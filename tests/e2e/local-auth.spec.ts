@@ -99,7 +99,7 @@ test.afterAll(async () => {
 test("ログインしていなければ、頁はログインへ移し、API と中継は 401", async ({ page, request }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByTestId("not-for-diagnostic-use")).toBeVisible();
+  await expect(page.getByTestId("not-for-diagnostic-use")).toHaveCount(0);
   // 検証モードの帯は出ない
   await expect(page.getByTestId("dev-mode-band")).toHaveCount(0);
   expect((await request.get("/api/studies")).status()).toBe(401);
