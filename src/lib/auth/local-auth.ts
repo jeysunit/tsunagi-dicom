@@ -47,6 +47,8 @@ export interface AuthSettings {
   loginLockThreshold: number;
   loginLockMinutes: number;
   screenLockMinutes: number;
+  /** 画面のロックを解くときに TOTP も求めるか（既定 false：パスワードだけ。docs/spec.md の 3.6） */
+  screenUnlockRequireTotp: boolean;
   sessionSecret: string;
   /** ログインの試みを遅らせ始める回数（1 分あたり。利用者名ごと・全体。src/lib/auth/rate-limit.ts） */
   rateLimitPerUserPerMinute: number;
@@ -282,6 +284,8 @@ export async function createUser(
 // 確かめる前に「試みの枠」を1つ、原子的な更新で取る（失敗の数が決めた回数より少ないときだけ1つ増やす）。
 // 同時に多くの要求を送っても、枠を取れた要求だけが確かめに進むので、決めた回数より多くは試せない。
 // パスワードが合ったら（TOTP が残っていても）その枠を返し、ログイン・ロックの解除・再認証を終えたら数を0に戻す。
+// ただし、TOTP を登録した利用者の、TOTP を確かめなかったロックの解除（SCREEN_UNLOCK_REQUIRE_TOTP=false）は、
+// 枠を返すだけで数を0に戻さない（verifyAgain）。
 
 /** 試みの枠を取る。取れなければ（一時停止の中か、枠を使い切った）false */
 async function claimAttempt(ctx: AuthContext, user: User): Promise<boolean> {
@@ -369,14 +373,18 @@ async function acceptTotp(ctx: AuthContext, user: User, secret: string, code: st
 
 /**
  * ログインした利用者の、もう一度の本人の確かめ（パスワードと、登録していれば TOTP）。
- * 画面のロックの解除・再認証・パスワードの変更に使う。回数の上限と一時停止を、ログインと同じに数える
+ * 画面のロックの解除・再認証・パスワードの変更に使う。回数の上限と一時停止を、ログインと同じに数える。
+ * requireTotp が false なら（画面のロックの解除で SCREEN_UNLOCK_REQUIRE_TOTP=false のとき）、TOTP は確かめず、
+ * 送られた番号も使った段に数えない。TOTP を確かめたら true を返す
  */
 async function verifyAgain(
   ctx: AuthContext,
   user: User,
   input: { password?: string; code?: string },
   action: AuditAction,
-): Promise<void> {
+  options: { requireTotp?: boolean } = {},
+): Promise<boolean> {
+  const checkTotp = (options.requireTotp ?? true) && user.totpSecretEnc !== null;
   // 回数は利用者ごとの試みの枠で抑える（全体の枠に入れると、ほかの人のログインの要求でロック中の職員が戻れなくなる）
   if (!(await claimAttempt(ctx, user))) {
     await record(ctx, actorOf(user), { action, outcome: "denied", detail: { reason: "locked" } });
@@ -392,15 +400,24 @@ async function verifyAgain(
     throw error;
   }
   let totpOk = true;
-  if (passwordOk && user.totpSecretEnc) {
+  if (passwordOk && checkTotp) {
     const secret = totpSecretOf(ctx, user);
     totpOk = secret !== null && (await acceptTotp(ctx, user, secret, input.code ?? ""));
   }
   if (!passwordOk || !totpOk) {
     const locked = await registerFailure(ctx, user, passwordOk ? "bad_totp" : "bad_password", action);
-    throw new AuthFailure(401, "パスワードか確認の番号が違う", locked ? ["locked"] : []);
+    throw new AuthFailure(401, checkTotp ? "パスワードか確認の番号が違う" : "パスワードが違う", locked ? ["locked"] : []);
   }
-  await resetAttempts(ctx, user);
+  if (checkTotp || user.totpSecretEnc === null) {
+    // 利用者が持つ確かめを全部通した（TOTP を登録していればそれも）ので、続けての失敗の数を0に戻す
+    await resetAttempts(ctx, user);
+  } else {
+    // TOTP を登録しているのに確かめなかった（パスワードだけの画面のロックの解除）。この試みの枠だけを返し、
+    // 前の失敗の数は残す。消すと、再認証などで TOTP の番号を試し、一時停止の手前でパスワードだけの解除を通して
+    // 数を消すことを繰り返し、TOTP の試みの上限を迂回できるため（docs/spec.md の 3.6）
+    await releaseAttempt(ctx, user);
+  }
+  return checkTotp;
 }
 
 // ── ログイン ──
@@ -935,7 +952,11 @@ export async function lockScreen(
   return { ...session, lockedAt: session.lockedAt ?? at };
 }
 
-/** ロックを解く。パスワードと、登録していれば TOTP。失敗はログインの失敗と同じに数える */
+/**
+ * ロックを解く。既定はパスワードだけ（席を外した間の覗き見を防ぐロックで、確かめるのはログインした本人が戻ったか。
+ * 二要素はログインで済んでいる）。SCREEN_UNLOCK_REQUIRE_TOTP=true なら、登録していれば TOTP も求める。
+ * 失敗はログインの失敗と同じに数える（docs/spec.md の 3.6。2026-10-19 に承認者が決めた）
+ */
 export async function unlockScreen(
   ctx: AuthContext,
   session: SessionRow,
@@ -943,10 +964,15 @@ export async function unlockScreen(
   input: { password: string; code?: string },
 ): Promise<void> {
   if (session.stage !== "active") throw new AuthFailure(409, "ログインしていない");
-  await verifyAgain(ctx, user, input, "screen_unlock");
+  const totp = await verifyAgain(ctx, user, input, "screen_unlock", { requireTotp: ctx.settings.screenUnlockRequireTotp });
   const at = now(ctx);
   await ctx.db.session.update({ where: { id: session.id }, data: { lockedAt: null, lastActivityAt: at } });
-  await record(ctx, actorOf(user), { action: "screen_unlock", outcome: "success" });
+  await record(ctx, actorOf(user), { action: "screen_unlock", outcome: "success", detail: { totp } });
+}
+
+/** 画面のロックを解くときに、この利用者に TOTP を求めるか（解く画面に6桁の欄を出すか） */
+export function screenUnlockNeedsTotp(settings: Pick<AuthSettings, "screenUnlockRequireTotp">, user: Pick<User, "totpSecretEnc">): boolean {
+  return settings.screenUnlockRequireTotp && user.totpSecretEnc !== null;
 }
 
 // ── 管理者の操作（利用者の棚卸し・役割・止める・TOTP のやり直し・一時停止の解除） ──

@@ -4,6 +4,7 @@ import { E2E_ADMIN, LOCAL_BASE_URL } from "../../playwright.config";
 
 // AUTH_MODE=local（段 1b）：ログイン・パスワードの規則・TOTP・ログインの一時停止・画面のロック・利用者の棚卸し・役割。
 // サーバーは LOGIN_LOCK_THRESHOLD=3・LOGIN_LOCK_MINUTES=1・SCREEN_LOCK_MINUTES=1・MFA_REQUIRED=true（playwright.config.ts）。
+// SCREEN_UNLOCK_REQUIRE_TOTP は既定（false：画面のロックはパスワードだけで解く。true のときは単体の試験で見る）。
 // 頁の流れが前の試験の結果に依るので、順に流す。
 
 test.describe.configure({ mode: "serial" });
@@ -279,7 +280,7 @@ test("ログインの一時停止：3回続けて失敗したら、正しいパ�
   await context.close();
 });
 
-test("画面のロック：操作の無い時間が続いたら画面をぼかしてロックし、パスワードと TOTP で解く", async () => {
+test("画面のロック：操作の無い時間が続いたら画面をぼかしてロックし、パスワードだけで解く（TOTP を登録した管理者でも）", async () => {
   test.setTimeout(120_000);
   const { page } = admin;
   await page.clock.install();
@@ -305,14 +306,17 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("screen-lock")).toBeVisible();
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
-  // パスワードだけ・違う番号では解けない
-  await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByLabel(/確認の番号/).fill("000000");
+  // 既定（SCREEN_UNLOCK_REQUIRE_TOTP=false）では、6桁の欄を出さない
+  await expect(lock.getByLabel(/確認の番号/)).toHaveCount(0);
+  await expect(lock).toContainText("続けるには、パスワードを入れる。");
+
+  // 違うパスワードでは解けない
+  await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
   await lock.getByRole("button", { name: "ロックを解く" }).click();
-  await expect(lock.getByRole("alert")).toContainText("違う");
+  await expect(lock.getByRole("alert")).toContainText("パスワードが違う");
+  await expect(page.getByTestId("study-count")).toHaveCount(0);
 
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
   await lock.getByRole("button", { name: "ロックを解く" }).click();
   await expect(page.getByTestId("screen-lock")).toHaveCount(0);
   await expect(page.getByTestId("study-count")).toHaveText("8");
@@ -338,7 +342,6 @@ test("画面のロック：ヘッダーの「ロック」で、同じブラウ�
   // 1つのタブで解けば、ほかのタブも戻る
   const lock = page.getByTestId("screen-lock");
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
   await lock.getByRole("button", { name: "ロックを解く" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await expect(other.getByTestId("study-count")).toHaveText("8");
@@ -377,14 +380,12 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
 
   // 違うパスワードでは解けない
   await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
-  await lock.getByLabel(/確認の番号/).fill("000000");
   await lock.getByRole("button", { name: "ロックを解く" }).click();
   await expect(lock.getByRole("alert")).toContainText("違う");
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
   await page.unroute("**/api/auth/lock");
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
   await lock.getByRole("button", { name: "ロックを解く" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   // 解いたらロックの印は消え、読み直しても中身が出る
@@ -419,7 +420,6 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
 
   const lock = page.getByTestId("screen-lock");
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
   await lock.getByRole("button", { name: "ロックを解く" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   // 知らせを受けないタブは、閉じたまま（自分で解く）
