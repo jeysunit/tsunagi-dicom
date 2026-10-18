@@ -87,9 +87,17 @@ function StateControls({ study, screen, onChanged }: { study: StudyView; screen:
   async function toggle(flag: StateFlag, value: boolean) {
     setBusy(true);
     setError(null);
-    const result = await postJson(`/api/studies/${encodeURIComponent(study.studyInstanceUid ?? "")}/state`, { flag, value }, screen.csrfToken);
+    const result = await postJson(
+      `/api/studies/${encodeURIComponent(study.studyInstanceUid ?? "")}/state`,
+      { flag, value, version: study.stateVersion ?? 0 },
+      screen.csrfToken,
+    );
     setBusy(false);
-    if (!result.ok) setError(errorText(result));
+    if (result.status === 409) {
+      // ほかの利用者が先に変えた：読み直して、いまの値を見せる（上書きしない）
+      setError("ほかの利用者が先に変えたので、読み直した。値を確かめてから、もう一度押す");
+      onChanged();
+    } else if (!result.ok) setError(errorText(result));
     else onChanged();
   }
 
@@ -191,6 +199,7 @@ export function StudyDetailPanel({
           studyUid={uid}
           defaultViewer={study.defaultViewer}
           rememberedViewer={study.rememberedViewer}
+          stateVersion={study.stateVersion}
           screen={screen}
           onChanged={changed}
         />

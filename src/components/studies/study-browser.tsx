@@ -275,6 +275,7 @@ function StudyRows({
                         studyUid={uid}
                         defaultViewer={s.defaultViewer}
                         rememberedViewer={s.rememberedViewer}
+                        stateVersion={s.stateVersion}
                         screen={screen}
                         onChanged={onChanged}
                       />

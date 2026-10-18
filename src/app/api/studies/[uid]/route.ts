@@ -1,6 +1,6 @@
 import { errorResponse } from "@/lib/api/respond";
 import { studyUidParam } from "@/lib/api/study-param";
-import { audit, requireSession } from "@/lib/auth/session";
+import { audit, requirePermission, requireSession } from "@/lib/auth/session";
 import { screenDeps } from "@/lib/screen-deps";
 import { studyDetail } from "@/lib/study-list";
 
@@ -11,8 +11,10 @@ type Context = { params: Promise<{ uid: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   try {
-    const session = await requireSession("study.search");
+    const session = await requireSession();
     const uid = studyUidParam((await params).uid);
+    // 権限が無ければ、断ったことを記録して 403
+    await requirePermission(session, "study.search", { action: "view_study", studyInstanceUid: uid });
     const detail = await studyDetail(await screenDeps(session), uid);
     if (!detail) return Response.json({ error: "検査が見つからない" }, { status: 404 });
     await audit(session, {

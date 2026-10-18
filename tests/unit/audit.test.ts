@@ -109,7 +109,9 @@ describe("監査の記録", () => {
         .filter(([, v]) => typeof v === "function")
         .map(([k]) => k)
         .sort();
-      expect(functions).toEqual(["appendAudit", "computeAuditHash", "verifyAuditChain"]);
+      // appendAuditWith は、BFF のデータベースの変更と記録の1行の追記を、1つの transaction で書くもの（段 2）。
+      // 記録の行は追記するだけで、更新・削除はしない
+      expect(functions).toEqual(["appendAudit", "appendAuditWith", "computeAuditHash", "verifyAuditChain"]);
     });
 
     it("データベースの側でも、行の更新を断る", async () => {

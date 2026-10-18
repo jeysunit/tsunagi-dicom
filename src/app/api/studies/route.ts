@@ -1,5 +1,5 @@
 import { errorResponse } from "@/lib/api/respond";
-import { audit, requireSession } from "@/lib/auth/session";
+import { audit, requirePermission, requireSession } from "@/lib/auth/session";
 import { screenDeps } from "@/lib/screen-deps";
 import { searchAuditFields } from "@/lib/search-audit";
 import { parseFilter } from "@/lib/study-filter";
@@ -10,7 +10,8 @@ import { listStudies } from "@/lib/study-list";
 // 返す検査は記録してから返す（記録に失敗したら返さない）。
 export async function GET(request: Request) {
   try {
-    const session = await requireSession("study.search");
+    // 権限が無ければ、断ったことを記録して 403
+    const session = await requirePermission(await requireSession(), "study.search", { action: "search", detail: { via: "api" } });
     const filter = parseFilter(new URL(request.url).searchParams);
     const { count, studies, returned } = await listStudies(await screenDeps(session), filter);
     await audit(session, searchAuditFields("api", returned));

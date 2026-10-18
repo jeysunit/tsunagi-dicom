@@ -43,6 +43,8 @@ export const STUDY_FIELDS = [
   "rememberedViewer",
   /** ダブルクリックで開く既定のビューア（覚え → モダリティの既定） */
   "defaultViewer",
+  /** 状態の版（変えるときに添え、ほかの利用者が先に変えていれば 409） */
+  "stateVersion",
 ] as const;
 export type StudyField = (typeof STUDY_FIELDS)[number];
 
@@ -83,6 +85,7 @@ export interface StudyRecord {
   bookmarked: boolean;
   rememberedViewer: string | null;
   defaultViewer: string | null;
+  stateVersion: number;
 }
 
 /** 画面の API が返す1行。役割に許された項目だけがある */
@@ -140,6 +143,7 @@ export function studyRecord(
     bookmarked: state.bookmarked,
     rememberedViewer: state.rememberedViewer,
     defaultViewer,
+    stateVersion: state.stateVersion,
   };
 }
 

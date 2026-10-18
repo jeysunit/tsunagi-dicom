@@ -26,6 +26,7 @@ export function ViewerMenu({
   studyUid,
   defaultViewer,
   rememberedViewer,
+  stateVersion,
   screen,
   onChanged,
   seriesLabel,
@@ -33,6 +34,8 @@ export function ViewerMenu({
   studyUid: string;
   defaultViewer: string | null | undefined;
   rememberedViewer: string | null | undefined;
+  /** 状態の版（覚えを変えるときに添える） */
+  stateVersion: number | undefined;
   screen: ScreenInfo;
   onChanged: () => void;
   /** 詳細のパネルのシリーズから開くときの、ボタンの名前の補い */
@@ -63,7 +66,16 @@ export function ViewerMenu({
 
   async function remember(viewer: ViewerId | null) {
     setOpen(false);
-    const result = await postJson(`/api/studies/${encodeURIComponent(studyUid)}/viewer`, { viewer }, screen.csrfToken);
+    const result = await postJson(
+      `/api/studies/${encodeURIComponent(studyUid)}/viewer`,
+      { viewer, version: stateVersion ?? 0 },
+      screen.csrfToken,
+    );
+    if (result.status === 409) {
+      setMessage("ほかの利用者が先に変えたので、読み直した。もう一度選ぶ");
+      onChanged();
+      return;
+    }
     setMessage(result.ok ? null : errorText(result));
     if (result.ok) onChanged();
   }

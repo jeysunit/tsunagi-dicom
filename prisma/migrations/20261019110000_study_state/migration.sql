@@ -7,6 +7,7 @@ CREATE TABLE "StudyState" (
     "read" BOOLEAN NOT NULL DEFAULT false,
     "urgent" BOOLEAN NOT NULL DEFAULT false,
     "viewer" TEXT,
+    "version" INTEGER NOT NULL DEFAULT 0,
     "updatedBy" TEXT NOT NULL,
     "updatedAt" DATETIME NOT NULL
 );

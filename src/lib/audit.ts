@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 
 // 監査の記録（docs/spec.md の 3.6「監査の記録」、第7.0版 17 遵守事項①②）。
@@ -117,8 +118,25 @@ const queueHolder = globalThis as typeof globalThis & { [QUEUE_KEY]?: { tail: Pr
 const queue = (queueHolder[QUEUE_KEY] ??= { tail: Promise.resolve() });
 
 export function appendAudit(db: Db, input: AuditEntryInput): Promise<AuditRow> {
+  return appendAuditWith(db, async () => ({ value: undefined, input })).then((r) => r.row);
+}
+
+/** 1つの transaction の中の Prisma の client */
+export type Tx = Prisma.TransactionClient;
+
+/**
+ * BFF のデータベースの変更と、その監査の記録の1行を、1つの transaction で書く。
+ * write が変更を書き、記録する中身（成功・断った など）を返す。どちらかが失敗したら両方とも書かない
+ * （変わったのに記録が無い、を作らない）。競合で書かなかったときは、write は投げずにその旨の記録を返す
+ * （わざと取り消すと、同じつなぎに入ったほかの要求の文まで消えうるため。docs/spec.md の 3.6 のセッション）
+ */
+export function appendAuditWith<T>(
+  db: Db,
+  write: (tx: Tx) => Promise<{ value: T; input: AuditEntryInput }>,
+): Promise<{ value: T; row: AuditRow }> {
   const run = queue.tail.then(() =>
     db.$transaction(async (tx) => {
+      const { value, input } = await write(tx);
       const last = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
       const base: Omit<AuditRow, "hash"> = {
         sourceAddressUnverified: input.sourceAddressUnverified ?? null,
@@ -135,7 +153,8 @@ export function appendAudit(db: Db, input: AuditEntryInput): Promise<AuditRow> {
         detail: input.detail ? JSON.stringify(input.detail) : null,
         prevHash: last?.hash ?? GENESIS_HASH,
       };
-      return tx.auditLog.create({ data: { ...base, hash: computeAuditHash(base) } });
+      const row = await tx.auditLog.create({ data: { ...base, hash: computeAuditHash(base) } });
+      return { value, row };
     }),
   );
   queue.tail = run.catch(() => undefined);

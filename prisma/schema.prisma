@@ -127,6 +127,8 @@ model StudyState {
   urgent           Boolean  @default(false)
   // 検査ごとに覚えたビューア（src/lib/viewers.ts の ID）。null は覚えが無い（モダリティの既定で開く）
   viewer           String?
+  // 版。変えるたびに 1 つ上げる。画面は読んだ時の版を添えて変え、違えば 409（古い画面からの上書きを断る）
+  version          Int      @default(0)
   updatedBy        String
   updatedAt        DateTime
 }

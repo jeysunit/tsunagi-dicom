@@ -2,31 +2,53 @@ import { z } from "zod";
 import { checkedScreenWrite, readJson } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { studyUidParam } from "@/lib/api/study-param";
-import { can } from "@/lib/auth/roles";
-import { audit, AuthError } from "@/lib/auth/session";
-import { getDb } from "@/lib/db";
+import { auditWith, requirePermission } from "@/lib/auth/session";
 import { setStateFlag, STATE_FLAGS, STATE_PERMISSIONS } from "@/lib/study-state";
 
 // 検査の状態（検像・読影・緊急・ブックマーク）を変える（docs/spec.md の 3.1）。
-// BFF のデータベースだけを変え、画像サーバーの DICOM の値は書き換えない。変えたことを監査の記録に残す。
-// 状態ごとに要る操作の権限は src/lib/study-state.ts の STATE_PERMISSIONS。
+// BFF のデータベースだけを変え、画像サーバーの DICOM の値は書き換えない。
+// - 変更と監査の記録を1つの transaction で書く（どちらかが失敗すれば両方とも書かない）。
+// - 画面は読んだ時の版（version）を添える。ほかの利用者が先に変えていれば書かずに 409（画面は読み直す）。
+// - 役割に権限が無ければ、断ったことを記録して 403。状態ごとの権限は src/lib/study-state.ts の STATE_PERMISSIONS。
 
 type Context = { params: Promise<{ uid: string }> };
 
-const Body = z.object({ flag: z.enum(STATE_FLAGS), value: z.boolean() });
+const Body = z.object({
+  flag: z.enum(STATE_FLAGS),
+  value: z.boolean(),
+  version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+});
 
 export async function POST(request: Request, { params }: Context) {
   try {
     const session = await checkedScreenWrite(request);
     const uid = studyUidParam((await params).uid);
-    const { flag, value } = await readJson(request, Body, 256);
-    if (!can(session.role, STATE_PERMISSIONS[flag])) {
-      await audit(session, { action: "study_state", outcome: "denied", studyInstanceUid: uid, detail: { flag, value } });
-      throw new AuthError(403, "この役割ではできない操作");
+    const { flag, value, version } = await readJson(request, Body, 256);
+    await requirePermission(session, STATE_PERMISSIONS[flag], {
+      action: "study_state",
+      studyInstanceUid: uid,
+      detail: { flag, value },
+    });
+    const result = await auditWith(session, async (tx) => {
+      const r = await setStateFlag(tx, session.actorId, uid, flag, value, version);
+      return {
+        value: r,
+        fields: {
+          action: "study_state",
+          outcome: r.kind === "ok" ? "success" : "denied",
+          studyInstanceUid: uid,
+          detail: {
+            flag,
+            value,
+            ...(r.kind === "conflict" ? { reason: "conflict", expected: version, current: r.version } : {}),
+          },
+        },
+      };
+    });
+    if (result.kind === "conflict") {
+      return Response.json({ error: "ほかの利用者が先に変えた。読み直した値を確かめる", version: result.version }, { status: 409 });
     }
-    await setStateFlag(await getDb(), session.actorId, uid, flag, value);
-    await audit(session, { action: "study_state", studyInstanceUid: uid, detail: { flag, value } });
-    return Response.json({ flag, value });
+    return Response.json({ flag, value, version: result.version });
   } catch (error) {
     return errorResponse(error);
   }

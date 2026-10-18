@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import { appendAudit, type AuditEntryInput } from "@/lib/audit";
+import { appendAudit, appendAuditWith, type AuditEntryInput, type Tx } from "@/lib/audit";
 import { decodeDevRole, DEV_ROLE_COOKIE } from "@/lib/auth/dev-role-cookie";
 import { type AuthContext, resolveSession, type Stage } from "@/lib/auth/local-auth";
 import { LOCK_COOKIE, parseLockCookie } from "@/lib/auth/lock-cookie";
@@ -133,4 +133,42 @@ export async function audit(session: Session, fields: AuditFields) {
     authMode: session.authMode,
     ...sourceFromHeaders(await headers()),
   });
+}
+
+/**
+ * BFF のデータベースの変更と、いまの利用者の監査の記録の1行を、1つの transaction で書く（src/lib/audit.ts の
+ * appendAuditWith）。変わったのに記録が無い、を作らない
+ */
+export async function auditWith<T>(
+  session: Session,
+  write: (tx: Tx) => Promise<{ value: T; fields: AuditFields }>,
+): Promise<T> {
+  const db = await getDb();
+  const source = sourceFromHeaders(await headers());
+  const { value } = await appendAuditWith(db, async (tx) => {
+    const { value, fields } = await write(tx);
+    return {
+      value,
+      input: { ...fields, actorId: session.actorId, actorRole: session.role, authMode: session.authMode, ...source },
+    };
+  });
+  return value;
+}
+
+/**
+ * ログインしている利用者に、操作の権限があるかを確かめる。無ければ、断ったことを監査の記録に残してから 403
+ * （断った要求も残す。docs/spec.md の 3.6 の監査の記録）
+ */
+export async function requirePermission(
+  session: Session,
+  permission: Permission,
+  denied: Omit<AuditFields, "outcome">,
+): Promise<Session> {
+  if (can(session.role, permission)) return session;
+  await audit(session, {
+    ...denied,
+    outcome: "denied",
+    detail: { ...(denied.detail ?? {}), reason: "forbidden", permission },
+  });
+  throw new AuthError(403, "この役割ではできない操作");
 }
