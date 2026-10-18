@@ -1,12 +1,28 @@
-import type { StudySummary } from "@/lib/backend/types";
+import type { SeriesSummary, StudyQuery, StudySummary } from "@/lib/backend/types";
 
 // DICOM JSON（PS3.18 F.2）の読み取り。QIDO-RS の応答を StudySummary にする。
 
-type DicomJsonValue = string | number | { Alphabetic?: string; Ideographic?: string; Phonetic?: string };
-export type DicomJsonDataset = Record<string, { vr: string; Value?: DicomJsonValue[] } | undefined>;
+type DicomJsonValue =
+  | string
+  | number
+  | { Alphabetic?: string; Ideographic?: string; Phonetic?: string }
+  | DicomJsonDataset;
+export type DicomJsonDataset = Record<
+  string,
+  { vr: string; Value?: DicomJsonValue[]; InlineBinary?: string; BulkDataURI?: string } | undefined
+>;
 
 export const TAG = {
   StudyDate: "00080020",
+  SeriesDate: "00080021",
+  Modality: "00080060",
+  ReferringPhysicianName: "00080090",
+  SeriesDescription: "0008103E",
+  BodyPartExamined: "00180015",
+  SeriesInstanceUID: "0020000E",
+  StudyID: "00200010",
+  SeriesNumber: "00200011",
+  NumberOfSeriesRelatedInstances: "00201209",
   StudyTime: "00080030",
   AccessionNumber: "00080050",
   ModalitiesInStudy: "00080061",
@@ -27,8 +43,12 @@ function values(ds: DicomJsonDataset, tag: string): DicomJsonValue[] {
 export function stringValue(ds: DicomJsonDataset, tag: string): string {
   const v = values(ds, tag)[0];
   if (v === undefined || v === null) return "";
-  if (typeof v === "object") return personNameToString(v);
+  if (typeof v === "object") return isPersonName(v) ? personNameToString(v) : "";
   return String(v);
+}
+
+function isPersonName(v: object): v is { Alphabetic?: string; Ideographic?: string; Phonetic?: string } {
+  return Object.keys(v).every((k) => k === "Alphabetic" || k === "Ideographic" || k === "Phonetic");
 }
 
 /** PN の3つの組を、DICOM の文字列の形（Alphabetic=Ideographic=Phonetic）に戻す。末尾の空の組は落とす */
@@ -55,10 +75,48 @@ export function studyFromDicomJson(ds: DicomJsonDataset): StudySummary {
     studyTime: stringValue(ds, TAG.StudyTime),
     accessionNumber: stringValue(ds, TAG.AccessionNumber),
     studyDescription: stringValue(ds, TAG.StudyDescription),
+    studyId: stringValue(ds, TAG.StudyID),
+    referringPhysicianName: stringValue(ds, TAG.ReferringPhysicianName),
     modalities: values(ds, TAG.ModalitiesInStudy).map(String),
     seriesCount: numberValue(ds, TAG.NumberOfStudyRelatedSeries),
     instanceCount: numberValue(ds, TAG.NumberOfStudyRelatedInstances),
   };
+}
+
+export function seriesFromDicomJson(ds: DicomJsonDataset): SeriesSummary {
+  return {
+    seriesInstanceUid: stringValue(ds, TAG.SeriesInstanceUID),
+    modality: stringValue(ds, TAG.Modality),
+    seriesNumber: stringValue(ds, TAG.SeriesNumber),
+    seriesDescription: stringValue(ds, TAG.SeriesDescription),
+    bodyPartExamined: stringValue(ds, TAG.BodyPartExamined),
+    seriesDate: stringValue(ds, TAG.SeriesDate),
+    instanceCount: numberValue(ds, TAG.NumberOfSeriesRelatedInstances),
+  };
+}
+
+/** シリーズの番号の順（番号が無い・数でないものは後ろ。同じなら SeriesInstanceUID の順） */
+export function sortSeries(series: SeriesSummary[]): SeriesSummary[] {
+  const num = (s: SeriesSummary) => (/^-?\d+$/.test(s.seriesNumber.trim()) ? Number(s.seriesNumber) : Number.POSITIVE_INFINITY);
+  return [...series].sort((a, b) => num(a) - num(b) || a.seriesInstanceUid.localeCompare(b.seriesInstanceUid));
+}
+
+/** QIDO-RS の StudyDate の範囲の値（`YYYYMMDD-YYYYMMDD`。片方だけでもよい）。条件が無ければ null */
+export function studyDateRange(query: StudyQuery | undefined): string | null {
+  const ok = (d: string | undefined) => (d && /^\d{8}$/.test(d) ? d : "");
+  const from = ok(query?.dateFrom);
+  const to = ok(query?.dateTo);
+  if (!from && !to) return null;
+  return from === to ? from : `${from}-${to}`;
+}
+
+/** 検査日の範囲に入るか（モックと、範囲を返さない画像サーバーの答えの確かめに使う） */
+export function inDateRange(studyDate: string, query: StudyQuery | undefined): boolean {
+  const from = query?.dateFrom;
+  const to = query?.dateTo;
+  if (!from && !to) return true;
+  if (!/^\d{8}$/.test(studyDate)) return false;
+  return (!from || studyDate >= from) && (!to || studyDate <= to);
 }
 
 /** 新しい検査を上に（検査日・時刻の降順。同じなら StudyInstanceUID の順） */

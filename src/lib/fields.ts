@@ -1,6 +1,7 @@
 import type { Role } from "@/lib/auth/roles";
-import type { StudySummary } from "@/lib/backend/types";
+import type { SeriesSummary, StudySummary } from "@/lib/backend/types";
 import { parsePatientName } from "@/lib/format/patient-name";
+import { EMPTY_STATE, type StudyStateView } from "@/lib/study-state";
 
 // 役割ごとの許可の一覧（docs/spec.md 原則 8）。
 // 画面の API（BFF が組み立てて返す JSON）は、ここに載った項目だけを返す。画像サーバーの応答をそのまま返さない。
@@ -27,11 +28,36 @@ export const STUDY_FIELDS = [
   "studyTime",
   "accessionNumber",
   "studyDescription",
+  "studyId",
+  /** 依頼医（漢字が無ければローマ字） */
+  "referringPhysicianName",
   "modalities",
   "seriesCount",
   "instanceCount",
+  // BFF のデータベースの状態（src/lib/study-state.ts）
+  "inspected",
+  "read",
+  "urgent",
+  "bookmarked",
+  /** 検査ごとに覚えたビューア（無ければ null） */
+  "rememberedViewer",
+  /** ダブルクリックで開く既定のビューア（覚え → モダリティの既定） */
+  "defaultViewer",
 ] as const;
 export type StudyField = (typeof STUDY_FIELDS)[number];
+
+/** 詳細のパネルのシリーズの項目 */
+export const SERIES_FIELDS = [
+  "seriesInstanceUid",
+  "modality",
+  "seriesNumber",
+  "seriesDescription",
+  "bodyPartExamined",
+  "seriesDate",
+  "instanceCount",
+] as const;
+export type SeriesField = (typeof SERIES_FIELDS)[number];
+export type SeriesView = Partial<SeriesSummary>;
 
 /** BFF の中で組み立てる、検査の一覧の1行の全部の項目（ブラウザへはそのまま返さない） */
 export interface StudyRecord {
@@ -46,9 +72,17 @@ export interface StudyRecord {
   studyTime: string;
   accessionNumber: string;
   studyDescription: string;
+  studyId: string;
+  referringPhysicianName: string;
   modalities: string[];
   seriesCount: number | null;
   instanceCount: number | null;
+  inspected: boolean;
+  read: boolean;
+  urgent: boolean;
+  bookmarked: boolean;
+  rememberedViewer: string | null;
+  defaultViewer: string | null;
 }
 
 /** 画面の API が返す1行。役割に許された項目だけがある */
@@ -56,25 +90,32 @@ export type StudyView = Partial<StudyRecord>;
 
 export interface FieldAllowlist {
   study: readonly StudyField[];
+  series: readonly SeriesField[];
 }
 
 export type FieldAllowlistMap = Record<Role, FieldAllowlist>;
 
 /** 既定の役割の許可の一覧。どの既定の役割も、検査の一覧の画面に要る項目をすべて見る（原則 8） */
 export const ROLE_FIELD_ALLOWLIST: FieldAllowlistMap = {
-  admin: { study: STUDY_FIELDS },
-  doctor: { study: STUDY_FIELDS },
-  technologist: { study: STUDY_FIELDS },
-  viewer: { study: STUDY_FIELDS },
+  admin: { study: STUDY_FIELDS, series: SERIES_FIELDS },
+  doctor: { study: STUDY_FIELDS, series: SERIES_FIELDS },
+  technologist: { study: STUDY_FIELDS, series: SERIES_FIELDS },
+  viewer: { study: STUDY_FIELDS, series: SERIES_FIELDS },
 };
 
 /** 役割の許可の一覧。一覧に無い役割は空（何も返さない） */
 export function allowlistFor(role: Role, map: FieldAllowlistMap = ROLE_FIELD_ALLOWLIST): FieldAllowlist {
-  return Object.hasOwn(map, role) ? map[role] : { study: [] };
+  return Object.hasOwn(map, role) ? map[role] : { study: [], series: [] };
 }
 
-/** 画像サーバーの応答（StudySummary）から、画面の項目を組み立てる。氏名は漢字・かな・ローマ字に分ける */
-export function studyRecord(s: StudySummary): StudyRecord {
+/**
+ * 画像サーバーの応答（StudySummary）と BFF の状態から、画面の項目を組み立てる。氏名は漢字・かな・ローマ字に分ける
+ */
+export function studyRecord(
+  s: StudySummary,
+  state: StudyStateView = EMPTY_STATE,
+  defaultViewer: string | null = null,
+): StudyRecord {
   const name = parsePatientName(s.patientName);
   return {
     studyInstanceUid: s.studyInstanceUid,
@@ -88,9 +129,17 @@ export function studyRecord(s: StudySummary): StudyRecord {
     studyTime: s.studyTime,
     accessionNumber: s.accessionNumber,
     studyDescription: s.studyDescription,
+    studyId: s.studyId,
+    referringPhysicianName: parsePatientName(s.referringPhysicianName).name,
     modalities: [...s.modalities],
     seriesCount: s.seriesCount,
     instanceCount: s.instanceCount,
+    inspected: state.inspected,
+    read: state.read,
+    urgent: state.urgent,
+    bookmarked: state.bookmarked,
+    rememberedViewer: state.rememberedViewer,
+    defaultViewer,
   };
 }
 
@@ -110,7 +159,22 @@ export function pickFields<K extends string>(
   return out;
 }
 
+/** 組み立てた1行を、役割の許可の一覧で絞る */
+export function projectStudy(record: StudyRecord, allowlist: FieldAllowlist): StudyView {
+  return pickFields(record, STUDY_FIELDS, allowlist.study) as StudyView;
+}
+
 /** 検査の一覧の1行を、役割の許可の一覧で絞る */
-export function studyView(s: StudySummary, allowlist: FieldAllowlist): StudyView {
-  return pickFields(studyRecord(s), STUDY_FIELDS, allowlist.study) as StudyView;
+export function studyView(
+  s: StudySummary,
+  allowlist: FieldAllowlist,
+  state?: StudyStateView,
+  defaultViewer?: string | null,
+): StudyView {
+  return projectStudy(studyRecord(s, state, defaultViewer), allowlist);
+}
+
+/** シリーズを、役割の許可の一覧で絞る */
+export function seriesView(s: SeriesSummary, allowlist: FieldAllowlist): SeriesView {
+  return pickFields({ ...s }, SERIES_FIELDS, allowlist.series) as SeriesView;
 }

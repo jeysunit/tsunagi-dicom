@@ -36,6 +36,8 @@ export const AUDIT_ACTIONS = [
   "user_create",
   "user_status_change",
   "role_change",
+  // 段 2：検査の状態（検像・読影・緊急・ブックマーク・検査ごとのビューアの覚え）の変更。BFF のデータベースだけを変える
+  "study_state",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 /** success：通した。denied：このアプリが断った。failed：画像サーバーが失敗を返した・つながらなかった */

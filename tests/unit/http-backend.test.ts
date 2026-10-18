@@ -144,4 +144,28 @@ describe("実の画像サーバーへの接続", () => {
     // どれも画像サーバーへは届いていない
     expect(seen).toHaveLength(0);
   });
+
+  it("段 2：検査日の範囲は QIDO-RS の StudyDate で求め、答えの範囲の外の検査は捨てる", async () => {
+    seen.length = 0;
+    const studiesInRange = await backend({ caPem }).searchStudies(1000, { dateFrom: "20261017", dateTo: "20261017" });
+    expect(new URL(seen[0]!.url, "https://x").searchParams.get("StudyDate")).toBe("20261017");
+    // 手元のサーバーは範囲を見ずに 8 件を返すので、BFF の側で 4 件に絞る
+    expect(studiesInRange).toHaveLength(4);
+  });
+
+  it("段 2：シリーズと値の全部は、UID を確かめてから QIDO-RS で求める", async () => {
+    seen.length = 0;
+    const b = backend({ caPem });
+    await b.searchSeries("1.2.3");
+    expect(seen.at(-1)!.url).toMatch(/^\/dicom-web\/studies\/1\.2\.3\/series\?includefield=0008103E/);
+    const ds = await b.studyDataset("1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012");
+    const url = new URL(seen.at(-1)!.url, "https://x");
+    expect(url.pathname).toBe("/dicom-web/studies");
+    expect(url.searchParams.get("includefield")).toBe("all");
+    expect(ds).not.toBeNull();
+    const before = seen.length;
+    await expect(b.searchSeries("../../system")).rejects.toMatchObject({ status: 400 });
+    await expect(b.studyDataset("1.2.3&PatientID=*")).rejects.toMatchObject({ status: 400 });
+    expect(seen).toHaveLength(before);
+  });
 });

@@ -29,6 +29,8 @@ export interface WadoRsTarget {
 /** DICOM の UID（数字と `.`、64 字まで） */
 const UID = /^[0-9]+(\.[0-9]+)*$/;
 const isUid = (s: string | undefined): s is string => s !== undefined && s.length <= 64 && UID.test(s);
+/** DICOM の UID の形（数字と `.`、64 字まで）か */
+export const isDicomUid = (s: unknown): s is string => typeof s === "string" && isUid(s);
 /** frames の番号の並び（1 から） */
 const FRAME_LIST = /^[1-9][0-9]{0,5}(,[1-9][0-9]{0,5}){0,99}$/;
 /** 大きな値（画素など）の URI の段。Orthanc は `bulk/{tag}/{番号}/{tag}…` の形 */

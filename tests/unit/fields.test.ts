@@ -69,14 +69,14 @@ const BACKENDS: [string, () => Backend][] = [
 /** 閲覧の役割だけ、許可の一覧を狭めた割り当て */
 const NARROW: FieldAllowlistMap = {
   ...ROLE_FIELD_ALLOWLIST,
-  viewer: { study: ["studyInstanceUid", "modalities", "studyDate"] },
+  viewer: { study: ["studyInstanceUid", "modalities", "studyDate"], series: ["seriesInstanceUid"] },
 };
 
 describe("画面の API は、許可の一覧の項目だけを返す（モック・Orthanc・DICOMweb）", () => {
   for (const [label, make] of BACKENDS) {
     describe(label, () => {
       it.each(ROLES)("既定の役割 %s：一覧の項目だけで、画面に出さない値は返らない", async (role) => {
-        const { studies: views } = await listStudies(make(), role);
+        const { studies: views } = await listStudies({ backend: make(), role, actorId: "t" });
         expect(views).toHaveLength(8);
         for (const view of views) {
           expect(Object.keys(view).every((k) => (STUDY_FIELDS as readonly string[]).includes(k))).toBe(true);
@@ -88,20 +88,20 @@ describe("画面の API は、許可の一覧の項目だけを返す（モッ�
       });
 
       it("許可の一覧を狭めた役割には、載っていない項目が返らない", async () => {
-        const { studies: views } = await listStudies(make(), "viewer", NARROW);
+        const { studies: views } = await listStudies({ backend: make(), role: "viewer", actorId: "t", allowlists: NARROW });
         expect(views).toHaveLength(8);
         for (const view of views) expect(Object.keys(view).sort()).toEqual(["modalities", "studyDate", "studyInstanceUid"]);
         const text = JSON.stringify(views);
         for (const leaked of ["JP-TEST-", "山田", "やまだ", "Yamada", "19750510", "ACC-"]) expect(text).not.toContain(leaked);
         // ほかの役割の見え方は変わらない
-        const doctor = await listStudies(make(), "doctor", NARROW);
+        const doctor = await listStudies({ backend: make(), role: "doctor", actorId: "t", allowlists: NARROW });
         expect(JSON.stringify(doctor.studies)).toContain("JP-TEST-");
       });
 
       it("割り当ての無い役割には、何も返さない（出ない側に倒れる）", async () => {
         const map = { ...ROLE_FIELD_ALLOWLIST } as Partial<FieldAllowlistMap>;
         delete map.viewer;
-        const { studies: views } = await listStudies(make(), "viewer", map as FieldAllowlistMap);
+        const { studies: views } = await listStudies({ backend: make(), role: "viewer", actorId: "t", allowlists: map as FieldAllowlistMap });
         expect(views.every((v) => Object.keys(v).length === 0)).toBe(true);
       });
     });
@@ -121,6 +121,8 @@ describe("許可の一覧の部品", () => {
         studyTime: "093000",
         accessionNumber: "ACC-1",
         studyDescription: "",
+        studyId: "1",
+        referringPhysicianName: "Shiken^Ishi=試験^医師=しけん^いし",
         modalities: ["CT"],
         seriesCount: 1,
         instanceCount: 4,
@@ -130,6 +132,7 @@ describe("許可の一覧の部品", () => {
     expect(view.patientName).toBe("山田 太郎");
     expect(view.patientKana).toBe("やまだ たろう");
     expect(view.patientNameAlphabetic).toBe("Yamada Taro");
+    expect(view.referringPhysicianName).toBe("試験 医師");
     expect(JSON.stringify(view)).not.toContain("^");
   });
 
@@ -141,7 +144,7 @@ describe("許可の一覧の部品", () => {
 
   it("一覧に無い役割の名前（prototype の名前を含む）は空", () => {
     for (const role of ["__proto__", "constructor", "blind"] as unknown as Role[]) {
-      expect(allowlistFor(role).study).toEqual([]);
+      expect(allowlistFor(role)).toEqual({ study: [], series: [] });
     }
   });
 });
