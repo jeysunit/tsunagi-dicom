@@ -62,6 +62,23 @@ jobs:
             type=raw,value=rebuild-{{date 'YYYYMMDD'}},enable=${{ github.event_name != 'push' }}
           flavor: |
             latest=false
+      - name: 版のタグがもう GHCR にあれば止める（実行のやり直しで版のタグを移さない）
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          IMAGE: ghcr.io/jeysunit/tsunagi-dicom
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -eu
+          for tag in ${TAGS}; do
+            case "$tag" in
+              "${IMAGE}:v"*)
+                if docker buildx imagetools inspect "$tag" > /dev/null 2>&1; then
+                  echo "版のタグ ${tag} はもう出してある。上書きしない" >&2
+                  exit 1
+                fi
+                ;;
+            esac
+          done
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:

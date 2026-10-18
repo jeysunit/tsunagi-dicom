@@ -56,7 +56,7 @@ For deployment, pin the GHCR image (`ghcr.io/jeysunit/tsunagi-dicom`) by version
 
 | Tag | When it is set |
 |---|---|
-| `vX.Y.Z` | On a version tag push. **Never overwritten by rebuilds and never deleted by cleanup** |
+| `vX.Y.Z` | Only on a version tag push. **Never set by rebuilds and never deleted by cleanup.** If the version tag already exists in GHCR (for example when a run is re-run), the workflow stops without publishing |
 | `sha-<short hash>` | On merges to `main`, version tags, and weekly rebuilds. Rebuilding the same commit moves it to the new image |
 | `rebuild-YYYYMMDD` | Weekly (Monday 03:17 UTC) and manual rebuilds of `main` (UTC date). Picks up updates to the packages installed with apt inside the image |
 
