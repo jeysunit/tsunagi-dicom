@@ -4,8 +4,10 @@ import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHttpBackend } from "@/lib/backend/http";
+import { wadoRsTarget } from "@/lib/backend/relay-path";
 import { BackendError } from "@/lib/backend/types";
 
 // 実の画像サーバーの代わりに、手元に自前の CA の証明書で HTTPS のサーバーを立てて確かめる。
@@ -39,7 +41,16 @@ beforeAll(async () => {
     { key: readFileSync(path.join(dir, "server.key")), cert: readFileSync(path.join(dir, "server.pem")) },
     (req, res) => {
       seen.push({ url: req.url ?? "", authorization: req.headers.authorization, method: req.method ?? "" });
-      if (req.url?.startsWith("/dicom-web/studies")) {
+      if (req.url?.endsWith("/metadata?gzip=1")) {
+        // 圧縮した応答。content-length は圧縮の後の長さ
+        const gz = gzipSync(Buffer.from(JSON.stringify(studies)));
+        res.writeHead(200, {
+          "content-type": "application/dicom+json",
+          "content-encoding": "gzip",
+          "content-length": String(gz.byteLength),
+        });
+        res.end(gz);
+      } else if (req.url?.startsWith("/dicom-web/studies")) {
         res.writeHead(200, { "content-type": "application/dicom+json", "set-cookie": "backend-session=1" });
         res.end(JSON.stringify(studies));
       } else if (req.url === "/statistics") {
@@ -87,16 +98,50 @@ describe("実の画像サーバーへの接続", () => {
     await expect(backend().searchStudies()).rejects.toThrow("画像サーバーにつながらない");
   });
 
+  it("検索の件数を上限の 1000 に収めて求める", async () => {
+    seen.length = 0;
+    await backend({ caPem }).searchStudies(50_000);
+    expect(seen[0]!.url).toMatch(/^\/dicom-web\/studies\?limit=1000&/);
+  });
+
+  const metadata = wadoRsTarget(["studies", "1.2.3", "series", "1.2.3.4", "metadata"])!;
+
   it("中継の応答に、画像サーバーの cookie などのヘッダーを渡さない", async () => {
     const res = await backend({ caPem }).relayDicomweb({
       method: "GET",
-      segments: ["studies"],
-      search: "?PatientID=JP-TEST-0001",
+      target: metadata,
+      search: "",
       accept: "application/dicom+json",
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/dicom+json");
     expect(res.headers.get("set-cookie")).toBeNull();
-    expect(seen.at(-1)!.url).toBe("/dicom-web/studies?PatientID=JP-TEST-0001");
+    expect(seen.at(-1)!.url).toBe("/dicom-web/studies/1.2.3/series/1.2.3.4/metadata");
+    expect(seen.at(-1)!.method).toBe("GET");
+  });
+
+  it("圧縮の応答をほどいて渡し、画像サーバーの content-length・content-encoding を通さない", async () => {
+    const res = await backend({ caPem }).relayDicomweb({ method: "GET", target: metadata, search: "?gzip=1" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBeNull();
+    expect(res.headers.get("content-encoding")).toBeNull();
+    // 長さの食い違いがあれば、ここで読み切れずに失敗する
+    expect(await res.json()).toHaveLength(8);
+  });
+
+  it("中継は WADO-RS の読み取りだけ（確かめを通っていない宛先・書き込みの method・長すぎる query を断る）", async () => {
+    seen.length = 0;
+    const b = backend({ caPem });
+    await expect(
+      b.relayDicomweb({ method: "GET", target: { path: "studies", studyInstanceUid: "" }, search: "" }),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(b.relayDicomweb({ method: "POST" as "GET", target: metadata, search: "" })).rejects.toMatchObject({
+      status: 405,
+    });
+    await expect(
+      b.relayDicomweb({ method: "GET", target: metadata, search: `?${"x".repeat(3000)}` }),
+    ).rejects.toMatchObject({ status: 400 });
+    // どれも画像サーバーへは届いていない
+    expect(seen).toHaveLength(0);
   });
 });

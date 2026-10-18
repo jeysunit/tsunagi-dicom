@@ -21,8 +21,11 @@ export const e2eEnv = {
   SESSION_SECRET: randomBytes(48).toString("base64"),
   DATABASE_URL: `file:${path.resolve(".e2e/e2e.db")}`,
   TZ: "Asia/Tokyo",
+  // Next.js の待ち受けの住所（AUTH_MODE=dev の起動の条件ではない。dev はモックのときだけ起動する）
   HOSTNAME: "127.0.0.1",
   PORT: String(PORT),
+  // 試験のデータベースを作る prisma migrate deploy が、外へ版の確かめを送らないようにする
+  CHECKPOINT_DISABLE: "1",
 };
 
 export default defineConfig({

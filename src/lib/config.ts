@@ -27,7 +27,6 @@ export interface AppConfig {
   };
   auth: {
     mode: AuthMode;
-    devAllowWrite: boolean;
     mfaRequired: boolean;
     loginLockThreshold: number;
     loginLockMinutes: number;
@@ -55,8 +54,8 @@ export class ConfigError extends Error {
   }
 }
 
-/** 待ち受けの住所がこれらなら「接続元が手元だけ」とみなす（docs/spec.md の 4） */
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+const SESSION_SECRET_HINT = "32 バイト以上の乱数を入れる（例：openssl rand -base64 48）。ファイルで渡すときは SESSION_SECRET_FILE";
+const SESSION_SECRET_MIN_BYTES = 32;
 
 const bool = (fallback: boolean) =>
   z
@@ -95,14 +94,18 @@ const envSchema = z.object({
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
+  OIDC_CLIENT_SECRET_FILE: z.string().optional(),
   DEV_ALLOW_WRITE: bool(false),
   DATABASE_URL: z
     .string()
     .default("file:/data/tsunagi.db")
     .refine((v) => v.startsWith("file:"), "SQLite の file: で始まる値にする（PostgreSQL への切り替えは後の段）"),
+  // 無いとき（SESSION_SECRET_FILE も無いとき）の誤りは loadConfig で出す
   SESSION_SECRET: z
-    .string({ error: "32 バイト以上の乱数を入れる（例：openssl rand -base64 48）" })
-    .refine((v) => Buffer.byteLength(v, "utf8") >= 32, "32 バイト以上の乱数にする"),
+    .string()
+    .refine((v) => Buffer.byteLength(v, "utf8") >= SESSION_SECRET_MIN_BYTES, "32 バイト以上の乱数にする")
+    .optional(),
+  SESSION_SECRET_FILE: z.string().optional(),
   TZ: z
     .string()
     .default("Asia/Tokyo")
@@ -114,8 +117,6 @@ const envSchema = z.object({
         return false;
       }
     }, "IANA の時間帯の名前にする（例：Asia/Tokyo）"),
-  // Next.js の待ち受けの住所。AUTH_MODE=dev の起動の条件に使う
-  HOSTNAME: z.string().optional(),
   NODE_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
 });
 
@@ -136,17 +137,50 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     raw[key] = value === undefined || value.trim() === "" ? undefined : value;
   }
 
+  // SESSION_SECRET はファイルでも渡せるので、どちらも無いことは型の確かめの外で見る（型の誤りと一緒に並べる）
+  const sessionSecretMissing: ConfigProblem[] =
+    raw.SESSION_SECRET === undefined && raw.SESSION_SECRET_FILE === undefined
+      ? [{ variable: "SESSION_SECRET", message: `必須。${SESSION_SECRET_HINT}` }]
+      : [];
+
   const parsed = envSchema.safeParse(raw);
   if (!parsed.success) {
     const problems = parsed.error.issues.map((issue) => ({
       variable: String(issue.path[0] ?? "(不明)"),
       message: raw[String(issue.path[0])] === undefined ? `必須。${issue.message}` : issue.message,
     }));
-    throw new ConfigError(dedupe(problems));
+    throw new ConfigError(dedupe([...problems, ...sessionSecretMissing]));
   }
   const e = parsed.data;
-  const problems: ConfigProblem[] = [];
+  const problems: ConfigProblem[] = [...sessionSecretMissing];
   const problem = (variable: string, message: string) => problems.push({ variable, message });
+
+  /** 秘密を値か `<名前>_FILE` のファイルで受ける。両方は誤り。ファイルの末尾の改行は落とす */
+  const secret = (name: string, value: string | undefined, file: string | undefined): string | undefined => {
+    if (value !== undefined && file !== undefined) {
+      problem(`${name}_FILE`, `${name} と同時には使えない。どちらか1つにする`);
+      return undefined;
+    }
+    if (file === undefined) return value;
+    try {
+      const fromFile = readFile(file).replace(/\r?\n$/, "");
+      if (fromFile === "") problem(`${name}_FILE`, "ファイルが空");
+      return fromFile === "" ? undefined : fromFile;
+    } catch {
+      problem(`${name}_FILE`, "ファイルを読めない");
+      return undefined;
+    }
+  };
+
+  const sessionSecret = secret("SESSION_SECRET", e.SESSION_SECRET, e.SESSION_SECRET_FILE);
+  if (
+    e.SESSION_SECRET_FILE !== undefined &&
+    sessionSecret !== undefined &&
+    Buffer.byteLength(sessionSecret, "utf8") < SESSION_SECRET_MIN_BYTES
+  ) {
+    problem("SESSION_SECRET_FILE", "32 バイト以上の乱数にする");
+  }
+  const oidcClientSecret = secret("OIDC_CLIENT_SECRET", e.OIDC_CLIENT_SECRET, e.OIDC_CLIENT_SECRET_FILE);
 
   if (e.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
     problem("NODE_TLS_REJECT_UNAUTHORIZED", "証明書の確かめを切る設定は使えない。自前の CA は BACKEND_CA_FILE で渡す");
@@ -159,21 +193,13 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   }
 
-  let password = e.BACKEND_PASSWORD;
-  if (e.BACKEND_PASSWORD && e.BACKEND_PASSWORD_FILE) {
-    problem("BACKEND_PASSWORD_FILE", "BACKEND_PASSWORD と同時には使えない。どちらか1つにする");
-  } else if (e.BACKEND_PASSWORD_FILE) {
-    try {
-      password = readFile(e.BACKEND_PASSWORD_FILE).replace(/\r?\n$/, "");
-      if (password === "") problem("BACKEND_PASSWORD_FILE", "ファイルが空");
-    } catch {
-      problem("BACKEND_PASSWORD_FILE", "ファイルを読めない");
-    }
-  }
-  if (e.BACKEND_USERNAME && !password) {
+  const bothPasswords = e.BACKEND_PASSWORD !== undefined && e.BACKEND_PASSWORD_FILE !== undefined;
+  const password = secret("BACKEND_PASSWORD", e.BACKEND_PASSWORD, e.BACKEND_PASSWORD_FILE);
+  const passwordFileFailed = e.BACKEND_PASSWORD_FILE !== undefined && password === undefined;
+  if (e.BACKEND_USERNAME && !password && !bothPasswords && !passwordFileFailed) {
     problem("BACKEND_PASSWORD", "BACKEND_USERNAME があるときは BACKEND_PASSWORD か BACKEND_PASSWORD_FILE が必須");
   }
-  if (!e.BACKEND_USERNAME && password) {
+  if (!e.BACKEND_USERNAME && (password || bothPasswords)) {
     problem("BACKEND_USERNAME", "パスワードがあるときは必須");
   }
 
@@ -188,17 +214,17 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
   }
 
   if (e.AUTH_MODE === "local") {
-    problem("AUTH_MODE", "local はまだ無い（段 1b で作る）。いまは開発用の dev だけ動く");
+    problem("AUTH_MODE", "local はまだ無い（段 1b で作る）。いまは開発用の dev（モックだけ）だけ動く");
   } else if (e.AUTH_MODE === "oidc") {
-    problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは開発用の dev だけ動く");
-  } else if (e.AUTH_MODE === "dev") {
-    const loopbackOnly = e.HOSTNAME !== undefined && LOOPBACK_HOSTS.has(e.HOSTNAME);
-    if (!e.BACKEND_MOCK && !loopbackOnly) {
-      problem(
-        "AUTH_MODE",
-        "dev は BACKEND_MOCK=true か、待ち受けを手元だけ（HOSTNAME=127.0.0.1・::1・localhost）にしたときだけ起動する",
-      );
-    }
+    problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは開発用の dev（モックだけ）だけ動く");
+  } else if (e.AUTH_MODE === "dev" && !e.BACKEND_MOCK) {
+    // 段 1a〜1b の決まり（docs/spec.md の 4）。実の画像サーバーには local を使う
+    problem("AUTH_MODE", "dev は BACKEND_MOCK=true のときだけ起動する。実の画像サーバーには local を使う");
+  }
+
+  if (e.DEV_ALLOW_WRITE) {
+    // 書き込みの道（中継の STOW-RS など）は段 4 まで作らない（docs/spec.md の 3.2・4）
+    problem("DEV_ALLOW_WRITE", "書き込みの道は段 4 まで無い（中継は WADO-RS の読み取りだけ）。true は段 4 から使える");
   }
 
   if (problems.length > 0) throw new ConfigError(problems);
@@ -222,15 +248,15 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     },
     auth: {
       mode: e.AUTH_MODE,
-      devAllowWrite: e.AUTH_MODE === "dev" && e.DEV_ALLOW_WRITE,
       mfaRequired: e.MFA_REQUIRED,
       loginLockThreshold: e.LOGIN_LOCK_THRESHOLD,
       loginLockMinutes: e.LOGIN_LOCK_MINUTES,
       screenLockMinutes: e.SCREEN_LOCK_MINUTES,
-      oidc: { issuer: e.OIDC_ISSUER, clientId: e.OIDC_CLIENT_ID, clientSecret: e.OIDC_CLIENT_SECRET },
+      oidc: { issuer: e.OIDC_ISSUER, clientId: e.OIDC_CLIENT_ID, clientSecret: oidcClientSecret },
     },
     databaseUrl: e.DATABASE_URL,
-    sessionSecret: e.SESSION_SECRET,
+    // 無いときは上で problem にして投げている
+    sessionSecret: sessionSecret!,
     timeZone: e.TZ,
   };
 }

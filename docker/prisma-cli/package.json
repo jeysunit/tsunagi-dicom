@@ -8,7 +8,7 @@
     "prisma": "7.10.1"
   },
   "allowScripts": {
-    "@prisma/engines": true,
-    "prisma": true
+    "@prisma/engines@7.10.1": true,
+    "prisma@7.10.1": true
   }
 }

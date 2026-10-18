@@ -5,8 +5,7 @@ export function checkConfigOrExit(): void {
   try {
     const config = loadConfig();
     console.info(
-      `tsunagi-dicom: BACKEND_KIND=${config.backend.kind} BACKEND_MOCK=${config.backend.mock} AUTH_MODE=${config.auth.mode}` +
-        (config.auth.mode === "dev" ? ` DEV_ALLOW_WRITE=${config.auth.devAllowWrite}` : ""),
+      `tsunagi-dicom: BACKEND_KIND=${config.backend.kind} BACKEND_MOCK=${config.backend.mock} AUTH_MODE=${config.auth.mode}`,
     );
   } catch (error) {
     if (error instanceof ConfigError) {

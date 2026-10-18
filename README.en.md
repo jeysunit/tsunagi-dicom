@@ -9,8 +9,8 @@ A standalone web front end and BFF (Backend For Frontend) that uses a DICOMweb-c
 
 ## Status
 
-**Stage 1a (2026-10-18).** The foundation, the BFF relay, the audit trail, development authentication (`AUTH_MODE=dev`), the common screen, and CI with container images are in place.
-The only page shows the number of studies and a plain study list, fetched through the BFF. Application user login (`AUTH_MODE=local`) comes in stage 1b; until then the application starts only with `AUTH_MODE=dev`.
+**Stage 1a (2026-10-18).** The foundation, the BFF (a screen API for search, and a relay limited to WADO-RS reads so that viewers can retrieve images), the audit trail, development authentication (`AUTH_MODE=dev`), the common screen, and CI with container images are in place.
+The only page shows the number of studies and a plain study list, fetched through the BFF. Application user login (`AUTH_MODE=local`) comes in stage 1b; until then the application starts only with `AUTH_MODE=dev`, and `AUTH_MODE=dev` starts only with the mock backend (`BACKEND_MOCK=true`). In other words, stage 1a does not connect to a real image server.
 Implementation proceeds stage by stage; each PR covers one cohesive change within a single stage (see "6. 段階" in [`docs/spec.md`](docs/spec.md)).
 
 The user interface will be Japanese only at first. The documents are written mainly in Japanese.
@@ -32,15 +32,16 @@ The image server and viewers are not modified. Every endpoint is configured thro
 Without an image server, run it against the mock backend (synthetic samples in `tests/fixtures/orthanc`) and development authentication (`AUTH_MODE=dev`; writes are blocked):
 
 ```sh
-SESSION_SECRET="$(openssl rand -base64 48)" BACKEND_MOCK=true AUTH_MODE=dev docker compose up --build
+mkdir -p secrets && openssl rand -base64 48 > secrets/session_secret.txt   # passed as SESSION_SECRET_FILE (secrets/ is not committed)
+BACKEND_MOCK=true AUTH_MODE=dev docker compose up --build
 # open http://127.0.0.1:3000/
 ```
 
-For local development (Node version in `.nvmrc`):
+For local development (Node version in `.nvmrc`; npm 11 `allowScripts` is enforced by `strict-allow-scripts` in `.npmrc`):
 
 ```sh
 npm ci
-cp .env.example .env   # set BACKEND_MOCK="true", AUTH_MODE="dev" and SESSION_SECRET
+cp .env.example .env   # set BACKEND_MOCK="true", AUTH_MODE="dev" and SESSION_SECRET (or SESSION_SECRET_FILE)
 mkdir -p data && DATABASE_URL="file:./data/tsunagi.db" npm run db:migrate
 DATABASE_URL="file:./data/tsunagi.db" npm run dev
 ```

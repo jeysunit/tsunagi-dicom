@@ -14,27 +14,31 @@ datasource db {
 // 追記だけ。更新と削除はデータベースの trigger で断る（migration を参照）。
 // 各行は前の行の hash を prevHash に持ち、hash は行の中身と prevHash の SHA-256。
 model AuditLog {
-  // 1 から始まる続き番号。抜けがあれば、行が消されたと分かる
-  seq              Int      @id
+  // 1 から始まる続き番号。抜けがあれば、行が消されたと分かる。値はアプリ（src/lib/audit.ts）が決めて入れる。
+  // Prisma は SQLite の Int の @id を `INTEGER PRIMARY KEY AUTOINCREMENT` にする（migration と同じ。
+  // `prisma migrate diff --from-config-datasource --to-schema` で差が無いことを確かめた）。番号を省いて足す道は使わない
+  seq                     Int      @id
   // いつ（サーバーの時計。UTC で持つ）
-  occurredAt       DateTime
+  occurredAt              DateTime
   // 誰が
-  actorId          String
-  actorRole        String
-  authMode         String
-  // 何をした（login・logout・search・view_study・open_viewer・modify・delete・import・config_change・role_switch・write）
-  action           String
-  // success か denied
-  outcome          String
+  actorId                 String
+  actorRole               String
+  authMode                String
+  // 何をした（login・logout・search・view_study・open_viewer・modify・delete・import・config_change・role_switch・write・retrieve）
+  action                  String
+  // success・denied（このアプリが断った）・failed（画像サーバーが失敗を返した）
+  outcome                 String
   // どの患者と検査に（無い操作は null）
-  patientId        String?
-  studyInstanceUid String?
-  // 接続元（分かるときだけ）
-  sourceAddress    String?
+  patientId               String?
+  studyInstanceUid        String?
+  // 確かめた接続元。信じるプロキシの設定が無い間は null
+  sourceAddress           String?
   // 補足（JSON の文字列）
-  detail           String?
-  prevHash         String   @unique
-  hash             String   @unique
+  detail                  String?
+  prevHash                String   @unique
+  hash                    String   @unique
+  // 要求のヘッダーにあった接続元（X-Forwarded-For など。偽れる値）。hash には値があるときだけ入れる
+  sourceAddressUnverified String?
 
   @@index([occurredAt])
   @@index([patientId])

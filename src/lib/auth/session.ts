@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { appendAudit, type AuditEntryInput } from "@/lib/audit";
 import { decodeDevRole, DEV_ROLE_COOKIE } from "@/lib/auth/dev-role-cookie";
 import { DEFAULT_DEV_ROLE, type Role } from "@/lib/auth/roles";
+import { sourceFromHeaders } from "@/lib/auth/source-address";
 import { getConfig, type AuthMode } from "@/lib/config";
 import { getDb } from "@/lib/db";
 
@@ -23,15 +24,12 @@ export async function getSession(): Promise<Session> {
   return { actorId: "dev", role, authMode: "dev" };
 }
 
-/** 接続元。リバースプロキシの後ろでは、その X-Forwarded-For の先頭（信じてよいかは施設の構成による） */
-async function sourceAddress(): Promise<string | null> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || null;
-}
+export type AuditFields = Omit<
+  AuditEntryInput,
+  "actorId" | "actorRole" | "authMode" | "sourceAddress" | "sourceAddressUnverified"
+>;
 
-type AuditFields = Omit<AuditEntryInput, "actorId" | "actorRole" | "authMode" | "sourceAddress">;
-
-/** いまの利用者で監査の記録に1行足す */
+/** いまの利用者で監査の記録に1行足す。接続元の分け方は src/lib/auth/source-address.ts */
 export async function audit(session: Session, fields: AuditFields) {
   const db = await getDb();
   return appendAudit(db, {
@@ -39,6 +37,6 @@ export async function audit(session: Session, fields: AuditFields) {
     actorId: session.actorId,
     actorRole: session.role,
     authMode: session.authMode,
-    sourceAddress: await sourceAddress(),
+    ...sourceFromHeaders(await headers()),
   });
 }

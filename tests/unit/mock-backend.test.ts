@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { personNameToString } from "@/lib/backend/dicom-json";
 import { createMockBackend } from "@/lib/backend/mock";
-import { safeRelayPath } from "@/lib/backend/relay-path";
-import { BackendError } from "@/lib/backend/types";
+import { safeRelayPath, wadoRsTarget, type WadoRsTarget } from "@/lib/backend/relay-path";
+import { BackendError, clampStudyLimit, STUDY_LIMIT } from "@/lib/backend/types";
 
 describe("モックのバックエンド", () => {
   for (const kind of ["orthanc", "dicomweb"] as const) {
@@ -33,39 +33,89 @@ describe("モックのバックエンド", () => {
     });
   });
 
-  it("中継：QIDO-RS の検査と、見本のある検査のシリーズを返す", async () => {
-    const backend = createMockBackend("orthanc");
-    const studies = await backend.relayDicomweb({ method: "GET", segments: ["studies"], search: "" });
-    expect(studies.status).toBe(200);
-    expect(studies.headers.get("content-type")).toBe("application/dicom+json");
-    expect(await studies.json()).toHaveLength(8);
-
-    const uid = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
-    const series = await backend.relayDicomweb({ method: "GET", segments: ["studies", uid, "series"], search: "" });
-    expect(series.status).toBe(200);
-
-    const missing = await backend.relayDicomweb({ method: "GET", segments: ["studies", "1.2.3", "series"], search: "" });
-    expect(missing.status).toBe(404);
+  it("検索の件数を 1〜1000 に収める", async () => {
+    const backend = createMockBackend("dicomweb");
+    expect(await backend.searchStudies(3)).toHaveLength(3);
+    expect(await backend.searchStudies(0)).toHaveLength(1);
+    expect(await backend.searchStudies(-5)).toHaveLength(1);
+    expect(await backend.searchStudies(Number.NaN)).toHaveLength(8);
+    expect(clampStudyLimit(10_000)).toBe(STUDY_LIMIT);
+    expect(clampStudyLimit(2.7)).toBe(2);
+    expect(clampStudyLimit(undefined)).toBe(STUDY_LIMIT);
   });
 
-  it("中継：モックは書き込みを受けない", async () => {
-    const res = await createMockBackend("orthanc").relayDicomweb({ method: "POST", segments: ["studies"], search: "" });
-    expect(res.status).toBe(501);
-  });
-
-  it("中継：見本の外のファイルへ出る path を断る", async () => {
+  it("中継：WADO-RS の読み取りの宛先だけを受ける（見本は無いので 404）", async () => {
     const backend = createMockBackend("orthanc");
-    for (const segments of [["..", "rest", "system.json"], ["studies", ".."], ["studies%2F.."], []]) {
-      await expect(backend.relayDicomweb({ method: "GET", segments, search: "" })).rejects.toBeInstanceOf(BackendError);
-    }
+    const target = wadoRsTarget(["studies", STUDY, "series", "1.2.3", "metadata"])!;
+    const res = await backend.relayDicomweb({ method: "GET", target, search: "" });
+    expect(res.status).toBe(404);
+
+    // 確かめを通っていない宛先（検索）は、モックの側でも断る
+    await expect(
+      backend.relayDicomweb({ method: "GET", target: { path: "studies", studyInstanceUid: "" }, search: "" }),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      backend.relayDicomweb({ method: "POST" as "GET", target, search: "" }),
+    ).rejects.toMatchObject({ status: 405 });
   });
 });
+
+const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
+const SERIES = "1.2.826.0.1.3680043.8.498.1";
+const INSTANCE = "1.2.826.0.1.3680043.8.498.2";
 
 describe("中継の path", () => {
   it("使える字だけを通す", () => {
     expect(safeRelayPath(["studies", "1.2.3", "series"])).toBe("studies/1.2.3/series");
-    expect(() => safeRelayPath(["studies", "a/b"])).toThrow(BackendError);
-    expect(() => safeRelayPath(["studies", "a b"])).toThrow(BackendError);
+    expect(safeRelayPath(["frames", "1,2,3"])).toBe("frames/1,2,3");
+    for (const bad of [["studies", "a/b"], ["studies", "a b"], ["studies", ".."], ["studies%2F.."], ["..", "rest"], []]) {
+      expect(() => safeRelayPath(bad)).toThrow(BackendError);
+    }
+  });
+
+  it("WADO-RS の読み取り（取得・metadata・rendered・thumbnail・frames・bulk）を通し、UID を分ける", () => {
+    const ok: [string[], Partial<WadoRsTarget>][] = [
+      [["studies", STUDY], { studyInstanceUid: STUDY }],
+      [["studies", STUDY, "metadata"], { studyInstanceUid: STUDY }],
+      [["studies", STUDY, "rendered"], {}],
+      [["studies", STUDY, "series", SERIES], { seriesInstanceUid: SERIES }],
+      [["studies", STUDY, "series", SERIES, "metadata"], { seriesInstanceUid: SERIES }],
+      [["studies", STUDY, "series", SERIES, "thumbnail"], {}],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE], { sopInstanceUid: INSTANCE }],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE, "metadata"], { sopInstanceUid: INSTANCE }],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE, "frames", "1"], {}],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE, "frames", "1,2,3"], {}],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE, "frames", "1", "rendered"], {}],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE, "bulk", "7fe00010"], {}],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE, "bulk", "00540016", "0", "00181072"], {}],
+    ];
+    for (const [segments, expected] of ok) {
+      const target = wadoRsTarget(segments);
+      expect(target, segments.join("/")).not.toBeNull();
+      expect(target).toMatchObject({ path: segments.join("/"), ...expected });
+    }
+  });
+
+  it("検索（QIDO-RS）とほかの path は通さない", () => {
+    const rejected = [
+      ["studies"],
+      ["series"],
+      ["instances"],
+      ["studies", STUDY, "series"],
+      ["studies", STUDY, "instances"],
+      ["studies", STUDY, "series", SERIES, "instances"],
+      ["studies", "not-a-uid"],
+      ["studies", `1.${"2".repeat(64)}`],
+      ["studies", STUDY, "series", SERIES, "instances", INSTANCE, "frames"],
+      ["studies", STUDY, "series", SERIES, "instances", INSTANCE, "frames", "0"],
+      ["studies", STUDY, "series", SERIES, "instances", INSTANCE, "frames", "1", "metadata"],
+      ["studies", STUDY, "series", SERIES, "instances", INSTANCE, "bulk"],
+      ["studies", STUDY, "series", SERIES, "instances", INSTANCE, "bulk", "pixeldata"],
+      ["studies", STUDY, "metadata", "extra"],
+      ["workitems"],
+      ["tools", "find"],
+    ];
+    for (const segments of rejected) expect(wadoRsTarget(segments), segments.join("/")).toBeNull();
   });
 });
 

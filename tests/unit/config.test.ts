@@ -34,7 +34,7 @@ describe("設定の読み込み", () => {
   it("モックと検証モードの最小の設定を型つきで読む", () => {
     const config = loadConfig(base);
     expect(config.backend).toMatchObject({ kind: "orthanc", mock: true });
-    expect(config.auth).toMatchObject({ mode: "dev", devAllowWrite: false, mfaRequired: true, loginLockThreshold: 5 });
+    expect(config.auth).toMatchObject({ mode: "dev", mfaRequired: true, loginLockThreshold: 5 });
     expect(config.databaseUrl).toBe("file:/data/tsunagi.db");
     expect(config.timeZone).toBe("Asia/Tokyo");
   });
@@ -79,9 +79,10 @@ describe("設定の読み込み", () => {
   });
 
   it("モックでなければ画像サーバーの URL が要る", () => {
-    const env = { ...base, BACKEND_MOCK: "false", HOSTNAME: "127.0.0.1" };
-    expect(variablesOf(env).sort()).toEqual(["BACKEND_DICOMWEB_URL", "BACKEND_ORTHANC_URL"]);
-    expect(variablesOf({ ...env, BACKEND_KIND: "dicomweb" })).toEqual(["BACKEND_DICOMWEB_URL"]);
+    // dev はモックのときだけなので、AUTH_MODE の誤りも一緒に並ぶ
+    const env = { ...base, BACKEND_MOCK: "false" };
+    expect(variablesOf(env).sort()).toEqual(["AUTH_MODE", "BACKEND_DICOMWEB_URL", "BACKEND_ORTHANC_URL"]);
+    expect(variablesOf({ ...env, BACKEND_KIND: "dicomweb" }).sort()).toEqual(["AUTH_MODE", "BACKEND_DICOMWEB_URL"]);
   });
 
   describe("AUTH_MODE", () => {
@@ -98,21 +99,69 @@ describe("設定の読み込み", () => {
       expect(variablesOf({ ...base, AUTH_MODE: undefined })).toEqual(["AUTH_MODE"]);
     });
 
-    it("dev はモックでも手元だけでもなければ起動しない", () => {
+    it("dev はモックでなければ起動しない（待ち受けの住所が手元だけでも）", () => {
       const real = {
         ...base,
         BACKEND_MOCK: "false",
         BACKEND_DICOMWEB_URL: "https://pacs.example.org/dicom-web",
         BACKEND_ORTHANC_URL: "https://pacs.example.org",
       };
-      expect(variablesOf({ ...real, HOSTNAME: "0.0.0.0" })).toEqual(["AUTH_MODE"]);
-      expect(variablesOf({ ...real, HOSTNAME: undefined })).toEqual(["AUTH_MODE"]);
-      expect(loadConfig({ ...real, HOSTNAME: "127.0.0.1" }).auth.mode).toBe("dev");
-      expect(loadConfig({ ...real, HOSTNAME: "::1" }).auth.mode).toBe("dev");
+      expect(problemsOf(real)).toEqual([{ variable: "AUTH_MODE", message: expect.stringContaining("BACKEND_MOCK=true") }]);
+      for (const HOSTNAME of ["127.0.0.1", "::1", "localhost", "0.0.0.0"]) {
+        expect(variablesOf({ ...real, HOSTNAME })).toEqual(["AUTH_MODE"]);
+      }
+      expect(loadConfig(base).auth.mode).toBe("dev");
     });
 
-    it("DEV_ALLOW_WRITE は dev のときだけ効く", () => {
-      expect(loadConfig({ ...base, DEV_ALLOW_WRITE: "true" }).auth.devAllowWrite).toBe(true);
+    it("書き込みの道は段 4 まで無いので、DEV_ALLOW_WRITE=true では起動しない", () => {
+      expect(variablesOf({ ...base, DEV_ALLOW_WRITE: "true" })).toEqual(["DEV_ALLOW_WRITE"]);
+      expect(loadConfig({ ...base, DEV_ALLOW_WRITE: "false" }).auth.mode).toBe("dev");
+    });
+  });
+
+  describe("秘密のファイル（*_FILE）", () => {
+    const files = { "/run/secrets/session_secret": `${SECRET}\n`, "/run/secrets/oidc": "oidc-from-file\n" };
+
+    it("SESSION_SECRET_FILE を読み、末尾の改行を落とす", () => {
+      const config = loadConfig(
+        { ...base, SESSION_SECRET: undefined, SESSION_SECRET_FILE: "/run/secrets/session_secret" },
+        { readFile: (p) => files[p as keyof typeof files] },
+      );
+      expect(config.sessionSecret).toBe(SECRET);
+    });
+
+    it("OIDC_CLIENT_SECRET_FILE を読む", () => {
+      const config = loadConfig(
+        { ...base, OIDC_CLIENT_SECRET_FILE: "/run/secrets/oidc" },
+        { readFile: (p) => files[p as keyof typeof files] },
+      );
+      expect(config.auth.oidc.clientSecret).toBe("oidc-from-file");
+    });
+
+    it("値とファイルを同時に指定したら誤り", () => {
+      expect(variablesOf({ ...base, SESSION_SECRET_FILE: "/run/secrets/session_secret" }, files)).toEqual([
+        "SESSION_SECRET_FILE",
+      ]);
+      expect(
+        variablesOf({ ...base, OIDC_CLIENT_SECRET: "inline", OIDC_CLIENT_SECRET_FILE: "/run/secrets/oidc" }, files),
+      ).toEqual(["OIDC_CLIENT_SECRET_FILE"]);
+    });
+
+    it("SESSION_SECRET_FILE が読めない・空・短いなら起動しない", () => {
+      const env = { ...base, SESSION_SECRET: undefined };
+      expect(variablesOf({ ...env, SESSION_SECRET_FILE: "/nope" })).toEqual(["SESSION_SECRET_FILE"]);
+      expect(variablesOf({ ...env, SESSION_SECRET_FILE: "/empty" }, { "/empty": "\n" })).toEqual(["SESSION_SECRET_FILE"]);
+      expect(variablesOf({ ...env, SESSION_SECRET_FILE: "/short" }, { "/short": "short\n" })).toEqual([
+        "SESSION_SECRET_FILE",
+      ]);
+    });
+
+    it("ファイルの中身を文言に出さない", () => {
+      const problems = problemsOf(
+        { ...base, SESSION_SECRET: undefined, SESSION_SECRET_FILE: "/short" },
+        { "/short": "leak-me-please" },
+      );
+      expect(JSON.stringify(problems)).not.toContain("leak-me-please");
     });
   });
 

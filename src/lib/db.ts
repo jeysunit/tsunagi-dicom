@@ -12,9 +12,22 @@ export async function createDb(databaseUrl: string): Promise<Db> {
   return db;
 }
 
-let shared: Promise<Db> | undefined;
-
-export function getDb(): Promise<Db> {
-  shared ??= createDb(getConfig().databaseUrl);
-  return shared;
+/**
+ * 1つのつなぎを使い回す。つなぐのに失敗したら覚えず、次の呼び出しでつなぎ直す
+ * （一度の失敗、例えばデータベースのファイルの場所がまだ無いときの失敗を、プロセスの終わりまで返し続けない）
+ */
+export function shareUntilFailure<T>(open: () => Promise<T>): () => Promise<T> {
+  let shared: Promise<T> | undefined;
+  return () => {
+    if (!shared) {
+      const attempt = open();
+      shared = attempt;
+      attempt.catch(() => {
+        if (shared === attempt) shared = undefined;
+      });
+    }
+    return shared;
+  };
 }
+
+export const getDb: () => Promise<Db> = shareUntilFailure(() => createDb(getConfig().databaseUrl));

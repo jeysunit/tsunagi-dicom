@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,7 +18,7 @@ beforeAll(() => {
   dir = mkdtempSync(path.join(tmpdir(), "tsunagi-audit-"));
   template = path.join(dir, "template.db");
   execFileSync(path.resolve("node_modules/.bin/prisma"), ["migrate", "deploy"], {
-    env: { ...process.env, DATABASE_URL: `file:${template}` },
+    env: { ...process.env, DATABASE_URL: `file:${template}`, CHECKPOINT_DISABLE: "1" },
     stdio: "pipe",
   });
 }, 60_000);
@@ -57,6 +58,7 @@ async function appendMany(db: Db, count: number) {
 async function dropGuards(db: Db) {
   await db.$executeRawUnsafe('DROP TRIGGER "AuditLog_no_update"');
   await db.$executeRawUnsafe('DROP TRIGGER "AuditLog_no_delete"');
+  await db.$executeRawUnsafe('DROP TRIGGER "AuditLog_no_replace"');
 }
 
 describe("監査の記録", () => {
@@ -126,6 +128,79 @@ describe("監査の記録", () => {
       await expect(db.auditLog.delete({ where: { seq: 1 } })).rejects.toThrow();
       await expect(db.$executeRawUnsafe('DELETE FROM "AuditLog"')).rejects.toThrow();
       expect(await db.auditLog.count()).toBe(2);
+    });
+
+    it("データベースの側でも、INSERT OR REPLACE・REPLACE INTO での置き換えを断る（同じ seq・prevHash・hash）", async () => {
+      const db = await freshDb();
+      await appendMany(db, 3);
+      const before = await db.auditLog.findMany({ orderBy: { seq: "asc" } });
+      const second = before[1]!;
+      const columns = `"seq","occurredAt","actorId","actorRole","authMode","action","outcome","prevHash","hash"`;
+      const forged = (seq: number, prevHash: string, hash: string) =>
+        `(${seq}, ${second.occurredAt.getTime()}, 'intruder', 'admin', 'dev', 'delete', 'success', '${prevHash}', '${hash}')`;
+
+      // 同じ seq（ほかの値は新しい）
+      await expect(
+        db.$executeRawUnsafe(`INSERT OR REPLACE INTO "AuditLog" (${columns}) VALUES ${forged(2, "a".repeat(64), "b".repeat(64))}`),
+      ).rejects.toThrow();
+      // 同じ prevHash（seq は新しい）
+      await expect(
+        db.$executeRawUnsafe(`REPLACE INTO "AuditLog" (${columns}) VALUES ${forged(10, second.prevHash, "c".repeat(64))}`),
+      ).rejects.toThrow();
+      // 同じ hash（seq は新しい）
+      await expect(
+        db.$executeRawUnsafe(`INSERT OR REPLACE INTO "AuditLog" (${columns}) VALUES ${forged(11, "d".repeat(64), second.hash)}`),
+      ).rejects.toThrow();
+      // UPSERT（ON CONFLICT DO UPDATE）も断る
+      await expect(
+        db.$executeRawUnsafe(
+          `INSERT INTO "AuditLog" (${columns}) VALUES ${forged(2, "e".repeat(64), "f".repeat(64))} ON CONFLICT("seq") DO UPDATE SET "action" = 'delete'`,
+        ),
+      ).rejects.toThrow();
+
+      expect(await db.auditLog.findMany({ orderBy: { seq: "asc" } })).toEqual(before);
+      expect(await verifyAuditChain(db)).toEqual({ ok: true, checked: 3 });
+      // 正しい追記はこれまでどおり通る
+      await appendAudit(db, entry(3));
+      expect(await verifyAuditChain(db)).toEqual({ ok: true, checked: 4 });
+    });
+  });
+
+  describe("確かめていない接続元（X-Forwarded-For など）", () => {
+    it("別の欄に残し、hash に含める（書き換えると見つかる）", async () => {
+      const db = await freshDb();
+      const row = await appendAudit(db, { ...entry(0), sourceAddressUnverified: "198.51.100.7" });
+      expect(row).toMatchObject({ sourceAddress: null, sourceAddressUnverified: "198.51.100.7" });
+      await appendMany(db, 1);
+      expect(await verifyAuditChain(db)).toEqual({ ok: true, checked: 2 });
+
+      await dropGuards(db);
+      await db.$executeRawUnsafe(`UPDATE "AuditLog" SET "sourceAddressUnverified" = '192.0.2.99' WHERE "seq" = 1`);
+      expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 1 });
+    });
+
+    it("値の無い行の hash は、欄を足す前の並びと同じ（古い行の確かめ方を変えない）", () => {
+      const base = {
+        seq: 1,
+        occurredAt: new Date("2026-10-18T00:00:00Z"),
+        actorId: "dev",
+        actorRole: "viewer",
+        authMode: "dev",
+        action: "search",
+        outcome: "success",
+        patientId: null,
+        studyInstanceUid: null,
+        sourceAddress: null,
+        detail: null,
+        prevHash: GENESIS_HASH,
+      };
+      // 欄を足す前の並び（12 の値）の SHA-256
+      const before = createHash("sha256")
+        .update(JSON.stringify([1, "2026-10-18T00:00:00.000Z", "dev", "viewer", "dev", "search", "success", null, null, null, null, GENESIS_HASH]))
+        .digest("hex");
+      expect(computeAuditHash(base)).toBe(before);
+      expect(computeAuditHash({ ...base, sourceAddressUnverified: null })).toBe(before);
+      expect(computeAuditHash({ ...base, sourceAddressUnverified: "198.51.100.7" })).not.toBe(computeAuditHash(base));
     });
   });
 

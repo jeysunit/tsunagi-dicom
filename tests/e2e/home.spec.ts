@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { BACKEND_PASSWORD_MARKER } from "../../playwright.config";
 
+/** 見本の1件目の検査の StudyInstanceUID */
+const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
+
 test.describe("共通の画面と検査の一覧（モック）", () => {
   test("暗い地の頁に「非医療機器」の表示と、モックの検査の件数・一覧が出る", async ({ page }) => {
     await page.goto("/");
@@ -23,9 +26,9 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await page.goto("/");
     expect(await page.content()).not.toContain(BACKEND_PASSWORD_MARKER);
 
-    for (const url of ["/api/studies", "/api/dicom-web/studies"]) {
+    for (const url of ["/api/studies", `/api/dicom-web/studies/${STUDY}/metadata`]) {
       const res = await request.get(url);
-      expect(res.status()).toBe(200);
+      expect(res.status(), url).toBe(url === "/api/studies" ? 200 : 404);
       const text = await res.text();
       expect(text).not.toContain(BACKEND_PASSWORD_MARKER);
       expect(text).not.toContain("e2e-user");
@@ -38,6 +41,32 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
   test("中継は見本の外へ出る path を断る", async ({ request }) => {
     const res = await request.get("/api/dicom-web/studies/..%2F..%2Frest/system.json");
     expect([400, 404]).toContain(res.status());
+  });
+
+  test("中継は検索（QIDO-RS）を返さない：検索は画面の API を通す", async ({ request }) => {
+    for (const path of ["studies", "studies?PatientID=JP-TEST-0001", `studies/${STUDY}/series`]) {
+      const res = await request.get(`/api/dicom-web/${path}`);
+      expect(res.status(), path).toBe(404);
+      const body = await res.json();
+      expect(body.error).toContain("WADO-RS の読み取りだけ");
+      expect(JSON.stringify(body)).not.toContain("JP-TEST-");
+    }
+  });
+
+  test("中継は WADO-RS の読み取りを通し、取得を監査の記録に残す", async ({ page }) => {
+    await page.goto("/");
+    const band = page.getByTestId("dev-mode-band");
+    await band.getByRole("button", { name: "管理者" }).click();
+    await expect(band.getByRole("button", { name: "管理者" })).toHaveAttribute("aria-pressed", "true");
+
+    const before = await (await page.request.get("/api/audit/verify")).json();
+    // モックには WADO-RS の見本が無いので 404 だが、宛先の確かめは通って画像サーバー（モック）まで届く
+    const res = await page.request.get(`/api/dicom-web/studies/${STUDY}/series/1.2.826.0.1.3680043.8.498.1/metadata`);
+    expect(res.status()).toBe(404);
+    expect((await res.json()).error).toBe("見本に無い");
+    const after = await (await page.request.get("/api/audit/verify")).json();
+    expect(after.ok).toBe(true);
+    expect(after.checked).toBe(before.checked + 1);
   });
 });
 
@@ -89,24 +118,35 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
     expect((await page.request.get("/api/audit/verify")).status()).toBe(403);
   });
 
-  test("書き込みの要求は止まる（DEV_ALLOW_WRITE が無いとき）", async ({ page, request }) => {
-    for (const method of ["POST", "PUT", "PATCH", "DELETE"] as const) {
-      const res = await request.fetch("/api/dicom-web/studies", {
-        method,
-        headers: { "content-type": "application/dicom" },
-        data: Buffer.from("not really dicom"),
-      });
-      expect(res.status(), method).toBe(403);
-      expect((await res.json()).error).toContain("DEV_ALLOW_WRITE=true");
-    }
-
-    // 止めたことも監査の記録に残り、つなぎは壊れていない
+  test("書き込みの要求は止まる（書き込みの道は段 4 まで無い）", async ({ page }) => {
     await page.goto("/");
     await page.getByTestId("dev-mode-band").getByRole("button", { name: "管理者" }).click();
     await expect(page.getByTestId("dev-mode-band").getByRole("button", { name: "管理者" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
+    const before = await (await page.request.get("/api/audit/verify")).json();
+
+    const methods = ["POST", "PUT", "PATCH", "DELETE"] as const;
+    for (const method of methods) {
+      const res = await page.request.fetch("/api/dicom-web/studies", {
+        method,
+        headers: { "content-type": "application/dicom" },
+        data: Buffer.from("not really dicom"),
+      });
+      expect(res.status(), method).toBe(405);
+      expect(res.headers()["allow"]).toBe("GET, HEAD");
+      expect((await res.json()).error).toContain("書き込みの道は段 4 まで無い");
+    }
+
+    // 止めたことも監査の記録に残り、つなぎは壊れていない
+    const after = await (await page.request.get("/api/audit/verify")).json();
+    expect(after.ok).toBe(true);
+    expect(after.checked).toBe(before.checked + methods.length);
+  });
+
+  test("役割の切り替えの本文が大きすぎれば断る", async ({ request }) => {
+    const res = await request.post("/api/dev/role", { data: { role: "admin", pad: "x".repeat(4096) } });
+    expect(res.status()).toBe(413);
   });
 });

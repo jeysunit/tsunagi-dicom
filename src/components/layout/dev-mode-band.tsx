@@ -3,7 +3,7 @@ import { RoleSwitcher } from "@/components/layout/role-switcher";
 import type { Role } from "@/lib/auth/roles";
 
 // 検証モード（AUTH_MODE=dev）の帯。画面の上に出し続ける（docs/spec.md の 4）。
-export function DevModeBand({ role, allowWrite }: { role: Role; allowWrite: boolean }) {
+export function DevModeBand({ role }: { role: Role }) {
   return (
     <div
       role="status"
@@ -15,7 +15,8 @@ export function DevModeBand({ role, allowWrite }: { role: Role; allowWrite: bool
         検証モード
       </span>
       <RoleSwitcher current={role} />
-      <span className="text-xs">{allowWrite ? "書き込みを許している（DEV_ALLOW_WRITE=true）" : "書き込みは止めている"}</span>
+      {/* 書き込みの道は段 4 まで無い（docs/spec.md の 4） */}
+      <span className="text-xs">書き込みは止めている</span>
     </div>
   );
 }

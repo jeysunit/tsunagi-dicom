@@ -9,8 +9,8 @@ DICOMweb に対応した画像サーバー（Orthanc など）を**改造せず�
 
 ## 状態
 
-**段 1a まで（2026-10-18）。** 土台・BFF の中継・監査の記録・開発用の認証（`AUTH_MODE=dev`）・共通の画面・CI とイメージがある。
-画面は、BFF を通した検査の件数と素の一覧の1頁だけ。アプリの利用者のログイン（`AUTH_MODE=local`）は段 1b で、それまでは `AUTH_MODE=dev` でしか起動しない。
+**段 1a まで（2026-10-18）。** 土台・BFF（検索の画面の API と、ビューアが画像を取る WADO-RS の読み取りだけの中継）・監査の記録・開発用の認証（`AUTH_MODE=dev`）・共通の画面・CI とイメージがある。
+画面は、BFF を通した検査の件数と素の一覧の1頁だけ。アプリの利用者のログイン（`AUTH_MODE=local`）は段 1b で、それまでは `AUTH_MODE=dev` でしか起動せず、`AUTH_MODE=dev` はモックのバックエンド（`BACKEND_MOCK=true`）のときだけ起動する。つまり段 1a では、実の画像サーバーにはつながない。
 実装は段ごとの PR で進める（[`docs/spec.md`](docs/spec.md) の「6. 段階」）。
 
 画面は、最初は日本語だけ。文書は日本語を主にし、README は日本語と英語。
@@ -32,15 +32,16 @@ DICOMweb に対応した画像サーバー（Orthanc など）を**改造せず�
 画像サーバー無しで、合成の見本（`tests/fixtures/orthanc`）を返すモックのバックエンドと、開発用の認証（`AUTH_MODE=dev`、書き込みは止める）で動かす。
 
 ```sh
-SESSION_SECRET="$(openssl rand -base64 48)" BACKEND_MOCK=true AUTH_MODE=dev docker compose up --build
+mkdir -p secrets && openssl rand -base64 48 > secrets/session_secret.txt   # SESSION_SECRET_FILE で渡す（secrets/ はリポジトリに入れない）
+BACKEND_MOCK=true AUTH_MODE=dev docker compose up --build
 # http://127.0.0.1:3000/ を開く
 ```
 
-手元で開発するとき（Node は `.nvmrc` の版）：
+手元で開発するとき（Node は `.nvmrc` の版。npm 11 の `allowScripts` を `.npmrc` の `strict-allow-scripts` で効かせている）：
 
 ```sh
 npm ci
-cp .env.example .env   # BACKEND_MOCK="true"・AUTH_MODE="dev"・SESSION_SECRET を入れる
+cp .env.example .env   # BACKEND_MOCK="true"・AUTH_MODE="dev"・SESSION_SECRET（か SESSION_SECRET_FILE）を入れる
 mkdir -p data && DATABASE_URL="file:./data/tsunagi.db" npm run db:migrate
 DATABASE_URL="file:./data/tsunagi.db" npm run dev
 ```

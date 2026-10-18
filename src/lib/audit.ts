@@ -20,9 +20,12 @@ export const AUDIT_ACTIONS = [
   "config_change",
   "role_switch",
   "write",
+  // ビューアが画像を取る道（WADO-RS の読み取りの中継）
+  "retrieve",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
-export type AuditOutcome = "success" | "denied";
+/** success：通した。denied：このアプリが断った。failed：画像サーバーが失敗を返した・つながらなかった */
+export type AuditOutcome = "success" | "denied" | "failed";
 
 /** 最初の行の prevHash */
 export const GENESIS_HASH = "0".repeat(64);
@@ -35,7 +38,10 @@ export interface AuditEntryInput {
   outcome?: AuditOutcome;
   patientId?: string | null;
   studyInstanceUid?: string | null;
+  /** 確かめた接続元。信じるプロキシの設定が無い間は null（src/lib/auth/source-address.ts） */
   sourceAddress?: string | null;
+  /** 要求のヘッダーにあった接続元（X-Forwarded-For など）。偽れるので、確かめていない値として分けて持つ */
+  sourceAddressUnverified?: string | null;
   detail?: Record<string, unknown> | null;
   /** 既定はサーバーの時計の今 */
   occurredAt?: Date;
@@ -55,10 +61,19 @@ export interface AuditRow {
   detail: string | null;
   prevHash: string;
   hash: string;
+  sourceAddressUnverified: string | null;
 }
 
-/** hash の元にする並び。項目を足すときは末尾に足し、古い行の確かめ方を変えない */
-export function computeAuditHash(row: Omit<AuditRow, "hash">): string {
+/** hash の元にする行。後から足した項目は、無い（null の）行では省ける */
+export type AuditHashInput = Omit<AuditRow, "hash" | "sourceAddressUnverified"> &
+  Partial<Pick<AuditRow, "sourceAddressUnverified">>;
+
+/**
+ * hash の元にする並び。項目を足すときは末尾に足し、古い行の確かめ方を変えない：
+ * 後から足した項目は、値があるときだけ並びに入れる（値の無い行は、足す前と同じ hash になる）
+ */
+export function computeAuditHash(row: AuditHashInput): string {
+  const later = row.sourceAddressUnverified != null ? [row.sourceAddressUnverified] : [];
   const payload = JSON.stringify([
     row.seq,
     row.occurredAt.toISOString(),
@@ -72,6 +87,7 @@ export function computeAuditHash(row: Omit<AuditRow, "hash">): string {
     row.sourceAddress,
     row.detail,
     row.prevHash,
+    ...later,
   ]);
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
@@ -85,6 +101,7 @@ export function appendAudit(db: Db, input: AuditEntryInput): Promise<AuditRow> {
     db.$transaction(async (tx) => {
       const last = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
       const base: Omit<AuditRow, "hash"> = {
+        sourceAddressUnverified: input.sourceAddressUnverified ?? null,
         seq: (last?.seq ?? 0) + 1,
         occurredAt: input.occurredAt ?? new Date(),
         actorId: input.actorId,

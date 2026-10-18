@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { sortStudiesNewestFirst, studyFromDicomJson, type DicomJsonDataset } from "@/lib/backend/dicom-json";
-import { safeRelayPath } from "@/lib/backend/relay-path";
-import { STUDY_LIMIT, type Backend, type RelayRequest } from "@/lib/backend/types";
+import { wadoRsTarget } from "@/lib/backend/relay-path";
+import { BackendError, clampStudyLimit, STUDY_LIMIT, type Backend, type RelayRequest } from "@/lib/backend/types";
 
 // モックのバックエンド（BACKEND_MOCK=true）。tests/fixtures/orthanc の合成の見本を返す。
-// 書き込みは受けない（中継の書き込みは 501）。
+// 中継（WADO-RS の読み取り）の見本はまだ無いので、中継は宛先を確かめたうえで 404 を返す。
 
 export function fixturesDir(): string {
   return path.join(process.cwd(), "tests", "fixtures", "orthanc");
@@ -13,15 +13,6 @@ export function fixturesDir(): string {
 
 async function readJson<T>(...parts: string[]): Promise<T> {
   return JSON.parse(await readFile(path.join(fixturesDir(), ...parts), "utf8")) as T;
-}
-
-const UID = /^[0-9.]+$/;
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": status === 200 ? "application/dicom+json" : "application/json" },
-  });
 }
 
 export function createMockBackend(kind: "orthanc" | "dicomweb"): Backend {
@@ -32,7 +23,7 @@ export function createMockBackend(kind: "orthanc" | "dicomweb"): Backend {
     mock: true,
 
     async searchStudies(limit = STUDY_LIMIT) {
-      return sortStudiesNewestFirst((await qidoStudies()).map(studyFromDicomJson)).slice(0, limit);
+      return sortStudiesNewestFirst((await qidoStudies()).map(studyFromDicomJson)).slice(0, clampStudyLimit(limit));
     },
 
     async countStudies() {
@@ -45,20 +36,10 @@ export function createMockBackend(kind: "orthanc" | "dicomweb"): Backend {
     },
 
     async relayDicomweb(req: RelayRequest) {
-      safeRelayPath(req.segments);
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        return json({ error: "モックのバックエンドは書き込みを受けない" }, 501);
-      }
-      const [first, uid, third, ...rest] = req.segments;
-      if (first === "studies" && uid === undefined) return json(await qidoStudies());
-      if (first === "studies" && uid && UID.test(uid) && third === "series" && rest.length === 0) {
-        try {
-          return json(await readJson("dicom-web", "studies", uid, "series.json"));
-        } catch {
-          return json({ error: "見本に無い" }, 404);
-        }
-      }
-      return json({ error: "見本に無い" }, 404);
+      if (req.method !== "GET" && req.method !== "HEAD") throw new BackendError("中継は読み取りだけ", 405);
+      const target = wadoRsTarget(req.target.path.split("/"));
+      if (!target || target.path !== req.target.path) throw new BackendError("中継は WADO-RS の読み取りだけ", 404);
+      return Response.json({ error: "見本に無い" }, { status: 404 });
     },
   };
 }

@@ -19,7 +19,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="ja">
       <body className="min-h-screen antialiased">
-        {session && <DevModeBand role={session.role} allowWrite={config.auth.devAllowWrite} />}
+        {session && <DevModeBand role={session.role} />}
         <SiteHeader />
         <main className="px-4 py-4">{children}</main>
       </body>

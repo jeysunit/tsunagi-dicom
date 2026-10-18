@@ -1,3 +1,5 @@
+import type { WadoRsTarget } from "@/lib/backend/relay-path";
+
 // 画像サーバーから受けた検査を、画面に出す形にしたもの。
 // 氏名・生年月日の整形（漢字とかなに分ける・和暦）は段 2。ここでは DICOM の値をそのまま持つ。
 export interface StudySummary {
@@ -27,7 +29,10 @@ export interface Backend {
    * DICOMweb だけのときは QIDO-RS の件数で、上限に届いたら exact=false（「以上」）
    */
   countStudies(): Promise<StudyCount>;
-  /** DICOMweb（QIDO-RS・WADO-RS・STOW-RS）への中継。path は `/dicom-web` より後ろ */
+  /**
+   * ビューアが画像を取る道（WADO-RS の読み取り）の中継。検索（QIDO-RS）と書き込みは通さない（docs/spec.md の 3.2）。
+   * 宛先は relay-path.ts の wadoRsTarget で確かめたもの
+   */
   relayDicomweb(request: RelayRequest): Promise<Response>;
 }
 
@@ -39,14 +44,19 @@ export interface StudyCount {
 /** 一覧と件数で、一度に QIDO-RS から受ける検査の上限 */
 export const STUDY_LIMIT = 1000;
 
+/** 検索の件数を 1〜STUDY_LIMIT に収める（数でなければ上限） */
+export function clampStudyLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) return STUDY_LIMIT;
+  return Math.min(STUDY_LIMIT, Math.max(1, Math.floor(limit)));
+}
+
 export interface RelayRequest {
-  method: string;
-  /** 例：["studies", "1.2.3", "series"] */
-  segments: string[];
+  /** 読み取りだけ */
+  method: "GET" | "HEAD";
+  target: WadoRsTarget;
+  /** 例：`?quality=90`。`?` を含む。無ければ空 */
   search: string;
   accept?: string | null;
-  contentType?: string | null;
-  body?: ArrayBuffer | null;
 }
 
 export class BackendError extends Error {

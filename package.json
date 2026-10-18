@@ -51,8 +51,9 @@
     "vitest": "5.0.5"
   },
   "allowScripts": {
-    "better-sqlite3": true,
-    "@prisma/engines": true,
-    "prisma": true
+    "better-sqlite3@12.11.1": true,
+    "@prisma/engines@7.10.1": true,
+    "prisma@7.10.1": true,
+    "fsevents": false
   }
 }

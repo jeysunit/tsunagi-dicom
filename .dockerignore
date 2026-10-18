@@ -12,5 +12,6 @@ src/generated
 docker/prisma-cli/node_modules
 .env*
 !.env.example
+secrets
 *.db
 *.db-*

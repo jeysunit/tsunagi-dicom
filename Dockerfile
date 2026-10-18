@@ -8,8 +8,11 @@ FROM ${NODE_IMAGE} AS deps
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+# Prisma の CLI が外（checkpoint.prisma.io）へ版の確かめを送らないようにする
+ENV CHECKPOINT_DISABLE=1
 WORKDIR /app
-COPY package.json package-lock.json prisma.config.ts ./
+# .npmrc：allowScripts に無い install のスクリプトで止める（strict-allow-scripts）
+COPY package.json package-lock.json .npmrc prisma.config.ts ./
 COPY prisma ./prisma
 RUN npm ci
 
@@ -24,8 +27,9 @@ FROM ${NODE_IMAGE} AS prisma-cli
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+ENV CHECKPOINT_DISABLE=1
 WORKDIR /opt/prisma-cli
-COPY docker/prisma-cli/package.json docker/prisma-cli/package-lock.json ./
+COPY docker/prisma-cli/package.json docker/prisma-cli/package-lock.json docker/prisma-cli/.npmrc ./
 RUN npm ci --omit=dev
 COPY prisma.config.ts ./
 COPY prisma ./prisma
@@ -37,8 +41,10 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /data \
   && chown node:node /data
+# CHECKPOINT_DISABLE：起動の時の prisma migrate deploy が、外へ版の確かめを送らないようにする
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
+    CHECKPOINT_DISABLE=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
     DATABASE_URL=file:/data/tsunagi.db \

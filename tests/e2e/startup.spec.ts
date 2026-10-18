@@ -29,14 +29,20 @@ const cases: [string, Record<string, string>, string][] = [
   ["AUTH_MODE=local（段 1b）", { AUTH_MODE: "local" }, "AUTH_MODE: local はまだ無い"],
   ["AUTH_MODE=oidc（段 4）", { AUTH_MODE: "oidc" }, "AUTH_MODE: oidc はまだ無い"],
   [
-    "AUTH_MODE=dev でモックでも手元だけでもない",
+    "AUTH_MODE=dev でモックでない（待ち受けが手元だけでも）",
     {
       BACKEND_MOCK: "false",
       BACKEND_DICOMWEB_URL: "https://pacs.example.org/dicom-web",
       BACKEND_ORTHANC_URL: "https://pacs.example.org",
-      HOSTNAME: "0.0.0.0",
+      HOSTNAME: "127.0.0.1",
     },
-    "AUTH_MODE: dev は",
+    "AUTH_MODE: dev は BACKEND_MOCK=true のときだけ起動する",
+  ],
+  ["DEV_ALLOW_WRITE=true（書き込みの道は段 4 まで無い）", { DEV_ALLOW_WRITE: "true" }, "DEV_ALLOW_WRITE"],
+  [
+    "SESSION_SECRET と SESSION_SECRET_FILE を同時に指定",
+    { SESSION_SECRET_FILE: "/nonexistent/session_secret" },
+    "SESSION_SECRET_FILE: SESSION_SECRET と同時には使えない",
   ],
   ["BACKEND_KIND が誤り", { BACKEND_KIND: "pacs" }, "BACKEND_KIND"],
   ["証明書の確かめを切る", { NODE_TLS_REJECT_UNAUTHORIZED: "0" }, "NODE_TLS_REJECT_UNAUTHORIZED"],
