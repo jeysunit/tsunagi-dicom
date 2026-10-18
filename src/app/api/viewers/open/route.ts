@@ -11,6 +11,8 @@ import { availableViewers, isViewerId, viewerUrl } from "@/lib/viewers";
 
 export async function GET(request: Request) {
   try {
+    // 別のサイトから踏ませた要求（リンク・画像）で、開いた記録を作らせない
+    if (request.headers.get("sec-fetch-site") === "cross-site") throw new RequestError(403, "別の場所からの要求は受けない");
     const session = await requireSession("image.retrieve");
     const url = new URL(request.url);
     const uid = studyUidParam(url.searchParams.get("study"));

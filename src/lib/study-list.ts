@@ -39,6 +39,8 @@ export interface StudyListResult {
   studies: StudyView[];
   /** 監査の記録に残す、返した検査（ブラウザへは返さない） */
   returned: StudySummary[];
+  /** 画像サーバーへ求めた時刻（ミリ秒） */
+  fetchedAt: number;
 }
 
 async function decorate(deps: ListDeps, studies: StudySummary[]) {
@@ -57,12 +59,16 @@ async function decorate(deps: ListDeps, studies: StudySummary[]) {
 
 export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_FILTER): Promise<StudyListResult> {
   const today = todayIn(deps.timeZone ?? "Asia/Tokyo", deps.now);
-  const studies = await deps.backend.searchStudies(STUDY_LIMIT, dateQuery(filter, today));
+  // 検査日を許されていない役割には、検査日の絞り込みも効かせない（隠した項目で探せないように。原則 8）
+  const dateAllowed = allowlistFor(deps.role, deps.allowlists).study.includes("studyDate");
+  const fetchedAt = Date.now();
+  const studies = await deps.backend.searchStudies(STUDY_LIMIT, dateAllowed ? dateQuery(filter, today) : {});
   const rows = (await decorate(deps, studies)).filter((r) => matchesFilter(r.view, filter));
   return {
     count: { count: rows.length, exact: studies.length < STUDY_LIMIT },
     studies: rows.map((r) => r.view),
     returned: rows.map((r) => r.summary),
+    fetchedAt,
   };
 }
 

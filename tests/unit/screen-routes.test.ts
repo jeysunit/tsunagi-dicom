@@ -177,6 +177,15 @@ describe("ビューア", () => {
     expect(await lastAudit("open_viewer")).toMatchObject({ studyInstanceUid: STUDY, actorRole: "viewer" });
   });
 
+  it("別のサイトから踏ませた要求は、記録を作らずに断る", async () => {
+    state.role = "doctor";
+    const { GET } = await import("@/app/api/viewers/open/route");
+    const before = await lastAudit("open_viewer");
+    const res = await GET(new Request(`${ORIGIN}/api/viewers/open?study=${STUDY}&viewer=ohif`, { headers: { "sec-fetch-site": "cross-site" } }));
+    expect(res.status).toBe(403);
+    expect((await lastAudit("open_viewer"))?.seq).toBe(before?.seq);
+  });
+
   it("DICOMweb の URL は移さずに返し、このアプリの監査の外と示す", async () => {
     state.role = "doctor";
     const { GET } = await import("@/app/api/viewers/open/route");

@@ -98,6 +98,13 @@ describe("画面の API は、許可の一覧の項目だけを返す（モッ�
         expect(JSON.stringify(doctor.studies)).toContain("JP-TEST-");
       });
 
+      it("検査日を許されていない役割には、検査日の絞り込みも効かない（隠した項目で探せない）", async () => {
+        const map: FieldAllowlistMap = { ...ROLE_FIELD_ALLOWLIST, viewer: { study: ["studyInstanceUid"], series: [] } };
+        const filter = { date: "range" as const, from: "2026-10-17", to: "2026-10-17" };
+        expect((await listStudies({ backend: make(), role: "viewer", actorId: "t", allowlists: map }, filter)).studies).toHaveLength(8);
+        expect((await listStudies({ backend: make(), role: "doctor", actorId: "t", allowlists: map }, filter)).studies).toHaveLength(4);
+      });
+
       it("割り当ての無い役割には、何も返さない（出ない側に倒れる）", async () => {
         const map = { ...ROLE_FIELD_ALLOWLIST } as Partial<FieldAllowlistMap>;
         delete map.viewer;

@@ -5,7 +5,7 @@ import { Bookmark, Search, Siren } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import type { ScreenInfo } from "@/components/studies/screen-info";
-import { detailKey, fetchDetail, StudyDetailPanel } from "@/components/studies/study-detail";
+import { StudyDetailPanel } from "@/components/studies/study-detail";
 import { Thumbnail } from "@/components/studies/thumbnail";
 import { openInViewer, ViewerMenu } from "@/components/studies/viewer-menu";
 import { getJson } from "@/lib/client/api";
@@ -189,7 +189,6 @@ function StudyRows({
   onSelect: (uid: string | null) => void;
   onChanged: () => void;
 }) {
-  const queryClient = useQueryClient();
   const COLS = 9;
   return (
     <div className="overflow-x-auto rounded-md border border-border">
@@ -222,7 +221,6 @@ function StudyRows({
                   aria-selected={isOpen}
                   tabIndex={0}
                   className={cn("cursor-pointer border-b border-border align-top hover:bg-muted", isOpen && "bg-muted")}
-                  onMouseEnter={() => uid && void queryClient.prefetchQuery({ queryKey: detailKey(uid), queryFn: () => fetchDetail(uid) })}
                   onClick={(e) => {
                     // ビューアの部品の中の操作と、ダブルクリックの2回目は、詳細の開け閉めにしない
                     if ((e.target as HTMLElement).closest("[data-row-control]") || e.detail > 1) return;
@@ -299,7 +297,18 @@ function StudyRows({
   );
 }
 
-function Browser({ initialFilter, initialData, screen }: { initialFilter: StudyFilter; initialData: StudyListData; screen: ScreenInfo }) {
+function Browser({
+  initialFilter,
+  initialData,
+  initialDataAt,
+  screen,
+}: {
+  initialFilter: StudyFilter;
+  initialData: StudyListData;
+  /** サーバーの側で一覧を取った時刻（ミリ秒）。古くなった最初の値を新しいものとして使わない */
+  initialDataAt: number;
+  screen: ScreenInfo;
+}) {
   const [filter, setFilter] = useState<StudyFilter>(initialFilter);
   const [selected, setSelected] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -310,6 +319,7 @@ function Browser({ initialFilter, initialData, screen }: { initialFilter: StudyF
     queryKey: listKey(filter),
     queryFn: ({ signal }) => getJson<StudyListData>(`/api/studies${params ? `?${params}` : ""}`, signal),
     initialData: params === initialKey ? initialData : undefined,
+    initialDataUpdatedAt: initialDataAt,
     placeholderData: (previous) => previous,
   });
 
@@ -350,7 +360,7 @@ function Browser({ initialFilter, initialData, screen }: { initialFilter: StudyF
   );
 }
 
-export function StudyBrowser(props: { initialFilter: StudyFilter; initialData: StudyListData; screen: ScreenInfo }) {
+export function StudyBrowser(props: { initialFilter: StudyFilter; initialData: StudyListData; initialDataAt: number; screen: ScreenInfo }) {
   const [client] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: false } } }),
   );
