@@ -74,16 +74,18 @@ flowchart LR
 
 | 秘密 | 何のためか | 渡し方 | 既定値 |
 |---|---|---|---|
-| `SESSION_SECRET` | セッションの署名 | 値か `SESSION_SECRET_FILE`（`compose.yaml` の例は secret のファイル）。32 バイト以上の乱数 | **無し。** どちらも空なら起動しない |
+| `SESSION_SECRET` | セッションの署名と、TOTP の秘密を暗号化する鍵の元（段 1b） | 値か `SESSION_SECRET_FILE`（`compose.yaml` の例は secret のファイル）。32 バイト以上の乱数 | **無し。** どちらも空なら起動しない |
 | `BACKEND_PASSWORD` | BFF が画像サーバーにつなぐ資格情報 | 値か `BACKEND_PASSWORD_FILE` | 無し。`BACKEND_USERNAME` があるのにパスワードが無ければ起動しない |
 | `OIDC_CLIENT_SECRET` | 外部の認証のクライアントの秘密（段 4） | 値か `OIDC_CLIENT_SECRET_FILE` | 無し |
 | 利用者のパスワード | アプリのログイン（段 1b） | データベースにハッシュ（argon2id）で持つ。平文に戻せない | — |
+| 最初の管理者のパスワード | 利用者が1人もいないときに、最初の管理者を作る（段 1b） | `INITIAL_ADMIN_PASSWORD_FILE` だけ（値の変数は無い）。最初のログインで本人が変える | 無し。利用者がいず、この設定も無ければ起動しない |
+| TOTP の秘密 | アプリのログインの二要素（段 1b） | データベースに AES-256-GCM で暗号化して持つ。鍵は `SESSION_SECRET` から HKDF-SHA256 で導く | — |
 
 - **同じ秘密を値と `*_FILE` の両方で渡したら起動しない**（どちらが効いているか分からなくなるため）。
 - **ファイルで渡すことを勧める。** 環境変数の値は、コンテナの設定の表示（`docker inspect` など）から読める。secret のファイルはリポジトリに入れない（`secrets/` は `.gitignore`）。
 - 起動の時の誤りの文言は、どの変数かだけを出し、値を出さない。
 - 証明書の確かめを切る設定（`NODE_TLS_REJECT_UNAUTHORIZED=0`）を与えたら起動しない。自前の CA は `BACKEND_CA_FILE` で渡す。
-- 二要素の認証（TOTP）の鍵の持ち方は、段 1b で決めて、この文書に足す。
+- 二要素の認証（TOTP）の秘密は、`SESSION_SECRET` から導いた鍵で暗号化して持つ（段 1b。秘密のファイルを増やさないため）。**`SESSION_SECRET` を替えると、保存した TOTP の秘密は読めなくなり**、管理者が利用者ごとに「TOTP をやり直す」（[`spec.md`](spec.md) の 3.6）。ログインのセッションの cookie には乱数の token を入れ、データベースには token の SHA-256 だけを持つ。
 
 ## 5. 記録
 
