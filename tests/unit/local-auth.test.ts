@@ -428,12 +428,98 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     expect(denied.map((r) => JSON.parse(r.detail ?? "{}").reason)).toEqual(["bad_password", "bad_password", "locked"]);
     expect(rows.filter((r) => r.action === "login_lock")).toHaveLength(1);
 
-    // 一時停止が解けたら、同じセッションでパスワードだけで解ける。成功で失敗の数を0に戻す
+    // 一時停止が解けたら、同じセッションでパスワードだけで解ける（一時停止にしたときに数は0になっている。
+    // 解除で取った枠は返すので、成功しても数は増えない）
     clock.advance(16 * 60_000);
     const later = await sessionOf(db, token);
     await unlockScreen(ctx, later.session, later.user, { password: PASSWORD });
     expect((await resolveSession(ctx, token)).kind).toBe("active");
     expect((await user()).failedLoginCount).toBe(0);
+  });
+
+  it("既定：TOTP を登録した利用者の、パスワードだけの解除の成功は、前の失敗の数を消さない（枠は返す）。TOTP まで確かめた成功で0に戻る", async () => {
+    const { ctx, db, clock } = await setup({ loginLockThreshold: 5 });
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const count = async () => (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount;
+    const lockAndUnlock = async () => {
+      const s = await sessionOf(db, token);
+      await lockScreen(ctx, s.session, s.user, "manual");
+      const l = await sessionOf(db, token);
+      await unlockScreen(ctx, l.session, l.user, { password: PASSWORD });
+    };
+    // 失敗が無ければ、何度解いても数は増えない（取った枠を返す）
+    await lockAndUnlock();
+    await lockAndUnlock();
+    expect(await count()).toBe(0);
+    // 解く前の失敗（パスワードの誤り）は、パスワードだけの解除の後も残る
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    await expect(unlockScreen(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({ status: 401 });
+    expect(await count()).toBe(1);
+    const l = await sessionOf(db, token);
+    await unlockScreen(ctx, l.session, l.user, { password: PASSWORD });
+    expect(await count()).toBe(1);
+    // 再認証（パスワードと TOTP）の成功で0に戻る
+    const a = await sessionOf(db, token);
+    await reauthenticate(ctx, a.session, a.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    expect(await count()).toBe(0);
+  });
+
+  it("既定：TOTP を登録していない利用者は、パスワードだけの解除の成功で失敗の数を0に戻す（持つ確かめの全部のため）", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false, loginLockThreshold: 5 });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    await expect(unlockScreen(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({ status: 401 });
+    await unlockScreen(ctx, s.session, s.user, { password: "kq7vz2mw-long1" });
+    expect((await db.user.findUniqueOrThrow({ where: { username: "sato" } })).failedLoginCount).toBe(0);
+  });
+
+  it("回帰（Codex の指摘）：再認証で TOTP を閾値の手前まで誤り、パスワードだけで解除することを繰り返しても、閾値で一時停止になる", async () => {
+    const { ctx, db, clock } = await setup({ loginLockThreshold: 3 });
+    const { secret, token } = await enrolledUser(ctx, clock);
+    clock.advance(30_000);
+    const count = async () => (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount;
+    const badTotp = async () => {
+      const a = await sessionOf(db, token);
+      return reauthenticate(ctx, a.session, a.user, { password: PASSWORD, code: "000000" });
+    };
+    const unlockWithPassword = async () => {
+      const s = await sessionOf(db, token);
+      // ロックしていなくても解除の要求は確かめる（断らない）。ロックしてから送っても同じ
+      await lockScreen(ctx, s.session, s.user, "manual");
+      const l = await sessionOf(db, token);
+      await unlockScreen(ctx, l.session, l.user, { password: PASSWORD });
+    };
+
+    // 1巡目：閾値の手前（2回）まで TOTP を誤り、パスワードだけで解く
+    await expect(badTotp()).rejects.toMatchObject({ status: 401, problems: [] });
+    await expect(badTotp()).rejects.toMatchObject({ status: 401, problems: [] });
+    expect(await count()).toBe(2);
+    await unlockWithPassword();
+    expect(await count()).toBe(2);
+    // 2巡目：次の TOTP の誤りで閾値に届き、一時停止になる（解除で数は消えていない）
+    await expect(badTotp()).rejects.toMatchObject({ status: 401, problems: ["locked"] });
+    const locked = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+    expect(locked.lockedUntil!.getTime()).toBeGreaterThan(clock.t);
+    // 一時停止の間は、正しい番号の再認証も、パスワードだけの解除も通らない
+    const a = await sessionOf(db, token);
+    await expect(
+      reauthenticate(ctx, a.session, a.user, { password: PASSWORD, code: totpAt(secret, clock.t) }),
+    ).rejects.toMatchObject({ problems: ["locked"] });
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    const l = await sessionOf(db, token);
+    await expect(unlockScreen(ctx, l.session, l.user, { password: PASSWORD })).rejects.toMatchObject({ problems: ["locked"] });
+    const rows = await auditRows(db);
+    expect(rows.filter((r) => r.action === "login_lock")).toHaveLength(1);
+    expect(rows.filter((r) => r.action === "reauth" && r.outcome === "denied").map((r) => JSON.parse(r.detail ?? "{}").reason)).toEqual([
+      "bad_totp",
+      "bad_totp",
+      "bad_totp",
+      "locked",
+    ]);
   });
 
   it("既定でも、ログインと再認証の TOTP は求める（画面のロックの設定はほかの確かめに効かない）", async () => {

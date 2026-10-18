@@ -284,6 +284,8 @@ export async function createUser(
 // 確かめる前に「試みの枠」を1つ、原子的な更新で取る（失敗の数が決めた回数より少ないときだけ1つ増やす）。
 // 同時に多くの要求を送っても、枠を取れた要求だけが確かめに進むので、決めた回数より多くは試せない。
 // パスワードが合ったら（TOTP が残っていても）その枠を返し、ログイン・ロックの解除・再認証を終えたら数を0に戻す。
+// ただし、TOTP を登録した利用者の、TOTP を確かめなかったロックの解除（SCREEN_UNLOCK_REQUIRE_TOTP=false）は、
+// 枠を返すだけで数を0に戻さない（verifyAgain）。
 
 /** 試みの枠を取る。取れなければ（一時停止の中か、枠を使い切った）false */
 async function claimAttempt(ctx: AuthContext, user: User): Promise<boolean> {
@@ -406,7 +408,15 @@ async function verifyAgain(
     const locked = await registerFailure(ctx, user, passwordOk ? "bad_totp" : "bad_password", action);
     throw new AuthFailure(401, checkTotp ? "パスワードか確認の番号が違う" : "パスワードが違う", locked ? ["locked"] : []);
   }
-  await resetAttempts(ctx, user);
+  if (checkTotp || user.totpSecretEnc === null) {
+    // 利用者が持つ確かめを全部通した（TOTP を登録していればそれも）ので、続けての失敗の数を0に戻す
+    await resetAttempts(ctx, user);
+  } else {
+    // TOTP を登録しているのに確かめなかった（パスワードだけの画面のロックの解除）。この試みの枠だけを返し、
+    // 前の失敗の数は残す。消すと、再認証などで TOTP の番号を試し、一時停止の手前でパスワードだけの解除を通して
+    // 数を消すことを繰り返し、TOTP の試みの上限を迂回できるため（docs/spec.md の 3.6）
+    await releaseAttempt(ctx, user);
+  }
   return checkTotp;
 }
 
