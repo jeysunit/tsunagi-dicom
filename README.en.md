@@ -23,6 +23,8 @@ The user interface will be Japanese only at first. The documents are written mai
 - **Simple reports (簡易レポート)** and import of documents such as PDF.
 - **Security and operations**: roles, two-factor authentication, audit trail, and so on. [`docs/guideline-mapping.md`](docs/guideline-mapping.md) maps these features to the items of the Japanese Ministry of Health, Labour and Welfare guideline (version 7.0, System Operations volume). **Whether a deployment meets the guideline is for each institution to determine, including its operations; this software alone does not make a deployment compliant.**
 
+**Example uses**: as an everyday viewing front end in front of a hospital or lab image server; and in front of a research image archive for clinical studies, where readers must not see the original patient information (a blind-reading role, planned after stage 4).
+
 The image server and viewers are not modified. Every endpoint is configured through environment variables. Search and retrieval use DICOMweb first; Orthanc-only features are kept in separate components that are enabled only with an Orthanc backend.
 
 ## Trying it out (mock backend)
