@@ -3,7 +3,18 @@ import { CodeForm } from "@/components/auth/auth-forms";
 
 // TOTP の登録の画面（QR と、手で入れるための秘密）。秘密は登録を確かめるまで、セッションに暗号化して置く。
 // QR はサーバーの側で SVG に描き、data: の画像で出す（外のサービスに秘密を渡さない）。
-export function TotpEnrollment({ secret, uri, csrfToken }: { secret: string; uri: string; csrfToken: string }) {
+export function TotpEnrollment({
+  secret,
+  uri,
+  csrfToken,
+  askPassword = false,
+}: {
+  secret: string;
+  uri: string;
+  csrfToken: string;
+  /** ログインした後の登録では、いまのパスワードも求める（再認証） */
+  askPassword?: boolean;
+}) {
   const svg = renderSVG(uri, { ecc: "M", border: 2, pixelSize: 4 });
   const src = `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
   const grouped = secret.replace(/(.{4})/g, "$1 ").trim();
@@ -21,7 +32,7 @@ export function TotpEnrollment({ secret, uri, csrfToken }: { secret: string; uri
           {grouped}
         </code>
       </p>
-      <CodeForm endpoint="/api/auth/totp/enroll" csrfToken={csrfToken} label="登録する" />
+      <CodeForm endpoint="/api/auth/totp/enroll" csrfToken={csrfToken} label="登録する" askPassword={askPassword} />
     </div>
   );
 }

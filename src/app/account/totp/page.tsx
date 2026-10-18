@@ -17,7 +17,7 @@ export default async function AccountTotpPage() {
   return (
     <section className="max-w-md space-y-4">
       <h1 className="text-lg font-bold text-value">二要素の認証（TOTP）の登録</h1>
-      <TotpEnrollment secret={enrollment.secret} uri={enrollment.uri} csrfToken={row.csrfToken} />
+      <TotpEnrollment secret={enrollment.secret} uri={enrollment.uri} csrfToken={row.csrfToken} askPassword />
     </section>
   );
 }

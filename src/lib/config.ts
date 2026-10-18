@@ -32,6 +32,9 @@ export interface AppConfig {
     loginLockThreshold: number;
     loginLockMinutes: number;
     screenLockMinutes: number;
+    /** 資格情報の確かめの回数の上限（1 分あたり）。接続元ごと・全体 */
+    rateLimitPerSourcePerMinute: number;
+    rateLimitGlobalPerMinute: number;
     oidc: { issuer?: string; clientId?: string; clientSecret?: string };
     /**
      * 最初の管理者（AUTH_MODE=local で利用者が1人もいないときだけ使う。src/lib/auth/bootstrap.ts）。
@@ -97,6 +100,8 @@ const envSchema = z.object({
   LOGIN_LOCK_THRESHOLD: int(5, 1),
   LOGIN_LOCK_MINUTES: int(15, 1),
   SCREEN_LOCK_MINUTES: int(15, 0),
+  LOGIN_RATE_LIMIT_PER_MINUTE: int(20, 1),
+  LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: int(300, 1),
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
@@ -273,6 +278,8 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       loginLockThreshold: e.LOGIN_LOCK_THRESHOLD,
       loginLockMinutes: e.LOGIN_LOCK_MINUTES,
       screenLockMinutes: e.SCREEN_LOCK_MINUTES,
+      rateLimitPerSourcePerMinute: e.LOGIN_RATE_LIMIT_PER_MINUTE,
+      rateLimitGlobalPerMinute: e.LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE,
       oidc: { issuer: e.OIDC_ISSUER, clientId: e.OIDC_CLIENT_ID, clientSecret: oidcClientSecret },
       initialAdmin,
     },

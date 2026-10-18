@@ -30,6 +30,8 @@ export const AUDIT_ACTIONS = [
   "mfa_enroll",
   "mfa_reset",
   "password_change",
+  // 大事な操作の前の、もう一度の本人の確かめ（段 1b）
+  "reauth",
   // 利用者の管理（段 1b）：作る・止める／戻す・役割の変更
   "user_create",
   "user_status_change",

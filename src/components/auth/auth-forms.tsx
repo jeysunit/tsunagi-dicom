@@ -51,7 +51,18 @@ export function LoginForm() {
   );
 }
 
-export function CodeForm({ endpoint, csrfToken, label }: { endpoint: string; csrfToken: string; label: string }) {
+export function CodeForm({
+  endpoint,
+  csrfToken,
+  label,
+  askPassword = false,
+}: {
+  endpoint: string;
+  csrfToken: string;
+  label: string;
+  /** いまのパスワードも求める（ログインした後の TOTP の登録の再認証） */
+  askPassword?: boolean;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -60,7 +71,11 @@ export function CodeForm({ endpoint, csrfToken, label }: { endpoint: string; csr
     const form = new FormData(event.currentTarget);
     setBusy(true);
     setError(null);
-    const res = await postJson(endpoint, { code: form.get("code") }, csrfToken);
+    const res = await postJson(
+      endpoint,
+      { code: form.get("code"), ...(askPassword ? { currentPassword: form.get("currentPassword") } : {}) },
+      csrfToken,
+    );
     setBusy(false);
     if (res.ok) go(res.data.next);
     else if (res.status === 401 && res.data.problems?.includes("locked")) go("/login");
@@ -69,6 +84,11 @@ export function CodeForm({ endpoint, csrfToken, label }: { endpoint: string; csr
 
   return (
     <form onSubmit={(e) => void onSubmit(e)} className="space-y-3" aria-label={label}>
+      {askPassword && (
+        <Field label="いまのパスワード">
+          <Input name="currentPassword" type="password" autoComplete="current-password" required />
+        </Field>
+      )}
       <Field label="確認の番号（認証のアプリの 6 桁）">
         <Input
           name="code"
@@ -91,10 +111,13 @@ export function CodeForm({ endpoint, csrfToken, label }: { endpoint: string; csr
 export function PasswordForm({
   csrfToken,
   askCurrent,
+  askCode = false,
   minLength,
 }: {
   csrfToken: string;
   askCurrent: boolean;
+  /** 確認の番号も求める（TOTP を登録した利用者の、ログインした後の変更の再認証） */
+  askCode?: boolean;
   minLength: number;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +136,11 @@ export function PasswordForm({
     setError(null);
     const res = await postJson(
       "/api/auth/password",
-      { ...(askCurrent ? { currentPassword: form.get("currentPassword") } : {}), newPassword: form.get("newPassword") },
+      {
+        ...(askCurrent ? { currentPassword: form.get("currentPassword") } : {}),
+        ...(askCode ? { code: form.get("code") } : {}),
+        newPassword: form.get("newPassword"),
+      },
       csrfToken,
     );
     setBusy(false);
@@ -134,6 +161,11 @@ export function PasswordForm({
       {askCurrent && (
         <Field label="いまのパスワード">
           <Input name="currentPassword" type="password" autoComplete="current-password" required />
+        </Field>
+      )}
+      {askCode && (
+        <Field label="確認の番号（認証のアプリの 6 桁）">
+          <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} required />
         </Field>
       )}
       <Field

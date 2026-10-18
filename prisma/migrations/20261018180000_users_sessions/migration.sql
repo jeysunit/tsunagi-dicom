@@ -31,6 +31,7 @@ CREATE TABLE "Session" (
     "lastActivityAt" DATETIME NOT NULL,
     "lockedAt" DATETIME,
     "pendingTotpEnc" TEXT,
+    "reauthAt" DATETIME,
     CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 

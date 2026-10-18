@@ -32,6 +32,8 @@ export async function checkConfigOrExit(): Promise<void> {
           loginLockMinutes: config.auth.loginLockMinutes,
           screenLockMinutes: config.auth.screenLockMinutes,
           sessionSecret: config.sessionSecret,
+          rateLimitPerSourcePerMinute: config.auth.rateLimitPerSourcePerMinute,
+          rateLimitGlobalPerMinute: config.auth.rateLimitGlobalPerMinute,
         },
         source: { sourceAddress: null, sourceAddressUnverified: null },
       },

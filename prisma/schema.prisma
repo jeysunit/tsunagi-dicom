@@ -95,6 +95,8 @@ model Session {
   lockedAt       DateTime?
   // 登録の途中の TOTP の秘密（暗号化）。登録を確かめたら User へ移す
   pendingTotpEnc String?
+  // 大事な操作（利用者の管理）の前の、もう一度の本人の確かめの時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）
+  reauthAt       DateTime?
 
   @@index([userId])
   @@index([expiresAt])

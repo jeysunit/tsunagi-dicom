@@ -3,7 +3,7 @@ import { cookies, headers } from "next/headers";
 import { cache } from "react";
 import { appendAudit, type AuditEntryInput } from "@/lib/audit";
 import { decodeDevRole, DEV_ROLE_COOKIE } from "@/lib/auth/dev-role-cookie";
-import { type AuthContext, resolveSession, type Stage, touchSession } from "@/lib/auth/local-auth";
+import { type AuthContext, resolveSession, type Stage } from "@/lib/auth/local-auth";
 import { can, DEFAULT_DEV_ROLE, isRole, type Permission, type Role } from "@/lib/auth/roles";
 import { sourceFromHeaders } from "@/lib/auth/source-address";
 import { getConfig, type AuthMode } from "@/lib/config";
@@ -48,6 +48,8 @@ export async function authContext(): Promise<AuthContext> {
       loginLockMinutes: config.auth.loginLockMinutes,
       screenLockMinutes: config.auth.screenLockMinutes,
       sessionSecret: config.sessionSecret,
+      rateLimitPerSourcePerMinute: config.auth.rateLimitPerSourcePerMinute,
+      rateLimitGlobalPerMinute: config.auth.rateLimitGlobalPerMinute,
     },
     source: sourceFromHeaders(await headers()),
   };
@@ -79,7 +81,7 @@ export const getAuthState = cache(async (): Promise<AuthState> => {
     case "locked":
       return { kind: "locked", session: toSession(resolved.user, resolved.session) };
     case "active":
-      await touchSession(ctx, resolved.session);
+      // 操作の時刻は、画面が操作を知らせたとき（/api/auth/activity）だけ数え直す（画像の取得などの裏の要求では数えない）
       return { kind: "active", session: toSession(resolved.user, resolved.session) };
   }
 });

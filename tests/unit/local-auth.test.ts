@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { verifyAuditChain } from "@/lib/audit";
 import { bootstrapInitialAdmin, BootstrapError } from "@/lib/auth/bootstrap";
+import { hashPassword } from "@/lib/auth/password-hash";
 import {
   AuthFailure,
   changePassword,
@@ -11,6 +12,10 @@ import {
   lockScreen,
   login,
   logout,
+  reauthenticate,
+  REAUTH_MINUTES,
+  REAUTH_REQUIRED,
+  assertRecentReauth,
   resolveSession,
   SERVER_LOCK_GRACE_SECONDS,
   startEnrollment,
@@ -20,6 +25,7 @@ import {
   type AuthContext,
   type AuthSettings,
 } from "@/lib/auth/local-auth";
+import { RateLimiter } from "@/lib/auth/rate-limit";
 import { totpAt } from "@/lib/auth/totp";
 import type { Db } from "@/lib/db";
 import { testDatabases } from "./helpers/test-db";
@@ -56,10 +62,13 @@ async function setup(settings: Partial<AuthSettings> = {}) {
       loginLockMinutes: 15,
       screenLockMinutes: 15,
       sessionSecret: SESSION_SECRET,
+      rateLimitPerSourcePerMinute: 1000,
+      rateLimitGlobalPerMinute: 1000,
       ...settings,
     },
     source: { sourceAddress: null, sourceAddressUnverified: "198.51.100.7" },
     now: clock.now,
+    rateLimiter: new RateLimiter(),
   };
   return { db, ctx, clock };
 }
@@ -82,10 +91,12 @@ async function enrolledUser(ctx: AuthContext, clock: Clock, username = "tanaka",
   const { session, user } = await sessionOf(ctx.db, first.token);
   const { secret } = await startEnrollment(ctx, session, user);
   const s2 = await sessionOf(ctx.db, first.token);
-  expect(await confirmEnrollment(ctx, s2.session, s2.user, totpAt(secret, clock.t))).toBe("active");
+  const done = await confirmEnrollment(ctx, s2.session, s2.user, totpAt(secret, clock.t));
+  expect(done.stage).toBe("active");
   // 次の TOTP は次の段で（使い回しは断る）
   clock.advance(30_000);
-  return { secret, token: first.token };
+  // ログインし終えたら、新しい token のセッションに替わる
+  return { secret, token: done.rotated!.token };
 }
 
 describe("利用者を作る", () => {
@@ -128,8 +139,14 @@ describe("ログインと二要素（TOTP）", () => {
     const pending = await sessionOf(db, second.token);
     // 途中のセッションは、ログインしたものとしては使えない
     expect((await resolveSession(ctx, second.token)).kind).toBe("pending");
-    expect(await submitTotp(ctx, pending.session, pending.user, totpAt(secret, clock.t))).toBe("active");
-    expect((await resolveSession(ctx, second.token)).kind).toBe("active");
+    const done = await submitTotp(ctx, pending.session, pending.user, totpAt(secret, clock.t));
+    expect(done.stage).toBe("active");
+    // 途中の段の token は使えなくなり、新しい token・CSRF の token のセッションに替わる
+    expect(done.rotated!.token).not.toBe(second.token);
+    expect((await resolveSession(ctx, second.token)).kind).toBe("anonymous");
+    const rotated = await resolveSession(ctx, done.rotated!.token);
+    expect(rotated.kind).toBe("active");
+    expect(rotated.kind === "active" && rotated.session.csrfToken).not.toBe(pending.session.csrfToken);
 
     const user = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
     expect(user.lastLoginAt).toEqual(clock.now());
@@ -144,7 +161,7 @@ describe("ログインと二要素（TOTP）", () => {
     const code = totpAt(secret, clock.t);
     const a = await login(ctx, "tanaka", PASSWORD);
     const sa = await sessionOf(db, a.token);
-    expect(await submitTotp(ctx, sa.session, sa.user, code)).toBe("active");
+    expect((await submitTotp(ctx, sa.session, sa.user, code)).stage).toBe("active");
     const b = await login(ctx, "tanaka", PASSWORD);
     const sb = await sessionOf(db, b.token);
     await expect(submitTotp(ctx, sb.session, sb.user, code)).rejects.toMatchObject({ status: 401 });
@@ -168,7 +185,7 @@ describe("ログインと二要素（TOTP）", () => {
     const s = await sessionOf(db, r.token);
     await expect(changePassword(ctx, s.session, s.user, { newPassword: pw })).rejects.toMatchObject({ status: 400 });
     await expect(changePassword(ctx, s.session, s.user, { newPassword: "sato-kq7vz2mw-1" })).rejects.toMatchObject({ status: 400 });
-    expect(await changePassword(ctx, s.session, s.user, { newPassword: "zr4tx8pe-next-1" })).toBe("active");
+    expect((await changePassword(ctx, s.session, s.user, { newPassword: "zr4tx8pe-next-1" })).stage).toBe("active");
     expect((await db.user.findUniqueOrThrow({ where: { username: "sato" } })).mustChangePassword).toBe(false);
     await expect(login(ctx, "sato", pw)).rejects.toBeInstanceOf(AuthFailure);
     expect((await login(ctx, "sato", "zr4tx8pe-next-1")).stage).toBe("active");
@@ -417,6 +434,8 @@ describe("最初の管理者", () => {
       loginLockThreshold: 5,
       loginLockMinutes: 15,
       screenLockMinutes: 15,
+      rateLimitPerSourcePerMinute: 20,
+      rateLimitGlobalPerMinute: 300,
       oidc: {},
       initialAdmin,
     },
@@ -455,5 +474,140 @@ describe("最初の管理者", () => {
         },
       }),
     ).rejects.toThrow("INITIAL_ADMIN_PASSWORD_FILE");
+  });
+});
+
+describe("レビューと安全の確かめで直したこと", () => {
+  it("同時に多くの TOTP を試しても、決めた回数より多くは確かめない（試みの枠を原子的に取る）", async () => {
+    const { ctx, db, clock } = await setup({ loginLockThreshold: 3 });
+    await enrolledUser(ctx, clock);
+    const r = await login(ctx, "tanaka", PASSWORD);
+    const s = await sessionOf(db, r.token);
+    const guesses = Array.from({ length: 25 }, (_, i) => String(100000 + i));
+    const results = await Promise.allSettled(guesses.map((g) => submitTotp(ctx, s.session, s.user, g)));
+    expect(results.every((x) => x.status === "rejected")).toBe(true);
+    const rows = await auditRows(db);
+    // 確かめに進んだのは決めた回数だけ。残りは一時停止として断った
+    expect(rows.filter((x) => x.action === "login" && x.detail?.includes("bad_totp"))).toHaveLength(3);
+    expect(rows.filter((x) => x.action === "login_lock")).toHaveLength(1);
+    const user = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+    expect(user.lockedUntil!.getTime()).toBeGreaterThan(clock.t);
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: true });
+  });
+
+  it("同時に多くのパスワードを試しても、決めた回数より多くは確かめない", async () => {
+    const { ctx, db } = await setup({ loginLockThreshold: 3, mfaRequired: false });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const tries = Array.from({ length: 12 }, (_, i) => login(ctx, "sato", `wrong-pass-${i}a`));
+    await Promise.allSettled(tries);
+    const rows = await auditRows(db);
+    expect(rows.filter((x) => x.action === "login" && x.detail?.includes("bad_password"))).toHaveLength(3);
+    await expect(login(ctx, "sato", "kq7vz2mw-long1")).rejects.toBeInstanceOf(AuthFailure);
+  });
+
+  it("接続元ごとの回数の上限：超えたら 429。知らない利用者名でも同じに数え、同じ答え", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false, rateLimitPerSourcePerMinute: 3, rateLimitGlobalPerMinute: 100 });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    for (const name of ["sato", "nobody", "sato"]) await expect(login(ctx, name, "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
+    const known = await login(ctx, "sato", "kq7vz2mw-long1").catch((e: AuthFailure) => e);
+    const unknown = await login(ctx, "nobody", "kq7vz2mw-long1").catch((e: AuthFailure) => e);
+    expect(known).toMatchObject({ status: 429 });
+    expect(unknown).toMatchObject({ status: 429, message: (known as AuthFailure).message });
+    // ほかの接続元は数えが別
+    const other = { ...ctx, source: { sourceAddress: null, sourceAddressUnverified: "203.0.113.9" } };
+    expect((await login(other, "sato", "kq7vz2mw-long1")).stage).toBe("active");
+    expect((await auditRows(db)).filter((r) => r.detail?.includes("rate_limited"))).toHaveLength(2);
+  });
+
+  it("全体の回数の上限：接続元を偽って変えても、全体で止まる。1 分たてば戻る", async () => {
+    const { ctx, clock } = await setup({ mfaRequired: false, rateLimitPerSourcePerMinute: 100, rateLimitGlobalPerMinute: 4 });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const from = (i: number) => ({ ...ctx, source: { sourceAddress: null, sourceAddressUnverified: `198.51.100.${i}` } });
+    for (let i = 0; i < 4; i++) await expect(login(from(i), "nobody", "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
+    await expect(login(from(9), "sato", "kq7vz2mw-long1")).rejects.toMatchObject({ status: 429 });
+    clock.advance(60_000);
+    expect((await login(from(9), "sato", "kq7vz2mw-long1")).stage).toBe("active");
+  });
+
+  it("利用者の管理の前に再認証が要る。パスワードと TOTP で通り、5 分で切れる", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret, token } = await enrolledUser(ctx, clock, "admin1", "admin");
+    const s = await sessionOf(db, token);
+    expect(() => assertRecentReauth(ctx, s.session)).toThrow(AuthFailure);
+    await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 401 });
+    await expect(
+      reauthenticate(ctx, s.session, s.user, { password: "wrong-pass-123", code: totpAt(secret, clock.t) }),
+    ).rejects.toMatchObject({ status: 401 });
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    const after = await sessionOf(db, token);
+    expect(() => assertRecentReauth(ctx, after.session)).not.toThrow();
+    clock.advance(REAUTH_MINUTES * 60_000);
+    try {
+      assertRecentReauth(ctx, after.session);
+      throw new Error("通ってしまった");
+    } catch (error) {
+      expect(error).toMatchObject({ status: 403, problems: [REAUTH_REQUIRED] });
+    }
+    const actions = (await auditRows(db)).map((r) => `${r.action}:${r.outcome}`);
+    expect(actions.filter((a) => a === "reauth:denied")).toHaveLength(2);
+    expect(actions).toContain("reauth:success");
+    expect(JSON.stringify(await auditRows(db))).not.toContain(PASSWORD);
+  });
+
+  it("ログインした後のパスワードの変更は、いまのパスワードと TOTP を求める", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await expect(changePassword(ctx, s.session, s.user, { currentPassword: PASSWORD, newPassword: NEW_PASSWORD })).rejects.toMatchObject({
+      status: 401,
+    });
+    const ok = await changePassword(ctx, s.session, s.user, {
+      currentPassword: PASSWORD,
+      code: totpAt(secret, clock.t),
+      newPassword: NEW_PASSWORD,
+    });
+    expect(ok.stage).toBe("active");
+    expect((await login(ctx, "tanaka", NEW_PASSWORD)).stage).toBe("totp");
+  });
+
+  it("二要素が任意のとき、ログインした後の TOTP の登録は、いまのパスワードを求める", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: false });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
+    const s = await sessionOf(db, token);
+    const { secret } = await startEnrollment(ctx, s.session, s.user);
+    const s2 = await sessionOf(db, token);
+    await expect(confirmEnrollment(ctx, s2.session, s2.user, totpAt(secret, clock.t))).rejects.toMatchObject({ status: 401 });
+    await expect(confirmEnrollment(ctx, s2.session, s2.user, totpAt(secret, clock.t), "wrong-pass-123")).rejects.toMatchObject({
+      status: 401,
+    });
+    const done = await confirmEnrollment(ctx, s2.session, s2.user, totpAt(secret, clock.t), "kq7vz2mw-long1");
+    expect(done.stage).toBe("active");
+    expect((await db.user.findUniqueOrThrow({ where: { username: "sato" } })).totpSecretEnc).not.toBeNull();
+  });
+
+  it("TOTP を登録した利用者でも、いまの規則に合わなくなったパスワードは変える段に進む", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: true });
+    const { secret } = await enrolledUser(ctx, clock, "tanaka");
+    // PASSWORD は 13 文字（kq7vz2mw-pass）。8 文字の利用者を作り、MFA_REQUIRED=false にする
+    const short = "kq7vz2mx";
+    const u = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+    await db.user.update({ where: { id: u.id }, data: { passwordHash: await hashPassword(short) } });
+    const relaxed = { ...ctx, settings: { ...ctx.settings, mfaRequired: false } };
+    const r = await login(relaxed, "tanaka", short);
+    expect(r.stage).toBe("totp");
+    const s = await sessionOf(db, r.token);
+    expect((await submitTotp(relaxed, s.session, s.user, totpAt(secret, clock.t))).stage).toBe("change_password");
+  });
+
+  it("2人の管理者が同時に互いを外しても、有効な管理者は0人にならない", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    const a = await createUser(ctx, { username: "admin1", displayName: "管理1", role: "admin", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const b = await createUser(ctx, { username: "admin2", displayName: "管理2", role: "admin", password: "kq7vz2mw-long2", mustChangePassword: false }, ADMIN);
+    await Promise.allSettled([
+      updateUser(ctx, a.id, { role: "viewer" }, ADMIN),
+      updateUser(ctx, b.id, { status: "disabled" }, ADMIN),
+    ]);
+    expect(await db.user.count({ where: { role: "admin", status: "active" } })).toBeGreaterThanOrEqual(1);
   });
 });

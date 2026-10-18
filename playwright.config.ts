@@ -42,6 +42,8 @@ export const localEnv = {
   LOGIN_LOCK_THRESHOLD: "3",
   LOGIN_LOCK_MINUTES: "1",
   SCREEN_LOCK_MINUTES: "1",
+  // 試験の要求はどれも同じ接続元（ヘッダー無し）として数えるので、回数の上限を広げる（上限そのものは単体の試験で見る）
+  LOGIN_RATE_LIMIT_PER_MINUTE: "200",
   INITIAL_ADMIN_USERNAME: E2E_ADMIN.username,
   INITIAL_ADMIN_PASSWORD_FILE: path.resolve(".e2e/local/initial-admin-password.txt"),
   E2E_INITIAL_ADMIN_PASSWORD: E2E_ADMIN.password,

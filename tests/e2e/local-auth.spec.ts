@@ -120,7 +120,8 @@ test("最初の管理者：TOTP を登録し、決められたパスワードを
   expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
 });
 
-test("利用者の棚卸し：一覧に最後のログインを出し、管理者が利用者を作り、役割を変える", async () => {
+test("利用者の棚卸し：一覧に最後のログインを出し、管理者が利用者を作り、役割を変える（大事な操作の前に再認証）", async () => {
+  test.setTimeout(90_000);
   const { page } = admin;
   await page.goto("/admin/users");
   const table = page.getByTestId("user-table");
@@ -135,6 +136,19 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
   await form.locator('select[name="role"]').selectOption("viewer");
   await form.locator('input[name="password"]').fill("qwerty123");
   await form.getByRole("button", { name: "作る" }).click();
+
+  // 利用者の管理は大事な操作なので、BFF が再認証を求める。違うパスワードでは通らない
+  const reauth = page.getByRole("form", { name: "本人の確かめ" });
+  await expect(reauth).toBeVisible();
+  await reauth.locator('input[name="password"]').fill("wrong-Pass-1x");
+  await reauth.locator('input[name="code"]').fill("000000");
+  await reauth.getByRole("button", { name: "確かめて続ける" }).click();
+  await expect(reauth.getByRole("alert")).toContainText("違う");
+  await reauth.locator('input[name="password"]').fill(ADMIN_PASSWORD);
+  await reauth.locator('input[name="code"]').fill(await nextCode(adminSecret));
+  await reauth.getByRole("button", { name: "確かめて続ける" }).click();
+  await expect(reauth).toHaveCount(0);
+  // 通ったら同じ操作をもう一度送る（ここでは規則に合わない最初のパスワードで断られる）
   await expect(page.getByRole("main").getByRole("alert")).toContainText("よく使われる");
 
   await form.locator('input[name="password"]').fill(DOCTOR.initial);
@@ -182,6 +196,15 @@ test("役割ごとにできる操作：医師は検査と画像を見られ、�
 
   expect((await page.request.get("/api/audit/verify")).status()).toBe(403);
   expect((await page.request.get("/api/admin/users")).status()).toBe(403);
+  // 再認証を求めない時間の中でも、管理者でなければ利用者の管理はできない
+  expect(
+    (
+      await page.request.patch(`/api/admin/users/x`, {
+        headers: { origin: LOCAL_BASE_URL, "x-csrf-token": "forged" },
+        data: { role: "admin" },
+      })
+    ).status(),
+  ).toBe(403);
   await page.goto("/admin/users");
   await expect(page.getByRole("main").getByRole("alert")).toHaveText("管理者だけが開ける");
   await context.close();
@@ -244,6 +267,9 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   const lock = page.getByTestId("screen-lock");
   await expect(lock).toBeVisible();
   await expect(page.getByTestId("lockable-content")).toHaveClass(/blur-md/);
+  // ぼかすだけでなく、中身（患者の情報）を頁から外す
+  await expect(page.getByTestId("study-count")).toHaveCount(0);
+  await expect(page.getByTestId("study-table")).toHaveCount(0);
   // サーバーの側もロックしている：画面の API と中継は 423、開き直しても中身を描かない
   await expect.poll(async () => (await page.request.get("/api/studies")).status()).toBe(423);
   expect((await page.request.get(`/api/dicom-web/studies/${STUDY}/metadata`)).status()).toBe(423);

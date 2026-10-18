@@ -30,7 +30,8 @@ describe("TOTP の秘密の暗号化", () => {
   it("書き換えた値・形の崩れた値は戻せない", () => {
     const sealed = sealField("JBSWY3DPEHPK3PXP", KEY, "user-1");
     const parts = sealed.split(":");
-    parts[2] = parts[2]!.slice(0, -1) + (parts[2]!.endsWith("A") ? "B" : "A");
+    // 末尾の字は使わない bit を含むことがあるので、頭の字を替える
+    parts[2] = (parts[2]!.startsWith("A") ? "B" : "A") + parts[2]!.slice(1);
     expect(openField(parts.join(":"), KEY, "user-1")).toBeNull();
     expect(openField("v2:a:b:c", KEY, "user-1")).toBeNull();
     expect(openField("garbage", KEY, "user-1")).toBeNull();

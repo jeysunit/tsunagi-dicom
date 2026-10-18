@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { assertLocalMode, checkedState, readJson } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
-import { createUser, listUsers } from "@/lib/auth/local-auth";
+import { assertRecentReauth, createUser, listUsers } from "@/lib/auth/local-auth";
 import { MAX_PASSWORD_LENGTH } from "@/lib/auth/password-policy";
 import { ROLES } from "@/lib/auth/roles";
 import { authContext, requireSession } from "@/lib/auth/session";
@@ -29,9 +29,12 @@ export async function POST(request: Request) {
   try {
     await checkedState(request);
     const session = await requireSession("user.manage");
+    const ctx = await authContext();
+    // 大事な操作：直前に本人の確かめ（/api/auth/reauth）が要る
+    assertRecentReauth(ctx, session.local!.row);
     const body = await readJson(request, Body);
     const user = await createUser(
-      await authContext(),
+      ctx,
       { ...body, username: body.username.trim(), mustChangePassword: true },
       { actorId: session.actorId, actorRole: session.role },
     );

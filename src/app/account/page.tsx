@@ -17,7 +17,12 @@ export default async function AccountPage() {
       <h1 className="text-lg font-bold text-value">自分の設定</h1>
       <div className="space-y-2">
         <h2 className="font-bold text-value">パスワードの変更</h2>
-        <PasswordForm csrfToken={row.csrfToken} askCurrent minLength={minPasswordLength(config.auth.mfaRequired)} />
+        <PasswordForm
+          csrfToken={row.csrfToken}
+          askCurrent
+          askCode={user.totpSecretEnc !== null}
+          minLength={minPasswordLength(config.auth.mfaRequired)}
+        />
       </div>
       <div className="space-y-2">
         <h2 className="font-bold text-value">二要素の認証（TOTP）</h2>

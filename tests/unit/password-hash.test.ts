@@ -27,7 +27,9 @@ describe("パスワードのハッシュ", () => {
     expect(await verifyPassword("kq7vz2mw", "plain-text")).toBe(false);
     expect(await verifyPassword("kq7vz2mw", hash.replace("v=19", "v=16"))).toBe(false);
     expect(await verifyPassword("kq7vz2mw", hash.replace("$argon2id$", "$argon2i$"))).toBe(false);
-    const tampered = hash.slice(0, -2) + (hash.endsWith("AA") ? "BB" : "AA");
+    // 末尾の字は使わない bit を含むことがあるので、末尾から 10 字目を替える
+    const i = hash.length - 10;
+    const tampered = hash.slice(0, i) + (hash[i] === "A" ? "B" : "A") + hash.slice(i + 1);
     expect(await verifyPassword("kq7vz2mw", tampered)).toBe(false);
   });
 });

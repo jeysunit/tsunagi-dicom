@@ -156,13 +156,14 @@ export function LockGuard({
 
   return (
     <>
+      {/* ロックの間は中身を描かない（ぼかしただけでは、開発者の道具で中身を読めるため）。ぼかした地だけを出す */}
       <div
         data-testid="lockable-content"
         aria-hidden={locked || undefined}
         inert={locked || undefined}
-        className={cn(locked && "pointer-events-none select-none blur-md")}
+        className={cn(locked && "pointer-events-none min-h-[60vh] select-none bg-surface/40 blur-md")}
       >
-        {children}
+        {locked ? null : children}
       </div>
       {locked && (
         <div

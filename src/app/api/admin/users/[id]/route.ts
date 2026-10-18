@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { checkedState, readJson } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
-import { updateUser } from "@/lib/auth/local-auth";
+import { assertRecentReauth, updateUser } from "@/lib/auth/local-auth";
 import { ROLES } from "@/lib/auth/roles";
 import { authContext, requireSession } from "@/lib/auth/session";
 
@@ -24,8 +24,11 @@ export async function PATCH(request: Request, { params }: Context) {
     await checkedState(request);
     const session = await requireSession("user.manage");
     const { id } = await params;
+    const ctx = await authContext();
+    // 大事な操作：直前に本人の確かめ（/api/auth/reauth）が要る
+    assertRecentReauth(ctx, session.local!.row);
     const change = await readJson(request, Body);
-    const user = await updateUser(await authContext(), id, change, { actorId: session.actorId, actorRole: session.role });
+    const user = await updateUser(ctx, id, change, { actorId: session.actorId, actorRole: session.role });
     return Response.json({ id: user.id, role: user.role, status: user.status });
   } catch (error) {
     return errorResponse(error);

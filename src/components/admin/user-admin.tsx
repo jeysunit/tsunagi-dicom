@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ROLE_LABELS, ROLES, isRole } from "@/lib/auth/roles";
-import { errorText, postJson } from "@/lib/client/post-json";
+import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 
 export interface UserRowView {
   id: string;
@@ -22,24 +22,71 @@ export interface UserRowView {
 }
 
 // 利用者の一覧（棚卸し）と、作る・役割を変える・止める／戻す・TOTP のやり直し・一時停止の解除。
+// これらは大事な操作なので、直前の本人の確かめ（再認証）が要る。BFF が求めたら、パスワードと確認の番号を入れてもらい、
+// 通ったら同じ操作をもう一度送る。
 export function UserAdmin({
   users,
   csrfToken,
   selfId,
   minPasswordLength,
+  needsTotp,
 }: {
   users: UserRowView[];
   csrfToken: string;
   selfId: string;
   minPasswordLength: number;
+  needsTotp: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [reauth, setReauth] = useState<{ retry: () => Promise<PostResult> ; done: (res: PostResult) => void } | null>(
+    null,
+  );
+  const [reauthError, setReauthError] = useState<string | null>(null);
+
+  /** 送って、再認証を求められたら、その画面を出して待つ */
+  async function send(run: () => Promise<PostResult>, done: (res: PostResult) => void) {
+    const res = await run();
+    if (res.status === 403 && res.data.problems?.includes("reauth_required")) {
+      setReauthError(null);
+      setReauth({ retry: run, done });
+      return;
+    }
+    done(res);
+  }
+
+  async function onReauth(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reauth) return;
+    const form = new FormData(event.currentTarget);
+    const res = await postJson(
+      "/api/auth/reauth",
+      { password: form.get("password"), ...(needsTotp ? { code: form.get("code") } : {}) },
+      csrfToken,
+    );
+    if (res.data.next) {
+      window.location.assign(res.data.next);
+      return;
+    }
+    if (!res.ok) {
+      setReauthError(errorText(res));
+      return;
+    }
+    const pendingAction = reauth;
+    setReauth(null);
+    pendingAction.done(await pendingAction.retry());
+  }
 
   async function change(id: string, body: Record<string, unknown>, done: string) {
     setMessage(null);
-    const res = await postJson(`/api/admin/users/${encodeURIComponent(id)}`, body, csrfToken, "PATCH");
+    await send(
+      () => postJson(`/api/admin/users/${encodeURIComponent(id)}`, body, csrfToken, "PATCH"),
+      (res) => afterChange(res, done),
+    );
+  }
+
+  function afterChange(res: PostResult, done: string) {
     if (!res.ok) {
       setMessage({ ok: false, text: errorText(res) });
       return;
@@ -53,28 +100,57 @@ export function UserAdmin({
     const formEl = event.currentTarget;
     const form = new FormData(formEl);
     setMessage(null);
-    const res = await postJson(
-      "/api/admin/users",
-      {
-        username: form.get("username"),
-        displayName: form.get("displayName"),
-        role: form.get("role"),
-        password: form.get("password"),
+    const body = {
+      username: form.get("username"),
+      displayName: form.get("displayName"),
+      role: form.get("role"),
+      password: form.get("password"),
+    };
+    await send(
+      () => postJson("/api/admin/users", body, csrfToken),
+      (res) => {
+        if (!res.ok) {
+          setMessage({ ok: false, text: errorText(res) });
+          return;
+        }
+        formEl.reset();
+        setMessage({ ok: true, text: "利用者を作った。最初のログインで本人がパスワードを変える" });
+        startTransition(() => router.refresh());
       },
-      csrfToken,
     );
-    if (!res.ok) {
-      setMessage({ ok: false, text: errorText(res) });
-      return;
-    }
-    formEl.reset();
-    setMessage({ ok: true, text: "利用者を作った。最初のログインで本人がパスワードを変える" });
-    startTransition(() => router.refresh());
   }
 
   return (
     <section className="space-y-6">
       <h1 className="text-lg font-bold text-value">利用者</h1>
+      {reauth && (
+        <form
+          onSubmit={(e) => void onReauth(e)}
+          aria-label="本人の確かめ"
+          className="max-w-sm space-y-3 rounded-md border border-border bg-surface p-3"
+        >
+          <p className="text-label">利用者の管理は大事な操作なので、パスワード{needsTotp ? "と確認の番号" : ""}をもう一度入れる。</p>
+          <Field label="パスワード">
+            <Input name="password" type="password" autoComplete="current-password" required />
+          </Field>
+          {needsTotp && (
+            <Field label="確認の番号（認証のアプリの 6 桁）">
+              <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} required />
+            </Field>
+          )}
+          {reauthError && (
+            <p role="alert" className="text-sm text-red-300">
+              {reauthError}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button type="submit">確かめて続ける</Button>
+            <Button type="button" variant="outline" onClick={() => setReauth(null)}>
+              やめる
+            </Button>
+          </div>
+        </form>
+      )}
       {message && (
         <p role={message.ok ? "status" : "alert"} className={message.ok ? "text-sm" : "text-sm text-red-300"}>
           {message.text}
