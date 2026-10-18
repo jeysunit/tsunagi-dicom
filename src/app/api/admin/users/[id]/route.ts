@@ -26,7 +26,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const { id } = await params;
     const ctx = await authContext();
     // 大事な操作：直前に本人の確かめ（/api/auth/reauth）が要る
-    assertRecentReauth(ctx, session.local!.row);
+    assertRecentReauth(ctx, session.local!.row, session.local!.user);
     const change = await readJson(request, Body);
     const user = await updateUser(ctx, id, change, { actorId: session.actorId, actorRole: session.role });
     return Response.json({ id: user.id, role: user.role, status: user.status });

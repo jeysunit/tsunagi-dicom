@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     const session = await requireSession("user.manage");
     const ctx = await authContext();
     // 大事な操作：直前に本人の確かめ（/api/auth/reauth）が要る
-    assertRecentReauth(ctx, session.local!.row);
+    assertRecentReauth(ctx, session.local!.row, session.local!.user);
     const body = await readJson(request, Body);
     const user = await createUser(
       ctx,

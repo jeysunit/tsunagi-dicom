@@ -708,17 +708,17 @@ describe("レビューと安全の確かめで直したこと", () => {
     const { ctx, db, clock } = await setup();
     const { secret, token } = await enrolledUser(ctx, clock, "admin1", "admin");
     const s = await sessionOf(db, token);
-    expect(() => assertRecentReauth(ctx, s.session)).toThrow(AuthFailure);
+    expect(() => assertRecentReauth(ctx, s.session, s.user)).toThrow(AuthFailure);
     await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 401 });
     await expect(
       reauthenticate(ctx, s.session, s.user, { password: "wrong-pass-123", code: totpAt(secret, clock.t) }),
     ).rejects.toMatchObject({ status: 401 });
     await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
     const after = await sessionOf(db, token);
-    expect(() => assertRecentReauth(ctx, after.session)).not.toThrow();
+    expect(() => assertRecentReauth(ctx, after.session, after.user)).not.toThrow();
     clock.advance(REAUTH_MINUTES * 60_000);
     try {
-      assertRecentReauth(ctx, after.session);
+      assertRecentReauth(ctx, after.session, after.user);
       throw new Error("通ってしまった");
     } catch (error) {
       expect(error).toMatchObject({ status: 403, problems: [REAUTH_REQUIRED] });
@@ -1179,9 +1179,9 @@ describe("独立のレビューの指摘で直したこと", () => {
     await reauthenticate(ctx, active.session, active.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
     const after = await sessionOf(db, token);
     clock.advance(2 * 60_000 - 1000);
-    expect(() => assertRecentReauth(ctx, after.session)).not.toThrow();
+    expect(() => assertRecentReauth(ctx, after.session, after.user)).not.toThrow();
     clock.advance(1000);
-    expect(() => assertRecentReauth(ctx, after.session)).toThrow(AuthFailure);
+    expect(() => assertRecentReauth(ctx, after.session, after.user)).toThrow(AuthFailure);
   });
 
   it("認証の世代：確かめた後に世代が上がったら、作ったセッションは使えない", async () => {
@@ -1292,6 +1292,36 @@ describe("独立のレビューの指摘で直したこと", () => {
     // 空いたら、ふつうに確かめて数える
     await expect(login(ctx, "tanaka", "wrong-pass-123")).rejects.toMatchObject({ status: 401 });
     expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount).toBe(1);
+  });
+
+  it("一時停止の間は、再認証の有効時間の内でも、再認証が要る操作を断る", async () => {
+    const { ctx, db, clock } = await setup({ loginLockThreshold: 2 });
+    const { secret, token } = await enrolledUser(ctx, clock, "admin1", "admin");
+    const s = await sessionOf(db, token);
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    const ok = await sessionOf(db, token);
+    expect(() => assertRecentReauth(ctx, ok.session, ok.user)).not.toThrow();
+    // ほかの人が、この利用者名でパスワードを続けて間違え、一時停止になる
+    for (let i = 0; i < 2; i++) await login(ctx, "admin1", "wrong-pass-123").catch(() => undefined);
+    const locked = await sessionOf(db, token);
+    expect(locked.user.lockedUntil!.getTime()).toBeGreaterThan(clock.t);
+    expect(() => assertRecentReauth(ctx, locked.session, locked.user)).toThrow(
+      expect.objectContaining({ status: 403, problems: ["locked"] }),
+    );
+  });
+
+  it("自分のログインの一時停止は、一時停止の有無に関わらず、自分では解けない（別の管理者が解く）", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false, loginLockThreshold: 2 });
+    const a = await createUser(ctx, { ...SATO, username: "admin1", role: "admin" }, ADMIN);
+    await createUser(ctx, { ...SATO, username: "admin2", role: "admin" }, ADMIN);
+    const self = { actorId: "admin1", actorRole: "admin" };
+    await expect(updateUser(ctx, a.id, { clearLoginLock: true }, self)).rejects.toMatchObject({ status: 403 });
+    for (let i = 0; i < 2; i++) await login(ctx, "admin1", "wrong-pass-123").catch(() => undefined);
+    await expect(updateUser(ctx, a.id, { clearLoginLock: true }, self)).rejects.toMatchObject({ status: 403 });
+    expect((await db.user.findUniqueOrThrow({ where: { id: a.id } })).lockedUntil).not.toBeNull();
+    // 別の管理者は解ける
+    await updateUser(ctx, a.id, { clearLoginLock: true }, { actorId: "admin2", actorRole: "admin" });
+    expect((await db.user.findUniqueOrThrow({ where: { id: a.id } })).lockedUntil).toBeNull();
   });
 
   it("F10：ログインし直したら前のセッションを消す。期限の切れたセッションを片付ける", async () => {

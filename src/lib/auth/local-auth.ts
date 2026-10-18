@@ -836,10 +836,14 @@ export async function reauthenticate(
 
 /**
  * 大事な操作（利用者の管理）の前に呼ぶ。設定の reauthMinutes（既定 REAUTH_MINUTES）の中に再認証していなければ
- * 403（problems に REAUTH_REQUIRED）
+ * 403（problems に REAUTH_REQUIRED）。ログインの一時停止の間は、再認証の有効時間の内でも 403（problems に locked）
+ * （一時停止の間は再認証を止める、という承認者の決定に合わせ、前に通した再認証も使わせない）
  */
-export function assertRecentReauth(ctx: AuthContext, session: SessionRow): void {
+export function assertRecentReauth(ctx: AuthContext, session: SessionRow, user: Pick<User, "lockedUntil">): void {
   const at = now(ctx).getTime();
+  if (user.lockedUntil !== null && user.lockedUntil.getTime() > at) {
+    throw new AuthFailure(403, "ログインの一時停止の間は、この操作はできない（一時停止が解けてから、もう一度確かめる）", ["locked"]);
+  }
   if (session.reauthAt && at - session.reauthAt.getTime() < ctx.settings.reauthMinutes * 60_000) return;
   throw new AuthFailure(403, "この操作の前に、パスワード（と確認の番号）をもう一度入れる", [REAUTH_REQUIRED]);
 }
@@ -1008,6 +1012,10 @@ export async function updateUser(
 ): Promise<User> {
   const target = await ctx.db.user.findUnique({ where: { id: targetId } });
   if (!target) throw new AuthFailure(404, "利用者が無い");
+  // 自分の一時停止は、一時停止の有無に関わらず自分では解けない（別の管理者が解く）
+  if (change.clearLoginLock && target.username === by.actorId) {
+    throw new AuthFailure(403, "自分のログインの一時停止は、自分では解けない。別の管理者が解く");
+  }
   if (change.role !== undefined && !isRole(change.role)) throw new AuthFailure(400, "役割が誤り");
   if (change.status !== undefined && change.status !== "active" && change.status !== "disabled") {
     throw new AuthFailure(400, "状態は active か disabled");
