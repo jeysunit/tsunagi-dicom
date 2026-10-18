@@ -43,7 +43,9 @@ NumberOfStudyRelatedSeries `00201206`・NumberOfStudyRelatedInstances `00201208`
 
 BFF の中継はビューアが画像を取る道（WADO-RS の読み取り）だけを通す（`docs/spec.md` の 3.2）。
 WADO-RS の応答（`metadata`・frames など）の見本はまだ無いので、モックの中継は宛先を確かめたうえで 404 を返す。
-上の QIDO-RS の写しは、画面の API（検索）のモックに使う。
+ただしサムネイル（`thumbnail`・`rendered`）は、写しのある1枚（`rest/instances/{id}/preview.png`）の検査・シリーズ・画像に限り、その PNG を返す（段 2。一覧と詳細のパネルの代表のサムネイルの試験のため）。
+上の QIDO-RS の写しは、画面の API（検索）のモックに使う。詳細のパネルのシリーズの並びは、QIDO-RS の写しが1件の検査の分しか無いので、
+REST の写し（`rest/studies`・`rest/series`）から組み立てる（`src/lib/backend/mock.ts`）。
 
 ## 置き換えの規則
 
