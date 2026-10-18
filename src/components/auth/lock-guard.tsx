@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { LOCK_COOKIE, type LockCookieReason } from "@/lib/auth/lock-cookie";
 import { errorText, postJson } from "@/lib/client/post-json";
 import { cn } from "@/lib/utils";
 
@@ -19,14 +20,53 @@ import { cn } from "@/lib/utils";
 //   BFF の状態を一定の間隔で確かめる（ほかのタブの知らせの取りこぼし）、解くのは BFF の確かめ（パスワード）が
 //   通ってから（BFF がロックしていなくても確かめる）、ほかのタブの「解いた」の知らせは BFF に聞き直してから。
 //   操作の無い時間は、このタブの時計の進み方で数え、ほかのタブの時刻は延ばす向きにだけ使う。
-// - 操作があれば、30 秒に1回まで BFF に知らせる（サーバーの側のロックの時間を数え直す）。
+// - ロックはサーバーの側を正にする：ロックするときは、BFF へ知らせる前に、ロックの印の cookie
+//   （src/lib/auth/lock-cookie.ts）を置く。知らせが届かなくても、読み直した頁・別のタブで開いた頁の要求に
+//   印が付くので、BFF はその時点でロックし、中身なしで描く。BFF は、最後の操作の知らせから SCREEN_LOCK_MINUTES を
+//   過ぎた要求でも、その時点でロックする。届いていないロックは sessionStorage にも持ち（読み直しの後も閉じたまま
+//   送り直す）、BroadcastChannel で開いているほかのタブにも閉じてもらう。BFF のロックの解除の確かめが通るまで閉じる。
+// - 操作があれば、15 秒に1回まで BFF に知らせる（サーバーの側のロックの時間を数え直す）。
 
 const LAST_ACTIVITY_KEY = "tsunagi:last-activity";
 const LOCK_EVENT_KEY = "tsunagi:lock-event";
 /** ヘッダーの「ロック」のボタンが投げる事件の名前 */
 export const LOCK_NOW_EVENT = "tsunagi:lock-now";
-const PING_INTERVAL_MS = 30_000;
+/** まだ BFF に届いていないロック（タブごと。読み直しの後も残る） */
+const PENDING_LOCK_KEY = "tsunagi:pending-lock";
+/** ほかのタブとの知らせの名前（BroadcastChannel） */
+const CHANNEL_NAME = "tsunagi:lock";
+/**
+ * 操作を BFF に知らせる間隔の下限。BFF は最後の知らせから SCREEN_LOCK_MINUTES でロックするので、
+ * 画面の側より最大この時間だけ早くロックしうる（閉じる側）
+ */
+const PING_INTERVAL_MS = 15_000;
 const CHECK_INTERVAL_MS = 5_000;
+
+/** ロックの印の cookie を置く（src/lib/auth/lock-cookie.ts。BFF へ届く次の要求に必ず付く） */
+function setLockCookie(reason: LockCookieReason) {
+  try {
+    document.cookie = `${LOCK_COOKIE}=${reason}; Path=/; Secure; SameSite=Strict`;
+  } catch {
+    // 置けなくても、画面はロックのまま、BFF へのロックの知らせを送り直す
+  }
+}
+
+function clearLockCookieHere() {
+  try {
+    document.cookie = `${LOCK_COOKIE}=; Path=/; Secure; SameSite=Strict; Max-Age=0`;
+  } catch {
+    // BFF の側でも、ロックの解除の確かめが通ったときに消している
+  }
+}
+
+function readPending(): LockCookieReason | null {
+  try {
+    const v = window.sessionStorage.getItem(PENDING_LOCK_KEY);
+    return v === "manual" || v === "client_idle" ? v : null;
+  } catch {
+    return null;
+  }
+}
 /** BFF の状態（/api/auth/status）を確かめる間隔 */
 const STATUS_INTERVAL_MS = 10_000;
 
@@ -81,24 +121,42 @@ export function LockGuard({
   /** BFF がロックした状態で描いた頁で、まだ解いていない（頁に患者の情報が無い） */
   const cleanRef = useRef(initiallyLocked);
 
-  /** 画面はロックしたが、BFF がロックしたことをまだ確かめていない（ロックの POST が失敗した）。その理由 */
-  const pendingLock = useRef<"client_idle" | "manual" | null>(null);
+  /**
+   * 画面はロックしたが、BFF がロックしたことをまだ確かめていない（ロックの POST が通っていない）。その理由。
+   * 頁の読み直しの後も残るよう、sessionStorage にも持つ（setPending）
+   */
+  const pendingLock = useRef<LockCookieReason | null>(null);
+  /** ほかのタブとの知らせ（storage の事件の補助） */
+  const channel = useRef<BroadcastChannel | null>(null);
+
+  const setPending = useCallback((reason: LockCookieReason | null) => {
+    pendingLock.current = reason;
+    try {
+      if (reason) window.sessionStorage.setItem(PENDING_LOCK_KEY, reason);
+      else window.sessionStorage.removeItem(PENDING_LOCK_KEY);
+    } catch {
+      // 使えないブラウザでは、ロックの印の cookie と BFF の側のロックに任せる
+    }
+  }, []);
 
   /** BFF がロックしている（どこかの要求が 423 を返した）。必ずロックの画面にし、データを持つ頁なら読み直す */
   const onServerLocked = useCallback(() => {
     lockedRef.current = true;
-    pendingLock.current = null;
+    setPending(null);
     setLocked(true);
     if (!cleanRef.current) window.location.reload();
-  }, []);
+  }, [setPending]);
 
   /**
    * BFF にロックを知らせる。通ったら（または 423 なら）ほかのタブに知らせて頁を読み直す。
-   * 通らなければ（網の切れ・BFF の失敗）、画面はロックのまま、間隔ごとに送り直す（閉じる側に倒す）
+   * 通らなければ（網の切れ・BFF の失敗）、画面はロックのまま、間隔ごとに送り直す（閉じる側に倒す）。
+   * 送る前にロックの印の cookie を置くので、知らせが届かなくても、次に BFF へ届く要求（読み直し・別のタブ）で
+   * BFF がロックする
    */
   const confirmLock = useCallback(
-    async (reason: "client_idle" | "manual") => {
-      pendingLock.current = reason;
+    async (reason: LockCookieReason) => {
+      setPending(reason);
+      setLockCookie(reason);
       const res = await postJson("/api/auth/lock", { reason }, csrfToken);
       if (res.status === 401) {
         window.location.assign("/login");
@@ -107,20 +165,22 @@ export function LockGuard({
       if (res.ok || res.status === 423) {
         // BFF がロックしてから、ほかのタブに知らせ、頁を読み直す（読み直した頁は、中身を描かずにロックの画面を出す）。
         // ルーターのキャッシュ・頁に残った描画の元のデータ（RSC の payload）から、患者の情報を消すため
-        pendingLock.current = null;
+        setPending(null);
         writeShared(LOCK_EVENT_KEY, `lock:${Date.now()}`);
+        channel.current?.postMessage({ type: "locked" });
         if (!cleanRef.current) window.location.reload();
       }
     },
-    [csrfToken],
+    [csrfToken, setPending],
   );
 
   const lockNow = useCallback(
-    async (reason: "client_idle" | "manual") => {
+    async (reason: LockCookieReason, announce = true) => {
       if (lockedRef.current) return;
-      // BFF の答えを待たずに、まず画面の中身を外す
+      // BFF の答えを待たずに、まず画面の中身を外し、ほかのタブにも閉じてもらう（受けたタブは知らせ返さない）
       lockedRef.current = true;
       setLocked(true);
+      if (announce) channel.current?.postMessage({ type: "locking", reason });
       await confirmLock(reason);
     },
     [confirmLock],
@@ -152,27 +212,55 @@ export function LockGuard({
     const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart", "scroll"] as const;
     for (const name of events) window.addEventListener(name, onActivity, { passive: true });
 
-    // ほかのタブとの知らせは補助。取りこぼしても、下の BFF の状態の確かめと、このタブの時計で閉じる
+    // 読み直す前に BFF へ届かなかったロックが残っていれば（このタブの sessionStorage）、閉じたまま送り直す。
+    // ふつうは、置いたロックの印の cookie で、BFF がこの頁を中身なしで描いている
+    const stored = readPending();
+    if (stored && initiallyLocked) setPending(null);
+    else if (stored) void Promise.resolve().then(() => lockNow(stored));
+
+    // 解いたという知らせだけでは中身を出さない。BFF がロックしていないと答えたときだけ戻す
+    const onPeerUnlocked = () => {
+      if (!lockedRef.current || pendingLock.current) return;
+      void fetchStatus().then((status) => {
+        if (status !== 200 || !lockedRef.current) return;
+        lockedRef.current = false;
+        cleanRef.current = false;
+        lastActivity.current = Date.now();
+        lastActivityMono.current = performance.now();
+        setLocked(false);
+        router.refresh();
+      });
+    };
+
+    // ほかのタブとの知らせ（storage の事件と BroadcastChannel）は補助。取りこぼしても、下の BFF の状態の確かめと、
+    // このタブの時計と、ロックの印の cookie で閉じる
     const onStorage = (event: StorageEvent) => {
       if (event.key !== LOCK_EVENT_KEY || !event.newValue) return;
       if (event.newValue.startsWith("lock:")) {
         // ほかのタブが BFF をロックし終えてから知らせてくる。このタブも読み直して、頁に残ったデータを消す。
         // ロックした状態で描いた頁（データを持たない）は、読み直さなくてよい
         onServerLocked();
-      } else if (event.newValue.startsWith("unlock:") && lockedRef.current && !pendingLock.current) {
-        // 解いたという知らせだけでは中身を出さない。BFF がロックしていないと答えたときだけ戻す
-        void fetchStatus().then((status) => {
-          if (status !== 200 || !lockedRef.current) return;
-          lockedRef.current = false;
-          cleanRef.current = false;
-          lastActivity.current = Date.now();
-          lastActivityMono.current = performance.now();
-          setLocked(false);
-          router.refresh();
-        });
+      } else if (event.newValue.startsWith("unlock:")) {
+        onPeerUnlocked();
       }
     };
     window.addEventListener("storage", onStorage);
+    try {
+      channel.current = new BroadcastChannel(CHANNEL_NAME);
+      channel.current.onmessage = (event: MessageEvent<{ type?: string; reason?: string }>) => {
+        const message = event.data;
+        if (message?.type === "locking") {
+          // ほかのタブがロックし始めた（まだ BFF に届いていないかもしれない）。このタブも閉じて、自分でも送る
+          void lockNow(message.reason === "client_idle" ? "client_idle" : "manual", false);
+        } else if (message?.type === "locked") {
+          onServerLocked();
+        } else if (message?.type === "unlocked") {
+          onPeerUnlocked();
+        }
+      };
+    } catch {
+      channel.current = null;
+    }
     const onLockNow = () => void lockNow("manual");
     window.addEventListener(LOCK_NOW_EVENT, onLockNow);
 
@@ -211,8 +299,10 @@ export function LockGuard({
       window.removeEventListener(LOCK_NOW_EVENT, onLockNow);
       if (timer !== undefined) window.clearInterval(timer);
       window.clearInterval(statusTimer);
+      channel.current?.close();
+      channel.current = null;
     };
-  }, [csrfToken, minutes, lockNow, confirmLock, onServerLocked, router]);
+  }, [csrfToken, minutes, initiallyLocked, lockNow, confirmLock, onServerLocked, setPending, router]);
 
   async function onUnlock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -233,14 +323,16 @@ export function LockGuard({
       setError(errorText(res));
       return;
     }
-    // BFF が確かめて通した（成功の応答）ときだけ、中身を出す
+    // BFF が確かめて通した（成功の応答）ときだけ、中身を出す。BFF はロックの印の cookie を消している
     lockedRef.current = false;
     cleanRef.current = false;
-    pendingLock.current = null;
+    setPending(null);
+    clearLockCookieHere();
     lastActivity.current = Date.now();
     lastActivityMono.current = performance.now();
     writeShared(LAST_ACTIVITY_KEY, String(Date.now()));
     writeShared(LOCK_EVENT_KEY, `unlock:${Date.now()}`);
+    channel.current?.postMessage({ type: "unlocked" });
     setLocked(false);
     router.refresh();
   }

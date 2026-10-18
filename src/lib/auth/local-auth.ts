@@ -31,10 +31,12 @@ export const SESSION_MAX_HOURS = 12;
 /** 大事な操作の前の本人の確かめ（再認証）が効く時間 */
 export const REAUTH_MINUTES = 5;
 /**
- * サーバーの側の画面のロックの猶予。画面の側（ブラウザ）が SCREEN_LOCK_MINUTES でロックするのが主で、
- * サーバーの側は、閉じた・離れたタブのための保険として、さらにこの秒数を待ってからロックする
+ * サーバーの側の画面のロックの猶予。ロックはサーバーの側を正にするので、画面が最後に操作を知らせてから
+ * SCREEN_LOCK_MINUTES を過ぎたら、猶予を置かずに、その要求の時点でロックする（画面の側のロックの知らせが
+ * 届かなくても、読み直した頁・別のタブは BFF が中身なしで描く）。画面は操作があれば 15 秒に1回まで知らせるので、
+ * 画面の側より最大 15 秒早くロックしうる（閉じる側）
  */
-export const SERVER_LOCK_GRACE_SECONDS = 60;
+export const SERVER_LOCK_GRACE_SECONDS = 0;
 
 export type Stage = "totp" | "enroll" | "change_password" | "active";
 
@@ -550,6 +552,8 @@ async function openSession(
       createdAt: at,
       expiresAt,
       lastActivityAt: at,
+      // 確かめた時の認証の世代。その後にパスワードの変更・TOTP の登録・やり直しがあれば、resolveSession が使わせない
+      credentialVersion: user.credentialVersion,
     },
   });
   const fresh = await ctx.db.user.findUnique({ where: { id: user.id } });
@@ -557,6 +561,7 @@ async function openSession(
     !fresh ||
     fresh.status !== "active" ||
     (fresh.lockedUntil !== null && fresh.lockedUntil > at) ||
+    fresh.credentialVersion !== user.credentialVersion ||
     fresh.passwordChangedAt.getTime() !== user.passwordChangedAt.getTime() ||
     fresh.totpSecretEnc !== user.totpSecretEnc
   ) {
@@ -568,11 +573,33 @@ async function openSession(
 }
 
 /**
+ * 認証の世代を上げた後の、その利用者のほかのセッションの後片付け。世代が違うセッションは resolveSession が
+ * 使わせないので、ここで消せなくても（止まった・失敗した）古いセッションは使えない。失敗しても操作は止めない
+ */
+async function closeOtherSessions(ctx: AuthContext, userId: string, keepId?: string): Promise<void> {
+  try {
+    await ctx.db.session.deleteMany({ where: { userId, ...(keepId ? { id: { not: keepId } } : {}) } });
+  } catch (error) {
+    console.error("tsunagi-dicom: 古いセッションの片付けに失敗した（認証の世代が違うので、使えない）", error);
+  }
+}
+
+/** いまのセッションを、上げた後の認証の世代に合わせる（上げる前の世代のままのときだけ） */
+async function followVersion(ctx: AuthContext, session: SessionRow, from: number, extra: { pendingTotpEnc?: null } = {}) {
+  await ctx.db.session.updateMany({
+    where: { id: session.id, credentialVersion: from },
+    data: { credentialVersion: from + 1, ...extra },
+  });
+}
+
+/**
  * 途中のセッションがまだ使える（残っていて、同じ段で、期限の前）という条件。利用者の行を変える
  * 1つの文（updateMany）の where に入れて、確かめと書き込みを分けない
  */
-const liveSession = (session: SessionRow, at: Date) => ({
-  sessions: { some: { id: session.id, stage: session.stage, expiresAt: { gt: at } } },
+const liveSession = (session: SessionRow, user: Pick<User, "credentialVersion">, at: Date) => ({
+  sessions: {
+    some: { id: session.id, stage: session.stage, expiresAt: { gt: at }, credentialVersion: user.credentialVersion },
+  },
 });
 
 async function completeLogin(ctx: AuthContext, user: User, detail: Record<string, unknown>) {
@@ -686,15 +713,17 @@ export async function confirmEnrollment(
   };
   // 確かめと書き込みを1つの文にする：まだ登録していない・有効・パスワードが読んだ時のまま・この途中の
   // セッションがまだ使える（残っていて、同じ段で、期限の前）ときだけ書く
+  // 書けたら、認証の世代を1つ上げる（ほかのセッションは、消す前でも使えなくなる）
   const res = await ctx.db.user.updateMany({
     where: {
       id: user.id,
       status: "active",
       totpSecretEnc: null,
       passwordChangedAt: user.passwordChangedAt,
-      ...liveSession(session, at),
+      credentialVersion: user.credentialVersion,
+      ...liveSession(session, user, at),
     },
-    data: enrolled,
+    data: { ...enrolled, credentialVersion: { increment: 1 } },
   });
   if (res.count !== 1) {
     const current = await ctx.db.user.findUnique({ where: { id: user.id } });
@@ -707,10 +736,10 @@ export async function confirmEnrollment(
         : SESSION_GONE_MESSAGE,
     );
   }
-  // 登録したら、その利用者のほかのセッションを閉じる
-  await ctx.db.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
-  if (optional) await ctx.db.session.updateMany({ where: { id: session.id }, data: { pendingTotpEnc: null } });
-  const updated: User = { ...user, ...enrolled };
+  // いまのセッションを新しい世代に合わせ（途中のセッションは advance が替える）、ほかのセッションを片付ける
+  if (optional) await followVersion(ctx, session, user.credentialVersion, { pendingTotpEnc: null });
+  await closeOtherSessions(ctx, user.id, session.id);
+  const updated: User = { ...user, ...enrolled, credentialVersion: user.credentialVersion + 1 };
   await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "success" });
   if (optional) return { stage: "active" };
   return advance(ctx, session, updated, updated.mustChangePassword ? "change_password" : "active", {
@@ -748,25 +777,27 @@ export async function changePassword(
     mustChangePassword: false,
     updatedAt: at,
   };
-  // 確かめと書き込みを1つの文にする：有効・パスワードと TOTP の秘密が読んだ時のまま・このセッションが
-  // まだ使える（残っていて、同じ段で、期限の前）ときだけ変える。変えたら、ほかのセッションを閉じる
-  // （同時に進んでいた古いパスワードのログインは、openSession の確かめか、この削除で消える）
+  // 確かめと書き込みを1つの文にする：有効・パスワードと TOTP の秘密と認証の世代が読んだ時のまま・この
+  // セッションがまだ使える（残っていて、同じ段で、期限の前）ときだけ変え、認証の世代を1つ上げる。
+  // 世代を上げた時点で、ほかのセッション（同時に進んでいた古いパスワードのログインも）は使えなくなる
   const res = await ctx.db.user.updateMany({
     where: {
       id: user.id,
       status: "active",
       passwordChangedAt: user.passwordChangedAt,
       totpSecretEnc: user.totpSecretEnc,
-      ...liveSession(session, at),
+      credentialVersion: user.credentialVersion,
+      ...liveSession(session, user, at),
     },
-    data: changes,
+    data: { ...changes, credentialVersion: { increment: 1 } },
   });
   if (res.count !== 1) {
     await record(ctx, actorOf(user), { action: "password_change", outcome: "denied", detail: { reason: "changed_during_change" } });
     throw new AuthFailure(409, "パスワードを変えられない（ほかの画面で先に変えたか、このセッションはもう使えない）。頁を開き直す");
   }
-  await ctx.db.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
-  const updated: User = { ...user, ...changes };
+  if (session.stage === "active") await followVersion(ctx, session, user.credentialVersion);
+  await closeOtherSessions(ctx, user.id, session.id);
+  const updated: User = { ...user, ...changes, credentialVersion: user.credentialVersion + 1 };
   await record(ctx, actorOf(user), { action: "password_change", outcome: "success" });
   if (session.stage === "active") return { stage: "active" };
   return advance(ctx, session, updated, "active", { mfa: user.totpSecretEnc !== null, passwordChanged: true });
@@ -800,20 +831,36 @@ export type ResolvedSession =
   | { kind: "anonymous" }
   | { kind: "pending" | "locked" | "active"; session: SessionRow; user: User };
 
-/** cookie の token からセッションを引く。長く操作が無ければ、ここでロックにする（サーバーの側の保険） */
-export async function resolveSession(ctx: AuthContext, token: string | undefined): Promise<ResolvedSession> {
+/**
+ * cookie の token からセッションを引く。ロックはサーバーの側を正にし、次のどちらでも、この要求の時点でロックにする：
+ * - lockRequested：画面が置いたロックの印（src/lib/auth/lock-cookie.ts）。画面のロックの知らせが届かなかったときも効く。
+ * - 画面が最後に操作を知らせてから SCREEN_LOCK_MINUTES を過ぎた。
+ * 認証の世代が違うセッションは使わない
+ */
+export async function resolveSession(
+  ctx: AuthContext,
+  token: string | undefined,
+  options: { lockRequested?: "manual" | "client_idle" | null } = {},
+): Promise<ResolvedSession> {
   if (!token || token.length > 128) return { kind: "anonymous" };
   const row = await ctx.db.session.findUnique({ where: { id: hashToken(token) }, include: { user: true } });
   if (!row) return { kind: "anonymous" };
   const { user, ...session } = row;
   const at = now(ctx);
   const userLocked = user.lockedUntil !== null && user.lockedUntil > at;
-  if (session.expiresAt <= at || user.status !== "active" || userLocked) {
+  // 認証の世代が違う（作った後にパスワードの変更・TOTP の登録・やり直しがあった）セッションは使わない。
+  // ほかのセッションの削除が止まった・失敗したときも、ここで閉じる側に倒れる
+  const staleCredential = session.credentialVersion !== user.credentialVersion;
+  if (session.expiresAt <= at || user.status !== "active" || userLocked || staleCredential) {
     await ctx.db.session.deleteMany({ where: { id: session.id } });
     return { kind: "anonymous" };
   }
   if (session.stage !== "active") return { kind: "pending", session, user };
   if (session.lockedAt) return { kind: "locked", session, user };
+  if (options.lockRequested) {
+    const locked = await lockScreen(ctx, session, user, options.lockRequested);
+    return { kind: "locked", session: locked, user };
+  }
 
   const minutes = ctx.settings.screenLockMinutes;
   const idleMs = at.getTime() - session.lastActivityAt.getTime();
@@ -984,9 +1031,10 @@ export async function updateUser(
   if (change.resetTotp) {
     user = await ctx.db.user.update({
       where: { id: target.id },
-      data: { totpSecretEnc: null, totpEnabledAt: null, totpLastStep: null, updatedAt: at },
+      // 認証の世代を上げ、その利用者のセッションを、消す前でも使えなくする（削除は後片付け）
+      data: { totpSecretEnc: null, totpEnabledAt: null, totpLastStep: null, credentialVersion: { increment: 1 }, updatedAt: at },
     });
-    await ctx.db.session.deleteMany({ where: { userId: target.id } });
+    await closeOtherSessions(ctx, target.id);
     await record(ctx, by, { action: "mfa_reset", detail: { target: target.username } });
   }
   if (change.clearLoginLock) {

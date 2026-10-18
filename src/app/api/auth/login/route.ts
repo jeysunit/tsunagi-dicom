@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { assertLocalMode, assertSameOrigin, readJson, setSessionCookie } from "@/lib/api/auth-route";
+import { assertLocalMode, assertSameOrigin, clearLockCookie, readJson, setSessionCookie } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { login } from "@/lib/auth/local-auth";
 import { MAX_PASSWORD_LENGTH } from "@/lib/auth/password-policy";
@@ -25,6 +25,8 @@ export async function POST(request: Request) {
     const previous = (await cookies()).get(SESSION_COOKIE)?.value;
     const result = await login(await authContext(), body.username.trim(), body.password, previous);
     await setSessionCookie(result.token, result.expiresAt);
+    // 前のセッションの画面のロックの印は、新しいセッションに持ち越さない（前のセッションは消えている）
+    await clearLockCookie();
     return Response.json({ next: STAGE_PATHS[result.stage] });
   } catch (error) {
     return errorResponse(error);

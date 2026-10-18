@@ -71,6 +71,9 @@ model User {
   lockedUntil        DateTime?
   // 利用者の棚卸し（第7.0版 14 遵守事項⑧）
   lastLoginAt        DateTime?
+  // 認証の世代。パスワードの変更・TOTP の登録・TOTP のやり直しで 1 つ増やす。セッションは作った時の値を持ち、
+  // 違えば使わない（src/lib/auth/local-auth.ts の resolveSession。ほかのセッションの削除は後片付け）
+  credentialVersion  Int       @default(0)
   createdAt          DateTime
   updatedAt          DateTime
 
@@ -97,6 +100,8 @@ model Session {
   pendingTotpEnc String?
   // 大事な操作（利用者の管理）の前の、もう一度の本人の確かめの時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）
   reauthAt       DateTime?
+  // 作った時の利用者の認証の世代（User.credentialVersion）。違えば、このセッションは使えない
+  credentialVersion Int    @default(0)
 
   @@index([userId])
   @@index([expiresAt])

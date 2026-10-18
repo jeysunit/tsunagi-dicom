@@ -4,6 +4,7 @@ import { cache } from "react";
 import { appendAudit, type AuditEntryInput } from "@/lib/audit";
 import { decodeDevRole, DEV_ROLE_COOKIE } from "@/lib/auth/dev-role-cookie";
 import { type AuthContext, resolveSession, type Stage } from "@/lib/auth/local-auth";
+import { LOCK_COOKIE, parseLockCookie } from "@/lib/auth/lock-cookie";
 import { can, DEFAULT_DEV_ROLE, isRole, type Permission, type Role } from "@/lib/auth/roles";
 import { sourceFromHeaders } from "@/lib/auth/source-address";
 import { getConfig, type AuthMode } from "@/lib/config";
@@ -78,7 +79,10 @@ export const getAuthState = cache(async (): Promise<AuthState> => {
   if (config.auth.mode !== "local") throw new Error(`AUTH_MODE=${config.auth.mode} はまだ無い`);
 
   const ctx = await authContext();
-  const resolved = await resolveSession(ctx, jar.get(SESSION_COOKIE)?.value);
+  // 画面が置いたロックの印（src/lib/auth/lock-cookie.ts）があれば、この要求の時点でロックにする
+  const resolved = await resolveSession(ctx, jar.get(SESSION_COOKIE)?.value, {
+    lockRequested: parseLockCookie(jar.get(LOCK_COOKIE)?.value),
+  });
   switch (resolved.kind) {
     case "anonymous":
       return { kind: "anonymous" };

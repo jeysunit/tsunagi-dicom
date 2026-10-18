@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { checkedState, clearSessionCookie, readJson } from "@/lib/api/auth-route";
+import { checkedState, clearLockCookie, clearSessionCookie, readJson } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { AuthFailure, unlockScreen } from "@/lib/auth/local-auth";
 import { MAX_PASSWORD_LENGTH } from "@/lib/auth/password-policy";
@@ -28,6 +28,8 @@ export async function POST(request: Request) {
       }
       throw error;
     }
+    // 確かめが通ったので、画面が置いたロックの印（src/lib/auth/lock-cookie.ts）を消す
+    await clearLockCookie();
     return Response.json({ locked: false });
   } catch (error) {
     return errorResponse(error);

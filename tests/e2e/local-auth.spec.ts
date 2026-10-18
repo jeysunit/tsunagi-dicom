@@ -344,7 +344,7 @@ test("画面のロック：ヘッダーの「ロック」で、同じブラウ�
   await other.close();
 });
 
-test("画面のロック：ロックの知らせが BFF に届かなくても、画面は閉じたまま。解くにはいつもパスワードが要り、届いたら読み直す", async () => {
+test("画面のロック：ロックの知らせ（POST）を落としても、読み直した頁・別のタブで開いた頁は BFF が中身なしで描く。解くにはパスワードが要る", async () => {
   test.setTimeout(120_000);
   // 時計を進めた管理者のタブは、操作の無い時間でロックを掛けうるので、この試験の間は閉じた頁にしておく
   await admin.page.goto("about:blank");
@@ -353,28 +353,41 @@ test("画面のロック：ロックの知らせが BFF に届かなくても、
   await expect(page.getByTestId("study-count")).toHaveText("8");
   const patient = await patientValues(page);
 
-  // ロックの POST を網の切れのように落とす
+  // ロックの POST を網の切れのように落とす（このタブからは何度送り直しても届かない）
   await page.route("**/api/auth/lock", (route) => route.abort("internetdisconnected"));
   await page.getByRole("button", { name: "ロック", exact: true }).click();
   const lock = page.getByTestId("screen-lock");
   await expect(lock).toBeVisible();
   await expect(page.getByTestId("study-count")).toHaveCount(0);
-  // BFF はまだロックしていない（ずれている）が、画面の側は閉じたまま。解くには BFF のパスワードの確かめが要る
-  expect((await page.request.get("/api/studies")).status()).toBe(200);
+
+  // 別のタブで開いても、ロックの印の cookie で BFF がロックし、中身なしで描く
+  const fresh = await admin.context.newPage();
+  await fresh.goto("/");
+  await expect(fresh.getByTestId("screen-lock")).toBeVisible();
+  await expect(fresh.getByTestId("study-count")).toHaveCount(0);
+  await expectNoPatientValues(fresh, patient);
+  expect((await fresh.request.get("/api/studies")).status()).toBe(423);
+  await fresh.close();
+
+  // 読み直しても、中身なしで描く（頁の HTML に患者の値が無い）
+  await page.reload();
+  await expect(page.getByTestId("screen-lock")).toBeVisible();
+  await expectNoPatientValues(page, patient);
+
+  // 違うパスワードでは解けない
   await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
   await lock.getByLabel(/確認の番号/).fill("000000");
   await lock.getByRole("button", { name: "ロックを解く" }).click();
   await expect(lock.getByRole("alert")).toContainText("違う");
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
-  // 網が戻ったら送り直し、BFF もロックして頁を読み直す（頁に患者の値が残らない）
   await page.unroute("**/api/auth/lock");
-  await expect.poll(async () => (await page.request.get("/api/studies")).status(), { timeout: 30_000 }).toBe(423);
-  await expectNoPatientValues(page, patient);
-
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
   await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
   await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  // 解いたらロックの印は消え、読み直しても中身が出る
+  await page.reload();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await page.close();
 });
@@ -383,13 +396,14 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
   test.setTimeout(120_000);
   const page = await admin.context.newPage();
   const deaf = await admin.context.newPage();
-  // このタブには、タブの間の知らせ（storage の事件）を届けない
+  // このタブには、タブの間の知らせ（storage の事件・BroadcastChannel）を届けない
   await deaf.addInitScript(() => {
     const original = window.addEventListener.bind(window);
     window.addEventListener = ((type: string, ...rest: unknown[]) => {
       if (type === "storage") return;
       return (original as (...a: unknown[]) => void)(type, ...rest);
     }) as typeof window.addEventListener;
+    Object.defineProperty(window, "BroadcastChannel", { value: undefined, configurable: true });
   });
   await page.goto("/");
   await deaf.goto("/");

@@ -307,14 +307,27 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     expect(JSON.stringify(await auditRows(db))).not.toContain(PASSWORD);
   });
 
-  it("操作の無い時間が続いたら、サーバーの側でもロックにする（画面の時間＋猶予）", async () => {
+  it("操作の無い時間が SCREEN_LOCK_MINUTES に達したら、サーバーの側でもその要求の時点でロックにする（猶予なし）", async () => {
     const { ctx, clock } = await setup({ mfaRequired: false, screenLockMinutes: 15 });
     await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
     const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
-    clock.advance(15 * 60_000);
+    expect(SERVER_LOCK_GRACE_SECONDS).toBe(0);
+    clock.advance(15 * 60_000 - 1000);
     expect((await resolveSession(ctx, token)).kind).toBe("active");
-    clock.advance(SERVER_LOCK_GRACE_SECONDS * 1000);
+    clock.advance(1000);
     expect((await resolveSession(ctx, token)).kind).toBe("locked");
+  });
+
+  it("画面が置いたロックの印があれば、その要求の時点でロックにし、記録に残す（ロックの知らせが届かなくても）", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
+    expect((await resolveSession(ctx, token, { lockRequested: null })).kind).toBe("active");
+    expect((await resolveSession(ctx, token, { lockRequested: "manual" })).kind).toBe("locked");
+    // 印が無くなっても、BFF の側のロックは残る（解くにはパスワード）
+    expect((await resolveSession(ctx, token)).kind).toBe("locked");
+    const rows = await auditRows(db);
+    expect(rows.filter((r) => r.action === "screen_lock")).toHaveLength(1);
   });
 
   it("SCREEN_LOCK_MINUTES=0 ならロックしない", async () => {
@@ -755,6 +768,23 @@ class PausingLimiter extends HashLimiter {
   }
 }
 
+/** セッションの削除（deleteMany）だけが失敗するデータベース。ほかの操作は本物に渡す */
+function sessionDeleteFails(db: Db): Db {
+  const bindAll = <T extends object>(target: T, override: (key: PropertyKey) => unknown) =>
+    new Proxy(target, {
+      get(t, key) {
+        const replaced = override(key);
+        if (replaced !== undefined) return replaced;
+        const value = Reflect.get(t, key, t) as unknown;
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(t) : value;
+      },
+    });
+  const session = bindAll(db.session, (key) =>
+    key === "deleteMany" ? () => Promise.reject(new Error("セッションを消せない")) : undefined,
+  );
+  return bindAll(db, (key) => (key === "session" ? session : undefined));
+}
+
 const SATO = { username: "sato", displayName: "佐藤", role: "viewer" as const, password: "kq7vz2mw-long1", mustChangePassword: false };
 
 describe("独立のレビューの指摘で直したこと", () => {
@@ -1037,6 +1067,56 @@ describe("独立のレビューの指摘で直したこと", () => {
       changePassword(ctx, s.session, s.user, { currentPassword: PASSWORD, code: totpAt(secret, clock.t), newPassword: NEW_PASSWORD }),
     ).rejects.toMatchObject({ status: 409 });
     expect((await db.user.findUniqueOrThrow({ where: { id: s.user.id } })).passwordHash).toBe(s.user.passwordHash);
+  });
+
+  it("認証の世代：パスワードの変更の後、ほかのセッションの削除が失敗しても、古いセッションは使えない", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    await createUser(ctx, SATO, ADMIN);
+    const mine = await login(ctx, "sato", SATO.password);
+    const other = await login(ctx, "sato", SATO.password);
+    const s = await sessionOf(db, mine.token);
+    // セッションの削除だけが失敗するデータベース（変更の途中で止まった、の代わり）
+    const flaky = sessionDeleteFails(db);
+    await changePassword({ ...ctx, db: flaky }, s.session, s.user, { currentPassword: SATO.password, newPassword: "zr4tx8pe-next-long" });
+    // 古いセッションの行は残っているが、使えない
+    expect(await db.session.findUnique({ where: { id: hashToken(other.token) } })).not.toBeNull();
+    expect((await resolveSession(ctx, other.token)).kind).toBe("anonymous");
+    // 変えた人のセッションは新しい世代に合わせてあり、使える
+    expect((await resolveSession(ctx, mine.token)).kind).toBe("active");
+    const after = await db.user.findUniqueOrThrow({ where: { username: "sato" } });
+    expect(after.credentialVersion).toBe(s.user.credentialVersion + 1);
+  });
+
+  it("認証の世代：TOTP の登録・やり直しの後も、削除が失敗した古いセッションは使えない", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: false });
+    const u = await createUser(ctx, SATO, ADMIN);
+    const mine = await login(ctx, "sato", SATO.password);
+    const other = await login(ctx, "sato", SATO.password);
+    const s = await sessionOf(db, mine.token);
+    const { secret } = await startEnrollment(ctx, s.session, s.user);
+    const s2 = await sessionOf(db, mine.token);
+    const flaky = sessionDeleteFails(db);
+    await confirmEnrollment({ ...ctx, db: flaky }, s2.session, s2.user, totpAt(secret, clock.t), SATO.password);
+    expect((await resolveSession(ctx, other.token)).kind).toBe("anonymous");
+    expect((await resolveSession(ctx, mine.token)).kind).toBe("active");
+
+    // 管理者が TOTP をやり直す（削除が失敗しても、その利用者のセッションは使えない）
+    await updateUser({ ...ctx, db: flaky }, u.id, { resetTotp: true }, ADMIN);
+    expect((await resolveSession(ctx, mine.token)).kind).toBe("anonymous");
+  });
+
+  it("認証の世代：確かめた後に世代が上がったら、作ったセッションは使えない", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    const limiter = new PausingLimiter({ concurrency: 2, queueLimit: 10 });
+    ctx.hashLimiter = limiter;
+    const u = await createUser(ctx, SATO, ADMIN);
+    const pause = limiter.pauseNextLogin();
+    const racing = login(ctx, "sato", SATO.password);
+    await pause.reached;
+    await db.user.update({ where: { id: u.id }, data: { credentialVersion: { increment: 1 } } });
+    pause.release();
+    await expect(racing).rejects.toMatchObject({ status: 401 });
+    expect(await db.session.count({ where: { userId: u.id } })).toBe(0);
   });
 
   it("F10：ログインし直したら前のセッションを消す。期限の切れたセッションを片付ける", async () => {

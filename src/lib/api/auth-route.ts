@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type { z } from "zod";
 import { readLimitedText } from "@/lib/api/body";
 import { csrfMatches } from "@/lib/auth/local-auth";
+import { LOCK_COOKIE } from "@/lib/auth/lock-cookie";
 import { AuthError, getAuthState, SESSION_COOKIE, type AuthState } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
 
@@ -93,4 +94,13 @@ export async function setSessionCookie(token: string, expiresAt: Date): Promise<
 export async function clearSessionCookie(): Promise<void> {
   const jar = await cookies();
   jar.set(SESSION_COOKIE, "", { httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: 0 });
+}
+
+/**
+ * 画面が置いたロックの印（src/lib/auth/lock-cookie.ts）を消す。BFF がロックの解除を確かめたとき・ログイン・
+ * ログアウトのときだけ呼ぶ
+ */
+export async function clearLockCookie(): Promise<void> {
+  const jar = await cookies();
+  jar.set(LOCK_COOKIE, "", { secure: true, sameSite: "strict", path: "/", maxAge: 0 });
 }
