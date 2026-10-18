@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { AuditFields } from "@/lib/auth/session";
 import { BackendError, type RelayRequest } from "@/lib/backend/types";
-import { relayWadoRs, RELAY_NOT_WADO_MESSAGE, RELAY_READ_ONLY_MESSAGE, type RelayDeps } from "@/lib/relay";
+import { can, ROLES } from "@/lib/auth/roles";
+import {
+  relayWadoRs,
+  RELAY_FORBIDDEN_MESSAGE,
+  RELAY_NOT_WADO_MESSAGE,
+  RELAY_READ_ONLY_MESSAGE,
+  type RelayDeps,
+} from "@/lib/relay";
 
 // BFF の中継（/api/dicom-web/...）：WADO-RS の読み取りだけを通し、通したものも断ったものも記録に残す。
 
@@ -10,11 +17,15 @@ const SERIES = "1.2.826.0.1.3680043.8.498.11";
 const INSTANCE = "1.2.826.0.1.3680043.8.498.12";
 
 /** 起きた順（中継と記録）を控える偽の部品 */
-function fakes(respond: (req: RelayRequest) => Promise<Response> = async () => new Response("pixels", { status: 200 })) {
+function fakes(
+  respond: (req: RelayRequest) => Promise<Response> = async () => new Response("pixels", { status: 200 }),
+  allowed = true,
+) {
   const events: string[] = [];
   const records: AuditFields[] = [];
   const relayed: RelayRequest[] = [];
   const deps: RelayDeps = {
+    allowed,
     backend: {
       async relayDicomweb(req) {
         events.push("relay");
@@ -86,6 +97,7 @@ describe("中継", () => {
       },
     });
     const deps: RelayDeps = {
+      allowed: true,
       backend: { relayDicomweb: async () => new Response(body, { status: 200 }) },
       record: async () => {
         throw new Error("database is locked");
@@ -129,6 +141,27 @@ describe("中継", () => {
         { action: "retrieve", outcome: "denied", detail: { method: "GET", path: segments.join("/"), reason: "bad-path" } },
       ]);
     }
+  });
+
+  it("役割に画像の取得が割り当てられていなければ 403（画像サーバーへ渡さず、断ったことを記録する）", async () => {
+    const f = fakes(undefined, false);
+    const res = await relayWadoRs(input(["studies", STUDY, "metadata"]), f.deps);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe(RELAY_FORBIDDEN_MESSAGE);
+    expect(f.relayed).toHaveLength(0);
+    expect(f.records).toEqual([
+      { action: "retrieve", outcome: "denied", detail: { method: "GET", path: `studies/${STUDY}/metadata`, reason: "forbidden" } },
+    ]);
+  });
+
+  it("権限が無くても、書き込みは 405 のまま（道が無いことを先に返す）", async () => {
+    const f = fakes(undefined, false);
+    expect((await relayWadoRs(input(["studies"], "POST"), f.deps)).status).toBe(405);
+    expect(f.records[0]).toMatchObject({ action: "write", outcome: "denied" });
+  });
+
+  it("既定の4つの役割は、どれも画像を取れる（段 1b の割り当て）", () => {
+    for (const role of ROLES) expect(can(role, "image.retrieve"), role).toBe(true);
   });
 
   it("記録に残す path の長さを切る", async () => {

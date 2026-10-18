@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { isValidUsername, USERNAME_HINT } from "@/lib/auth/username";
 
 // 設定の読み込み（docs/spec.md の 2.1。正本は .env.example）。
 // 足りない・誤った値があれば、どの変数かを並べて ConfigError を投げる。値そのものは文言に出さない（秘密を漏らさない）。
@@ -31,7 +32,22 @@ export interface AppConfig {
     loginLockThreshold: number;
     loginLockMinutes: number;
     screenLockMinutes: number;
+    /** ログインの試みを遅らせ始める回数（1 分あたり）。利用者名ごと・全体 */
+    rateLimitPerUserPerMinute: number;
+    rateLimitGlobalPerMinute: number;
+    /** パスワードのハッシュ（argon2id）をログインの枠で同時に回す数と、待たせる数（src/lib/auth/hash-limiter.ts） */
+    passwordHashConcurrency: number;
+    passwordHashQueue: number;
+    /** ログインの途中のセッションの長さ（分）・ログインしたセッションの長さ（時間）・再認証が効く時間（分） */
+    pendingSessionMinutes: number;
+    sessionMaxHours: number;
+    reauthMinutes: number;
     oidc: { issuer?: string; clientId?: string; clientSecret?: string };
+    /**
+     * 最初の管理者（AUTH_MODE=local で利用者が1人もいないときだけ使う。src/lib/auth/bootstrap.ts）。
+     * パスワードはファイルで受け、ここにはファイルの場所だけを持つ（中身は使う時に読む）
+     */
+    initialAdmin?: { username: string; passwordFile: string };
   };
   databaseUrl: string;
   sessionSecret: string;
@@ -63,11 +79,14 @@ const bool = (fallback: boolean) =>
     .default(fallback ? "true" : "false")
     .transform((v) => v === "true");
 
-const int = (fallback: number, min: number) =>
+const int = (fallback: number, min: number, max = Number.MAX_SAFE_INTEGER) =>
   z
     .string()
     .default(String(fallback))
-    .refine((v) => /^\d+$/.test(v) && Number(v) >= min, `${min} 以上の整数にする`)
+    .refine(
+      (v) => /^\d+$/.test(v) && Number(v) >= min && Number(v) <= max,
+      max === Number.MAX_SAFE_INTEGER ? `${min} 以上の整数にする` : `${min}〜${max} の整数にする`,
+    )
     .transform(Number);
 
 const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で始まる URL にする" });
@@ -91,11 +110,22 @@ const envSchema = z.object({
   LOGIN_LOCK_THRESHOLD: int(5, 1),
   LOGIN_LOCK_MINUTES: int(15, 1),
   SCREEN_LOCK_MINUTES: int(15, 0),
+  LOGIN_RATE_LIMIT_PER_MINUTE: int(10, 1),
+  LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: int(300, 1),
+  // libuv のスレッドの溜め（既定 4 本）を、ログインした人の枠の1本とほかの仕事のために残す
+  PASSWORD_HASH_CONCURRENCY: int(2, 1, 8),
+  PASSWORD_HASH_QUEUE: int(32, 0, 1024),
+  // セッションの長さ（既定の値。2026-10-18 に承認者が決めた。運用に合わせて変える）
+  LOGIN_PENDING_MINUTES: int(10, 1, 60),
+  SESSION_MAX_HOURS: int(12, 1, 24),
+  REAUTH_MINUTES: int(5, 1, 60),
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
   OIDC_CLIENT_SECRET_FILE: z.string().optional(),
   DEV_ALLOW_WRITE: bool(false),
+  INITIAL_ADMIN_USERNAME: z.string().optional(),
+  INITIAL_ADMIN_PASSWORD_FILE: z.string().optional(),
   DATABASE_URL: z
     .string()
     .default("file:/data/tsunagi.db")
@@ -213,13 +243,26 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   }
 
-  if (e.AUTH_MODE === "local") {
-    problem("AUTH_MODE", "local はまだ無い（段 1b で作る）。いまは開発用の dev（モックだけ）だけ動く");
-  } else if (e.AUTH_MODE === "oidc") {
-    problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは開発用の dev（モックだけ）だけ動く");
+  if (e.AUTH_MODE === "oidc") {
+    problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは local（アプリの利用者）と開発用の dev（モックだけ）が動く");
   } else if (e.AUTH_MODE === "dev" && !e.BACKEND_MOCK) {
     // 段 1a〜1b の決まり（docs/spec.md の 4）。実の画像サーバーには local を使う
     problem("AUTH_MODE", "dev は BACKEND_MOCK=true のときだけ起動する。実の画像サーバーには local を使う");
+  }
+
+  let initialAdmin: { username: string; passwordFile: string } | undefined;
+  if (e.INITIAL_ADMIN_USERNAME !== undefined || e.INITIAL_ADMIN_PASSWORD_FILE !== undefined) {
+    if (e.AUTH_MODE !== "local") {
+      problem("INITIAL_ADMIN_USERNAME", "AUTH_MODE=local のときだけ使える");
+    } else if (e.INITIAL_ADMIN_USERNAME === undefined) {
+      problem("INITIAL_ADMIN_USERNAME", "INITIAL_ADMIN_PASSWORD_FILE があるときは必須");
+    } else if (e.INITIAL_ADMIN_PASSWORD_FILE === undefined) {
+      problem("INITIAL_ADMIN_PASSWORD_FILE", "INITIAL_ADMIN_USERNAME があるときは必須（パスワードはファイルで渡す）");
+    } else if (!isValidUsername(e.INITIAL_ADMIN_USERNAME)) {
+      problem("INITIAL_ADMIN_USERNAME", USERNAME_HINT);
+    } else {
+      initialAdmin = { username: e.INITIAL_ADMIN_USERNAME, passwordFile: e.INITIAL_ADMIN_PASSWORD_FILE };
+    }
   }
 
   if (e.DEV_ALLOW_WRITE) {
@@ -252,7 +295,15 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       loginLockThreshold: e.LOGIN_LOCK_THRESHOLD,
       loginLockMinutes: e.LOGIN_LOCK_MINUTES,
       screenLockMinutes: e.SCREEN_LOCK_MINUTES,
+      rateLimitPerUserPerMinute: e.LOGIN_RATE_LIMIT_PER_MINUTE,
+      rateLimitGlobalPerMinute: e.LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE,
+      passwordHashConcurrency: e.PASSWORD_HASH_CONCURRENCY,
+      passwordHashQueue: e.PASSWORD_HASH_QUEUE,
+      pendingSessionMinutes: e.LOGIN_PENDING_MINUTES,
+      sessionMaxHours: e.SESSION_MAX_HOURS,
+      reauthMinutes: e.REAUTH_MINUTES,
       oidc: { issuer: e.OIDC_ISSUER, clientId: e.OIDC_CLIENT_ID, clientSecret: oidcClientSecret },
+      initialAdmin,
     },
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている

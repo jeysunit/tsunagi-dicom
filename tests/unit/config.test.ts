@@ -71,6 +71,30 @@ describe("設定の読み込み", () => {
     expect(variablesOf({ ...base, TZ: "Mars/Olympus" })).toEqual(["TZ"]);
   });
 
+  it("パスワードのハッシュを同時に回す数と待たせる数（既定 2・32。範囲の外は起動しない）", () => {
+    expect(loadConfig(base).auth).toMatchObject({ passwordHashConcurrency: 2, passwordHashQueue: 32 });
+    expect(loadConfig({ ...base, PASSWORD_HASH_CONCURRENCY: "4", PASSWORD_HASH_QUEUE: "0" }).auth).toMatchObject({
+      passwordHashConcurrency: 4,
+      passwordHashQueue: 0,
+    });
+    expect(variablesOf({ ...base, PASSWORD_HASH_CONCURRENCY: "0" })).toEqual(["PASSWORD_HASH_CONCURRENCY"]);
+    expect(variablesOf({ ...base, PASSWORD_HASH_CONCURRENCY: "9" })).toEqual(["PASSWORD_HASH_CONCURRENCY"]);
+    expect(variablesOf({ ...base, PASSWORD_HASH_QUEUE: "1025" })).toEqual(["PASSWORD_HASH_QUEUE"]);
+  });
+
+  it("セッションの長さと再認証の時間（既定 10 分・12 時間・5 分。範囲の外は起動しない）", () => {
+    expect(loadConfig(base).auth).toMatchObject({ pendingSessionMinutes: 10, sessionMaxHours: 12, reauthMinutes: 5 });
+    expect(
+      loadConfig({ ...base, LOGIN_PENDING_MINUTES: "5", SESSION_MAX_HOURS: "8", REAUTH_MINUTES: "15" }).auth,
+    ).toMatchObject({ pendingSessionMinutes: 5, sessionMaxHours: 8, reauthMinutes: 15 });
+    expect(variablesOf({ ...base, LOGIN_PENDING_MINUTES: "0" })).toEqual(["LOGIN_PENDING_MINUTES"]);
+    expect(variablesOf({ ...base, LOGIN_PENDING_MINUTES: "61" })).toEqual(["LOGIN_PENDING_MINUTES"]);
+    expect(variablesOf({ ...base, SESSION_MAX_HOURS: "0" })).toEqual(["SESSION_MAX_HOURS"]);
+    expect(variablesOf({ ...base, SESSION_MAX_HOURS: "25" })).toEqual(["SESSION_MAX_HOURS"]);
+    expect(variablesOf({ ...base, REAUTH_MINUTES: "0" })).toEqual(["REAUTH_MINUTES"]);
+    expect(variablesOf({ ...base, REAUTH_MINUTES: "61" })).toEqual(["REAUTH_MINUTES"]);
+  });
+
   it("いくつも誤っていれば、全部を並べる", () => {
     expect(variablesOf({ ...base, BACKEND_KIND: undefined, SESSION_SECRET: "" }).sort()).toEqual([
       "BACKEND_KIND",
@@ -86,17 +110,56 @@ describe("設定の読み込み", () => {
   });
 
   describe("AUTH_MODE", () => {
-    it("local と oidc は、この段ではまだ無いと示して止める", () => {
-      expect(problemsOf({ ...base, AUTH_MODE: "local" })).toEqual([
-        { variable: "AUTH_MODE", message: expect.stringContaining("段 1b") },
-      ]);
+    it("oidc は、この段ではまだ無いと示して止める", () => {
       expect(problemsOf({ ...base, AUTH_MODE: "oidc" })).toEqual([
         { variable: "AUTH_MODE", message: expect.stringContaining("段 4") },
       ]);
     });
 
-    it("設定しなければ local（認証が有効）を既定にし、この段では止める", () => {
-      expect(variablesOf({ ...base, AUTH_MODE: undefined })).toEqual(["AUTH_MODE"]);
+    it("設定しなければ local（認証が有効）を既定にする", () => {
+      expect(loadConfig({ ...base, AUTH_MODE: undefined }).auth.mode).toBe("local");
+    });
+
+    it("local はモックでも実の画像サーバーでも起動する（段 1b）", () => {
+      expect(loadConfig({ ...base, AUTH_MODE: "local" }).auth.mode).toBe("local");
+      const real = {
+        ...base,
+        AUTH_MODE: "local",
+        BACKEND_MOCK: "false",
+        BACKEND_DICOMWEB_URL: "https://pacs.example.org/dicom-web",
+        BACKEND_ORTHANC_URL: "https://pacs.example.org",
+      };
+      expect(loadConfig(real).auth).toMatchObject({ mode: "local", mfaRequired: true, initialAdmin: undefined });
+    });
+
+    it("ログインを遅らせ始める回数は、既定で利用者名ごと 10・全体 300（1 分あたり）。0 は誤り", () => {
+      expect(loadConfig({ ...base, AUTH_MODE: "local" }).auth).toMatchObject({
+        rateLimitPerUserPerMinute: 10,
+        rateLimitGlobalPerMinute: 300,
+      });
+      expect(
+        loadConfig({ ...base, LOGIN_RATE_LIMIT_PER_MINUTE: "5", LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: "50" }).auth,
+      ).toMatchObject({ rateLimitPerUserPerMinute: 5, rateLimitGlobalPerMinute: 50 });
+      expect(variablesOf({ ...base, LOGIN_RATE_LIMIT_PER_MINUTE: "0" })).toEqual(["LOGIN_RATE_LIMIT_PER_MINUTE"]);
+      expect(variablesOf({ ...base, LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: "x" })).toEqual(["LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE"]);
+    });
+
+    it("最初の管理者は、利用者名とパスワードのファイルを両方そろえ、local のときだけ使える", () => {
+      const local = { ...base, AUTH_MODE: "local" };
+      expect(
+        loadConfig({ ...local, INITIAL_ADMIN_USERNAME: "admin", INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" }).auth
+          .initialAdmin,
+      ).toEqual({ username: "admin", passwordFile: "/run/secrets/admin" });
+      expect(variablesOf({ ...local, INITIAL_ADMIN_USERNAME: "admin" })).toEqual(["INITIAL_ADMIN_PASSWORD_FILE"]);
+      expect(variablesOf({ ...local, INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" })).toEqual([
+        "INITIAL_ADMIN_USERNAME",
+      ]);
+      expect(
+        variablesOf({ ...local, INITIAL_ADMIN_USERNAME: "Admin User", INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" }),
+      ).toEqual(["INITIAL_ADMIN_USERNAME"]);
+      expect(
+        variablesOf({ ...base, INITIAL_ADMIN_USERNAME: "admin", INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" }),
+      ).toEqual(["INITIAL_ADMIN_USERNAME"]);
     });
 
     it("dev はモックでなければ起動しない（待ち受けの住所が手元だけでも）", () => {

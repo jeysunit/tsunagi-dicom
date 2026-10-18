@@ -4,7 +4,12 @@
 #   mkdir -p secrets
 #   openssl rand -base64 48 > secrets/session_secret.txt
 #   cp .env.example .env            # 施設の値を入れる（SESSION_SECRET は .env に書かない。下の secret のファイルで渡す）
+#   # 最初の管理者（AUTH_MODE=local で利用者が1人もいないときだけ使う。最初のログインでパスワードを変える）
+#   printf '%s\n' '<最初のパスワード>' > secrets/initial_admin_password.txt
 #   docker compose up
+#
+# 最初の管理者を作った後は、INITIAL_ADMIN_* と secrets/initial_admin_password.txt を外してよい
+# （利用者が1人でもいれば使わない。残してもパスワードを書き換えない）。
 #
 # secret のファイルは、コンテナの中の利用者（uid 1000）が読めるようにしておく（例：chmod 0644、か所有者を 1000 にする）。
 #
@@ -31,6 +36,9 @@ services:
       AUTH_MODE: ${AUTH_MODE:-local}
       # 値は secret のファイル（下の secrets）。SESSION_SECRET と同時には指定しない（起動しない）
       SESSION_SECRET_FILE: /run/secrets/session_secret
+      # 最初の管理者（AUTH_MODE=local。下の secrets の initial_admin_password を有効にする）
+      # INITIAL_ADMIN_USERNAME: admin
+      # INITIAL_ADMIN_PASSWORD_FILE: /run/secrets/initial_admin_password
       # 画像サーバーのパスワードを secret のファイルで渡すとき（下の secrets を有効にする）
       # BACKEND_PASSWORD_FILE: /run/secrets/backend_password
       # 自前の CA を渡すとき（下の volumes を有効にする）
@@ -41,6 +49,7 @@ services:
       # - ./ca.pem:/etc/tsunagi/ca.pem:ro
     secrets:
       - session_secret
+      # - initial_admin_password
       # - backend_password
     init: true
     read_only: true
@@ -55,6 +64,8 @@ services:
 secrets:
   session_secret:
     file: ./secrets/session_secret.txt
+  # initial_admin_password:
+  #   file: ./secrets/initial_admin_password.txt
   # backend_password:
   #   file: ./secrets/backend_password.txt
 

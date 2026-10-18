@@ -22,6 +22,20 @@ export const AUDIT_ACTIONS = [
   "write",
   // ビューアが画像を取る道（WADO-RS の読み取りの中継）
   "retrieve",
+  // AUTH_MODE=local（段 1b）：ログインの一時停止とその解除・画面のロックと解除・TOTP の登録とやり直し・パスワードの変更
+  "login_lock",
+  "login_unlock",
+  "screen_lock",
+  "screen_unlock",
+  "mfa_enroll",
+  "mfa_reset",
+  "password_change",
+  // 大事な操作の前の、もう一度の本人の確かめ（段 1b）
+  "reauth",
+  // 利用者の管理（段 1b）：作る・止める／戻す・役割の変更
+  "user_create",
+  "user_status_change",
+  "role_change",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 /** success：通した。denied：このアプリが断った。failed：画像サーバーが失敗を返した・つながらなかった */
@@ -94,10 +108,14 @@ export function computeAuditHash(row: AuditHashInput): string {
 
 // 1つのプロセスの中で追記を一列に並べる（前の行の hash を読んでから書くため）。
 // ほかのプロセスと競ったときは prevHash の一意の制約で失敗し、つなぎは枝分かれしない。
-let queue: Promise<unknown> = Promise.resolve();
+// Next.js は起動の時の処理（instrumentation の定期の片付け）と route handler を別々に組むことがあり、
+// そのときこのモジュールは2つになるので、並びは globalThis に1つだけ置く
+const QUEUE_KEY = Symbol.for("tsunagi-dicom.audit-queue");
+const queueHolder = globalThis as typeof globalThis & { [QUEUE_KEY]?: { tail: Promise<unknown> } };
+const queue = (queueHolder[QUEUE_KEY] ??= { tail: Promise.resolve() });
 
 export function appendAudit(db: Db, input: AuditEntryInput): Promise<AuditRow> {
-  const run = queue.then(() =>
+  const run = queue.tail.then(() =>
     db.$transaction(async (tx) => {
       const last = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
       const base: Omit<AuditRow, "hash"> = {
@@ -118,7 +136,7 @@ export function appendAudit(db: Db, input: AuditEntryInput): Promise<AuditRow> {
       return tx.auditLog.create({ data: { ...base, hash: computeAuditHash(base) } });
     }),
   );
-  queue = run.catch(() => undefined);
+  queue.tail = run.catch(() => undefined);
   return run;
 }
 
