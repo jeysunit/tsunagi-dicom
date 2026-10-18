@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { appendAudit, type AuditAction, type AuditEntryInput } from "@/lib/audit";
 import { burnPasswordCheck, hashPassword, verifyPassword } from "@/lib/auth/password-hash";
 import { checkPassword } from "@/lib/auth/password-policy";
-import { defaultRateLimiter, type RateLimiter } from "@/lib/auth/rate-limit";
+import { defaultLoginThrottle, throttleKeys, type LoginThrottle } from "@/lib/auth/rate-limit";
 import { isRole, type Role } from "@/lib/auth/roles";
 import { openField, sealField } from "@/lib/auth/sealed-field";
 import type { SourceAddress } from "@/lib/auth/source-address";
@@ -36,8 +36,8 @@ export interface AuthSettings {
   loginLockMinutes: number;
   screenLockMinutes: number;
   sessionSecret: string;
-  /** 資格情報の確かめの回数の上限（1 分あたり。接続元ごと・全体） */
-  rateLimitPerSourcePerMinute: number;
+  /** ログインの試みを遅らせ始める回数（1 分あたり。利用者名ごと・全体。src/lib/auth/rate-limit.ts） */
+  rateLimitPerUserPerMinute: number;
   rateLimitGlobalPerMinute: number;
 }
 
@@ -47,7 +47,9 @@ export interface AuthContext {
   source: SourceAddress;
   now?: () => Date;
   /** 既定はプロセスで1つの数え手 */
-  rateLimiter?: RateLimiter;
+  loginThrottle?: LoginThrottle;
+  /** 待つ（試験で差し替える） */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export class AuthFailure extends Error {
@@ -64,7 +66,6 @@ export class AuthFailure extends Error {
 /** ログインの失敗の文言は1つにする（利用者名の有無・一時停止の有無を、答えの違いで知られないように） */
 export const LOGIN_FAILED_MESSAGE =
   "利用者名かパスワード（か確認の番号）が違う。または、続けて失敗したため、しばらくログインを止めている";
-export const RATE_LIMITED_MESSAGE = "試みが多すぎる。しばらく待ってからやり直す";
 /** 大事な操作の前に、本人の確かめが要るときの印（AuthFailure の problems） */
 export const REAUTH_REQUIRED = "reauth_required";
 
@@ -91,20 +92,21 @@ async function record(
 const actorOf = (user: Pick<User, "username" | "role">) => ({ actorId: user.username, actorRole: user.role });
 
 /**
- * 資格情報の確かめの回数の上限（接続元ごと・全体）。利用者を引く前に数える。
- * 超えたら 429（存在しない利用者名でも同じ）。断ったことは記録に残す（利用者名は残さない）
+ * ログインの試みを遅らせる（利用者名ごと・全体。src/lib/auth/rate-limit.ts）。利用者を引く前に数え、
+ * 存在しない利用者名でも同じに遅らせる。断らない（ほかの人の失敗で、正しい利用者を締め出さない）。
+ * 枠の中ではじめて遅らせ始めたときだけ記録に残す（利用者名は残さない）
  */
-async function takeRateLimit(ctx: AuthContext, action: AuditAction): Promise<void> {
-  const limiter = ctx.rateLimiter ?? defaultRateLimiter;
-  const source = ctx.source.sourceAddress ?? ctx.source.sourceAddressUnverified;
-  const ok = limiter.take(
-    source,
-    { perSourcePerMinute: ctx.settings.rateLimitPerSourcePerMinute, globalPerMinute: ctx.settings.rateLimitGlobalPerMinute },
+async function throttleLogin(ctx: AuthContext, username: string): Promise<void> {
+  const throttle = ctx.loginThrottle ?? defaultLoginThrottle;
+  const { delayMs, firstOver } = throttle.take(
+    throttleKeys(username, ctx.source.sourceAddress),
+    { perKeyPerMinute: ctx.settings.rateLimitPerUserPerMinute, globalPerMinute: ctx.settings.rateLimitGlobalPerMinute },
     now(ctx).getTime(),
   );
-  if (ok) return;
-  await record(ctx, { actorId: "unknown", actorRole: "none" }, { action, outcome: "denied", detail: { reason: "rate_limited" } });
-  throw new AuthFailure(429, RATE_LIMITED_MESSAGE);
+  if (firstOver) {
+    await record(ctx, { actorId: "unknown", actorRole: "none" }, { action: "login", outcome: "denied", detail: { reason: "throttled" } });
+  }
+  if (delayMs > 0) await (ctx.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(delayMs);
 }
 
 // ── 利用者を作る ──
@@ -243,7 +245,7 @@ async function verifyAgain(
   input: { password?: string; code?: string },
   action: AuditAction,
 ): Promise<void> {
-  await takeRateLimit(ctx, action);
+  // 回数は利用者ごとの試みの枠で抑える（全体の枠に入れると、ほかの人のログインの要求でロック中の職員が戻れなくなる）
   if (!(await claimAttempt(ctx, user))) {
     await record(ctx, actorOf(user), { action, outcome: "denied", detail: { reason: "locked" } });
     throw new AuthFailure(401, LOGIN_FAILED_MESSAGE, ["locked"]);
@@ -282,7 +284,7 @@ function nextStageAfterPassword(ctx: AuthContext, user: User): Stage {
 }
 
 export async function login(ctx: AuthContext, username: string, password: string): Promise<LoginResult> {
-  await takeRateLimit(ctx, "login");
+  await throttleLogin(ctx, username);
   const user = isValidUsername(username) ? await ctx.db.user.findUnique({ where: { username } }) : null;
   if (!user) {
     // 知らない利用者名でも、パスワードの確かめと同じほどの時間をかけ、同じ答えを返す。
@@ -377,7 +379,6 @@ async function advance(
 
 export async function submitTotp(ctx: AuthContext, session: SessionRow, user: User, code: string): Promise<StageResult> {
   if (session.stage !== "totp") throw new AuthFailure(409, "TOTP の入力の段ではない");
-  await takeRateLimit(ctx, "login");
   const secret = totpSecretOf(ctx, user);
   if (!secret) {
     // SESSION_SECRET を替えたなどで読めない。管理者が TOTP をやり直す

@@ -25,7 +25,7 @@ import {
   type AuthContext,
   type AuthSettings,
 } from "@/lib/auth/local-auth";
-import { RateLimiter } from "@/lib/auth/rate-limit";
+import { LoginThrottle, MAX_DELAY_MS, MAX_KEYS, throttleKeys } from "@/lib/auth/rate-limit";
 import { totpAt } from "@/lib/auth/totp";
 import type { Db } from "@/lib/db";
 import { testDatabases } from "./helpers/test-db";
@@ -51,7 +51,11 @@ class Clock {
   }
 }
 
+/** 遅らせた時間（sleep の差し替えが控える） */
+let slept: number[] = [];
+
 async function setup(settings: Partial<AuthSettings> = {}) {
+  slept = [];
   const db = await dbs.fresh();
   const clock = new Clock();
   const ctx: AuthContext = {
@@ -62,13 +66,16 @@ async function setup(settings: Partial<AuthSettings> = {}) {
       loginLockMinutes: 15,
       screenLockMinutes: 15,
       sessionSecret: SESSION_SECRET,
-      rateLimitPerSourcePerMinute: 1000,
+      rateLimitPerUserPerMinute: 1000,
       rateLimitGlobalPerMinute: 1000,
       ...settings,
     },
     source: { sourceAddress: null, sourceAddressUnverified: "198.51.100.7" },
     now: clock.now,
-    rateLimiter: new RateLimiter(),
+    loginThrottle: new LoginThrottle(),
+    sleep: async (ms: number) => {
+      slept.push(ms);
+    },
   };
   return { db, ctx, clock };
 }
@@ -434,7 +441,7 @@ describe("最初の管理者", () => {
       loginLockThreshold: 5,
       loginLockMinutes: 15,
       screenLockMinutes: 15,
-      rateLimitPerSourcePerMinute: 20,
+      rateLimitPerUserPerMinute: 10,
       rateLimitGlobalPerMinute: 300,
       oidc: {},
       initialAdmin,
@@ -505,28 +512,83 @@ describe("レビューと安全の確かめで直したこと", () => {
     await expect(login(ctx, "sato", "kq7vz2mw-long1")).rejects.toBeInstanceOf(AuthFailure);
   });
 
-  it("接続元ごとの回数の上限：超えたら 429。知らない利用者名でも同じに数え、同じ答え", async () => {
-    const { ctx, db } = await setup({ mfaRequired: false, rateLimitPerSourcePerMinute: 3, rateLimitGlobalPerMinute: 100 });
+  it("同じ利用者名への試みが多いと、断らずに遅らせる（指数的に増え、上限で止まる）。知らない利用者名でも同じ", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false, rateLimitPerUserPerMinute: 3, rateLimitGlobalPerMinute: 1000 });
     await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
-    for (const name of ["sato", "nobody", "sato"]) await expect(login(ctx, name, "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
-    const known = await login(ctx, "sato", "kq7vz2mw-long1").catch((e: AuthFailure) => e);
-    const unknown = await login(ctx, "nobody", "kq7vz2mw-long1").catch((e: AuthFailure) => e);
-    expect(known).toMatchObject({ status: 429 });
-    expect(unknown).toMatchObject({ status: 429, message: (known as AuthFailure).message });
-    // ほかの接続元は数えが別
-    const other = { ...ctx, source: { sourceAddress: null, sourceAddressUnverified: "203.0.113.9" } };
-    expect((await login(other, "sato", "kq7vz2mw-long1")).stage).toBe("active");
-    expect((await auditRows(db)).filter((r) => r.detail?.includes("rate_limited"))).toHaveLength(2);
+    const known: number[] = [];
+    const unknown: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      slept = [];
+      await expect(login(ctx, "nobody", "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
+      unknown.push(slept[0] ?? 0);
+    }
+    const relaxed = { ...ctx, settings: { ...ctx.settings, loginLockThreshold: 100 } };
+    for (let i = 0; i < 8; i++) {
+      slept = [];
+      await expect(login(relaxed, "sato", "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
+      known.push(slept[0] ?? 0);
+    }
+    expect(unknown).toEqual([0, 0, 0, 250, 500, 1000, 2000, 4000]);
+    expect(known).toEqual(unknown);
+    // 遅らせても、正しいパスワードなら通る（締め出さない）
+    expect((await login(relaxed, "sato", "kq7vz2mw-long1")).stage).toBe("active");
+    for (let i = 0; i < 10; i++) await login(ctx, "nobody", "x").catch(() => undefined);
+    expect(Math.max(...slept)).toBe(MAX_DELAY_MS);
+    // 遅らせ始めたことは、枠ごとに1回だけ記録に残す（利用者名は残さない）
+    const rows = await auditRows(db);
+    expect(rows.filter((r) => r.detail?.includes("throttled"))).toHaveLength(2);
+    expect(JSON.stringify(rows)).not.toContain("nobody");
   });
 
-  it("全体の回数の上限：接続元を偽って変えても、全体で止まる。1 分たてば戻る", async () => {
-    const { ctx, clock } = await setup({ mfaRequired: false, rateLimitPerSourcePerMinute: 100, rateLimitGlobalPerMinute: 4 });
+  it("ほかの利用者名への失敗では、正しい利用者は遅れない。偽れる接続元（X-Forwarded-For）を変えても鍵は分かれない", async () => {
+    const { ctx } = await setup({ mfaRequired: false, rateLimitPerUserPerMinute: 2, rateLimitGlobalPerMinute: 1000 });
     await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
-    const from = (i: number) => ({ ...ctx, source: { sourceAddress: null, sourceAddressUnverified: `198.51.100.${i}` } });
-    for (let i = 0; i < 4; i++) await expect(login(from(i), "nobody", "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
-    await expect(login(from(9), "sato", "kq7vz2mw-long1")).rejects.toMatchObject({ status: 429 });
+    const spoofed = (i: number) => ({ ...ctx, source: { sourceAddress: null, sourceAddressUnverified: `198.51.100.${i}` } });
+    for (let i = 0; i < 6; i++) await login(spoofed(i), "victim-other", "wrong-pass-1a").catch(() => undefined);
+    expect(slept.length).toBeGreaterThan(0);
+    slept = [];
+    expect((await login(ctx, "sato", "kq7vz2mw-long1")).stage).toBe("active");
+    expect(slept).toEqual([]);
+    expect(throttleKeys("Sato ", null)).toEqual(["user:sato"]);
+    expect(throttleKeys("sato", "192.0.2.10")).toEqual(["user:sato", "user:sato|src:192.0.2.10"]);
+  });
+
+  it("全体の試みが多いと、全員を遅らせる（締め出さない）。1 分たてば戻る", async () => {
+    const { ctx, clock } = await setup({ mfaRequired: false, rateLimitPerUserPerMinute: 1000, rateLimitGlobalPerMinute: 4 });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    for (let i = 0; i < 4; i++) await login(ctx, `attacker${i}`, "wrong-pass-1a").catch(() => undefined);
+    slept = [];
+    expect((await login(ctx, "sato", "kq7vz2mw-long1")).stage).toBe("active");
+    expect(slept).toEqual([250]);
     clock.advance(60_000);
-    expect((await login(from(9), "sato", "kq7vz2mw-long1")).stage).toBe("active");
+    slept = [];
+    await login(ctx, "sato", "kq7vz2mw-long1");
+    expect(slept).toEqual([]);
+  });
+
+  it("ログインの試みが多くても、ロックの解除と再認証は遅らせない", async () => {
+    const { ctx, db, clock } = await setup({ rateLimitPerUserPerMinute: 1, rateLimitGlobalPerMinute: 1 });
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    for (let i = 0; i < 5; i++) await login(ctx, "nobody", "wrong-pass-1a").catch(() => undefined);
+    slept = [];
+    const locked = await sessionOf(db, token);
+    await unlockScreen(ctx, locked.session, locked.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    clock.advance(30_000);
+    const active = await sessionOf(db, token);
+    await reauthenticate(ctx, active.session, active.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    expect(slept).toEqual([]);
+  });
+
+  it("覚える鍵の数は上限で止まる（多くの利用者名を試されても記憶が増え続けない）", () => {
+    const throttle = new LoginThrottle();
+    const settings = { perKeyPerMinute: 5, globalPerMinute: 1_000_000 };
+    const t = 1_800_000_000_000;
+    for (let i = 0; i < MAX_KEYS + 500; i++) throttle.take([`user:u${i}`], settings, t);
+    expect(throttle.keyCount).toBe(MAX_KEYS);
+    throttle.take(["user:new"], settings, t + 60_000);
+    expect(throttle.keyCount).toBe(1);
   });
 
   it("利用者の管理の前に再認証が要る。パスワードと TOTP で通り、5 分で切れる", async () => {

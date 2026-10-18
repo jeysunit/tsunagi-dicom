@@ -48,7 +48,7 @@ export async function authContext(): Promise<AuthContext> {
       loginLockMinutes: config.auth.loginLockMinutes,
       screenLockMinutes: config.auth.screenLockMinutes,
       sessionSecret: config.sessionSecret,
-      rateLimitPerSourcePerMinute: config.auth.rateLimitPerSourcePerMinute,
+      rateLimitPerUserPerMinute: config.auth.rateLimitPerUserPerMinute,
       rateLimitGlobalPerMinute: config.auth.rateLimitGlobalPerMinute,
     },
     source: sourceFromHeaders(await headers()),

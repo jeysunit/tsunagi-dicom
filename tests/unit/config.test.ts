@@ -108,14 +108,14 @@ describe("設定の読み込み", () => {
       expect(loadConfig(real).auth).toMatchObject({ mode: "local", mfaRequired: true, initialAdmin: undefined });
     });
 
-    it("資格情報の確かめの回数の上限は、既定で接続元ごと 20・全体 300（1 分あたり）。0 は誤り", () => {
+    it("ログインを遅らせ始める回数は、既定で利用者名ごと 10・全体 300（1 分あたり）。0 は誤り", () => {
       expect(loadConfig({ ...base, AUTH_MODE: "local" }).auth).toMatchObject({
-        rateLimitPerSourcePerMinute: 20,
+        rateLimitPerUserPerMinute: 10,
         rateLimitGlobalPerMinute: 300,
       });
       expect(
         loadConfig({ ...base, LOGIN_RATE_LIMIT_PER_MINUTE: "5", LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: "50" }).auth,
-      ).toMatchObject({ rateLimitPerSourcePerMinute: 5, rateLimitGlobalPerMinute: 50 });
+      ).toMatchObject({ rateLimitPerUserPerMinute: 5, rateLimitGlobalPerMinute: 50 });
       expect(variablesOf({ ...base, LOGIN_RATE_LIMIT_PER_MINUTE: "0" })).toEqual(["LOGIN_RATE_LIMIT_PER_MINUTE"]);
       expect(variablesOf({ ...base, LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: "x" })).toEqual(["LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE"]);
     });
