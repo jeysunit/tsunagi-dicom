@@ -1,0 +1,29 @@
+{
+  "ID": "43cc9d89-1ce25c2f-d0e105bb-145b760a-022b5f77",
+  "IsStable": true,
+  "Labels": [
+    "test-jp"
+  ],
+  "LastUpdate": "20261017T231200",
+  "MainDicomTags": {
+    "AccessionNumber": "ACC-0001-2",
+    "InstitutionName": "架空病院（試験用）",
+    "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+    "StudyDate": "20261017",
+    "StudyDescription": "胸部CT 単純（試験）",
+    "StudyID": "2",
+    "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.45255015335478509141706689498950755880",
+    "StudyTime": "103000"
+  },
+  "ParentPatient": "aefc2f1e-f29718fb-7c599255-ac0115ca-dd21a0bb",
+  "PatientMainDicomTags": {
+    "PatientBirthDate": "19750510",
+    "PatientID": "JP-TEST-0001",
+    "PatientName": "Yamada^Taro=山田^太郎=やまだ^たろう",
+    "PatientSex": "M"
+  },
+  "Series": [
+    "9a67ee89-ce9dabc9-90ee526c-ef7bbda2-05ed17bc"
+  ],
+  "Type": "Study"
+}

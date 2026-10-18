@@ -1,0 +1,26 @@
+{
+  "ExpectedNumberOfInstances": null,
+  "ID": "6e2a1dab-7f482373-c28c6ee9-18f43229-398c2238",
+  "Instances": [
+    "47de1aa7-176d40ca-e9f27b4b-8da1e5ab-7914d236",
+    "57cf4f33-2dcf935d-04cb9ce3-0364fed0-37848784",
+    "d8fc0985-544d6973-31fb2929-e6333b67-adaa9aec"
+  ],
+  "IsStable": true,
+  "Labels": [],
+  "LastUpdate": "20261017T231203",
+  "MainDicomTags": {
+    "BodyPartExamined": "HEAD",
+    "ImageOrientationPatient": "1.0\\0.0\\0.0\\0.0\\1.0\\0.0",
+    "Manufacturer": "SYNTHETIC",
+    "Modality": "MR",
+    "SeriesDate": "20261017",
+    "SeriesDescription": "T2 Axial",
+    "SeriesInstanceUID": "1.2.826.0.1.3680043.8.498.81786072675344327391342465806463830252",
+    "SeriesNumber": "1",
+    "SeriesTime": "133000"
+  },
+  "ParentStudy": "91a114e5-6c9b217a-d03a2baa-6d0bea79-2888c793",
+  "Status": "Unknown",
+  "Type": "Series"
+}

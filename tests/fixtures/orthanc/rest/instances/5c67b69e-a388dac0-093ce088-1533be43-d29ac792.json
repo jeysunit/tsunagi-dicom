@@ -1,0 +1,16 @@
+{
+  "FileSize": 9664,
+  "FileUuid": "00000000-0000-0000-0000-000000000000",
+  "ID": "5c67b69e-a388dac0-093ce088-1533be43-d29ac792",
+  "IndexInSeries": 2,
+  "Labels": [],
+  "MainDicomTags": {
+    "AcquisitionNumber": "1",
+    "ImageOrientationPatient": "1.0\\0.0\\0.0\\0.0\\1.0\\0.0",
+    "ImagePositionPatient": "-160.0\\-160.0\\-45.0",
+    "InstanceNumber": "2",
+    "SOPInstanceUID": "1.2.826.0.1.3680043.8.498.53029568242301755846602279581089286065"
+  },
+  "ParentSeries": "c8975f98-96dfccb5-db74b064-80a20495-d2500e3e",
+  "Type": "Instance"
+}

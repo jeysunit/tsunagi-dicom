@@ -1,0 +1,26 @@
+{
+  "ExpectedNumberOfInstances": null,
+  "ID": "5a38e0d5-48b6cafe-91259273-2231123d-7fa0e6ba",
+  "Instances": [
+    "20d1ba9b-60b77da4-5d56888b-acb79caf-7084100c",
+    "5b91b219-39ea82e0-87d4c806-49fe436f-bcad7d12",
+    "e791806e-0d571c81-b71028cf-b24c0f90-9dda6216"
+  ],
+  "IsStable": true,
+  "Labels": [],
+  "LastUpdate": "20261017T231202",
+  "MainDicomTags": {
+    "BodyPartExamined": "HEAD",
+    "ImageOrientationPatient": "0.0\\1.0\\0.0\\0.0\\0.0\\-1.0",
+    "Manufacturer": "SYNTHETIC",
+    "Modality": "MR",
+    "SeriesDate": "20261017",
+    "SeriesDescription": "T1 Sagittal",
+    "SeriesInstanceUID": "1.2.826.0.1.3680043.8.498.12707993234656542537253192997382165574",
+    "SeriesNumber": "2",
+    "SeriesTime": "113000"
+  },
+  "ParentStudy": "84baa029-3747fabe-d3a0eb02-08d81350-9e429c80",
+  "Status": "Unknown",
+  "Type": "Series"
+}

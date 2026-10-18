@@ -1,0 +1,30 @@
+{
+  "ID": "84baa029-3747fabe-d3a0eb02-08d81350-9e429c80",
+  "IsStable": true,
+  "Labels": [
+    "test-jp"
+  ],
+  "LastUpdate": "20261017T231202",
+  "MainDicomTags": {
+    "AccessionNumber": "ACC-0002-2",
+    "InstitutionName": "架空病院（試験用）",
+    "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+    "StudyDate": "20261017",
+    "StudyDescription": "頭部MRI（試験）",
+    "StudyID": "2",
+    "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.12421290802828275301475531919530615941",
+    "StudyTime": "113000"
+  },
+  "ParentPatient": "f438ac49-4c00a4ff-bd1a6fd2-68751ac8-e6deef5e",
+  "PatientMainDicomTags": {
+    "PatientBirthDate": "19950101",
+    "PatientID": "JP-TEST-0002",
+    "PatientName": "Shiken^Hanako=試験^花子=しけん^はなこ",
+    "PatientSex": "F"
+  },
+  "Series": [
+    "5a38e0d5-48b6cafe-91259273-2231123d-7fa0e6ba",
+    "bb32ef25-30a3dc32-2148e641-2c2ed6fe-7cd77209"
+  ],
+  "Type": "Study"
+}

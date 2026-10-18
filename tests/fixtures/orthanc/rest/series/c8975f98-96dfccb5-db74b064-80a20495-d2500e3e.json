@@ -1,0 +1,27 @@
+{
+  "ExpectedNumberOfInstances": null,
+  "ID": "c8975f98-96dfccb5-db74b064-80a20495-d2500e3e",
+  "Instances": [
+    "5c67b69e-a388dac0-093ce088-1533be43-d29ac792",
+    "609f8b81-201e5654-38a7a82b-c362ca74-d31b4e90",
+    "8ade2634-8fc9c363-07691164-6082b766-c6e25ef8",
+    "9c01273c-6dd3ffdc-5a1a5f49-0f041a32-eb8d4c55"
+  ],
+  "IsStable": true,
+  "Labels": [],
+  "LastUpdate": "20261017T231203",
+  "MainDicomTags": {
+    "BodyPartExamined": "CHEST",
+    "ImageOrientationPatient": "1.0\\0.0\\0.0\\0.0\\1.0\\0.0",
+    "Manufacturer": "SYNTHETIC",
+    "Modality": "CT",
+    "SeriesDate": "20260410",
+    "SeriesDescription": "Chest Axial 5mm",
+    "SeriesInstanceUID": "1.2.826.0.1.3680043.8.498.43907805789171690229100828585828292254",
+    "SeriesNumber": "1",
+    "SeriesTime": "093000"
+  },
+  "ParentStudy": "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919",
+  "Status": "Unknown",
+  "Type": "Series"
+}

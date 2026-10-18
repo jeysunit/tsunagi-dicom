@@ -1,0 +1,236 @@
+[
+  {
+    "ID": "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231203",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0004-1",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20260410",
+      "StudyDescription": "胸部CT 単純（試験）",
+      "StudyID": "1",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012",
+      "StudyTime": "093000"
+    },
+    "ParentPatient": "d9c7d69e-ea949d83-3e90bfe4-7749a0a0-d7ae493e",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "19600715",
+      "PatientID": "JP-TEST-0004",
+      "PatientName": "Shiken^Takako=試験^髙子=しけん^たかこ",
+      "PatientSex": "F"
+    },
+    "Series": [
+      "c8975f98-96dfccb5-db74b064-80a20495-d2500e3e"
+    ],
+    "Type": "Study"
+  },
+  {
+    "ID": "43cc9d89-1ce25c2f-d0e105bb-145b760a-022b5f77",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231200",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0001-2",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20261017",
+      "StudyDescription": "胸部CT 単純（試験）",
+      "StudyID": "2",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.45255015335478509141706689498950755880",
+      "StudyTime": "103000"
+    },
+    "ParentPatient": "aefc2f1e-f29718fb-7c599255-ac0115ca-dd21a0bb",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "19750510",
+      "PatientID": "JP-TEST-0001",
+      "PatientName": "Yamada^Taro=山田^太郎=やまだ^たろう",
+      "PatientSex": "M"
+    },
+    "Series": [
+      "9a67ee89-ce9dabc9-90ee526c-ef7bbda2-05ed17bc"
+    ],
+    "Type": "Study"
+  },
+  {
+    "ID": "84baa029-3747fabe-d3a0eb02-08d81350-9e429c80",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231202",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0002-2",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20261017",
+      "StudyDescription": "頭部MRI（試験）",
+      "StudyID": "2",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.12421290802828275301475531919530615941",
+      "StudyTime": "113000"
+    },
+    "ParentPatient": "f438ac49-4c00a4ff-bd1a6fd2-68751ac8-e6deef5e",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "19950101",
+      "PatientID": "JP-TEST-0002",
+      "PatientName": "Shiken^Hanako=試験^花子=しけん^はなこ",
+      "PatientSex": "F"
+    },
+    "Series": [
+      "5a38e0d5-48b6cafe-91259273-2231123d-7fa0e6ba",
+      "bb32ef25-30a3dc32-2148e641-2c2ed6fe-7cd77209"
+    ],
+    "Type": "Study"
+  },
+  {
+    "ID": "91a114e5-6c9b217a-d03a2baa-6d0bea79-2888c793",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231203",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0004-2",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20261017",
+      "StudyDescription": "頭部MRI（試験）",
+      "StudyID": "2",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.73812431209939638312153431926357964288",
+      "StudyTime": "133000"
+    },
+    "ParentPatient": "d9c7d69e-ea949d83-3e90bfe4-7749a0a0-d7ae493e",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "19600715",
+      "PatientID": "JP-TEST-0004",
+      "PatientName": "Shiken^Takako=試験^髙子=しけん^たかこ",
+      "PatientSex": "F"
+    },
+    "Series": [
+      "4312fc63-216b1c0d-ba931d50-c875ff02-26adeafe",
+      "6e2a1dab-7f482373-c28c6ee9-18f43229-398c2238"
+    ],
+    "Type": "Study"
+  },
+  {
+    "ID": "b2f45382-2222c5f9-9b5cca10-949c2081-82cf080c",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231202",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0003-1",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20260410",
+      "StudyDescription": "胸部CT 単純（試験）",
+      "StudyID": "1",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.74370219478963110549339491256573063606",
+      "StudyTime": "093000"
+    },
+    "ParentPatient": "37b46442-c67a6ddf-a9e3b695-b3c9dfdb-1f872507",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "20200301",
+      "PatientID": "JP-TEST-0003",
+      "PatientName": "Yamada^Jiro=山田^次郎=やまだ^じろう",
+      "PatientSex": "M"
+    },
+    "Series": [
+      "f40824ae-60d2cc43-5e8d06e6-9c0bc098-59889f8b"
+    ],
+    "Type": "Study"
+  },
+  {
+    "ID": "d04ceb4f-50ee0483-f8fbbf2a-54eb75f2-e95088ee",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231202",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0003-2",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20261017",
+      "StudyDescription": "胸部CT 単純（試験）",
+      "StudyID": "2",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.75667752445432888498174554407272599978",
+      "StudyTime": "123000"
+    },
+    "ParentPatient": "37b46442-c67a6ddf-a9e3b695-b3c9dfdb-1f872507",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "20200301",
+      "PatientID": "JP-TEST-0003",
+      "PatientName": "Yamada^Jiro=山田^次郎=やまだ^じろう",
+      "PatientSex": "M"
+    },
+    "Series": [
+      "ba84b2a5-70118b12-9b7e7f42-ce719e26-d3566013"
+    ],
+    "Type": "Study"
+  },
+  {
+    "ID": "f95c57a6-df48c83c-1f94d99d-bfc62075-92822dc9",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231201",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0002-1",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20260410",
+      "StudyDescription": "胸部CT 単純（試験）",
+      "StudyID": "1",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.92586672124270452901721343807821604204",
+      "StudyTime": "093000"
+    },
+    "ParentPatient": "f438ac49-4c00a4ff-bd1a6fd2-68751ac8-e6deef5e",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "19950101",
+      "PatientID": "JP-TEST-0002",
+      "PatientName": "Shiken^Hanako=試験^花子=しけん^はなこ",
+      "PatientSex": "F"
+    },
+    "Series": [
+      "aae9face-d76df327-b481f844-f89d4e29-a2e21ad2"
+    ],
+    "Type": "Study"
+  },
+  {
+    "ID": "fd432ba4-73bbd221-afb64d63-c4822c63-b059de02",
+    "IsStable": true,
+    "Labels": [
+      "test-jp"
+    ],
+    "LastUpdate": "20261017T231200",
+    "MainDicomTags": {
+      "AccessionNumber": "ACC-0001-1",
+      "InstitutionName": "架空病院（試験用）",
+      "ReferringPhysicianName": "Shiken^Ishi=試験^医師=しけん^いし",
+      "StudyDate": "20260410",
+      "StudyDescription": "胸部CT 単純（試験）",
+      "StudyID": "1",
+      "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.12580196157444326238324642149044327503",
+      "StudyTime": "093000"
+    },
+    "ParentPatient": "aefc2f1e-f29718fb-7c599255-ac0115ca-dd21a0bb",
+    "PatientMainDicomTags": {
+      "PatientBirthDate": "19750510",
+      "PatientID": "JP-TEST-0001",
+      "PatientName": "Yamada^Taro=山田^太郎=やまだ^たろう",
+      "PatientSex": "M"
+    },
+    "Series": [
+      "0c256689-f07ff9c4-1791af1e-052551aa-41cfcc90"
+    ],
+    "Type": "Study"
+  }
+]

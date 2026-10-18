@@ -1,0 +1,10 @@
+{
+  "CountInstances": 36,
+  "CountPatients": 4,
+  "CountSeries": 10,
+  "CountStudies": 8,
+  "TotalDiskSize": "10485760",
+  "TotalDiskSizeMB": 10,
+  "TotalUncompressedSize": "10485760",
+  "TotalUncompressedSizeMB": 10
+}
