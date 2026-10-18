@@ -9,7 +9,6 @@ export interface HeaderUser {
   username: string;
   roleLabel: string;
   csrfToken: string;
-  canManageUsers: boolean;
 }
 
 // どの頁にも出す見出し。「非医療機器」の表示は出さない（承認者の決定。医療機器でない旨は README と仕様書に書く）。
@@ -19,31 +18,41 @@ export function SiteHeader({
   user,
   pendingCsrfToken,
   theme,
+  nav,
 }: {
   user?: HeaderUser;
   pendingCsrfToken?: string;
+  /** 頁の道（ログインしているときだけ。検証モードを含む） */
+  nav?: { canManageUsers: boolean; canEditViewerDefaults: boolean; account: boolean };
   /** 地の色の切り替え（ログインしているときだけ） */
   theme?: { current: Theme; csrfToken?: string };
 }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-surface px-4 py-2">
+    <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-border bg-surface px-6 py-2.5">
       <div className="flex items-center gap-4">
         <Link href="/" className="font-bold text-value">
           tsunagi-dicom
         </Link>
-        {user && (
-          <nav aria-label="頁" className="flex items-center gap-3 text-label">
+        {nav && (
+          <nav aria-label="頁" className="flex items-center gap-4 text-label">
             <Link href="/" className="hover:text-value">
               検査
             </Link>
-            {user.canManageUsers && (
+            {nav.canEditViewerDefaults && (
+              <Link href="/admin/viewers" className="hover:text-value">
+                ビューアの既定
+              </Link>
+            )}
+            {nav.canManageUsers && (
               <Link href="/admin/users" className="hover:text-value">
                 利用者
               </Link>
             )}
-            <Link href="/account" className="hover:text-value">
-              自分の設定
-            </Link>
+            {nav.account && (
+              <Link href="/account" className="hover:text-value">
+                自分の設定
+              </Link>
+            )}
           </nav>
         )}
       </div>

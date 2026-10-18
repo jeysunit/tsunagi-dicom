@@ -65,10 +65,11 @@ async function changeOwnPassword(page: Page, password: string) {
 
 /** 検査の一覧の1行目の、患者 ID・氏名・StudyInstanceUID（合成の見本の値） */
 async function patientValues(page: Page): Promise<string[]> {
-  const row = page.getByTestId("study-table").locator("tbody tr").first();
+  const row = page.getByTestId("study-table").locator("tbody tr[data-study-uid]").first();
   const values = [
-    (await row.locator("td").nth(1).innerText()).trim(),
-    (await row.locator("td").nth(2).innerText()).trim(),
+    // 列：状態・サムネイル・検査日時・患者 ID・氏名…（src/components/studies/study-browser.tsx）
+    (await row.locator("td").nth(3).innerText()).trim(),
+    (await row.getByTestId("patient-name").innerText()).trim(),
     (await row.getAttribute("data-study-uid")) ?? "",
   ];
   for (const v of values) expect(v.length).toBeGreaterThan(3);

@@ -24,6 +24,10 @@ export const e2eEnv = {
   SESSION_SECRET: randomBytes(48).toString("base64"),
   DATABASE_URL: `file:${path.resolve(".e2e/e2e.db")}`,
   TZ: "Asia/Tokyo",
+  // ビューアの選び分けの試験（段 2）。例の名前だけ。画面の試験は BFF の移り先を控えるだけで、この宛先へは通信しない
+  VIEWER_OHIF_URL: "https://viewer.example.org/ohif",
+  VIEWER_STONE_URL: "https://viewer.example.org/stone",
+  PUBLIC_DICOMWEB_URL: "https://pacs.example.org/dicom-web",
   // Next.js の待ち受けの住所（AUTH_MODE=dev の起動の条件ではない。dev はモックのときだけ起動する）
   HOSTNAME: "127.0.0.1",
   PORT: String(PORT),
