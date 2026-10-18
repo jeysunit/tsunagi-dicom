@@ -1,5 +1,5 @@
 import { errorResponse } from "@/lib/api/respond";
-import { audit, getSession } from "@/lib/auth/session";
+import { audit, requireSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { searchAuditFields } from "@/lib/search-audit";
 
@@ -7,7 +7,7 @@ import { searchAuditFields } from "@/lib/search-audit";
 // 返す検査は記録してから返す（記録に失敗したら返さない）。
 export async function GET() {
   try {
-    const session = await getSession();
+    const session = await requireSession("study.search");
     const backend = getBackend();
     const [count, studies] = await Promise.all([backend.countStudies(), backend.searchStudies()]);
     await audit(session, searchAuditFields("api", studies));

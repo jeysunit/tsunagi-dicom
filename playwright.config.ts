@@ -7,6 +7,9 @@ import { defineConfig } from "@playwright/test";
 
 const PORT = 3100;
 const baseURL = `http://127.0.0.1:${PORT}`;
+/** AUTH_MODE=local の試験のサーバー */
+const LOCAL_PORT = 3102;
+export const LOCAL_BASE_URL = `http://127.0.0.1:${LOCAL_PORT}`;
 
 /** 画像サーバーのパスワードの代わりの印。画面と API の応答に出ないことを確かめる */
 export const BACKEND_PASSWORD_MARKER = "e2e-backend-password-must-not-leak";
@@ -26,6 +29,26 @@ export const e2eEnv = {
   PORT: String(PORT),
   // 試験のデータベースを作る prisma migrate deploy が、外へ版の確かめを送らないようにする
   CHECKPOINT_DISABLE: "1",
+};
+
+/** AUTH_MODE=local の試験の、最初の管理者（試験だけの値） */
+export const E2E_ADMIN = { username: "e2e-admin", password: "e2e-Initial-7xq4" };
+
+export const localEnv = {
+  ...e2eEnv,
+  AUTH_MODE: "local",
+  DEV_ALLOW_WRITE: "",
+  MFA_REQUIRED: "true",
+  LOGIN_LOCK_THRESHOLD: "3",
+  LOGIN_LOCK_MINUTES: "1",
+  SCREEN_LOCK_MINUTES: "1",
+  INITIAL_ADMIN_USERNAME: E2E_ADMIN.username,
+  INITIAL_ADMIN_PASSWORD_FILE: path.resolve(".e2e/local/initial-admin-password.txt"),
+  E2E_INITIAL_ADMIN_PASSWORD: E2E_ADMIN.password,
+  DATABASE_URL: `file:${path.resolve(".e2e/local/e2e.db")}`,
+  PORT: String(LOCAL_PORT),
+  // standalone の .next/static は、検証モードのサーバーの方で写す（同時に写さない）
+  E2E_SKIP_PREPARE: "true",
 };
 
 export default defineConfig({
@@ -49,11 +72,20 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: "node scripts/e2e-server.mjs",
-    url: `${baseURL}/api/health`,
-    reuseExistingServer: false,
-    timeout: 60_000,
-    env: e2eEnv,
-  },
+  webServer: [
+    {
+      command: "node scripts/e2e-server.mjs",
+      url: `${baseURL}/api/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: e2eEnv,
+    },
+    {
+      command: "node scripts/e2e-server.mjs",
+      url: `${LOCAL_BASE_URL}/api/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: localEnv,
+    },
+  ],
 });

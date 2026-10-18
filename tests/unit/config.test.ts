@@ -86,17 +86,44 @@ describe("設定の読み込み", () => {
   });
 
   describe("AUTH_MODE", () => {
-    it("local と oidc は、この段ではまだ無いと示して止める", () => {
-      expect(problemsOf({ ...base, AUTH_MODE: "local" })).toEqual([
-        { variable: "AUTH_MODE", message: expect.stringContaining("段 1b") },
-      ]);
+    it("oidc は、この段ではまだ無いと示して止める", () => {
       expect(problemsOf({ ...base, AUTH_MODE: "oidc" })).toEqual([
         { variable: "AUTH_MODE", message: expect.stringContaining("段 4") },
       ]);
     });
 
-    it("設定しなければ local（認証が有効）を既定にし、この段では止める", () => {
-      expect(variablesOf({ ...base, AUTH_MODE: undefined })).toEqual(["AUTH_MODE"]);
+    it("設定しなければ local（認証が有効）を既定にする", () => {
+      expect(loadConfig({ ...base, AUTH_MODE: undefined }).auth.mode).toBe("local");
+    });
+
+    it("local はモックでも実の画像サーバーでも起動する（段 1b）", () => {
+      expect(loadConfig({ ...base, AUTH_MODE: "local" }).auth.mode).toBe("local");
+      const real = {
+        ...base,
+        AUTH_MODE: "local",
+        BACKEND_MOCK: "false",
+        BACKEND_DICOMWEB_URL: "https://pacs.example.org/dicom-web",
+        BACKEND_ORTHANC_URL: "https://pacs.example.org",
+      };
+      expect(loadConfig(real).auth).toMatchObject({ mode: "local", mfaRequired: true, initialAdmin: undefined });
+    });
+
+    it("最初の管理者は、利用者名とパスワードのファイルを両方そろえ、local のときだけ使える", () => {
+      const local = { ...base, AUTH_MODE: "local" };
+      expect(
+        loadConfig({ ...local, INITIAL_ADMIN_USERNAME: "admin", INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" }).auth
+          .initialAdmin,
+      ).toEqual({ username: "admin", passwordFile: "/run/secrets/admin" });
+      expect(variablesOf({ ...local, INITIAL_ADMIN_USERNAME: "admin" })).toEqual(["INITIAL_ADMIN_PASSWORD_FILE"]);
+      expect(variablesOf({ ...local, INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" })).toEqual([
+        "INITIAL_ADMIN_USERNAME",
+      ]);
+      expect(
+        variablesOf({ ...local, INITIAL_ADMIN_USERNAME: "Admin User", INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" }),
+      ).toEqual(["INITIAL_ADMIN_USERNAME"]);
+      expect(
+        variablesOf({ ...base, INITIAL_ADMIN_USERNAME: "admin", INITIAL_ADMIN_PASSWORD_FILE: "/run/secrets/admin" }),
+      ).toEqual(["INITIAL_ADMIN_USERNAME"]);
     });
 
     it("dev はモックでなければ起動しない（待ち受けの住所が手元だけでも）", () => {

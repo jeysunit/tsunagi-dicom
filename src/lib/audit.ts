@@ -22,6 +22,18 @@ export const AUDIT_ACTIONS = [
   "write",
   // ビューアが画像を取る道（WADO-RS の読み取りの中継）
   "retrieve",
+  // AUTH_MODE=local（段 1b）：ログインの一時停止とその解除・画面のロックと解除・TOTP の登録とやり直し・パスワードの変更
+  "login_lock",
+  "login_unlock",
+  "screen_lock",
+  "screen_unlock",
+  "mfa_enroll",
+  "mfa_reset",
+  "password_change",
+  // 利用者の管理（段 1b）：作る・止める／戻す・役割の変更
+  "user_create",
+  "user_status_change",
+  "role_change",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 /** success：通した。denied：このアプリが断った。failed：画像サーバーが失敗を返した・つながらなかった */

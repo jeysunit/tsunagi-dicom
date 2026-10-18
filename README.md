@@ -9,10 +9,11 @@ DICOMweb に対応した画像サーバー（Orthanc など）を**改造せず�
 
 ## 状態
 
-> **設計の段で、本番（診療の現場・実の患者のデータ）には使わない。** いまは仕様と土台を作っている途中で、実の画像サーバーにつなぐ機能と利用者のログインがまだ無い。
+> **設計の段で、本番（診療の現場・実の患者のデータ）には使わない。** いまは仕様と土台を作っている途中。
 
-**段 1a まで（2026-10-18）。** 土台・BFF（検索の画面の API と、ビューアが画像を取る WADO-RS の読み取りだけの中継）・監査の記録・開発用の認証（`AUTH_MODE=dev`）・共通の画面・CI とイメージがある。
-画面は、BFF を通した検査の件数と素の一覧の1頁だけ。アプリの利用者のログイン（`AUTH_MODE=local`）は段 1b で、それまでは `AUTH_MODE=dev` でしか起動せず、`AUTH_MODE=dev` はモックのバックエンド（`BACKEND_MOCK=true`）のときだけ起動する。つまり段 1a では、実の画像サーバーにはつながない。
+**段 1b まで（2026-10-18）。** 段 1a の土台・BFF（検索の画面の API と、ビューアが画像を取る WADO-RS の読み取りだけの中継）・監査の記録・開発用の認証（`AUTH_MODE=dev`）・共通の画面・CI とイメージに、アプリの利用者のログイン（`AUTH_MODE=local`）を足した：利用者と役割（管理者・医師・技師・閲覧）、パスワードの規則（argon2id のハッシュ）、二要素の認証（TOTP）、ログインの一時停止、画面のロック、利用者の棚卸しの画面、役割ごとにできる操作、中継の役割の確かめ。
+`AUTH_MODE=local` は実の画像サーバーにもつなげる（実の画像サーバーでの確かめはまだ）。`AUTH_MODE=dev` はこれまでどおり、モックのバックエンド（`BACKEND_MOCK=true`）のときだけ起動する。
+画面は、ログイン・BFF を通した検査の件数と素の一覧・利用者の管理・自分の設定。検査の一覧の作り込みは段 2。
 実装は段ごとの PR で進める（[`docs/spec.md`](docs/spec.md) の「6. 段階」）。
 
 画面は、最初は日本語だけ。文書は日本語を主にし、README は日本語と英語。
@@ -48,7 +49,15 @@ mkdir -p data && DATABASE_URL="file:./data/tsunagi.db" npm run db:migrate
 DATABASE_URL="file:./data/tsunagi.db" npm run dev
 ```
 
-試験：`npm run lint`・`npm run typecheck`・`npm test`（Vitest）・`npm run build && npm run test:e2e`（Playwright。モックに対して流す）。
+アプリの利用者のログイン（`AUTH_MODE=local`）で試すとき：最初の管理者は、利用者が1人もいないときだけ、起動の時に秘密のファイルから作る（`compose.yaml` の `INITIAL_ADMIN_USERNAME`・`INITIAL_ADMIN_PASSWORD_FILE` の例）。最初のログインで TOTP（`MFA_REQUIRED=true` のとき）を登録し、パスワードを本人のものに変える。cookie は `Secure` なので、手元（`127.0.0.1`・`localhost`）のほかでは TLS（リバースプロキシ）の後ろに置く。
+
+```sh
+printf '%s\n' '<最初のパスワード>' > secrets/initial_admin_password.txt   # 8 文字以上・英字と数字を両方含める
+# compose.yaml の INITIAL_ADMIN_* と secrets の initial_admin_password の行を有効にしてから
+BACKEND_MOCK=true AUTH_MODE=local docker compose up --build
+```
+
+試験：`npm run lint`・`npm run typecheck`・`npm test`（Vitest）・`npm run build && npm run test:e2e`（Playwright。モックに対して、`AUTH_MODE=dev` と `AUTH_MODE=local` のサーバーを起こして流す）。
 
 ## イメージ（GHCR）
 

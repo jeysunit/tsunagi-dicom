@@ -24,7 +24,7 @@ model AuditLog {
   actorId                 String
   actorRole               String
   authMode                String
-  // 何をした（login・logout・search・view_study・open_viewer・modify・delete・import・config_change・role_switch・write・retrieve）
+  // 何をした（src/lib/audit.ts の AUDIT_ACTIONS。login・logout・search・retrieve・role_change など）
   action                  String
   // success・denied（このアプリが断った）・failed（画像サーバーが失敗を返した）
   outcome                 String
@@ -43,4 +43,59 @@ model AuditLog {
   @@index([occurredAt])
   @@index([patientId])
   @@index([studyInstanceUid])
+}
+
+// アプリの利用者（AUTH_MODE=local。docs/spec.md の 3.6、第7.0版 14 遵守事項①②⑤⑥⑧・14.2）。
+// 利用者は消さずに止める（status = disabled）。監査の記録の「誰が」（actorId = username）を後から追えるようにするため。
+model User {
+  id                 String    @id
+  // ログインの名前。作った後は変えない（監査の記録の actorId に使う）
+  username           String    @unique
+  displayName        String
+  // admin・doctor・technologist・viewer（src/lib/auth/roles.ts）
+  role               String
+  // active・disabled
+  status             String    @default("active")
+  // argon2id の PHC の文字列（$argon2id$v=19$m=…,t=…,p=…$salt$hash）。平文には戻せない
+  passwordHash       String
+  passwordChangedAt  DateTime
+  // 管理者が決めたパスワード（作った時）は、次のログインで本人が変える
+  mustChangePassword Boolean   @default(false)
+  // TOTP の秘密（AES-256-GCM で暗号化。鍵は SESSION_SECRET から HKDF で導く。src/lib/auth/sealed-field.ts）
+  totpSecretEnc      String?
+  totpEnabledAt      DateTime?
+  // 最後に受け入れた TOTP の時間の段（30 秒ごと）。同じ段・前の段の使い回しを断る
+  totpLastStep       Int?
+  // ログインの一時停止（第7.0版 14 遵守事項⑥(6)）
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  // 利用者の棚卸し（第7.0版 14 遵守事項⑧）
+  lastLoginAt        DateTime?
+  createdAt          DateTime
+  updatedAt          DateTime
+
+  sessions Session[]
+}
+
+// ログインのセッション。cookie には乱数の token を入れ、ここには token の SHA-256 だけを持つ。
+model Session {
+  // token の SHA-256（16 進）
+  id             String    @id
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // totp（TOTP の入力待ち）・enroll（TOTP の登録待ち）・change_password（パスワードの変更待ち）・active
+  stage          String
+  // CSRF の対策の token（状態を変える要求の x-csrf-token と比べる）
+  csrfToken      String
+  createdAt      DateTime
+  expiresAt      DateTime
+  // 最後の操作（画面のロックの時間を数える元）
+  lastActivityAt DateTime
+  // 画面のロック（第7.0版 12 遵守事項⑥）。null でなければロックしている
+  lockedAt       DateTime?
+  // 登録の途中の TOTP の秘密（暗号化）。登録を確かめたら User へ移す
+  pendingTotpEnc String?
+
+  @@index([userId])
+  @@index([expiresAt])
 }

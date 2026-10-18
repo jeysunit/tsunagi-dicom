@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { isValidUsername, USERNAME_HINT } from "@/lib/auth/username";
 
 // 設定の読み込み（docs/spec.md の 2.1。正本は .env.example）。
 // 足りない・誤った値があれば、どの変数かを並べて ConfigError を投げる。値そのものは文言に出さない（秘密を漏らさない）。
@@ -32,6 +33,11 @@ export interface AppConfig {
     loginLockMinutes: number;
     screenLockMinutes: number;
     oidc: { issuer?: string; clientId?: string; clientSecret?: string };
+    /**
+     * 最初の管理者（AUTH_MODE=local で利用者が1人もいないときだけ使う。src/lib/auth/bootstrap.ts）。
+     * パスワードはファイルで受け、ここにはファイルの場所だけを持つ（中身は使う時に読む）
+     */
+    initialAdmin?: { username: string; passwordFile: string };
   };
   databaseUrl: string;
   sessionSecret: string;
@@ -96,6 +102,8 @@ const envSchema = z.object({
   OIDC_CLIENT_SECRET: z.string().optional(),
   OIDC_CLIENT_SECRET_FILE: z.string().optional(),
   DEV_ALLOW_WRITE: bool(false),
+  INITIAL_ADMIN_USERNAME: z.string().optional(),
+  INITIAL_ADMIN_PASSWORD_FILE: z.string().optional(),
   DATABASE_URL: z
     .string()
     .default("file:/data/tsunagi.db")
@@ -213,13 +221,26 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   }
 
-  if (e.AUTH_MODE === "local") {
-    problem("AUTH_MODE", "local はまだ無い（段 1b で作る）。いまは開発用の dev（モックだけ）だけ動く");
-  } else if (e.AUTH_MODE === "oidc") {
-    problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは開発用の dev（モックだけ）だけ動く");
+  if (e.AUTH_MODE === "oidc") {
+    problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは local（アプリの利用者）と開発用の dev（モックだけ）が動く");
   } else if (e.AUTH_MODE === "dev" && !e.BACKEND_MOCK) {
     // 段 1a〜1b の決まり（docs/spec.md の 4）。実の画像サーバーには local を使う
     problem("AUTH_MODE", "dev は BACKEND_MOCK=true のときだけ起動する。実の画像サーバーには local を使う");
+  }
+
+  let initialAdmin: { username: string; passwordFile: string } | undefined;
+  if (e.INITIAL_ADMIN_USERNAME !== undefined || e.INITIAL_ADMIN_PASSWORD_FILE !== undefined) {
+    if (e.AUTH_MODE !== "local") {
+      problem("INITIAL_ADMIN_USERNAME", "AUTH_MODE=local のときだけ使える");
+    } else if (e.INITIAL_ADMIN_USERNAME === undefined) {
+      problem("INITIAL_ADMIN_USERNAME", "INITIAL_ADMIN_PASSWORD_FILE があるときは必須");
+    } else if (e.INITIAL_ADMIN_PASSWORD_FILE === undefined) {
+      problem("INITIAL_ADMIN_PASSWORD_FILE", "INITIAL_ADMIN_USERNAME があるときは必須（パスワードはファイルで渡す）");
+    } else if (!isValidUsername(e.INITIAL_ADMIN_USERNAME)) {
+      problem("INITIAL_ADMIN_USERNAME", USERNAME_HINT);
+    } else {
+      initialAdmin = { username: e.INITIAL_ADMIN_USERNAME, passwordFile: e.INITIAL_ADMIN_PASSWORD_FILE };
+    }
   }
 
   if (e.DEV_ALLOW_WRITE) {
@@ -253,6 +274,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       loginLockMinutes: e.LOGIN_LOCK_MINUTES,
       screenLockMinutes: e.SCREEN_LOCK_MINUTES,
       oidc: { issuer: e.OIDC_ISSUER, clientId: e.OIDC_CLIENT_ID, clientSecret: oidcClientSecret },
+      initialAdmin,
     },
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている

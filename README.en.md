@@ -9,10 +9,11 @@ A standalone web front end and BFF (Backend For Frontend) that uses a DICOMweb-c
 
 ## Status
 
-> **Design stage — do not use in production (clinical settings or real patient data).** The specification and foundation are still being built; connecting to a real image server and user login are not implemented yet.
+> **Design stage — do not use in production (clinical settings or real patient data).** The specification and foundation are still being built.
 
-**Stage 1a (2026-10-18).** The foundation, the BFF (a screen API for search, and a relay limited to WADO-RS reads so that viewers can retrieve images), the audit trail, development authentication (`AUTH_MODE=dev`), the common screen, and CI with container images are in place.
-The only page shows the number of studies and a plain study list, fetched through the BFF. Application user login (`AUTH_MODE=local`) comes in stage 1b; until then the application starts only with `AUTH_MODE=dev`, and `AUTH_MODE=dev` starts only with the mock backend (`BACKEND_MOCK=true`). In other words, stage 1a does not connect to a real image server.
+**Stage 1b (2026-10-18).** On top of the stage 1a foundation (the BFF with a screen API for search and a relay limited to WADO-RS reads so that viewers can retrieve images, the audit trail, development authentication `AUTH_MODE=dev`, the common screen, and CI with container images), application user login (`AUTH_MODE=local`) is in place: users and roles (administrator, physician, technologist, read-only), password rules (stored as argon2id hashes), two-factor authentication (TOTP), temporary login lockout, screen lock, a user inventory page, per-role permissions, and role checks on the relay.
+`AUTH_MODE=local` can also be used with a real image server (not yet verified against one). `AUTH_MODE=dev` still starts only with the mock backend (`BACKEND_MOCK=true`).
+The pages are: login, the number of studies and a plain study list fetched through the BFF, user administration, and personal settings. The full study list comes in stage 2.
 Implementation proceeds stage by stage; each PR covers one cohesive change within a single stage (see "6. 段階" in [`docs/spec.md`](docs/spec.md)).
 
 The user interface will be Japanese only at first. The documents are written mainly in Japanese.
@@ -48,7 +49,15 @@ mkdir -p data && DATABASE_URL="file:./data/tsunagi.db" npm run db:migrate
 DATABASE_URL="file:./data/tsunagi.db" npm run dev
 ```
 
-Tests: `npm run lint`, `npm run typecheck`, `npm test` (Vitest), `npm run build && npm run test:e2e` (Playwright, against the mock backend).
+To try application user login (`AUTH_MODE=local`): the first administrator is created at startup from a secret file, only while there are no users (see `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD_FILE` in `compose.yaml`). At the first login the administrator enrolls TOTP (when `MFA_REQUIRED=true`) and replaces the password. The session cookie is `Secure`, so outside `127.0.0.1` / `localhost` put the application behind TLS (a reverse proxy).
+
+```sh
+printf '%s\n' '<initial password>' > secrets/initial_admin_password.txt   # at least 8 characters, letters and digits
+# after enabling the INITIAL_ADMIN_* and initial_admin_password secret lines in compose.yaml
+BACKEND_MOCK=true AUTH_MODE=local docker compose up --build
+```
+
+Tests: `npm run lint`, `npm run typecheck`, `npm test` (Vitest), `npm run build && npm run test:e2e` (Playwright, against the mock backend, with one `AUTH_MODE=dev` server and one `AUTH_MODE=local` server).
 
 ## Container image (GHCR)
 

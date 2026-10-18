@@ -1,8 +1,17 @@
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { e2eEnv } from "../../playwright.config";
 
 // 設定に誤りがあれば、どの変数かを示して起動を止める（docs/spec.md の 2.1・4）。
+
+/** 規則に合わない最初の管理者のパスワード（よく使われるパスワードの一覧にある） */
+const WEAK_PASSWORD_FILE = path.resolve(".e2e/weak-initial-admin-password.txt");
+test.beforeAll(() => {
+  mkdirSync(path.dirname(WEAK_PASSWORD_FILE), { recursive: true });
+  writeFileSync(WEAK_PASSWORD_FILE, "password1\n");
+});
 
 function startWith(overrides: Record<string, string>): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve, reject) => {
@@ -26,7 +35,36 @@ function startWith(overrides: Record<string, string>): Promise<{ code: number | 
 
 const cases: [string, Record<string, string>, string][] = [
   ["SESSION_SECRET が空", { SESSION_SECRET: "" }, "SESSION_SECRET"],
-  ["AUTH_MODE=local（段 1b）", { AUTH_MODE: "local" }, "AUTH_MODE: local はまだ無い"],
+  [
+    "AUTH_MODE=local で利用者が1人もいず、最初の管理者の設定も無い",
+    { AUTH_MODE: "local", DEV_ALLOW_WRITE: "" },
+    "INITIAL_ADMIN_USERNAME: AUTH_MODE=local で利用者が1人もいない",
+  ],
+  [
+    "最初の管理者のパスワードがファイルでない",
+    { AUTH_MODE: "local", DEV_ALLOW_WRITE: "", INITIAL_ADMIN_USERNAME: "admin" },
+    "INITIAL_ADMIN_PASSWORD_FILE",
+  ],
+  [
+    "最初の管理者のパスワードのファイルを読めない",
+    {
+      AUTH_MODE: "local",
+      DEV_ALLOW_WRITE: "",
+      INITIAL_ADMIN_USERNAME: "admin",
+      INITIAL_ADMIN_PASSWORD_FILE: "/nonexistent/initial_admin_password",
+    },
+    "INITIAL_ADMIN_PASSWORD_FILE: ファイルを読めない",
+  ],
+  [
+    "最初の管理者のパスワードが規則に合わない（よく使われるもの）",
+    {
+      AUTH_MODE: "local",
+      DEV_ALLOW_WRITE: "",
+      INITIAL_ADMIN_USERNAME: "admin",
+      INITIAL_ADMIN_PASSWORD_FILE: WEAK_PASSWORD_FILE,
+    },
+    "最初の管理者を作れない",
+  ],
   ["AUTH_MODE=oidc（段 4）", { AUTH_MODE: "oidc" }, "AUTH_MODE: oidc はまだ無い"],
   [
     "AUTH_MODE=dev でモックでない（待ち受けが手元だけでも）",

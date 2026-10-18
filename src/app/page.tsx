@@ -1,5 +1,6 @@
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { audit, getSession } from "@/lib/auth/session";
+import { pageAccess } from "@/lib/auth/page-session";
+import { audit } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { BackendError, type StudyCount, type StudySummary } from "@/lib/backend/types";
 import { searchAuditFields } from "@/lib/search-audit";
@@ -16,7 +17,17 @@ function formatTime(hhmmss: string): string {
 }
 
 export default async function HomePage() {
-  const session = await getSession();
+  const access = await pageAccess("study.search");
+  // 画面のロック中は中身を描かない（ロックの画面は layout が出す）
+  if (access.kind === "locked") return null;
+  if (access.kind === "forbidden") {
+    return (
+      <p role="alert" className="text-label">
+        この役割では検査の一覧を開けない
+      </p>
+    );
+  }
+  const { session } = access;
   const backend = getBackend();
 
   let count: StudyCount;
