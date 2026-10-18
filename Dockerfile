@@ -14,7 +14,8 @@ WORKDIR /app
 # .npmrc：allowScripts に無い install のスクリプトで止める（strict-allow-scripts）
 COPY package.json package-lock.json .npmrc prisma.config.ts ./
 COPY prisma ./prisma
-RUN npm ci
+# strict-allow-scripts は npm 11 の後の版の設定。土台のイメージの npm の版を作りの記録に残す
+RUN npm --version && npm ci
 
 # ── 作る ──
 FROM deps AS builder

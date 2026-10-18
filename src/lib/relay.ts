@@ -40,8 +40,20 @@ export async function relayWadoRs(input: RelayInput, deps: RelayDeps): Promise<R
     return Response.json({ error: RELAY_READ_ONLY_MESSAGE }, { status: 405, headers: { allow: "GET, HEAD" } });
   }
 
-  // 字が使えない path は 400（BackendError を投げる）
-  const target = wadoRsTarget(input.segments);
+  // 字が使えない path（`..`・符号化した `/` など）は、断ったことを記録してから 400
+  let target: ReturnType<typeof wadoRsTarget>;
+  try {
+    target = wadoRsTarget(input.segments);
+  } catch (error) {
+    if (error instanceof BackendError) {
+      await deps.record({
+        action: "retrieve",
+        outcome: "denied",
+        detail: { method, path: pathForAudit(input.segments), reason: "bad-path" },
+      });
+    }
+    throw error;
+  }
   if (!target) {
     await deps.record({
       action: "retrieve",

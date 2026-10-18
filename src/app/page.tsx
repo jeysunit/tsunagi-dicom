@@ -2,6 +2,7 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { audit, getSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { BackendError, type StudyCount, type StudySummary } from "@/lib/backend/types";
+import { searchAuditFields } from "@/lib/search-audit";
 
 // 段 1a の1頁：BFF を通した検査の件数と、検査の一覧（素の表）。
 // 一覧の作り込み（絞り込み・氏名の整形・和暦・詳細のパネル）は段 2。
@@ -31,7 +32,7 @@ export default async function HomePage() {
       </p>
     );
   }
-  await audit(session, { action: "search", detail: { via: "page", results: studies.length } });
+  await audit(session, searchAuditFields("page", studies));
 
   return (
     <section className="space-y-3">

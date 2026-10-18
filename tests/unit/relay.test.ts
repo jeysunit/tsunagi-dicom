@@ -120,10 +120,15 @@ describe("中継", () => {
     }
   });
 
-  it("使えない字の path は 400（画像サーバーへ渡さない）", async () => {
-    const f = fakes();
-    await expect(relayWadoRs(input(["studies", ".."]), f.deps)).rejects.toMatchObject({ status: 400 });
-    expect(f.relayed).toHaveLength(0);
+  it("使えない字の path は 400（画像サーバーへ渡さず、断ったことを記録する）", async () => {
+    for (const segments of [["studies", ".."], ["studies", "a/b"], ["studies", "%2e%2e"], []]) {
+      const f = fakes();
+      await expect(relayWadoRs(input(segments), f.deps)).rejects.toMatchObject({ status: 400 });
+      expect(f.relayed).toHaveLength(0);
+      expect(f.records).toEqual([
+        { action: "retrieve", outcome: "denied", detail: { method: "GET", path: segments.join("/"), reason: "bad-path" } },
+      ]);
+    }
   });
 
   it("記録に残す path の長さを切る", async () => {
