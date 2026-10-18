@@ -75,6 +75,7 @@ async function setup(settings: Partial<AuthSettings> = {}) {
       loginLockThreshold: 3,
       loginLockMinutes: 15,
       screenLockMinutes: 15,
+      screenUnlockRequireTotp: false,
       sessionSecret: SESSION_SECRET,
       rateLimitPerUserPerMinute: 1000,
       rateLimitGlobalPerMinute: 1000,
@@ -294,8 +295,10 @@ describe("ログインの一時停止（第7.0版 14 遵守事項⑥(6)）", () 
 });
 
 describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
-  it("ロックしたら、解くまでセッションはロックのまま。解くにはパスワードと TOTP が要る", async () => {
-    const { ctx, db, clock } = await setup();
+  // 2026-10-19 に承認者が決めた：既定はパスワードだけで解き、SCREEN_UNLOCK_REQUIRE_TOTP=true のときだけ TOTP も求める。
+  // この試験は、設定を true にしたときに、これまでどおりパスワードと TOTP が要ることを確かめる（期待は変えていない）
+  it("SCREEN_UNLOCK_REQUIRE_TOTP=true：ロックしたら、解くまでセッションはロックのまま。解くにはパスワードと TOTP が要る", async () => {
+    const { ctx, db, clock } = await setup({ screenUnlockRequireTotp: true });
     const { secret, token } = await enrolledUser(ctx, clock);
     const s = await sessionOf(db, token);
     await lockScreen(ctx, s.session, s.user, "client_idle");
@@ -314,6 +317,132 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     expect(actions.filter((a) => a === "screen_unlock:denied")).toHaveLength(2);
     expect(actions).toContain("screen_unlock:success");
     expect(JSON.stringify(await auditRows(db))).not.toContain(PASSWORD);
+    // 解いたことの記録に、TOTP を確かめたことを残す
+    const unlocked = (await auditRows(db)).filter((r) => r.action === "screen_unlock" && r.outcome === "success");
+    expect(unlocked.map((r) => JSON.parse(r.detail ?? "{}"))).toEqual([{ totp: true }]);
+  });
+
+  it("SCREEN_UNLOCK_REQUIRE_TOTP=true：番号が無い・違うときは断り、失敗に数える（理由 bad_totp）", async () => {
+    const { ctx, db, clock } = await setup({ screenUnlockRequireTotp: true, loginLockThreshold: 2 });
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    const count = async () => (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount;
+
+    await expect(unlockScreen(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 401, problems: [] });
+    expect(await count()).toBe(1);
+    await expect(unlockScreen(ctx, s.session, s.user, { password: PASSWORD, code: "000000" })).rejects.toMatchObject({
+      status: 401,
+      problems: ["locked"],
+    });
+    expect((await resolveSession(ctx, token)).kind).toBe("locked");
+    const denied = (await auditRows(db)).filter((r) => r.action === "screen_unlock" && r.outcome === "denied");
+    expect(denied.map((r) => JSON.parse(r.detail ?? "{}").reason)).toEqual(["bad_totp", "bad_totp"]);
+    // 一時停止の間は、正しいパスワードと番号でも解けない
+    await expect(
+      unlockScreen(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) }),
+    ).rejects.toMatchObject({ problems: ["locked"] });
+  });
+
+  it("SCREEN_UNLOCK_REQUIRE_TOTP=true でも、TOTP を登録していない利用者はパスワードだけで解く", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false, screenUnlockRequireTotp: true });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    await unlockScreen(ctx, s.session, s.user, { password: "kq7vz2mw-long1" });
+    expect((await resolveSession(ctx, token)).kind).toBe("active");
+  });
+
+  it("既定（SCREEN_UNLOCK_REQUIRE_TOTP=false）：TOTP を登録した利用者も、パスワードだけで解ける。記録に TOTP を確かめなかったことを残す", async () => {
+    const { ctx, db, clock } = await setup();
+    const { token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "client_idle");
+    expect((await resolveSession(ctx, token)).kind).toBe("locked");
+
+    const locked = await sessionOf(db, token);
+    await unlockScreen(ctx, locked.session, locked.user, { password: PASSWORD });
+    expect((await resolveSession(ctx, token)).kind).toBe("active");
+
+    const rows = await auditRows(db);
+    const unlocked = rows.filter((r) => r.action === "screen_unlock");
+    expect(unlocked.map((r) => [r.outcome, JSON.parse(r.detail ?? "{}")])).toEqual([["success", { totp: false }]]);
+    expect(unlocked[0]!.actorId).toBe("tanaka");
+    expect(JSON.stringify(rows)).not.toContain(PASSWORD);
+  });
+
+  it("既定：TOTP の番号を送っても要らない。違う番号でも解け、送った番号は使った段に数えない（ログインで使える）", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+
+    // 違う番号を添えても、パスワードが合えば解ける
+    await lockScreen(ctx, s.session, s.user, "manual");
+    await unlockScreen(ctx, s.session, s.user, { password: PASSWORD, code: "000000" });
+    expect((await resolveSession(ctx, token)).kind).toBe("active");
+
+    // 正しい番号を添えても、確かめず、使った段を進めない
+    const before = (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep;
+    const s2 = await sessionOf(db, token);
+    await lockScreen(ctx, s2.session, s2.user, "manual");
+    const code = totpAt(secret, clock.t);
+    await unlockScreen(ctx, s2.session, s2.user, { password: PASSWORD, code });
+    expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep).toBe(before);
+    // 同じ番号を、ログインの TOTP で使える（ロックの解除で使い切っていない）
+    const r = await login(ctx, "tanaka", PASSWORD);
+    const p = await sessionOf(db, r.token);
+    expect((await submitTotp(ctx, p.session, p.user, code)).stage).toBe("active");
+
+    const rows = await auditRows(db);
+    expect(rows.filter((x) => x.action === "screen_unlock" && x.outcome === "denied")).toHaveLength(0);
+    expect(JSON.stringify(rows)).not.toContain(code);
+  });
+
+  it("既定：パスワードの誤りは失敗に数え（理由 bad_password）、決めた回数で一時停止になる。一時停止の間は正しいパスワードでも解けない", async () => {
+    const { ctx, db, clock } = await setup({ loginLockThreshold: 2 });
+    const { token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    const user = async () => db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+
+    await expect(unlockScreen(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({
+      status: 401,
+      message: "パスワードが違う",
+      problems: [],
+    });
+    expect((await user()).failedLoginCount).toBe(1);
+    await expect(unlockScreen(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({
+      status: 401,
+      problems: ["locked"],
+    });
+    expect((await user()).lockedUntil!.getTime()).toBeGreaterThan(clock.t);
+    await expect(unlockScreen(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({
+      status: 401,
+      problems: ["locked"],
+    });
+    // セッションはロックのまま残る
+    expect((await resolveSession(ctx, token)).kind).toBe("locked");
+    const rows = await auditRows(db);
+    const denied = rows.filter((r) => r.action === "screen_unlock" && r.outcome === "denied");
+    expect(denied.map((r) => JSON.parse(r.detail ?? "{}").reason)).toEqual(["bad_password", "bad_password", "locked"]);
+    expect(rows.filter((r) => r.action === "login_lock")).toHaveLength(1);
+
+    // 一時停止が解けたら、同じセッションでパスワードだけで解ける。成功で失敗の数を0に戻す
+    clock.advance(16 * 60_000);
+    const later = await sessionOf(db, token);
+    await unlockScreen(ctx, later.session, later.user, { password: PASSWORD });
+    expect((await resolveSession(ctx, token)).kind).toBe("active");
+    expect((await user()).failedLoginCount).toBe(0);
+  });
+
+  it("既定でも、ログインと再認証の TOTP は求める（画面のロックの設定はほかの確かめに効かない）", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 401 });
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    expect((await login(ctx, "tanaka", PASSWORD)).stage).toBe("totp");
   });
 
   it("操作の無い時間が SCREEN_LOCK_MINUTES に達したら、サーバーの側でもその要求の時点でロックにする（猶予なし）", async () => {
@@ -512,6 +641,7 @@ describe("最初の管理者", () => {
       loginLockThreshold: 5,
       loginLockMinutes: 15,
       screenLockMinutes: 15,
+      screenUnlockRequireTotp: false,
       rateLimitPerUserPerMinute: 10,
       rateLimitGlobalPerMinute: 300,
       passwordHashConcurrency: 2,

@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { LockGuard } from "@/components/auth/lock-guard";
 import { DevModeBand } from "@/components/layout/dev-mode-band";
 import { SiteHeader, type HeaderUser } from "@/components/layout/site-header";
+import { screenUnlockNeedsTotp } from "@/lib/auth/local-auth";
 import { can, ROLE_LABELS } from "@/lib/auth/roles";
 import { getAuthState } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
@@ -61,7 +62,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           <LockGuard
             csrfToken={local.row.csrfToken}
             minutes={config.auth.screenLockMinutes}
-            needsTotp={local.user.totpSecretEnc !== null}
+            needsTotp={screenUnlockNeedsTotp(config.auth, local.user)}
             initiallyLocked={state.kind === "locked"}
           >
             {main}

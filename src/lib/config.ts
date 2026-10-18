@@ -32,6 +32,8 @@ export interface AppConfig {
     loginLockThreshold: number;
     loginLockMinutes: number;
     screenLockMinutes: number;
+    /** 画面のロックを解くときに TOTP も求めるか（既定 false：パスワードだけ。docs/spec.md の 3.6） */
+    screenUnlockRequireTotp: boolean;
     /** ログインの試みを遅らせ始める回数（1 分あたり）。利用者名ごと・全体 */
     rateLimitPerUserPerMinute: number;
     rateLimitGlobalPerMinute: number;
@@ -110,6 +112,7 @@ const envSchema = z.object({
   LOGIN_LOCK_THRESHOLD: int(5, 1),
   LOGIN_LOCK_MINUTES: int(15, 1),
   SCREEN_LOCK_MINUTES: int(15, 0),
+  SCREEN_UNLOCK_REQUIRE_TOTP: bool(false),
   LOGIN_RATE_LIMIT_PER_MINUTE: int(10, 1),
   LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: int(300, 1),
   // libuv のスレッドの溜め（既定 4 本）を、ログインした人の枠の1本とほかの仕事のために残す
@@ -295,6 +298,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       loginLockThreshold: e.LOGIN_LOCK_THRESHOLD,
       loginLockMinutes: e.LOGIN_LOCK_MINUTES,
       screenLockMinutes: e.SCREEN_LOCK_MINUTES,
+      screenUnlockRequireTotp: e.SCREEN_UNLOCK_REQUIRE_TOTP,
       rateLimitPerUserPerMinute: e.LOGIN_RATE_LIMIT_PER_MINUTE,
       rateLimitGlobalPerMinute: e.LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE,
       passwordHashConcurrency: e.PASSWORD_HASH_CONCURRENCY,

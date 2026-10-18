@@ -27,6 +27,7 @@ export async function checkConfigOrExit(): Promise<void> {
     loginLockThreshold: config.auth.loginLockThreshold,
     loginLockMinutes: config.auth.loginLockMinutes,
     screenLockMinutes: config.auth.screenLockMinutes,
+    screenUnlockRequireTotp: config.auth.screenUnlockRequireTotp,
     sessionSecret: config.sessionSecret,
     rateLimitPerUserPerMinute: config.auth.rateLimitPerUserPerMinute,
     rateLimitGlobalPerMinute: config.auth.rateLimitGlobalPerMinute,

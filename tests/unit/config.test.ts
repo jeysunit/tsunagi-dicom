@@ -95,6 +95,14 @@ describe("設定の読み込み", () => {
     expect(variablesOf({ ...base, REAUTH_MINUTES: "61" })).toEqual(["REAUTH_MINUTES"]);
   });
 
+  it("画面のロックを解くときの TOTP（SCREEN_UNLOCK_REQUIRE_TOTP。既定 false。true か false だけ）", () => {
+    expect(loadConfig(base).auth.screenUnlockRequireTotp).toBe(false);
+    expect(loadConfig({ ...base, SCREEN_UNLOCK_REQUIRE_TOTP: "" }).auth.screenUnlockRequireTotp).toBe(false);
+    expect(loadConfig({ ...base, SCREEN_UNLOCK_REQUIRE_TOTP: "false" }).auth.screenUnlockRequireTotp).toBe(false);
+    expect(loadConfig({ ...base, SCREEN_UNLOCK_REQUIRE_TOTP: "true" }).auth.screenUnlockRequireTotp).toBe(true);
+    expect(variablesOf({ ...base, SCREEN_UNLOCK_REQUIRE_TOTP: "yes" })).toEqual(["SCREEN_UNLOCK_REQUIRE_TOTP"]);
+  });
+
   it("いくつも誤っていれば、全部を並べる", () => {
     expect(variablesOf({ ...base, BACKEND_KIND: undefined, SESSION_SECRET: "" }).sort()).toEqual([
       "BACKEND_KIND",
