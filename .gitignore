@@ -41,3 +41,7 @@ blob-report/
 .DS_Store
 .vscode/
 .idea/
+src/generated/
+
+# Playwright の試験のデータベース
+/.e2e/

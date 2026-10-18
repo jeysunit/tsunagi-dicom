@@ -51,25 +51,22 @@
   "StorageAreaPlugin": null,
   "StorageCompression": false,
   "StoreMD5ForAttachments": true,
-  "ThirdPartyPatches": [
-    "civetweb-1.16.patch",
-    "dcmtk-3.7.0-max-nested-sequence.patch"
-  ],
+  "ThirdPartyPatches": [],
   "ThirdPartyVersions": {
-    "boost": "1.90.0",
-    "civetweb": "1.16.0",
-    "dcmtk": "3.7.0",
-    "jsoncpp": "1.9.6",
-    "libcurl": "8.17.0",
-    "libjpeg": "8.0",
-    "libpng": "1.6.57",
-    "lua": "5.4.8",
-    "openssl": "3.1.4",
-    "protobuf": "3.21.12",
-    "pugixml": "1.14.0",
-    "sqlite": "3.46.1",
-    "zlib": "1.3.1"
+    "boost": "0.0.0",
+    "civetweb": "0.0.0",
+    "dcmtk": "0.0.0",
+    "jsoncpp": "0.0.0",
+    "libcurl": "0.0.0",
+    "libjpeg": "0.0.0",
+    "libpng": "0.0.0",
+    "lua": "0.0.0",
+    "openssl": "0.0.0",
+    "protobuf": "0.0.0",
+    "pugixml": "0.0.0",
+    "sqlite": "0.0.0",
+    "zlib": "0.0.0"
   },
   "UserMetadata": {},
-  "Version": "1.13.0"
+  "Version": "1.0.0"
 }

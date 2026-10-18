@@ -1,0 +1,21 @@
+# 依存の更新の PR を週に1回出す（npm・GitHub Actions・Docker）。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+  - package-ecosystem: npm
+    # イメージの中で migration を流す Prisma の CLI。直下の prisma と同じ版にそろえる
+    directory: /docker/prisma-cli
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

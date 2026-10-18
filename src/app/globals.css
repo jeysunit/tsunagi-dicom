@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* 画面の見た目の基準（docs/spec.md の 2）：暗い地、基準の文字 14px・行間 1.5 */
+@theme {
+  --color-background: #121417;
+  --color-surface: #1a1d21;
+  --color-foreground: #e6edf3;
+  --color-label: #8a949e;
+  --color-value: #ffffff;
+  --color-border: #2a2f36;
+  --color-muted: #23272d;
+  --color-primary: #2f81f7;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #2f81f7;
+  --color-dev-band: #6b4a00;
+  --color-dev-band-foreground: #ffe8a3;
+  /* 字体は OS の標準に任せる（商用の字体の名前を書かない） */
+  --font-sans: system-ui, "Noto Sans JP", sans-serif;
+  --font-mono: ui-monospace, "Noto Sans Mono", monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.875rem; /* 14px */
+  line-height: 1.5;
+}
