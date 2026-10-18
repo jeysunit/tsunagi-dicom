@@ -23,10 +23,12 @@ The user interface will be Japanese only at first. The documents are written mai
 - **Study list**: quick filters by study date, modality, and status (the Japanese terms used in clinical practice: 未検像, 検像済, 未読, 既読, 緊急, bookmark). Patient names are shown split into the ideographic (kanji) name and the phonetic (kana) name; birth dates are shown with the Japanese era and age.
 - **Viewer selection**: open a study in one of the configured viewers (OHIF Viewer, Stone Web Viewer, VolView, ...). Defaults can be remembered per study and per modality.
 - **Per-patient timeline**, and side-by-side comparison of two studies.
-- **Simple reports (簡易レポート)** and import of documents such as PDF.
-- **Security and operations**: roles, two-factor authentication, audit trail, and so on. [`docs/guideline-mapping.md`](docs/guideline-mapping.md) maps these features to the items of the Japanese Ministry of Health, Labour and Welfare guideline (version 7.0, System Operations volume). **Whether a deployment meets the guideline is for each institution to determine, including its operations; this software alone does not make a deployment compliant.**
+- **Simple reports (簡易レポート)** (stage 3). Document import and display (PDF, etc.) and importing, correcting, splitting, and merging other institutions' data are heavier, so they were moved later (after stage 4).
+- **Security and operations**: roles, two-factor authentication, audit trail, and so on (image-server monitoring and the read-only switch come after stage 4). [`docs/guideline-mapping.md`](docs/guideline-mapping.md) maps these features to the items of the Japanese Ministry of Health, Labour and Welfare guideline (version 7.0, System Operations volume). **Whether a deployment meets the guideline is for each institution to determine, including its operations; this software alone does not make a deployment compliant.**
 
 **Example uses**: as an everyday viewing front end in front of a hospital or lab image server; and in front of a research image archive for clinical studies, where readers must not see the original patient information (a blind-reading role, planned for stage 2b).
+
+This tool is for clinical trials, research, and system testing, and **features are cut rather than added**.
 
 The image server and viewers are not modified. Every endpoint is configured through environment variables. Search and retrieval use DICOMweb first; Orthanc-only features are kept in separate components that are enabled only with an Orthanc backend.
 
