@@ -147,7 +147,7 @@ DICOMweb に対応した画像サーバー（Orthanc など）を**改造せず�
 - イメージの片付け：版のタグの付いたイメージは消さない。ほかのタグのイメージは新しい順に 10 個と、2 日より新しいものを残し、残りとタグの無いイメージを週に1回消す（署名などの子は親と一緒）。いまは dry-run で、消す候補を記録に出すだけ（記録を確かめてから消す形にする）。範囲は README と `.github/workflows/image-cleanup.yml`。
 - **仕様の外で足した道**（アプリの機能ではないもの）：`/api/health`（コンテナの生死の確かめ。認証なし・画像サーバーにつながない）、`/api/audit/verify`（監査の記録のつなぎの確かめ。管理者だけ）。3.6 を参照。
 - **アプリの設定の外の変数**（`.env.example` に入れない。アプリは読まない）：`TSUNAGI_IMAGE`（`compose.yaml` で使うイメージ。既定は手元で作る `tsunagi-dicom:local`）、`PLAYWRIGHT_CHROMIUM_EXECUTABLE`（試験だけ。入っている Chromium を使うとき）。
-- 文書：README（日本語と英語）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
+- 文書：README（日本語と英語）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`docs/security-and-maintenance.md`（セキュリティと保守の方針）、`SECURITY.md`（脆弱性の報告の窓口）、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
 - 「DICOM® は NEMA の登録商標」の一文を README に書く。
 
 ## 6. 段階（PR の単位）
