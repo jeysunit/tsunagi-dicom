@@ -5,7 +5,7 @@ import { BACKEND_PASSWORD_MARKER } from "../../playwright.config";
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 
 test.describe("共通の画面と検査の一覧（モック）", () => {
-  test("暗い地の頁に、モックの検査の件数・一覧が出る（「非医療機器」の表示は出さない）", async ({ page }) => {
+  test("明るい地の頁に、モックの検査の件数・一覧が出る（「非医療機器」の表示は出さない）", async ({ page }) => {
     await page.goto("/");
 
     await expect(page.getByTestId("not-for-diagnostic-use")).toHaveCount(0);
@@ -14,13 +14,57 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
 
     const rows = page.getByTestId("study-table").locator("tbody tr");
     await expect(rows).toHaveCount(8);
-    await expect(page.getByTestId("study-table")).toContainText("JP-TEST-0001");
-    await expect(page.getByTestId("study-table")).toContainText("Yamada^Taro=山田^太郎=やまだ^たろう");
+    const table = page.getByTestId("study-table");
+    await expect(table).toContainText("JP-TEST-0001");
+    // 氏名は漢字とかなに分け、PN の元の形（^ と =）は出さない
+    await expect(table).toContainText("山田 太郎");
+    await expect(table).toContainText("やまだ たろう");
+    await expect(table).not.toContainText("Yamada^Taro");
+    // 生年月日は和暦・検査日の時点の年齢・性別を添える
+    await expect(table).toContainText("1975/05/10（昭和50年・51歳・男）");
 
     const body = page.locator("body");
-    await expect(body).toHaveCSS("background-color", "rgb(18, 20, 23)");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(body).toHaveCSS("background-color", "rgb(255, 255, 255)");
     await expect(body).toHaveCSS("font-size", "14px");
-    await expect(body).toHaveCSS("color", "rgb(230, 237, 243)");
+    await expect(body).toHaveCSS("color", "rgb(31, 35, 40)");
+  });
+
+  test("暗い地に切り替えると、利用者ごとに覚えて、開き直しても暗い地のまま", async ({ page }) => {
+    await page.goto("/");
+    const toggle = page.getByTestId("theme-toggle");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    const saved = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
+    await toggle.click();
+    await saved;
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(18, 20, 23)");
+    await expect(page.locator("body")).toHaveCSS("color", "rgb(230, 237, 243)");
+
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.getByTestId("theme-toggle")).toHaveAttribute("aria-pressed", "true");
+
+    // 次の試験のために明るい地へ戻す
+    const back = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
+    await page.getByTestId("theme-toggle").click();
+    await back;
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+
+  test("地の色の保存は、別の場所からの要求と、決めた値の外を断る", async ({ request }) => {
+    const foreign = await request.post("/api/preferences/theme", {
+      data: { theme: "dark" },
+      headers: { origin: "https://attacker.example.org" },
+    });
+    expect(foreign.status()).toBe(403);
+    const bad = await request.post("/api/preferences/theme", {
+      data: { theme: "<script>" },
+      headers: { origin: "http://127.0.0.1:3100" },
+    });
+    expect(bad.status()).toBe(400);
   });
 
   test("API の中継は資格情報を返さない", async ({ page, request }) => {

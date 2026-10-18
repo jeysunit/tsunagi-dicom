@@ -2,19 +2,13 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { pageAccess } from "@/lib/auth/page-session";
 import { audit } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
-import { BackendError, type StudyCount, type StudySummary } from "@/lib/backend/types";
+import { BackendError } from "@/lib/backend/types";
+import { formatBirthLine, formatDicomTime, formatSlashDate } from "@/lib/format/japanese-date";
 import { searchAuditFields } from "@/lib/search-audit";
+import { listStudies, type StudyListResult } from "@/lib/study-list";
 
-// 段 1a の1頁：BFF を通した検査の件数と、検査の一覧（素の表）。
-// 一覧の作り込み（絞り込み・氏名の整形・和暦・詳細のパネル）は段 2。
-
-function formatDate(yyyymmdd: string): string {
-  return /^\d{8}$/.test(yyyymmdd) ? `${yyyymmdd.slice(0, 4)}/${yyyymmdd.slice(4, 6)}/${yyyymmdd.slice(6, 8)}` : yyyymmdd;
-}
-
-function formatTime(hhmmss: string): string {
-  return /^\d{4}/.test(hhmmss) ? `${hhmmss.slice(0, 2)}:${hhmmss.slice(2, 4)}` : hhmmss;
-}
+// BFF を通した検査の件数と、検査の一覧。項目は役割の許可の一覧で絞ったもの（src/lib/fields.ts）。
+// 氏名は漢字とかなに分け、生年月日は和暦・検査日の時点の年齢・性別を添える（docs/spec.md の 3.1）。
 
 export default async function HomePage() {
   const access = await pageAccess("study.search");
@@ -30,10 +24,9 @@ export default async function HomePage() {
   const { session } = access;
   const backend = getBackend();
 
-  let count: StudyCount;
-  let studies: StudySummary[];
+  let result: StudyListResult;
   try {
-    [count, studies] = await Promise.all([backend.countStudies(), backend.searchStudies()]);
+    result = await listStudies(backend, session.role);
   } catch (error) {
     const message = error instanceof BackendError ? error.message : "検査を読めなかった";
     if (!(error instanceof BackendError)) console.error(error);
@@ -43,7 +36,8 @@ export default async function HomePage() {
       </p>
     );
   }
-  await audit(session, searchAuditFields("page", studies));
+  await audit(session, searchAuditFields("page", result.returned));
+  const { count, studies } = result;
 
   return (
     <section className="space-y-3">
@@ -65,7 +59,6 @@ export default async function HomePage() {
             <TableHead>患者 ID</TableHead>
             <TableHead>氏名</TableHead>
             <TableHead>生年月日</TableHead>
-            <TableHead>性別</TableHead>
             <TableHead>モダリティ</TableHead>
             <TableHead>検査の記述</TableHead>
             <TableHead>受付番号</TableHead>
@@ -77,13 +70,23 @@ export default async function HomePage() {
           {studies.map((s) => (
             <TableRow key={s.studyInstanceUid} data-study-uid={s.studyInstanceUid}>
               <TableCell className="whitespace-nowrap">
-                {formatDate(s.studyDate)} {formatTime(s.studyTime)}
+                {formatSlashDate(s.studyDate)} {formatDicomTime(s.studyTime)}
               </TableCell>
               <TableCell className="font-mono">{s.patientId}</TableCell>
-              <TableCell className="font-bold text-value">{s.patientName}</TableCell>
-              <TableCell>{formatDate(s.patientBirthDate)}</TableCell>
-              <TableCell>{s.patientSex}</TableCell>
-              <TableCell>{s.modalities.join("・")}</TableCell>
+              <TableCell>
+                {s.patientName ? (
+                  <span className="block font-bold text-value" data-testid="patient-name">
+                    {s.patientName}
+                  </span>
+                ) : (
+                  <span className="block text-label">（氏名なし）</span>
+                )}
+                {s.patientKana && <span className="block text-xs text-label">{s.patientKana}</span>}
+              </TableCell>
+              <TableCell className="whitespace-nowrap">
+                {formatBirthLine(s.patientBirthDate, s.patientSex, s.studyDate)}
+              </TableCell>
+              <TableCell>{s.modalities?.join("・")}</TableCell>
               <TableCell>{s.studyDescription}</TableCell>
               <TableCell className="font-mono">{s.accessionNumber}</TableCell>
               <TableCell className="text-right">{s.seriesCount ?? ""}</TableCell>

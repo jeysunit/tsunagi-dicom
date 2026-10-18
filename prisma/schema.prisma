@@ -106,3 +106,12 @@ model Session {
   @@index([userId])
   @@index([expiresAt])
 }
+
+// 利用者ごとの画面の設定（段 2。docs/spec.md の 2）。いまは地の色（明るい地・暗い地）だけ。
+// actorId は監査の記録の「誰が」と同じ値（AUTH_MODE=local は利用者名、検証モードは dev）。
+model UserPreference {
+  actorId   String   @id
+  // light・dark
+  theme     String
+  updatedAt DateTime
+}
