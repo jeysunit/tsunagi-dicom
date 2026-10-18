@@ -6,6 +6,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # 型は動かす Node の大きな版（.nvmrc・Dockerfile の node:24）に合わせる。Node を上げるときに一緒に上げる
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
     # イメージの中で migration を流す Prisma の CLI。直下の prisma と同じ版にそろえる
     directory: /docker/prisma-cli

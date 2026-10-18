@@ -1,0 +1,41 @@
+# GHCR の古いイメージを片付ける（週に1回と手動）。
+# 残す：版のタグ（v*）の付いたイメージは全部。ほかのタグ（sha-*・rebuild-*）の付いたイメージは新しい順に 10 個。2 日より新しいものは全部。
+# 消す：上に当たらないタグ付きのイメージと、タグの無いイメージ。署名・SBOM・provenance・プラットフォーム別の子は、親と一緒に残し・消す。
+# いまは dry-run（消さずに、消す候補を記録に出すだけ）。記録を確かめてから、別の PR で dry-run を外す。
+#
+# Action の選び方：公式の actions/delete-package-versions は、タグの無い版を1つずつ消すだけで、
+# buildx の索引（image index）の子（SBOM・provenance）と cosign の署名（referrer・sha256-* のタグ）を見分けない。
+# 残すイメージの署名と子まで消してしまうので使わない。ここでは、それを見分ける dataaxiom/ghcr-cleanup-action を commit の SHA で固定して使う。
+name: Image cleanup
+
+on:
+  schedule:
+    # 毎週月曜 06:41（UTC）。週の作り直し（image.yml、03:17）の後
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  # この Action は同じ package に並んで流すと安全でない（README の Concurrency）
+  group: image-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: 古いイメージを片付ける（dry-run）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          package: tsunagi-dicom
+          exclude-tags: "v*"
+          keep-n-tagged: 10
+          delete-untagged: true
+          delete-orphaned-images: true
+          older-than: 2 days
+          validate: true
+          dry-run: true

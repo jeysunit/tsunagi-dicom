@@ -9,6 +9,8 @@ A standalone web front end and BFF (Backend For Frontend) that uses a DICOMweb-c
 
 ## Status
 
+> **Design stage — do not use in production (clinical settings or real patient data).** The specification and foundation are still being built; connecting to a real image server and user login are not implemented yet.
+
 **Stage 1a (2026-10-18).** The foundation, the BFF (a screen API for search, and a relay limited to WADO-RS reads so that viewers can retrieve images), the audit trail, development authentication (`AUTH_MODE=dev`), the common screen, and CI with container images are in place.
 The only page shows the number of studies and a plain study list, fetched through the BFF. Application user login (`AUTH_MODE=local`) comes in stage 1b; until then the application starts only with `AUTH_MODE=dev`, and `AUTH_MODE=dev` starts only with the mock backend (`BACKEND_MOCK=true`). In other words, stage 1a does not connect to a real image server.
 Implementation proceeds stage by stage; each PR covers one cohesive change within a single stage (see "6. 段階" in [`docs/spec.md`](docs/spec.md)).
@@ -48,7 +50,34 @@ DATABASE_URL="file:./data/tsunagi.db" npm run dev
 
 Tests: `npm run lint`, `npm run typecheck`, `npm test` (Vitest), `npm run build && npm run test:e2e` (Playwright, against the mock backend).
 
-For deployment, pin the GHCR image (`ghcr.io/jeysunit/tsunagi-dicom`) by version tag (`vX.Y.Z`) or digest (`TSUNAGI_IMAGE` in `compose.yaml`).
+## Container image (GHCR)
+
+For deployment, pin the GHCR image (`ghcr.io/jeysunit/tsunagi-dicom`) by version tag (`vX.Y.Z`) or digest (`TSUNAGI_IMAGE` in `compose.yaml`). Images are published only after CI passes (`.github/workflows/image.yml`).
+
+| Tag | When it is set |
+|---|---|
+| `vX.Y.Z` | On a version tag push. **Never overwritten by rebuilds and never deleted by cleanup** |
+| `sha-<short hash>` | On merges to `main`, version tags, and weekly rebuilds. Rebuilding the same commit moves it to the new image |
+| `rebuild-YYYYMMDD` | Weekly (Monday 03:17 UTC) and manual rebuilds of `main` (UTC date). Picks up updates to the packages installed with apt inside the image |
+
+**Verifying the signature.** Each published image digest carries a keyless cosign signature made with the GitHub Actions OIDC token. Before deploying, look up the digest and verify it:
+
+```sh
+docker buildx imagetools inspect ghcr.io/jeysunit/tsunagi-dicom:vX.Y.Z   # use the Digest it prints
+cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
+  --certificate-identity-regexp '^https://github\.com/jeysunit/tsunagi-dicom/\.github/workflows/image\.yml@refs/(heads/main|tags/v[0-9]+\.[0-9]+\.[0-9]+.*)$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To accept only a release image, replace `--certificate-identity-regexp` with `--certificate-identity https://github.com/jeysunit/tsunagi-dicom/.github/workflows/image.yml@refs/tags/vX.Y.Z`, which also checks that the workflow run for that version signed it.
+
+**Cleanup of old images** (`.github/workflows/image-cleanup.yml`, weekly, Monday 06:41 UTC):
+
+- Kept: every image with a version tag (`v*`); the 10 newest images with other tags (`sha-*`, `rebuild-*`); every image published less than 2 days ago.
+- Deleted: other tagged images, and untagged images (for example an old image after its `sha-*` tag moved to a rebuilt one).
+- Signatures, SBOMs, provenance, and per-platform children are kept and deleted together with their parent image.
+- **Currently a dry run** (nothing is deleted; the candidates are listed in the run log). The dry run will be turned off after the log has been reviewed.
+- If you pin by digest, use the digest of a version-tagged image (other images are eventually deleted).
 
 ## Where the rules live
 
