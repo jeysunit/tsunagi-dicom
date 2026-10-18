@@ -110,6 +110,8 @@ export const LOGIN_FAILED_MESSAGE =
 export const REAUTH_REQUIRED = "reauth_required";
 /** パスワードの確かめが混んで断ったときの文言（503） */
 export const HASH_BUSY_MESSAGE = "いまログインの要求が混んでいる。少し待ってから、もう一度試す";
+/** 失敗したので、ログインの途中のセッションを捨てたときの印（AuthFailure の problems。画面はログインへ戻る） */
+export const SESSION_CLOSED = "session_closed";
 /** ログインの途中のセッションが、もう使えないとき（ほかの画面で先に進んだ・閉じた） */
 export const SESSION_GONE_MESSAGE = "このログインの途中のセッションは、もう使えない。ログインし直す";
 
@@ -661,9 +663,12 @@ export async function submitTotp(ctx: AuthContext, session: SessionRow, user: Us
   }
   if (!(await acceptTotp(ctx, user, secret, code))) {
     const locked = await registerFailure(ctx, user, "bad_totp");
-    throw new AuthFailure(401, LOGIN_FAILED_MESSAGE, locked ? ["locked"] : []);
+    // 6 桁は総当たりされやすいので、1回の失敗で、この途中のセッションを捨てる（次の番号を試すには、
+    // パスワードからログインし直す。どちらの失敗も、同じ一時停止の数え上げに入る）
+    await ctx.db.session.deleteMany({ where: { id: session.id } });
+    throw new AuthFailure(401, LOGIN_FAILED_MESSAGE, locked ? ["locked", SESSION_CLOSED] : [SESSION_CLOSED]);
   }
-  // 確かめたときの利用者のままかは、advance（openSession）が transaction の中で見る
+  // 確かめたときの利用者のままかは、advance（openSession）が見る
   return advance(ctx, session, user, user.mustChangePassword ? "change_password" : "active", { mfa: true });
 }
 

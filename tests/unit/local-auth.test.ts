@@ -11,6 +11,7 @@ import {
   HASH_BUSY_MESSAGE,
   hashToken,
   purgeExpiredSessions,
+  SESSION_CLOSED,
   SESSION_GONE_MESSAGE,
   listUsers,
   lockScreen,
@@ -264,15 +265,18 @@ describe("ログインの一時停止（第7.0版 14 遵守事項⑥(6)）", () 
     expect((await db.user.findUniqueOrThrow({ where: { username: "sato" } })).lockedUntil).toBeNull();
   });
 
-  it("TOTP の失敗も同じに数え、一時停止になったら途中のセッションも消す", async () => {
+  // TOTP の1回の失敗で途中のセッションを捨てる（安全のレビューの指摘：6 桁の総当たり）ので、2回目はログインし直して試す
+  it("TOTP の失敗も同じに数え、失敗した途中のセッションは捨てる。一時停止になる", async () => {
     const { ctx, db, clock } = await setup({ loginLockThreshold: 2 });
     await enrolledUser(ctx, clock);
     const r = await login(ctx, "tanaka", PASSWORD);
     const s = await sessionOf(db, r.token);
-    await expect(submitTotp(ctx, s.session, s.user, "000000")).rejects.toMatchObject({ problems: [] });
-    const s2 = await sessionOf(db, r.token);
-    await expect(submitTotp(ctx, s2.session, s2.user, "000001")).rejects.toMatchObject({ problems: ["locked"] });
+    await expect(submitTotp(ctx, s.session, s.user, "000000")).rejects.toMatchObject({ problems: [SESSION_CLOSED] });
     expect((await resolveSession(ctx, r.token)).kind).toBe("anonymous");
+    const r2 = await login(ctx, "tanaka", PASSWORD);
+    const s2 = await sessionOf(db, r2.token);
+    await expect(submitTotp(ctx, s2.session, s2.user, "000001")).rejects.toMatchObject({ problems: ["locked", SESSION_CLOSED] });
+    expect((await resolveSession(ctx, r2.token)).kind).toBe("anonymous");
     const rows = await auditRows(db);
     expect(rows.filter((x) => x.action === "login" && x.detail?.includes("bad_totp"))).toHaveLength(2);
     expect(JSON.stringify(rows)).not.toContain("000001");
@@ -1192,6 +1196,102 @@ describe("独立のレビューの指摘で直したこと", () => {
     pause.release();
     await expect(racing).rejects.toMatchObject({ status: 401 });
     expect(await db.session.count({ where: { userId: u.id } })).toBe(0);
+  });
+
+  it("総当たり：5つの道（ログイン・TOTP・ロックの解除・再認証・パスワードの変更）の失敗は同じ一時停止に数え、一時停止の間はどの道も確かめない", async () => {
+    const { ctx, db, clock } = await setup({ loginLockThreshold: 5 });
+    const { secret, token: a } = await enrolledUser(ctx, clock);
+    // もう1つ、ログインし終えたセッションを作る（一時停止の後も閉じない。F3）
+    const rb = await login(ctx, "tanaka", PASSWORD);
+    const sb0 = await sessionOf(db, rb.token);
+    const b = (await submitTotp(ctx, sb0.session, sb0.user, totpAt(secret, clock.t))).rotated!.token;
+    clock.advance(30_000);
+    const count = async () => (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount;
+    expect(await count()).toBe(0);
+
+    // ① ログインのパスワード
+    await expect(login(ctx, "tanaka", "wrong-pass-123")).rejects.toMatchObject({ status: 401 });
+    expect(await count()).toBe(1);
+    // ② TOTP の6桁（パスワードが合っても、番号の失敗は数える）
+    const rt = await login(ctx, "tanaka", PASSWORD);
+    const st = await sessionOf(db, rt.token);
+    await expect(submitTotp(ctx, st.session, st.user, "000000")).rejects.toMatchObject({ status: 401 });
+    expect(await count()).toBe(2);
+    // ③ 画面のロックの解除
+    const sa = await sessionOf(db, a);
+    await lockScreen(ctx, sa.session, sa.user, "manual");
+    const la = await sessionOf(db, a);
+    await expect(unlockScreen(ctx, la.session, la.user, { password: "wrong-pass-123" })).rejects.toMatchObject({ status: 401 });
+    expect(await count()).toBe(3);
+    // ④ 再認証
+    const sb = await sessionOf(db, b);
+    await expect(reauthenticate(ctx, sb.session, sb.user, { password: "wrong-pass-123" })).rejects.toMatchObject({ status: 401 });
+    expect(await count()).toBe(4);
+    // ⑤ パスワードの変更のときの、いまのパスワード（5回目で一時停止）
+    await expect(
+      changePassword(ctx, sb.session, sb.user, { currentPassword: "wrong-pass-123", code: totpAt(secret, clock.t), newPassword: NEW_PASSWORD }),
+    ).rejects.toMatchObject({ status: 401, problems: ["locked"] });
+    const locked = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+    expect(locked.lockedUntil!.getTime()).toBeGreaterThan(clock.t);
+
+    // 一時停止の間は、正しいパスワードと番号でも、どの道も確かめない
+    clock.advance(30_000);
+    await expect(login(ctx, "tanaka", PASSWORD)).rejects.toMatchObject({ status: 401 });
+    const la2 = await sessionOf(db, a);
+    await expect(unlockScreen(ctx, la2.session, la2.user, { password: PASSWORD, code: totpAt(secret, clock.t) })).rejects.toMatchObject({
+      problems: ["locked"],
+    });
+    const sb2 = await sessionOf(db, b);
+    await expect(reauthenticate(ctx, sb2.session, sb2.user, { password: PASSWORD, code: totpAt(secret, clock.t) })).rejects.toMatchObject({
+      problems: ["locked"],
+    });
+    await expect(
+      changePassword(ctx, sb2.session, sb2.user, { currentPassword: PASSWORD, code: totpAt(secret, clock.t), newPassword: NEW_PASSWORD }),
+    ).rejects.toMatchObject({ problems: ["locked"] });
+    // 止めている間の試みは数えず、一時停止の記録は1行
+    const rows = await auditRows(db);
+    expect(rows.filter((x) => x.action === "login_lock")).toHaveLength(1);
+    expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).passwordHash).toBe(locked.passwordHash);
+    // ログインし終えたセッションは閉じない（F3）
+    expect((await resolveSession(ctx, a)).kind).toBe("locked");
+    expect((await resolveSession(ctx, b)).kind).toBe("active");
+  });
+
+  it("総当たり：混んで断る（503）答えは、パスワードが合っても違っても同じで、確かめずに数えない（503 を繰り返させても試せない）", async () => {
+    const { ctx, db, clock } = await setup({ passwordHashConcurrency: 1, passwordHashQueue: 0 });
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const releases: (() => void)[] = [];
+    const hold = (lane: HashLane) =>
+      ctx.hashLimiter!.run(lane, () => new Promise<void>((r) => releases.push(r)));
+    // ログインの枠と、ログインした人の取っておいた1本の両方を埋める
+    const held = [hold("login"), hold("priority")];
+    await new Promise((r) => setTimeout(r, 0));
+
+    const shape = (e: unknown) => {
+      const f = e as AuthFailure;
+      return { status: f.status, message: f.message, problems: f.problems, retry: f.retryAfterSeconds };
+    };
+    const right = await login(ctx, "tanaka", PASSWORD).catch(shape);
+    const wrong = await login(ctx, "tanaka", "wrong-pass-123").catch(shape);
+    expect(right).toEqual(wrong);
+    expect(right).toMatchObject({ status: 503 });
+    const s = await sessionOf(db, token);
+    const reRight = await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) }).catch(shape);
+    const reWrong = await reauthenticate(ctx, s.session, s.user, { password: "wrong-pass-123" }).catch(shape);
+    expect(reRight).toEqual(reWrong);
+    expect(reRight).toMatchObject({ status: 503 });
+    for (let i = 0; i < 20; i++) await login(ctx, "tanaka", `wrong-pass-${i}a`).catch(() => undefined);
+    // 1つも確かめていないので、数えず、一時停止にもならない
+    const user = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+    expect(user.failedLoginCount).toBe(0);
+    expect(user.lockedUntil).toBeNull();
+    expect((await auditRows(db)).filter((x) => x.detail?.includes("bad_password"))).toHaveLength(0);
+
+    for (const r of releases) r();
+    await Promise.all(held);
+    // 空いたら、ふつうに確かめて数える
+    await expect(login(ctx, "tanaka", "wrong-pass-123")).rejects.toMatchObject({ status: 401 });
+    expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount).toBe(1);
   });
 
   it("F10：ログインし直したら前のセッションを消す。期限の切れたセッションを片付ける", async () => {

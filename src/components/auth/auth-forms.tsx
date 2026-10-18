@@ -78,7 +78,8 @@ export function CodeForm({
     );
     setBusy(false);
     if (res.ok) go(res.data.next);
-    else if (res.status === 401 && res.data.problems?.includes("locked")) go("/login");
+    // 番号の失敗・一時停止で、ログインの途中のセッションは捨てられている（BFF が next で戻り先を返す）
+    else if (res.status === 401 && res.data.next) go(res.data.next);
     else setError(errorText(res));
   }
 
