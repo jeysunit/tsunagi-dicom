@@ -6,6 +6,8 @@ import { SiteHeader, type HeaderUser } from "@/components/layout/site-header";
 import { can, ROLE_LABELS } from "@/lib/auth/roles";
 import { getAuthState } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
+import { getDb } from "@/lib/db";
+import { DEFAULT_THEME, getTheme } from "@/lib/preferences";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -33,12 +35,20 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   // ログインの途中は、頁の道を出さず、ログアウトだけを出す
   const pendingCsrfToken = state.kind === "pending" ? state.row.csrfToken : undefined;
 
-  const main = <main className="px-4 py-4">{children}</main>;
+  // 地の色は利用者ごとに覚えたもの（既定は明るい地。docs/spec.md の 2）
+  const signedIn = state.kind === "active" || state.kind === "locked" ? state.session : undefined;
+  const theme = signedIn ? await getTheme(await getDb(), signedIn.actorId) : DEFAULT_THEME;
+
+  const main = <main className="mx-auto max-w-screen-2xl px-6 py-6">{children}</main>;
   return (
-    <html lang="ja">
+    <html lang="ja" data-theme={theme}>
       <body className="min-h-screen antialiased">
         {config.auth.mode === "dev" && state.kind === "active" && <DevModeBand role={state.session.role} />}
-        <SiteHeader user={user} pendingCsrfToken={pendingCsrfToken} />
+        <SiteHeader
+          user={user}
+          pendingCsrfToken={pendingCsrfToken}
+          theme={state.kind === "active" ? { current: theme, csrfToken: local?.row.csrfToken } : undefined}
+        />
         {local ? (
           <LockGuard
             csrfToken={local.row.csrfToken}

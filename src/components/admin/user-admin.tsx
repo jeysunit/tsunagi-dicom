@@ -139,7 +139,7 @@ export function UserAdmin({
             </Field>
           )}
           {reauthError && (
-            <p role="alert" className="text-sm text-red-300">
+            <p role="alert" className="text-sm text-danger">
               {reauthError}
             </p>
           )}
@@ -152,7 +152,7 @@ export function UserAdmin({
         </form>
       )}
       {message && (
-        <p role={message.ok ? "status" : "alert"} className={message.ok ? "text-sm" : "text-sm text-red-300"}>
+        <p role={message.ok ? "status" : "alert"} className={message.ok ? "text-sm" : "text-sm text-danger"}>
           {message.text}
         </p>
       )}

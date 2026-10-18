@@ -1,17 +1,34 @@
 @import "tailwindcss";
 
-/* 画面の見た目の基準（docs/spec.md の 2）：暗い地、基準の文字 14px・行間 1.5 */
+/*
+ * 設計の値（design tokens）。色と文字の値はここ1か所で持つ（docs/spec.md の 2「画面の見た目の基準」）。
+ * - 文字を読む画面は明るい地を既定にし、暗い地に切り替えられる（利用者ごとに覚える。<html data-theme>）。
+ * - 画像のサムネイルの並びは、まわりだけ暗い地にする（その部品に data-theme="dark" を付ける）。
+ * - 文字と地の対比は WCAG 2.2 の AA（4.5:1）以上（tests/unit/design-tokens.test.ts で確かめる）。
+ * - 基準の文字は 14px（0.875rem）、行間 1.5。
+ */
+
+/* 明るい地（既定） */
 @theme {
-  --color-background: #121417;
-  --color-surface: #1a1d21;
-  --color-foreground: #e6edf3;
-  --color-label: #8a949e;
-  --color-value: #ffffff;
-  --color-border: #2a2f36;
-  --color-muted: #23272d;
-  --color-primary: #2f81f7;
+  --color-background: #ffffff;
+  /* 控えめな地（見出し・帯・パネル） */
+  --color-surface: #f6f8fa;
+  --color-foreground: #1f2328;
+  --color-label: #59636e;
+  /* 値（太字で出す） */
+  --color-value: #1f2328;
+  --color-border: #d1d9e0;
+  /* 行の hover などの、地との差の小さい色 */
+  --color-muted: #eff2f5;
+  /* 主の色（ボタンの地。白い字） */
+  --color-primary: #0969da;
   --color-primary-foreground: #ffffff;
-  --color-ring: #2f81f7;
+  /* ボタンの地の hover（白い字との対比を下げないよう、濃くする） */
+  --color-primary-hover: #0757b5;
+  /* リンク・強調の文字 */
+  --color-link: #0969da;
+  --color-ring: #0969da;
+  --color-danger: #d1242f;
   --color-dev-band: #6b4a00;
   --color-dev-band-foreground: #ffe8a3;
   /* 字体は OS の標準に任せる（商用の字体の名前を書かない） */
@@ -19,8 +36,27 @@
   --font-mono: ui-monospace, "Noto Sans Mono", monospace;
 }
 
-html {
+:root {
+  color-scheme: light;
+}
+
+/* 暗い地（利用者が選んだとき・画像のまわり） */
+[data-theme="dark"] {
   color-scheme: dark;
+  --color-background: #121417;
+  --color-surface: #1a1d21;
+  --color-foreground: #e6edf3;
+  --color-label: #8a949e;
+  --color-value: #ffffff;
+  --color-border: #2a2f36;
+  --color-muted: #23272d;
+  --color-primary: #1f6feb;
+  --color-primary-foreground: #ffffff;
+  --color-primary-hover: #1858c4;
+  /* 暗い地の上のリンクの文字は、ボタンの地の色より明るくする */
+  --color-link: #4493f8;
+  --color-ring: #4493f8;
+  --color-danger: #ff7b72;
 }
 
 body {

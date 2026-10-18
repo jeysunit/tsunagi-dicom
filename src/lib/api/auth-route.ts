@@ -4,7 +4,8 @@ import type { z } from "zod";
 import { readLimitedText } from "@/lib/api/body";
 import { csrfMatches } from "@/lib/auth/local-auth";
 import { LOCK_COOKIE } from "@/lib/auth/lock-cookie";
-import { AuthError, getAuthState, SESSION_COOKIE, type AuthState } from "@/lib/auth/session";
+import type { Permission } from "@/lib/auth/roles";
+import { AuthError, getAuthState, requireSession, SESSION_COOKIE, type AuthState, type Session } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
 
 // 状態を変える API（ログイン・利用者の管理など）の共通の確かめ。
@@ -56,6 +57,17 @@ export async function checkedState(request: Request): Promise<AuthState> {
     throw new RequestError(403, "要求の確かめの token（x-csrf-token）が合わない。頁を開き直す");
   }
   return state;
+}
+
+/**
+ * 画面から BFF のデータベースだけを変える要求（画面の設定・検査の状態など。画像サーバーには書かない）の確かめ。
+ * AUTH_MODE=local では Origin と CSRF の token を、検証モードでは Origin を確かめ、ログインしていて
+ * 画面のロックが無く、操作の権限がある利用者を返す
+ */
+export async function checkedScreenWrite(request: Request, permission?: Permission): Promise<Session> {
+  if (getConfig().auth.mode === "local") await checkedState(request);
+  else assertSameOrigin(request);
+  return requireSession(permission);
 }
 
 /** 本文の JSON を、決めた大きさまで読み、形を確かめる */

@@ -14,7 +14,7 @@ function go(next: string | undefined) {
 
 function ErrorLine({ message }: { message: string | null }) {
   return message ? (
-    <p role="alert" className="text-sm text-red-300">
+    <p role="alert" className="text-sm text-danger">
       {message}
     </p>
   ) : null;
