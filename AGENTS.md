@@ -51,5 +51,6 @@
 
 ## CI と配布
 
-- GitHub Actions の権限は最小にする。**イメージを作る仕事にだけ `permissions: packages: write`** を付ける。
-- イメージのタグは `vX.Y.Z` と `sha-<短い hash>`。配備は版のタグか digest を指定する。
+- GitHub Actions の権限は最小にする。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付ける。`id-token: write`（署名）はイメージを作る仕事にだけ。
+- イメージのタグは `vX.Y.Z` と `sha-<短い hash>`、週の作り直しには `rebuild-YYYYMMDD` も付ける。作り直しで版のタグを上書きしない。配備は版のタグか digest を指定する。
+- 出したイメージは digest に署名する（cosign の鍵の要らない署名）。タグには署名しない。

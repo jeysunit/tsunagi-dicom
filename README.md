@@ -9,6 +9,8 @@ DICOMweb に対応した画像サーバー（Orthanc など）を**改造せず�
 
 ## 状態
 
+> **設計の段で、本番（診療の現場・実の患者のデータ）には使わない。** いまは仕様と土台を作っている途中で、実の画像サーバーにつなぐ機能と利用者のログインがまだ無い。
+
 **段 1a まで（2026-10-18）。** 土台・BFF（検索の画面の API と、ビューアが画像を取る WADO-RS の読み取りだけの中継）・監査の記録・開発用の認証（`AUTH_MODE=dev`）・共通の画面・CI とイメージがある。
 画面は、BFF を通した検査の件数と素の一覧の1頁だけ。アプリの利用者のログイン（`AUTH_MODE=local`）は段 1b で、それまでは `AUTH_MODE=dev` でしか起動せず、`AUTH_MODE=dev` はモックのバックエンド（`BACKEND_MOCK=true`）のときだけ起動する。つまり段 1a では、実の画像サーバーにはつながない。
 実装は段ごとの PR で進める（[`docs/spec.md`](docs/spec.md) の「6. 段階」）。
@@ -48,7 +50,34 @@ DATABASE_URL="file:./data/tsunagi.db" npm run dev
 
 試験：`npm run lint`・`npm run typecheck`・`npm test`（Vitest）・`npm run build && npm run test:e2e`（Playwright。モックに対して流す）。
 
-配備では、GHCR のイメージ（`ghcr.io/jeysunit/tsunagi-dicom`）を版のタグ（`vX.Y.Z`）か digest で指定する（`compose.yaml` の `TSUNAGI_IMAGE`）。
+## イメージ（GHCR）
+
+配備では、GHCR のイメージ（`ghcr.io/jeysunit/tsunagi-dicom`）を版のタグ（`vX.Y.Z`）か digest で指定する（`compose.yaml` の `TSUNAGI_IMAGE`）。イメージは CI が通ってから出す（`.github/workflows/image.yml`）。
+
+| タグ | いつ付くか |
+|---|---|
+| `vX.Y.Z` | 版のタグの push のときだけ。**作り直しでは付けず、片付けでは消さない。** 同じ版のタグがもう GHCR にあれば（実行のやり直しなど）、出さずに止める |
+| `sha-<短い hash>` | `main` への merge・版のタグ・週の作り直し。同じ commit を作り直すと、新しいイメージへ移る |
+| `rebuild-YYYYMMDD` | 週に1回（月曜 03:17 UTC）と手動の、`main` の作り直し（日付は UTC）。イメージの中で apt で入れる包みの更新を取り込む |
+
+**署名の確かめ。** 出したイメージの digest には、GitHub Actions の OIDC による cosign の鍵の要らない署名が付いている。配備の前に、digest を調べて確かめる：
+
+```sh
+docker buildx imagetools inspect ghcr.io/jeysunit/tsunagi-dicom:vX.Y.Z   # 出てくる Digest を使う
+cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
+  --certificate-identity-regexp '^https://github\.com/jeysunit/tsunagi-dicom/\.github/workflows/image\.yml@refs/(heads/main|tags/v[0-9]+\.[0-9]+\.[0-9]+.*)$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+版のタグのイメージだけを受け入れるなら、`--certificate-identity-regexp` の代わりに `--certificate-identity https://github.com/jeysunit/tsunagi-dicom/.github/workflows/image.yml@refs/tags/vX.Y.Z` で、その版の workflow が署名したことまで確かめる。
+
+**古いイメージの片付け**（`.github/workflows/image-cleanup.yml`、週に1回、月曜 06:41 UTC）：
+
+- 残す：版のタグ（`v*`）の付いたイメージは全部。ほかのタグ（`sha-*`・`rebuild-*`）の付いたイメージは新しい順に 10 個。出してから 2 日より新しいイメージは全部。
+- 消す：上に当たらないタグ付きのイメージと、タグの無いイメージ（`sha-*` のタグが新しいイメージへ移った後の古いイメージなど）。
+- 署名・SBOM・provenance・プラットフォーム別の子は、親のイメージと一緒に残し、一緒に消す。
+- **いまは dry-run**（消さずに、消す候補を実行の記録に出すだけ）。記録を確かめてから dry-run を外す。
+- digest で止めて配備するなら、版のタグの付いたイメージの digest を使う（ほかのイメージは、いずれ消える）。
 
 ## 決まりの在り処
 
