@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { appendAudit, type AuditAction, type AuditEntryInput } from "@/lib/audit";
 import { burnPasswordCheck, hashPassword, verifyPassword } from "@/lib/auth/password-hash";
 import { checkPassword } from "@/lib/auth/password-policy";
-import { defaultLoginThrottle, throttleKeys, type LoginThrottle } from "@/lib/auth/rate-limit";
+import { defaultLoginThrottle, normalizeUsername, type LoginThrottle } from "@/lib/auth/rate-limit";
 import { isRole, type Role } from "@/lib/auth/roles";
 import { openField, sealField } from "@/lib/auth/sealed-field";
 import type { SourceAddress } from "@/lib/auth/source-address";
@@ -99,7 +99,8 @@ const actorOf = (user: Pick<User, "username" | "role">) => ({ actorId: user.user
 async function throttleLogin(ctx: AuthContext, username: string): Promise<void> {
   const throttle = ctx.loginThrottle ?? defaultLoginThrottle;
   const { delayMs, firstOver } = throttle.take(
-    throttleKeys(username, ctx.source.sourceAddress),
+    username,
+    ctx.source.sourceAddress,
     { perKeyPerMinute: ctx.settings.rateLimitPerUserPerMinute, globalPerMinute: ctx.settings.rateLimitGlobalPerMinute },
     now(ctx).getTime(),
   );
@@ -283,8 +284,10 @@ function nextStageAfterPassword(ctx: AuthContext, user: User): Stage {
   return user.mustChangePassword ? "change_password" : "active";
 }
 
-export async function login(ctx: AuthContext, username: string, password: string): Promise<LoginResult> {
-  await throttleLogin(ctx, username);
+export async function login(ctx: AuthContext, rawUsername: string, password: string): Promise<LoginResult> {
+  await throttleLogin(ctx, rawUsername);
+  // 遅らせの数え方と同じ正規化（NFKC・小文字・空白の除去）で利用者を引く
+  const username = normalizeUsername(rawUsername);
   const user = isValidUsername(username) ? await ctx.db.user.findUnique({ where: { username } }) : null;
   if (!user) {
     // 知らない利用者名でも、パスワードの確かめと同じほどの時間をかけ、同じ答えを返す。
