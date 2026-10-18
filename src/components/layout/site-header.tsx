@@ -1,4 +1,3 @@
-import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { LockNowButton } from "@/components/auth/lock-guard";
 import { LogoutButton } from "@/components/auth/logout-button";
@@ -11,7 +10,7 @@ export interface HeaderUser {
   canManageUsers: boolean;
 }
 
-// どの頁にも出す見出し。「非医療機器」の表示はここに1つだけ置く（機能ごとの断り書きは足さない）。
+// どの頁にも出す見出し。「非医療機器」の表示は出さない（承認者の決定。医療機器でない旨は README と仕様書に書く）。
 // AUTH_MODE=local でログインしていれば、利用者・役割・ログアウトを出す。
 export function SiteHeader({ user, pendingCsrfToken }: { user?: HeaderUser; pendingCsrfToken?: string }) {
   return (
@@ -48,10 +47,6 @@ export function SiteHeader({ user, pendingCsrfToken }: { user?: HeaderUser; pend
           </div>
         )}
         {!user && pendingCsrfToken && <LogoutButton csrfToken={pendingCsrfToken} />}
-        <p className="flex items-center gap-1.5 text-label" data-testid="not-for-diagnostic-use">
-          <ShieldAlert aria-hidden className="size-4" />
-          Not for Diagnostic Use / 非医療機器
-        </p>
       </div>
     </header>
   );

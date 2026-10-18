@@ -5,10 +5,11 @@ import { BACKEND_PASSWORD_MARKER } from "../../playwright.config";
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 
 test.describe("共通の画面と検査の一覧（モック）", () => {
-  test("暗い地の頁に「非医療機器」の表示と、モックの検査の件数・一覧が出る", async ({ page }) => {
+  test("暗い地の頁に、モックの検査の件数・一覧が出る（「非医療機器」の表示は出さない）", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.getByTestId("not-for-diagnostic-use")).toHaveText("Not for Diagnostic Use / 非医療機器");
+    await expect(page.getByTestId("not-for-diagnostic-use")).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText("非医療機器");
     await expect(page.getByTestId("study-count")).toHaveText("8");
 
     const rows = page.getByTestId("study-table").locator("tbody tr");
