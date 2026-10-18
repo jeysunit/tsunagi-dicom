@@ -71,6 +71,17 @@ describe("設定の読み込み", () => {
     expect(variablesOf({ ...base, TZ: "Mars/Olympus" })).toEqual(["TZ"]);
   });
 
+  it("パスワードのハッシュを同時に回す数と待たせる数（既定 2・32。範囲の外は起動しない）", () => {
+    expect(loadConfig(base).auth).toMatchObject({ passwordHashConcurrency: 2, passwordHashQueue: 32 });
+    expect(loadConfig({ ...base, PASSWORD_HASH_CONCURRENCY: "4", PASSWORD_HASH_QUEUE: "0" }).auth).toMatchObject({
+      passwordHashConcurrency: 4,
+      passwordHashQueue: 0,
+    });
+    expect(variablesOf({ ...base, PASSWORD_HASH_CONCURRENCY: "0" })).toEqual(["PASSWORD_HASH_CONCURRENCY"]);
+    expect(variablesOf({ ...base, PASSWORD_HASH_CONCURRENCY: "9" })).toEqual(["PASSWORD_HASH_CONCURRENCY"]);
+    expect(variablesOf({ ...base, PASSWORD_HASH_QUEUE: "1025" })).toEqual(["PASSWORD_HASH_QUEUE"]);
+  });
+
   it("いくつも誤っていれば、全部を並べる", () => {
     expect(variablesOf({ ...base, BACKEND_KIND: undefined, SESSION_SECRET: "" }).sort()).toEqual([
       "BACKEND_KIND",

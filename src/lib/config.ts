@@ -35,6 +35,9 @@ export interface AppConfig {
     /** ログインの試みを遅らせ始める回数（1 分あたり）。利用者名ごと・全体 */
     rateLimitPerUserPerMinute: number;
     rateLimitGlobalPerMinute: number;
+    /** パスワードのハッシュ（argon2id）をログインの枠で同時に回す数と、待たせる数（src/lib/auth/hash-limiter.ts） */
+    passwordHashConcurrency: number;
+    passwordHashQueue: number;
     oidc: { issuer?: string; clientId?: string; clientSecret?: string };
     /**
      * 最初の管理者（AUTH_MODE=local で利用者が1人もいないときだけ使う。src/lib/auth/bootstrap.ts）。
@@ -72,11 +75,14 @@ const bool = (fallback: boolean) =>
     .default(fallback ? "true" : "false")
     .transform((v) => v === "true");
 
-const int = (fallback: number, min: number) =>
+const int = (fallback: number, min: number, max = Number.MAX_SAFE_INTEGER) =>
   z
     .string()
     .default(String(fallback))
-    .refine((v) => /^\d+$/.test(v) && Number(v) >= min, `${min} 以上の整数にする`)
+    .refine(
+      (v) => /^\d+$/.test(v) && Number(v) >= min && Number(v) <= max,
+      max === Number.MAX_SAFE_INTEGER ? `${min} 以上の整数にする` : `${min}〜${max} の整数にする`,
+    )
     .transform(Number);
 
 const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で始まる URL にする" });
@@ -102,6 +108,9 @@ const envSchema = z.object({
   SCREEN_LOCK_MINUTES: int(15, 0),
   LOGIN_RATE_LIMIT_PER_MINUTE: int(10, 1),
   LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE: int(300, 1),
+  // libuv のスレッドの溜め（既定 4 本）を、ログインした人の枠の1本とほかの仕事のために残す
+  PASSWORD_HASH_CONCURRENCY: int(2, 1, 8),
+  PASSWORD_HASH_QUEUE: int(32, 0, 1024),
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
@@ -280,6 +289,8 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       screenLockMinutes: e.SCREEN_LOCK_MINUTES,
       rateLimitPerUserPerMinute: e.LOGIN_RATE_LIMIT_PER_MINUTE,
       rateLimitGlobalPerMinute: e.LOGIN_RATE_LIMIT_GLOBAL_PER_MINUTE,
+      passwordHashConcurrency: e.PASSWORD_HASH_CONCURRENCY,
+      passwordHashQueue: e.PASSWORD_HASH_QUEUE,
       oidc: { issuer: e.OIDC_ISSUER, clientId: e.OIDC_CLIENT_ID, clientSecret: oidcClientSecret },
       initialAdmin,
     },

@@ -32,6 +32,10 @@ export interface ThrottleResult {
   delayMs: number;
   /** この枠で、はじめて上限を超えた（記録に残す） */
   firstOver: boolean;
+  /** 全体の数が上限を超えている */
+  globalOver: boolean;
+  /** この試みで、はじめて全体の数が上限を超えた */
+  firstGlobalOver: boolean;
 }
 
 const WINDOW_MS = 60_000;
@@ -69,7 +73,9 @@ export class LoginThrottle {
     const name = normalizeUsername(username);
     this.globalCount += 1;
     let over = this.globalCount - settings.globalPerMinute;
-    let firstOver = over === 1;
+    const globalOver = over > 0;
+    const firstGlobalOver = over === 1;
+    let firstOver = firstGlobalOver;
 
     const counters: [Uint32Array, number][] = [[this.byName, bucketOf(`user:${name}`)]];
     if (verifiedSource) counters.push([this.byNameAndSource, bucketOf(`user:${name}|src:${verifiedSource}`)]);
@@ -79,7 +85,7 @@ export class LoginThrottle {
       if (own === 1) firstOver = true;
       over = Math.max(over, own);
     }
-    return { delayMs: delayFor(over), firstOver };
+    return { delayMs: delayFor(over), firstOver, globalOver, firstGlobalOver };
   }
 
   /** 数を持っている桶の数（試験用。BUCKETS を超えない） */

@@ -49,7 +49,7 @@ mkdir -p data && DATABASE_URL="file:./data/tsunagi.db" npm run db:migrate
 DATABASE_URL="file:./data/tsunagi.db" npm run dev
 ```
 
-To try application user login (`AUTH_MODE=local`): the first administrator is created at startup from a secret file, only while there are no users (see `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD_FILE` in `compose.yaml`). At the first login the administrator enrolls TOTP (when `MFA_REQUIRED=true`) and replaces the password. The session cookie is `Secure`, so outside `127.0.0.1` / `localhost` put the application behind TLS (a reverse proxy).
+To try application user login (`AUTH_MODE=local`): the first administrator is created at startup from a secret file, only while there are no users (see `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD_FILE` in `compose.yaml`). At the first login the administrator enrolls TOTP (when `MFA_REQUIRED=true`) and replaces the password. **Keep at least two administrators** (if the only administrator loses the authenticator app, there is no recovery path yet; see section 4 of `docs/security-and-maintenance.md`). The session cookie is `Secure`, so outside `127.0.0.1` / `localhost` put the application behind TLS (a reverse proxy).
 
 ```sh
 printf '%s\n' '<initial password>' > secrets/initial_admin_password.txt   # at least 8 characters, letters and digits

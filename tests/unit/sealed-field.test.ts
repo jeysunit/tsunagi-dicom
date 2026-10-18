@@ -36,4 +36,17 @@ describe("TOTP の秘密の暗号化", () => {
     expect(openField("v2:a:b:c", KEY, "user-1")).toBeNull();
     expect(openField("garbage", KEY, "user-1")).toBeNull();
   });
+
+  it("認証のタグは 16 バイトだけを受ける（短くしたタグ・長さの違う iv は戻せない）", () => {
+    const sealed = sealField("JBSWY3DPEHPK3PXP", KEY, "user-1");
+    const parts = sealed.split(":");
+    const tag = Buffer.from(parts[3]!, "base64url");
+    expect(tag).toHaveLength(16);
+    for (const bytes of [4, 8, 12, 15]) {
+      const short = [...parts.slice(0, 3), tag.subarray(0, bytes).toString("base64url")].join(":");
+      expect(openField(short, KEY, "user-1")).toBeNull();
+    }
+    const longIv = [parts[0], Buffer.alloc(16).toString("base64url"), parts[2], parts[3]].join(":");
+    expect(openField(longIv, KEY, "user-1")).toBeNull();
+  });
 });

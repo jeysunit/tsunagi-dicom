@@ -1,6 +1,14 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { appendAudit, type AuditAction, type AuditEntryInput } from "@/lib/audit";
-import { burnPasswordCheck, hashPassword, verifyPassword } from "@/lib/auth/password-hash";
+import { defaultFailureDigest, type DigestActor, type FailureDigest } from "@/lib/auth/failure-digest";
+import {
+  HASH_BUSY_RETRY_AFTER_SECONDS,
+  HashBusyError,
+  sharedHashLimiter,
+  type HashLane,
+  type HashLimiter,
+} from "@/lib/auth/hash-limiter";
+import { burnPasswordCheck, hashPassword, needsRehash, verifyPassword } from "@/lib/auth/password-hash";
 import { checkPassword } from "@/lib/auth/password-policy";
 import { defaultLoginThrottle, normalizeUsername, type LoginThrottle } from "@/lib/auth/rate-limit";
 import { isRole, type Role } from "@/lib/auth/roles";
@@ -39,6 +47,9 @@ export interface AuthSettings {
   /** ログインの試みを遅らせ始める回数（1 分あたり。利用者名ごと・全体。src/lib/auth/rate-limit.ts） */
   rateLimitPerUserPerMinute: number;
   rateLimitGlobalPerMinute: number;
+  /** パスワードのハッシュ（argon2id）をログインの枠で同時に回す数と、待たせる数（src/lib/auth/hash-limiter.ts） */
+  passwordHashConcurrency: number;
+  passwordHashQueue: number;
 }
 
 export interface AuthContext {
@@ -50,6 +61,25 @@ export interface AuthContext {
   loginThrottle?: LoginThrottle;
   /** 待つ（試験で差し替える） */
   sleep?: (ms: number) => Promise<void>;
+  /** 既定はプロセスで1つ（設定の passwordHashConcurrency・passwordHashQueue） */
+  hashLimiter?: HashLimiter;
+  /** 既定はプロセスで1つ（src/lib/auth/failure-digest.ts） */
+  failureDigest?: FailureDigest;
+  /** ログインの失敗の答えを返すまでの下限（既定 LOGIN_FAILURE_FLOOR_MS。試験で差し替える） */
+  loginFailureFloorMs?: number;
+}
+
+/**
+ * ログインの失敗の答えを返すまでの下限（遅らせの後、利用者を引き始めてから。実の時計で数える）。
+ * パスワードの確かめ（argon2id。手元の測りで 30 ミリ秒ほど）より十分に長くし、利用者名の有無による
+ * データベースの仕事の量の差（手元の測りで中央値 0.7 ミリ秒。docs/spec.md の 3.6）を答えの時間に出さない
+ */
+export const LOGIN_FAILURE_FLOOR_MS = 250;
+
+/** 実の時計で、決めた時刻まで待つ */
+async function padUntil(deadline: number): Promise<void> {
+  const rest = deadline - performance.now();
+  if (rest > 0) await new Promise<void>((r) => setTimeout(r, rest));
 }
 
 export class AuthFailure extends Error {
@@ -57,6 +87,8 @@ export class AuthFailure extends Error {
     readonly status: number,
     message: string,
     readonly problems: string[] = [],
+    /** 503 のとき、もう一度試すまでの秒数（Retry-After） */
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "AuthFailure";
@@ -68,8 +100,28 @@ export const LOGIN_FAILED_MESSAGE =
   "利用者名かパスワード（か確認の番号）が違う。または、続けて失敗したため、しばらくログインを止めている";
 /** 大事な操作の前に、本人の確かめが要るときの印（AuthFailure の problems） */
 export const REAUTH_REQUIRED = "reauth_required";
+/** パスワードの確かめが混んで断ったときの文言（503） */
+export const HASH_BUSY_MESSAGE = "いまログインの要求が混んでいる。少し待ってから、もう一度試す";
+/** ログインの途中のセッションが、もう使えないとき（ほかの画面で先に進んだ・閉じた） */
+export const SESSION_GONE_MESSAGE = "このログインの途中のセッションは、もう使えない。ログインし直す";
 
 const now = (ctx: AuthContext) => (ctx.now ? ctx.now() : new Date());
+
+const limiterOf = (ctx: AuthContext) =>
+  ctx.hashLimiter ??
+  sharedHashLimiter({ concurrency: ctx.settings.passwordHashConcurrency, queueLimit: ctx.settings.passwordHashQueue });
+const digestOf = (ctx: AuthContext) => ctx.failureDigest ?? defaultFailureDigest;
+const busyFailure = () => new AuthFailure(503, HASH_BUSY_MESSAGE, ["busy"], HASH_BUSY_RETRY_AFTER_SECONDS);
+
+/** パスワードのハッシュを、枠を取って回す。枠も待ちの席も無ければ 503（AuthFailure） */
+async function hashing<T>(ctx: AuthContext, lane: HashLane, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await limiterOf(ctx).run(lane, fn);
+  } catch (error) {
+    if (error instanceof HashBusyError) throw busyFailure();
+    throw error;
+  }
+}
 const addMinutes = (d: Date, m: number) => new Date(d.getTime() + m * 60_000);
 
 export const hashToken = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
@@ -91,23 +143,72 @@ async function record(
 
 const actorOf = (user: Pick<User, "username" | "role">) => ({ actorId: user.username, actorRole: user.role });
 
+const UNKNOWN_ACTOR: DigestActor = { actorId: "unknown", actorRole: "none" };
+
+/**
+ * まとめておいたログインの失敗（src/lib/auth/failure-digest.ts）を、1 分の枠が替わっていれば記録に書く。
+ * force なら枠の途中でも書く。ログインの要求のはじめと、一定の間隔の片付け（src/lib/startup.ts）から呼ぶ
+ */
+export async function flushFailureDigest(ctx: AuthContext, force = false): Promise<number> {
+  const entries = digestOf(ctx).take(now(ctx).getTime(), force);
+  for (const e of entries) {
+    await appendAudit(ctx.db, {
+      actorId: e.actorId,
+      actorRole: e.actorRole,
+      authMode: AUTH_MODE_LOCAL,
+      action: "login",
+      outcome: "denied",
+      // まとめた行は、いろいろな接続元の試みを含みうるので、接続元を入れない
+      sourceAddress: null,
+      sourceAddressUnverified: null,
+      occurredAt: now(ctx),
+      detail: { reason: e.reason, aggregated: e.count, firstAt: e.firstAt.toISOString(), lastAt: e.lastAt.toISOString() },
+    });
+  }
+  return entries.length;
+}
+
+/**
+ * ログインの失敗を記録する。遅らせの上限を超えた試み（throttled）の失敗は、1行ずつではなく、
+ * 1 分の枠ごとに「利用者×理由」でまとめる（監査の行が、攻撃の要求の数だけ膨らまないように）
+ */
+async function recordLoginDenied(ctx: AuthContext, actor: DigestActor, reason: string, throttled: boolean) {
+  if (throttled) {
+    digestOf(ctx).add(actor, reason, now(ctx));
+    return;
+  }
+  await record(ctx, actor, { action: "login", outcome: "denied", detail: { reason } });
+}
+
 /**
  * ログインの試みを遅らせる（利用者名ごと・全体。src/lib/auth/rate-limit.ts）。利用者を引く前に数え、
  * 存在しない利用者名でも同じに遅らせる。断らない（ほかの人の失敗で、正しい利用者を締め出さない）。
- * 枠の中ではじめて遅らせ始めたときだけ記録に残す（利用者名は残さない）
+ * 枠の中ではじめて遅らせ始めたときだけ記録に残す（利用者名は残さない）。
+ * ただし、パスワードの確かめの枠と待ちの席が埋まっていれば、待たせずにすぐ 503 で断る（src/lib/auth/hash-limiter.ts）。
+ * 遅らせたら throttled（その試みの失敗は、まとめて記録する）
  */
-async function throttleLogin(ctx: AuthContext, username: string): Promise<void> {
+async function throttleLogin(ctx: AuthContext, username: string): Promise<{ throttled: boolean }> {
+  await flushFailureDigest(ctx);
   const throttle = ctx.loginThrottle ?? defaultLoginThrottle;
-  const { delayMs, firstOver } = throttle.take(
+  const { delayMs, firstOver, globalOver, firstGlobalOver } = throttle.take(
     username,
     ctx.source.sourceAddress,
     { perKeyPerMinute: ctx.settings.rateLimitPerUserPerMinute, globalPerMinute: ctx.settings.rateLimitGlobalPerMinute },
     now(ctx).getTime(),
   );
-  if (firstOver) {
-    await record(ctx, { actorId: "unknown", actorRole: "none" }, { action: "login", outcome: "denied", detail: { reason: "throttled" } });
+  // 遅らせ始めた印は1行ずつ残す。ただし全体の数が上限を超えた後は（名前を次々に替える試みで、
+  // 桶の数だけ行が増えないように）、全体で超えた1行のほかは、まとめて残す
+  if (firstGlobalOver || (firstOver && !globalOver)) {
+    await record(ctx, UNKNOWN_ACTOR, { action: "login", outcome: "denied", detail: { reason: "throttled" } });
+  } else if (firstOver) {
+    digestOf(ctx).add(UNKNOWN_ACTOR, "throttled", now(ctx));
+  }
+  if (limiterOf(ctx).wouldReject("login")) {
+    digestOf(ctx).add(UNKNOWN_ACTOR, "busy", now(ctx));
+    throw busyFailure();
   }
   if (delayMs > 0) await (ctx.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(delayMs);
+  return { throttled: delayMs > 0 };
 }
 
 // ── 利用者を作る ──
@@ -145,7 +246,7 @@ export async function createUser(
       username: input.username,
       displayName,
       role: input.role,
-      passwordHash: await hashPassword(input.password),
+      passwordHash: await hashing(ctx, "priority", () => hashPassword(input.password)),
       passwordChangedAt: at,
       mustChangePassword: input.mustChangePassword,
       createdAt: at,
@@ -193,10 +294,20 @@ async function resetAttempts(ctx: AuthContext, user: User): Promise<void> {
   });
 }
 
-/** 失敗を記録し、枠を使い切っていたら一時停止にする。一時停止になっていたら true */
-async function registerFailure(ctx: AuthContext, user: User, reason: string, action: AuditAction = "login") {
+/**
+ * 失敗を記録し、枠を使い切っていたら一時停止にする。一時停止になっていたら true。
+ * throttled（遅らせの上限を超えたログインの試み）の失敗は、まとめて記録する（一時停止の記録はいつも1行）
+ */
+async function registerFailure(
+  ctx: AuthContext,
+  user: User,
+  reason: string,
+  action: AuditAction = "login",
+  throttled = false,
+) {
   const at = now(ctx);
-  await record(ctx, actorOf(user), { action, outcome: "denied", detail: { reason } });
+  if (action === "login") await recordLoginDenied(ctx, actorOf(user), reason, throttled);
+  else await record(ctx, actorOf(user), { action, outcome: "denied", detail: { reason } });
   const lockedUntil = addMinutes(at, ctx.settings.loginLockMinutes);
   // 一時停止にするのは1つの要求だけ（同時の失敗が重なっても、一時停止の記録は1行）
   const res = await ctx.db.user.updateMany({
@@ -251,7 +362,15 @@ async function verifyAgain(
     await record(ctx, actorOf(user), { action, outcome: "denied", detail: { reason: "locked" } });
     throw new AuthFailure(401, LOGIN_FAILED_MESSAGE, ["locked"]);
   }
-  const passwordOk = await verifyPassword(input.password ?? "", user.passwordHash);
+  // ログインした人の枠で回す（ログインの要求が溢れていても、ロック中の職員が戻れるように）。
+  // 混んで断ったときは、取った試みの枠を返す（混んでいたことを失敗に数えない）
+  let passwordOk: boolean;
+  try {
+    passwordOk = await hashing(ctx, "priority", () => verifyPassword(input.password ?? "", user.passwordHash));
+  } catch (error) {
+    await releaseAttempt(ctx, user);
+    throw error;
+  }
   let totpOk = true;
   if (passwordOk && user.totpSecretEnc) {
     const secret = totpSecretOf(ctx, user);
@@ -284,68 +403,168 @@ function nextStageAfterPassword(ctx: AuthContext, user: User): Stage {
   return user.mustChangePassword ? "change_password" : "active";
 }
 
-export async function login(ctx: AuthContext, rawUsername: string, password: string): Promise<LoginResult> {
-  await throttleLogin(ctx, rawUsername);
+/**
+ * ログイン（利用者名とパスワード）。previousToken は、このブラウザがいま持っているセッションの token
+ * （ログインし直したら、前のセッションを消す）
+ */
+export async function login(
+  ctx: AuthContext,
+  rawUsername: string,
+  password: string,
+  previousToken?: string,
+): Promise<LoginResult> {
+  const { throttled } = await throttleLogin(ctx, rawUsername);
+  // 失敗の答えは、ここから決めた時間（LOGIN_FAILURE_FLOOR_MS）より前には返さない（利用者名の有無で、
+  // データベースの仕事の量が違うため。測った差は docs/spec.md の 3.6）
+  const started = performance.now();
   // 遅らせの数え方と同じ正規化（NFKC・小文字・空白の除去）で利用者を引く
   const username = normalizeUsername(rawUsername);
   const user = isValidUsername(username) ? await ctx.db.user.findUnique({ where: { username } }) : null;
+
+  // パスワードの確かめは、どの道でも1回だけ、ログインの枠で回す（枠と待ちの席が埋まっていれば 503）
+  const check = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await limiterOf(ctx).run("login", fn);
+    } catch (error) {
+      if (error instanceof HashBusyError) {
+        digestOf(ctx).add(user ? actorOf(user) : UNKNOWN_ACTOR, "busy", now(ctx));
+        throw busyFailure();
+      }
+      throw error;
+    }
+  };
+  const deny = async (actor: DigestActor, reason: string): Promise<never> => {
+    await recordLoginDenied(ctx, actor, reason, throttled);
+    await padUntil(started + (ctx.loginFailureFloorMs ?? LOGIN_FAILURE_FLOOR_MS));
+    throw new AuthFailure(401, LOGIN_FAILED_MESSAGE);
+  };
+
   if (!user) {
     // 知らない利用者名でも、パスワードの確かめと同じほどの時間をかけ、同じ答えを返す。
     // 名前は、打ち間違えたパスワードであることがあるので、記録に入れない
-    await burnPasswordCheck(password);
-    await record(ctx, { actorId: "unknown", actorRole: "none" }, { action: "login", outcome: "denied", detail: { reason: "unknown_user" } });
-    throw new AuthFailure(401, LOGIN_FAILED_MESSAGE);
+    await check(() => burnPasswordCheck(password));
+    return deny(UNKNOWN_ACTOR, "unknown_user");
   }
   if (user.status !== "active") {
-    await burnPasswordCheck(password);
-    await record(ctx, actorOf(user), { action: "login", outcome: "denied", detail: { reason: "disabled" } });
-    throw new AuthFailure(401, LOGIN_FAILED_MESSAGE);
+    await check(() => burnPasswordCheck(password));
+    return deny(actorOf(user), "disabled");
   }
   if (!(await claimAttempt(ctx, user))) {
-    await burnPasswordCheck(password);
-    await record(ctx, actorOf(user), { action: "login", outcome: "denied", detail: { reason: "locked" } });
-    throw new AuthFailure(401, LOGIN_FAILED_MESSAGE);
+    await check(() => burnPasswordCheck(password));
+    return deny(actorOf(user), "locked");
   }
-  if (!(await verifyPassword(password, user.passwordHash))) {
-    await registerFailure(ctx, user, "bad_password");
+  let passwordOk: boolean;
+  try {
+    passwordOk = await check(() => verifyPassword(password, user.passwordHash));
+  } catch (error) {
+    // 混んで断ったときは、取った試みの枠を返す（混んでいたことを失敗に数えない）
+    await releaseAttempt(ctx, user);
+    throw error;
+  }
+  if (!passwordOk) {
+    await registerFailure(ctx, user, "bad_password", "login", throttled);
+    await padUntil(started + (ctx.loginFailureFloorMs ?? LOGIN_FAILURE_FLOOR_MS));
     throw new AuthFailure(401, LOGIN_FAILED_MESSAGE);
   }
   await releaseAttempt(ctx, user);
 
-  // いまの規則に合わなくなったパスワード（MFA_REQUIRED を false にしたときの 8〜12 文字など）は、本人が変える。
-  // 平文はここでしか見られないので、ここで確かめて印を付ける（TOTP の段を通る利用者にも効く）
-  let current = user;
+  // 平文はここでしか見られないので、ここで2つを確かめる（TOTP の段を通る利用者にも効く）：
+  // - いまの規則に合わなくなったパスワード（MFA_REQUIRED を false にしたときの 8〜12 文字など）は、本人が変える。
+  // - 保存したハッシュが、いまの強さより弱ければ作り直す（混んでいれば、次のログインに回す）。
+  //   作り直しは、パスワードが同時に変えられていないとき（passwordHash が読んだ値のまま）だけ書く
+  const data: { mustChangePassword?: true; passwordHash?: string } = {};
   if (
     !user.mustChangePassword &&
     checkPassword(password, { mfaRequired: ctx.settings.mfaRequired, username: user.username }).length > 0
   ) {
-    current = await ctx.db.user.update({ where: { id: user.id }, data: { mustChangePassword: true, updatedAt: now(ctx) } });
+    data.mustChangePassword = true;
+  }
+  if (needsRehash(user.passwordHash)) {
+    try {
+      data.passwordHash = await limiterOf(ctx).run("login", () => hashPassword(password));
+    } catch (error) {
+      if (!(error instanceof HashBusyError)) throw error;
+    }
+  }
+  let current = user;
+  if (Object.keys(data).length > 0) {
+    const res = await ctx.db.user.updateMany({
+      where: { id: user.id, passwordHash: user.passwordHash },
+      data: { ...data, updatedAt: now(ctx) },
+    });
+    if (res.count !== 1) return deny(actorOf(user), "changed_during_login");
+    current = { ...user, ...data };
   }
 
+  if (previousToken && previousToken.length <= 128) {
+    await ctx.db.session.deleteMany({ where: { id: hashToken(previousToken) } });
+  }
   const stage = nextStageAfterPassword(ctx, current);
   const result = await openSession(ctx, current, stage);
   if (stage === "active") await completeLogin(ctx, current, { mfa: false });
   return result;
 }
 
-async function openSession(ctx: AuthContext, user: User, stage: Stage): Promise<LoginResult> {
+/**
+ * セッションを開く。1つの transaction の中で、利用者が確かめた時のまま（有効・一時停止でない・
+ * パスワードの変更の時刻と TOTP の秘密が同じ）であることを確かめてから作る。確かめている間に
+ * パスワードを変えた・TOTP をやり直した・止めた・一時停止にした利用者のセッションを、後から生き残らせない。
+ * replacing を渡したら、そのセッション（ログインの途中のセッション）を同じ transaction で消し、
+ * 消せたとき（1件）だけ作る（ほかの画面で先に進んだ・閉じた途中のセッションから、二度ログインさせない）
+ */
+async function openSession(
+  ctx: AuthContext,
+  user: User,
+  stage: Stage,
+  options: { replacing?: string } = {},
+): Promise<LoginResult> {
   const at = now(ctx);
   const token = randomBytes(32).toString("base64url");
   const expiresAt =
     stage === "active" ? addMinutes(at, SESSION_MAX_HOURS * 60) : addMinutes(at, PENDING_SESSION_MINUTES);
-  await ctx.db.session.create({
-    data: {
-      id: hashToken(token),
-      userId: user.id,
-      stage,
-      csrfToken: randomBytes(32).toString("base64url"),
-      createdAt: at,
-      expiresAt,
-      lastActivityAt: at,
-    },
+  const outcome = await ctx.db.$transaction(async (tx) => {
+    if (options.replacing !== undefined) {
+      const gone = await tx.session.deleteMany({ where: { id: options.replacing, userId: user.id } });
+      if (gone.count !== 1) return "session_gone" as const;
+    }
+    const fresh = await tx.user.findUnique({ where: { id: user.id } });
+    if (
+      !fresh ||
+      fresh.status !== "active" ||
+      (fresh.lockedUntil !== null && fresh.lockedUntil > at) ||
+      fresh.passwordChangedAt.getTime() !== user.passwordChangedAt.getTime() ||
+      fresh.totpSecretEnc !== user.totpSecretEnc
+    ) {
+      // 消した途中のセッションも戻す（transaction ごと取り消す）。途中のセッションは、止めた・一時停止の利用者なら
+      // 次の要求で消え、パスワードの変更・TOTP のやり直しなら、そちらの側で消している
+      throw new StaleUser();
+    }
+    await tx.session.create({
+      data: {
+        id: hashToken(token),
+        userId: user.id,
+        stage,
+        csrfToken: randomBytes(32).toString("base64url"),
+        createdAt: at,
+        expiresAt,
+        lastActivityAt: at,
+      },
+    });
+    return "opened" as const;
+  }).catch((error: unknown) => {
+    if (error instanceof StaleUser) return "changed" as const;
+    throw error;
   });
+  if (outcome === "session_gone") throw new AuthFailure(409, SESSION_GONE_MESSAGE);
+  if (outcome === "changed") {
+    await record(ctx, actorOf(user), { action: "login", outcome: "denied", detail: { reason: "changed_during_login" } });
+    throw new AuthFailure(401, LOGIN_FAILED_MESSAGE);
+  }
   return { token, stage, expiresAt };
 }
+
+/** openSession の transaction を取り消すための印 */
+class StaleUser extends Error {}
 
 async function completeLogin(ctx: AuthContext, user: User, detail: Record<string, unknown>) {
   const at = now(ctx);
@@ -356,7 +575,9 @@ async function completeLogin(ctx: AuthContext, user: User, detail: Record<string
 
 /**
  * 段を進める。active になるときは、途中のセッションを消して、新しい token・CSRF の token のセッションを開く
- * （途中の段の token を、ログインした後に使い続けない）。そしてログインを記録する
+ * （途中の段の token を、ログインした後に使い続けない）。そしてログインを記録する。
+ * 途中のセッションが、もう無い・ほかの段に進んでいるときは 409（同じ途中のセッションから二度進ませない）。
+ * user は、この段で確かめたときの利用者（openSession が、確かめた時のままかを見る）
  */
 async function advance(
   ctx: AuthContext,
@@ -366,14 +587,14 @@ async function advance(
   detail: Record<string, unknown>,
 ): Promise<StageResult> {
   if (stage !== "active") {
-    await ctx.db.session.update({
-      where: { id: session.id },
+    const res = await ctx.db.session.updateMany({
+      where: { id: session.id, stage: session.stage },
       data: { stage, pendingTotpEnc: null, lastActivityAt: now(ctx) },
     });
+    if (res.count !== 1) throw new AuthFailure(409, SESSION_GONE_MESSAGE);
     return { stage };
   }
-  await ctx.db.session.deleteMany({ where: { id: session.id } });
-  const opened = await openSession(ctx, user, "active");
+  const opened = await openSession(ctx, user, "active", { replacing: session.id });
   await completeLogin(ctx, user, detail);
   return { stage, rotated: { token: opened.token, expiresAt: opened.expiresAt } };
 }
@@ -396,8 +617,8 @@ export async function submitTotp(ctx: AuthContext, session: SessionRow, user: Us
     const locked = await registerFailure(ctx, user, "bad_totp");
     throw new AuthFailure(401, LOGIN_FAILED_MESSAGE, locked ? ["locked"] : []);
   }
-  const fresh = await ctx.db.user.findUniqueOrThrow({ where: { id: user.id } });
-  return advance(ctx, session, fresh, fresh.mustChangePassword ? "change_password" : "active", { mfa: true });
+  // 確かめたときの利用者のままかは、advance（openSession）が transaction の中で見る
+  return advance(ctx, session, user, user.mustChangePassword ? "change_password" : "active", { mfa: true });
 }
 
 export interface Enrollment {
@@ -423,7 +644,10 @@ export async function startEnrollment(ctx: AuthContext, session: SessionRow, use
 
 /**
  * 登録を確かめる。二要素が任意のときの、ログインした後の登録では、いまのパスワードも確かめる
- * （離れた端末のセッションで、ほかの人の認証のアプリを結び付けられないように）
+ * （離れた端末のセッションで、ほかの人の認証のアプリを結び付けられないように）。
+ * 書くのは、まだ TOTP を登録していない（totpSecretEnc が空の）ときだけ。もう登録してあれば 409
+ * （登録の途中のセッションを2つ開いて、後から登録済みの TOTP を上書きできないように）。
+ * 登録できたら、同じ transaction で、その利用者のほかのセッションを閉じる
  */
 export async function confirmEnrollment(
   ctx: AuthContext,
@@ -445,20 +669,29 @@ export async function confirmEnrollment(
     throw new AuthFailure(400, "確認の番号が合わない。認証のアプリの番号を入れ直す");
   }
   const at = now(ctx);
-  const updated = await ctx.db.user.update({
-    where: { id: user.id },
-    data: {
-      totpSecretEnc: sealField(secret, ctx.settings.sessionSecret, user.id),
-      totpEnabledAt: at,
-      totpLastStep: step,
-      updatedAt: at,
-    },
+  const enrolled = {
+    totpSecretEnc: sealField(secret, ctx.settings.sessionSecret, user.id),
+    totpEnabledAt: at,
+    totpLastStep: step,
+    updatedAt: at,
+  };
+  const won = await ctx.db.$transaction(async (tx) => {
+    const res = await tx.user.updateMany({
+      where: { id: user.id, status: "active", totpSecretEnc: null },
+      data: enrolled,
+    });
+    if (res.count !== 1) return false;
+    await tx.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
+    if (optional) await tx.session.updateMany({ where: { id: session.id }, data: { pendingTotpEnc: null } });
+    return true;
   });
-  await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "success" });
-  if (optional) {
-    await ctx.db.session.update({ where: { id: session.id }, data: { pendingTotpEnc: null } });
-    return { stage: "active" };
+  if (!won) {
+    await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "denied", detail: { reason: "already_enrolled" } });
+    throw new AuthFailure(409, "TOTP はもう登録してある。登録し直すときは、管理者に TOTP のやり直しを頼む");
   }
+  const updated: User = { ...user, ...enrolled };
+  await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "success" });
+  if (optional) return { stage: "active" };
   return advance(ctx, session, updated, updated.mustChangePassword ? "change_password" : "active", {
     mfa: true,
     enrolled: true,
@@ -482,21 +715,31 @@ export async function changePassword(
     await verifyAgain(ctx, user, { password: input.currentPassword, code: input.code }, "password_change");
   }
   const problems = checkPassword(input.newPassword, { mfaRequired: ctx.settings.mfaRequired, username: user.username });
-  if (await verifyPassword(input.newPassword, user.passwordHash)) problems.push("いまのパスワードと違うものにする");
+  if (await hashing(ctx, "priority", () => verifyPassword(input.newPassword, user.passwordHash))) {
+    problems.push("いまのパスワードと違うものにする");
+  }
   if (problems.length > 0) throw new AuthFailure(400, "このパスワードは使えない", problems);
 
   const at = now(ctx);
-  const updated = await ctx.db.user.update({
-    where: { id: user.id },
-    data: {
-      passwordHash: await hashPassword(input.newPassword),
-      passwordChangedAt: at,
-      mustChangePassword: false,
-      updatedAt: at,
-    },
+  const changes = {
+    passwordHash: await hashing(ctx, "priority", () => hashPassword(input.newPassword)),
+    passwordChangedAt: at,
+    mustChangePassword: false,
+    updatedAt: at,
+  };
+  // 読んだ時のパスワードのままのときだけ変え、同じ transaction でほかのセッションを閉じる
+  // （同時に進んでいた古いパスワードのログインは、openSession の確かめか、この削除で消える）
+  const changed = await ctx.db.$transaction(async (tx) => {
+    const res = await tx.user.updateMany({
+      where: { id: user.id, passwordChangedAt: user.passwordChangedAt },
+      data: changes,
+    });
+    if (res.count !== 1) return false;
+    await tx.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
+    return true;
   });
-  // ほかのセッションは閉じる
-  await ctx.db.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
+  if (!changed) throw new AuthFailure(409, "パスワードは、ほかの画面で先に変えられている。頁を開き直す");
+  const updated: User = { ...user, ...changes };
   await record(ctx, actorOf(user), { action: "password_change", outcome: "success" });
   if (session.stage === "active") return { stage: "active" };
   return advance(ctx, session, updated, "active", { mfa: user.totpSecretEnc !== null, passwordChanged: true });
@@ -563,6 +806,15 @@ export async function touchSession(ctx: AuthContext, session: SessionRow): Promi
   const at = now(ctx);
   if (at.getTime() - session.lastActivityAt.getTime() < 15_000) return;
   await ctx.db.session.updateMany({ where: { id: session.id, lockedAt: null }, data: { lastActivityAt: at } });
+}
+
+/**
+ * 期限の切れたセッションを片付ける（Session_expiresAt_idx を使う）。起動の時と、一定の間隔で呼ぶ（src/lib/startup.ts）。
+ * 切れたセッションは、片付ける前でも resolveSession が使わせない。消した数を返す
+ */
+export async function purgeExpiredSessions(db: Db, at: Date = new Date()): Promise<number> {
+  const res = await db.session.deleteMany({ where: { expiresAt: { lte: at } } });
+  return res.count;
 }
 
 export async function logout(ctx: AuthContext, session: SessionRow, user: User): Promise<void> {

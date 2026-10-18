@@ -10,8 +10,12 @@ import { getConfig, type AuthMode } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import type { Session as SessionRow, User } from "@/generated/prisma/client";
 
-/** ログインのセッションの cookie（HttpOnly・Secure・SameSite=Strict。src/lib/auth/session-cookie.ts） */
-export const SESSION_COOKIE = "tsunagi_session";
+/**
+ * ログインのセッションの cookie（HttpOnly・Secure・SameSite=Strict・Path=/、Domain は付けない。src/lib/api/auth-route.ts）。
+ * 名前の `__Host-` で、ブラウザは Secure・Path=/・Domain 無しの cookie だけを受ける（同じ親のドメインの
+ * ほかの名前のサーバーや、TLS の無い頁が入れた同じ名前の cookie で、上書き・固定されないように）
+ */
+export const SESSION_COOKIE = "__Host-tsunagi_session";
 
 export interface Session {
   actorId: string;
@@ -50,6 +54,8 @@ export async function authContext(): Promise<AuthContext> {
       sessionSecret: config.sessionSecret,
       rateLimitPerUserPerMinute: config.auth.rateLimitPerUserPerMinute,
       rateLimitGlobalPerMinute: config.auth.rateLimitGlobalPerMinute,
+      passwordHashConcurrency: config.auth.passwordHashConcurrency,
+      passwordHashQueue: config.auth.passwordHashQueue,
     },
     source: sourceFromHeaders(await headers()),
   };

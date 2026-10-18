@@ -1,13 +1,17 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { verifyAuditChain } from "@/lib/audit";
 import { bootstrapInitialAdmin, BootstrapError } from "@/lib/auth/bootstrap";
-import { hashPassword } from "@/lib/auth/password-hash";
+import { DEFAULT_ARGON2_PARAMS, hashPassword } from "@/lib/auth/password-hash";
 import {
   AuthFailure,
   changePassword,
   confirmEnrollment,
   createUser,
+  flushFailureDigest,
+  HASH_BUSY_MESSAGE,
   hashToken,
+  purgeExpiredSessions,
+  SESSION_GONE_MESSAGE,
   listUsers,
   lockScreen,
   login,
@@ -25,7 +29,10 @@ import {
   type AuthContext,
   type AuthSettings,
 } from "@/lib/auth/local-auth";
+import { FailureDigest } from "@/lib/auth/failure-digest";
+import { HASH_BUSY_RETRY_AFTER_SECONDS, HashLimiter, type HashLane } from "@/lib/auth/hash-limiter";
 import { BUCKETS, LoginThrottle, MAX_DELAY_MS, normalizeUsername } from "@/lib/auth/rate-limit";
+import { sealField } from "@/lib/auth/sealed-field";
 import { totpAt } from "@/lib/auth/totp";
 import type { Db } from "@/lib/db";
 import { testDatabases } from "./helpers/test-db";
@@ -68,6 +75,8 @@ async function setup(settings: Partial<AuthSettings> = {}) {
       sessionSecret: SESSION_SECRET,
       rateLimitPerUserPerMinute: 1000,
       rateLimitGlobalPerMinute: 1000,
+      passwordHashConcurrency: 2,
+      passwordHashQueue: 1000,
       ...settings,
     },
     source: { sourceAddress: null, sourceAddressUnverified: "198.51.100.7" },
@@ -76,7 +85,11 @@ async function setup(settings: Partial<AuthSettings> = {}) {
     sleep: async (ms: number) => {
       slept.push(ms);
     },
+    failureDigest: new FailureDigest(),
+    // 失敗の答えの下限は、それを見る試験でだけ使う（ほかの試験を遅くしない）
+    loginFailureFloorMs: 0,
   };
+  ctx.hashLimiter = new HashLimiter({ concurrency: ctx.settings.passwordHashConcurrency, queueLimit: ctx.settings.passwordHashQueue });
   return { db, ctx, clock };
 }
 
@@ -443,6 +456,8 @@ describe("最初の管理者", () => {
       screenLockMinutes: 15,
       rateLimitPerUserPerMinute: 10,
       rateLimitGlobalPerMinute: 300,
+      passwordHashConcurrency: 2,
+      passwordHashQueue: 32,
       oidc: {},
       initialAdmin,
     },
@@ -708,5 +723,320 @@ describe("レビューと安全の確かめで直したこと", () => {
       updateUser(ctx, b.id, { status: "disabled" }, ADMIN),
     ]);
     expect(await db.user.count({ where: { role: "admin", status: "active" } })).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/** ログインの枠の確かめが終わったところで1回止める（ほかの操作を割り込ませる試験のため） */
+class PausingLimiter extends HashLimiter {
+  private hold?: { reached: () => void; release: Promise<void> };
+
+  pauseNextLogin() {
+    let reached!: () => void;
+    let release!: () => void;
+    const reachedP = new Promise<void>((r) => {
+      reached = r;
+    });
+    const releaseP = new Promise<void>((r) => {
+      release = r;
+    });
+    this.hold = { reached, release: releaseP };
+    return { reached: reachedP, release };
+  }
+
+  override async run<T>(lane: HashLane, fn: () => Promise<T>): Promise<T> {
+    const value = await super.run(lane, fn);
+    const hold = this.hold;
+    if (lane === "login" && hold) {
+      this.hold = undefined;
+      hold.reached();
+      await hold.release;
+    }
+    return value;
+  }
+}
+
+const SATO = { username: "sato", displayName: "佐藤", role: "viewer" as const, password: "kq7vz2mw-long1", mustChangePassword: false };
+
+describe("独立のレビューの指摘で直したこと", () => {
+  it("F1：登録の途中のセッションを2つ開いても、2つ目の確定は断る（登録済みの TOTP を上書きしない）。登録したら、ほかのセッションを閉じる", async () => {
+    const { ctx, db, clock } = await setup();
+    await createUser(ctx, { ...SATO, password: PASSWORD }, ADMIN);
+    const a = await login(ctx, "sato", PASSWORD);
+    const b = await login(ctx, "sato", PASSWORD);
+    expect([a.stage, b.stage]).toEqual(["enroll", "enroll"]);
+    const sa = await sessionOf(db, a.token);
+    const ea = await startEnrollment(ctx, sa.session, sa.user);
+    const sb = await sessionOf(db, b.token);
+    const eb = await startEnrollment(ctx, sb.session, sb.user);
+    const sa2 = await sessionOf(db, a.token);
+    const sb2 = await sessionOf(db, b.token);
+
+    const done = await confirmEnrollment(ctx, sa2.session, sa2.user, totpAt(ea.secret, clock.t));
+    expect(done.stage).toBe("active");
+    // 2つ目の途中のセッションは閉じた
+    expect(await db.session.findUnique({ where: { id: hashToken(b.token) } })).toBeNull();
+    // 先に読んでおいた2つ目のセッションから確定しても、断る（登録した秘密を替えない）
+    const before = (await db.user.findUniqueOrThrow({ where: { username: "sato" } })).totpSecretEnc;
+    await expect(confirmEnrollment(ctx, sb2.session, sb2.user, totpAt(eb.secret, clock.t))).rejects.toMatchObject({ status: 409 });
+    expect((await db.user.findUniqueOrThrow({ where: { username: "sato" } })).totpSecretEnc).toBe(before);
+    const actions = (await auditRows(db)).map((r) => `${r.action}:${r.outcome}`);
+    expect(actions.filter((x) => x === "mfa_enroll:success")).toHaveLength(1);
+    expect(actions).toContain("mfa_enroll:denied");
+
+    // 次のログインで要るのは、1つ目の秘密
+    clock.advance(30_000);
+    const r = await login(ctx, "sato", PASSWORD);
+    const s = await sessionOf(db, r.token);
+    expect((await submitTotp(ctx, s.session, s.user, totpAt(ea.secret, clock.t))).stage).toBe("active");
+  });
+
+  it("F1：同時に2つの登録を確定しても、通るのは1つだけ", async () => {
+    const { ctx, db, clock } = await setup();
+    await createUser(ctx, { ...SATO, password: PASSWORD }, ADMIN);
+    const tokens = [(await login(ctx, "sato", PASSWORD)).token, (await login(ctx, "sato", PASSWORD)).token];
+    const pending = [];
+    for (const token of tokens) {
+      const s = await sessionOf(db, token);
+      const { secret } = await startEnrollment(ctx, s.session, s.user);
+      pending.push({ ...(await sessionOf(db, token)), secret });
+    }
+    const results = await Promise.allSettled(
+      pending.map((p) => confirmEnrollment(ctx, p.session, p.user, totpAt(p.secret, clock.t))),
+    );
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    expect(await db.session.count({ where: { stage: "active" } })).toBe(1);
+  });
+
+  it("F1：二要素が任意のときのログインした後の登録も、もう登録してあれば断る", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: false });
+    await createUser(ctx, SATO, ADMIN);
+    const tokens = [(await login(ctx, "sato", SATO.password)).token, (await login(ctx, "sato", SATO.password)).token];
+    const pending = [];
+    for (const token of tokens) {
+      const s = await sessionOf(db, token);
+      const { secret } = await startEnrollment(ctx, s.session, s.user);
+      pending.push({ ...(await sessionOf(db, token)), secret });
+    }
+    const [first, second] = pending as [(typeof pending)[0], (typeof pending)[0]];
+    expect((await confirmEnrollment(ctx, first.session, first.user, totpAt(first.secret, clock.t), SATO.password)).stage).toBe("active");
+    expect(await db.session.findUnique({ where: { id: second.session.id } })).toBeNull();
+    await expect(
+      confirmEnrollment(ctx, second.session, second.user, totpAt(second.secret, clock.t), SATO.password),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("F4：ログインの途中のセッションが、もう使われていたら、新しいセッションを作らない（同じ途中のセッションから二度ログインさせない）", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret } = await enrolledUser(ctx, clock);
+    const r = await login(ctx, "tanaka", PASSWORD);
+    const stale = await sessionOf(db, r.token);
+    // 前後の段の番号はどちらも受ける窓に入る（使い回しの確かめは段ごとなので、別の段なら通る）
+    expect((await submitTotp(ctx, stale.session, stale.user, totpAt(secret, clock.t))).stage).toBe("active");
+    const activeBefore = await db.session.count({ where: { userId: stale.user.id, stage: "active" } });
+    await expect(submitTotp(ctx, stale.session, stale.user, totpAt(secret, clock.t + 30_000))).rejects.toMatchObject({
+      status: 409,
+      message: SESSION_GONE_MESSAGE,
+    });
+    expect(await db.session.count({ where: { userId: stale.user.id, stage: "active" } })).toBe(activeBefore);
+  });
+
+  it("F4：確かめている間に、利用者を止めた・TOTP の秘密が替わったら、ログインしたセッションを作らない", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret } = await enrolledUser(ctx, clock);
+    const user = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+    const countActive = () => db.session.count({ where: { userId: user.id, stage: "active" } });
+
+    const r1 = await login(ctx, "tanaka", PASSWORD);
+    const s1 = await sessionOf(db, r1.token);
+    const activeBefore = await countActive();
+    // 止めた（セッションを消す前の、確かめとの間）
+    await db.user.update({ where: { id: user.id }, data: { status: "disabled" } });
+    await expect(submitTotp(ctx, s1.session, s1.user, totpAt(secret, clock.t))).rejects.toMatchObject({ status: 401 });
+    expect(await countActive()).toBe(activeBefore);
+    await db.user.update({ where: { id: user.id }, data: { status: "active" } });
+
+    clock.advance(30_000);
+    const r2 = await login(ctx, "tanaka", PASSWORD);
+    const s2 = await sessionOf(db, r2.token);
+    // TOTP の秘密の行が替わった（やり直して登録し直した、の間。暗号化し直すと値は毎回違う）
+    await db.user.update({ where: { id: user.id }, data: { totpSecretEnc: sealField(secret, SESSION_SECRET, user.id) } });
+    await expect(submitTotp(ctx, s2.session, s2.user, totpAt(secret, clock.t))).rejects.toMatchObject({ status: 401 });
+    expect(await countActive()).toBe(activeBefore);
+    const reasons = (await auditRows(db)).map((x) => x.detail ?? "");
+    expect(reasons.filter((d) => d.includes("changed_during_login"))).toHaveLength(2);
+  });
+
+  it("F5：パスワードの変更と同時に進んでいた、古いパスワードのログインは、セッションを作らない", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: false });
+    const limiter = new PausingLimiter({ concurrency: 2, queueLimit: 10 });
+    ctx.hashLimiter = limiter;
+    await createUser(ctx, SATO, ADMIN);
+    const mine = await login(ctx, "sato", SATO.password);
+
+    const pause = limiter.pauseNextLogin();
+    const racing = login(ctx, "sato", SATO.password);
+    // 古いパスワードの確かめが通ったところで、ほかの画面からパスワードを変える
+    await pause.reached;
+    clock.advance(1000);
+    const s = await sessionOf(db, mine.token);
+    await changePassword(ctx, s.session, s.user, { currentPassword: SATO.password, newPassword: "zr4tx8pe-next-long" });
+    pause.release();
+
+    await expect(racing).rejects.toMatchObject({ status: 401 });
+    const sessions = await db.session.findMany({ where: { userId: s.user.id } });
+    expect(sessions.map((x) => x.id)).toEqual([hashToken(mine.token)]);
+    expect((await auditRows(db)).some((x) => x.detail?.includes("changed_during_login"))).toBe(true);
+    // 新しいパスワードでは入れる
+    expect((await login(ctx, "sato", "zr4tx8pe-next-long")).stage).toBe("active");
+  });
+
+  it("F2：パスワードの確かめの枠と待ちが埋まっていたら、待たせずに 503（Retry-After）。試みの枠は使わない。ログインした人の再認証は通る", async () => {
+    const { ctx, db, clock } = await setup({ passwordHashConcurrency: 1, passwordHashQueue: 0, rateLimitPerUserPerMinute: 1 });
+    const { secret, token } = await enrolledUser(ctx, clock);
+    let release!: () => void;
+    const held = ctx.hashLimiter!.run("login", () => new Promise<void>((r) => (release = r)));
+
+    slept = [];
+    for (let i = 0; i < 3; i++) {
+      const error = await login(ctx, "tanaka", PASSWORD).catch((e: unknown) => e);
+      expect(error).toMatchObject({ status: 503, message: HASH_BUSY_MESSAGE, retryAfterSeconds: HASH_BUSY_RETRY_AFTER_SECONDS });
+    }
+    // 遅らせの上限を超えていても、断る要求は待たせない
+    expect(slept).toEqual([]);
+    expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount).toBe(0);
+    // ログインした人（再認証・ロックの解除）は、取っておいた枠で通る
+    const s = await sessionOf(db, token);
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+
+    release();
+    await held;
+    expect((await login(ctx, "tanaka", PASSWORD)).stage).toBe("totp");
+    // 断った要求は、1行ずつではなく、まとめて残す
+    expect(await flushFailureDigest(ctx, true)).toBe(1);
+    const busy = (await auditRows(db)).filter((x) => x.detail?.includes('"busy"'));
+    expect(busy).toHaveLength(1);
+    expect(JSON.parse(busy[0]!.detail!)).toMatchObject({ reason: "busy", aggregated: 3 });
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: true });
+  });
+
+  it("F2：遅らせている間に枠が埋まったら、確かめの前に 503。取った試みの枠は返す", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false, passwordHashConcurrency: 1, passwordHashQueue: 0, rateLimitPerUserPerMinute: 1 });
+    await createUser(ctx, SATO, ADMIN);
+    await login(ctx, "sato", SATO.password);
+    let release: (() => void) | undefined;
+    let held: Promise<void> | undefined;
+    ctx.sleep = async () => {
+      held = ctx.hashLimiter!.run("login", () => new Promise<void>((r) => (release = r)));
+    };
+    await expect(login(ctx, "sato", "wrong-pass-1a")).rejects.toMatchObject({ status: 503 });
+    expect((await db.user.findUniqueOrThrow({ where: { username: "sato" } })).failedLoginCount).toBe(0);
+    release!();
+    await held;
+  });
+
+  it("F2：遅らせの上限を超えた試みの失敗は、1 分の枠ごとに「利用者×理由」の1行にまとめる（上限の中は1行ずつ）", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: false, rateLimitPerUserPerMinute: 2, loginLockThreshold: 100 });
+    await createUser(ctx, SATO, ADMIN);
+    for (let i = 0; i < 6; i++) await login(ctx, "nobody", "wrong-pass-1a").catch(() => undefined);
+    for (let i = 0; i < 6; i++) await login(ctx, "sato", "wrong-pass-1a").catch(() => undefined);
+    let rows = await auditRows(db);
+    expect(rows.filter((x) => x.detail?.includes("unknown_user"))).toHaveLength(2);
+    expect(rows.filter((x) => x.detail?.includes("bad_password"))).toHaveLength(2);
+
+    // 枠が替わった後の最初のログインの要求で、まとめた行を書く
+    clock.advance(60_000);
+    expect((await login(ctx, "sato", SATO.password)).stage).toBe("active");
+    rows = await auditRows(db);
+    const aggregated = rows
+      .filter((x) => x.detail?.includes("aggregated"))
+      .map((x) => ({ actorId: x.actorId, ...(JSON.parse(x.detail!) as Record<string, unknown>) }));
+    expect(aggregated).toHaveLength(2);
+    expect(aggregated).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ actorId: "unknown", reason: "unknown_user", aggregated: 4 }),
+        expect.objectContaining({ actorId: "sato", reason: "bad_password", aggregated: 4 }),
+      ]),
+    );
+    expect(JSON.stringify(rows)).not.toContain("nobody");
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: true });
+  });
+
+  it("F2：名前を次々に替えて全体の上限を超えても、行は名前の数だけ増えない（遅らせ始めた印もまとめる）", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: false, rateLimitPerUserPerMinute: 1, rateLimitGlobalPerMinute: 5 });
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 2; j++) await login(ctx, `ghost-${i}`, "wrong-pass-1a").catch(() => undefined);
+    }
+    let rows = await auditRows(db);
+    // 全体の上限の中の失敗（3 回）と、遅らせ始めた印（上限の中の2つと、全体で超えた1つ）だけが1行ずつ
+    expect(rows.filter((x) => x.detail?.includes("unknown_user"))).toHaveLength(3);
+    expect(rows.filter((x) => x.detail?.includes("throttled"))).toHaveLength(3);
+    clock.advance(60_000);
+    expect(await flushFailureDigest(ctx)).toBe(2);
+    rows = await auditRows(db);
+    const aggregated = rows.filter((x) => x.detail?.includes("aggregated")).map((x) => JSON.parse(x.detail!) as Record<string, unknown>);
+    expect(aggregated).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: "unknown_user", aggregated: 77 }),
+        expect.objectContaining({ reason: "throttled" }),
+      ]),
+    );
+    // 桶が重なった名前は、1回目から遅らせるので印が出ない（37 より少しだけ少ないことがある）
+    const throttledMarks = aggregated.find((x) => x.reason === "throttled")!.aggregated as number;
+    expect(throttledMarks).toBeGreaterThan(30);
+    expect(throttledMarks).toBeLessThanOrEqual(37);
+    expect(rows.length).toBeLessThan(10);
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: true });
+  });
+
+  it("F10：ログインし直したら前のセッションを消す。期限の切れたセッションを片付ける", async () => {
+    const { ctx, db, clock } = await setup({ mfaRequired: false });
+    await createUser(ctx, SATO, ADMIN);
+    await createUser(ctx, { ...SATO, username: "kato", displayName: "加藤", mustChangePassword: true }, ADMIN);
+    const first = await login(ctx, "sato", SATO.password);
+    const second = await login(ctx, "sato", SATO.password, first.token);
+    expect(await db.session.findUnique({ where: { id: hashToken(first.token) } })).toBeNull();
+    // 失敗したログインでは消さない
+    await expect(login(ctx, "sato", "wrong-pass-1a", second.token)).rejects.toMatchObject({ status: 401 });
+    expect(await db.session.findUnique({ where: { id: hashToken(second.token) } })).not.toBeNull();
+
+    // 途中のセッション（10 分）だけが切れる
+    const pending = await login(ctx, "kato", SATO.password);
+    expect(pending.stage).toBe("change_password");
+    clock.advance(11 * 60_000);
+    expect(await purgeExpiredSessions(db, clock.now())).toBe(1);
+    expect(await db.session.findUnique({ where: { id: hashToken(pending.token) } })).toBeNull();
+    expect(await db.session.findUnique({ where: { id: hashToken(second.token) } })).not.toBeNull();
+  });
+
+  it("F7：ログインの失敗の答えは、利用者名の有無・理由によらず、決めた時間より前には返さない", async () => {
+    const { ctx } = await setup({ mfaRequired: false });
+    ctx.loginFailureFloorMs = 80;
+    await createUser(ctx, SATO, ADMIN);
+    await createUser(ctx, { ...SATO, username: "kato", displayName: "加藤" }, ADMIN);
+    const kato = await ctx.db.user.findUniqueOrThrow({ where: { username: "kato" } });
+    await ctx.db.user.update({ where: { id: kato.id }, data: { status: "disabled" } });
+    for (const name of ["nobody", "sato", "kato"]) {
+      const t0 = performance.now();
+      await expect(login(ctx, name, "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
+      // タイマーの丸めの分だけ、少しの余裕を見る
+      expect(performance.now() - t0).toBeGreaterThanOrEqual(78);
+    }
+  });
+
+  it("F11：保存したハッシュが弱ければ、ログインに成功したときに作り直す（パスワードの変更の時刻は変えない）", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    const u = await createUser(ctx, SATO, ADMIN);
+    const weak = await hashPassword(SATO.password, { memory: 8192, passes: 1, parallelism: 1 });
+    await db.user.update({ where: { id: u.id }, data: { passwordHash: weak } });
+    // 違うパスワードでは作り直さない
+    await expect(login(ctx, "sato", "wrong-pass-1a")).rejects.toMatchObject({ status: 401 });
+    expect((await db.user.findUniqueOrThrow({ where: { id: u.id } })).passwordHash).toBe(weak);
+
+    expect((await login(ctx, "sato", SATO.password)).stage).toBe("active");
+    const after = await db.user.findUniqueOrThrow({ where: { id: u.id } });
+    const { memory, passes, parallelism } = DEFAULT_ARGON2_PARAMS;
+    expect(after.passwordHash).toContain(`$m=${memory},t=${passes},p=${parallelism}$`);
+    expect(after.passwordChangedAt).toEqual(u.passwordChangedAt);
+    expect((await login(ctx, "sato", SATO.password)).stage).toBe("active");
   });
 });

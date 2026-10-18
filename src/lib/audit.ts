@@ -108,10 +108,14 @@ export function computeAuditHash(row: AuditHashInput): string {
 
 // 1つのプロセスの中で追記を一列に並べる（前の行の hash を読んでから書くため）。
 // ほかのプロセスと競ったときは prevHash の一意の制約で失敗し、つなぎは枝分かれしない。
-let queue: Promise<unknown> = Promise.resolve();
+// Next.js は起動の時の処理（instrumentation の定期の片付け）と route handler を別々に組むことがあり、
+// そのときこのモジュールは2つになるので、並びは globalThis に1つだけ置く
+const QUEUE_KEY = Symbol.for("tsunagi-dicom.audit-queue");
+const queueHolder = globalThis as typeof globalThis & { [QUEUE_KEY]?: { tail: Promise<unknown> } };
+const queue = (queueHolder[QUEUE_KEY] ??= { tail: Promise.resolve() });
 
 export function appendAudit(db: Db, input: AuditEntryInput): Promise<AuditRow> {
-  const run = queue.then(() =>
+  const run = queue.tail.then(() =>
     db.$transaction(async (tx) => {
       const last = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
       const base: Omit<AuditRow, "hash"> = {
@@ -132,7 +136,7 @@ export function appendAudit(db: Db, input: AuditEntryInput): Promise<AuditRow> {
       return tx.auditLog.create({ data: { ...base, hash: computeAuditHash(base) } });
     }),
   );
-  queue = run.catch(() => undefined);
+  queue.tail = run.catch(() => undefined);
   return run;
 }
 

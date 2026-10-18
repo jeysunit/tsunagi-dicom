@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 // - ロックは BFF にも知らせ（/api/auth/lock）、ロックの間は画面の API と中継が 423 を返す（頁を開き直しても解けない）。
 // - 解くのはパスワード（と、登録していれば TOTP）。
 // - 同じブラウザのほかのタブとは localStorage で、最後の操作の時刻とロック・解除を分け合う。
+// - BFF がロックしたら（ほかのタブのロックの知らせでも）頁を読み直す。描かないだけでは、ルーターのキャッシュと
+//   頁に残った描画の元のデータ（RSC の payload）に、患者の情報が残るため。読み直した頁は、中身を描かない。
 // - 操作があれば、30 秒に1回まで BFF に知らせる（サーバーの側のロックの時間を数え直す）。
 
 const LAST_ACTIVITY_KEY = "tsunagi:last-activity";
@@ -57,15 +59,25 @@ export function LockGuard({
   const lastActivity = useRef(0);
   const lastPing = useRef(0);
   const lockedRef = useRef(initiallyLocked);
+  /** BFF がロックした状態で描いた頁で、まだ解いていない（頁に患者の情報が無い） */
+  const cleanRef = useRef(initiallyLocked);
 
   const lockNow = useCallback(
     async (reason: "client_idle" | "manual") => {
       if (lockedRef.current) return;
       lockedRef.current = true;
       setLocked(true);
-      writeShared(LOCK_EVENT_KEY, `lock:${Date.now()}`);
       const res = await postJson("/api/auth/lock", { reason }, csrfToken);
-      if (res.status === 401) window.location.assign("/login");
+      if (res.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (res.ok || res.status === 423) {
+        // BFF がロックしてから、ほかのタブに知らせ、頁を読み直す（読み直した頁は、中身を描かずにロックの画面を出す）。
+        // ルーターのキャッシュ・頁に残った描画の元のデータ（RSC の payload）から、患者の情報を消すため
+        writeShared(LOCK_EVENT_KEY, `lock:${Date.now()}`);
+        window.location.reload();
+      }
     },
     [csrfToken],
   );
@@ -83,8 +95,10 @@ export function LockGuard({
         lastPing.current = now;
         void postJson("/api/auth/activity", {}, csrfToken).then((res) => {
           if (res.status === 423) {
+            // BFF の側が先にロックしていた。読み直して、頁に残ったデータを消す
             lockedRef.current = true;
             setLocked(true);
+            window.location.reload();
           } else if (res.status === 401) {
             window.location.assign("/login");
           }
@@ -97,10 +111,15 @@ export function LockGuard({
     const onStorage = (event: StorageEvent) => {
       if (event.key !== LOCK_EVENT_KEY || !event.newValue) return;
       if (event.newValue.startsWith("lock:")) {
+        // ほかのタブが BFF をロックし終えてから知らせてくる。このタブも読み直して、頁に残ったデータを消す。
+        // ロックした状態で描いた頁（データを持たない）は、読み直さなくてよい
+        if (cleanRef.current) return;
         lockedRef.current = true;
         setLocked(true);
+        window.location.reload();
       } else if (event.newValue.startsWith("unlock:")) {
         lockedRef.current = false;
+        cleanRef.current = false;
         lastActivity.current = Date.now();
         setLocked(false);
         router.refresh();
@@ -147,6 +166,7 @@ export function LockGuard({
       return;
     }
     lockedRef.current = false;
+    cleanRef.current = false;
     lastActivity.current = Date.now();
     writeShared(LAST_ACTIVITY_KEY, String(Date.now()));
     writeShared(LOCK_EVENT_KEY, `unlock:${Date.now()}`);

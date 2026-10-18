@@ -20,10 +20,14 @@ export function testDatabases(prefix: string) {
         stdio: "pipe",
       });
     },
-    async fresh(): Promise<Db> {
+    /** migration を流したデータベースの写しの URL（file:）。アプリの側（getDb）につながせる試験に使う */
+    freshUrl(): string {
       const file = path.join(dir, `t${++n}.db`);
       copyFileSync(template, file);
-      const db = await createDb(`file:${file}`);
+      return `file:${file}`;
+    },
+    async fresh(): Promise<Db> {
+      const db = await createDb(this.freshUrl());
       opened.push(db);
       return db;
     },

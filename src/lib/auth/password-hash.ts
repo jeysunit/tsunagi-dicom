@@ -46,16 +46,68 @@ export async function hashPassword(password: string, params: Argon2Params = DEFA
 
 const PHC = /^\$argon2id\$v=(\d+)\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
 
-/** 形の読めない値・版の違う値は false（例外にしない） */
-export async function verifyPassword(password: string, phc: string): Promise<boolean> {
+/**
+ * 保存したハッシュの強さの値として受ける範囲。外れた値（壊れた行・書き換えた行）は確かめに回さない
+ * （大きすぎる値で記憶と時間を使い切らせない。小さすぎる値は強さが足りない）
+ */
+export const ARGON2_PARAM_RANGE = {
+  memory: { min: 8 * 1024, max: 256 * 1024 },
+  passes: { min: 1, max: 10 },
+  parallelism: { min: 1, max: 8 },
+  saltBytes: { min: 8, max: 64 },
+  tagBytes: { min: 16, max: 64 },
+} as const;
+
+const within = (v: number, r: { min: number; max: number }) => Number.isSafeInteger(v) && v >= r.min && v <= r.max;
+
+interface ParsedHash {
+  params: Argon2Params;
+  salt: Buffer;
+  tag: Buffer;
+}
+
+function parseHash(phc: string): ParsedHash | null {
   const m = PHC.exec(phc);
-  if (!m || Number(m[1]) !== VERSION) return false;
+  if (!m || Number(m[1]) !== VERSION) return null;
   const params = { memory: Number(m[2]), passes: Number(m[3]), parallelism: Number(m[4]) };
   const salt = Buffer.from(m[5]!, "base64");
-  const expected = Buffer.from(m[6]!, "base64");
-  if (salt.length < 8 || expected.length < 16) return false;
-  const actual = await derive(password, salt, params, expected.length);
-  return timingSafeEqual(actual, expected);
+  const tag = Buffer.from(m[6]!, "base64");
+  const r = ARGON2_PARAM_RANGE;
+  if (
+    !within(params.memory, r.memory) ||
+    !within(params.passes, r.passes) ||
+    !within(params.parallelism, r.parallelism) ||
+    params.memory < 8 * params.parallelism ||
+    !within(salt.length, r.saltBytes) ||
+    !within(tag.length, r.tagBytes)
+  ) {
+    return null;
+  }
+  return { params, salt, tag };
+}
+
+/** 形の読めない値・版の違う値・強さの値が範囲の外の値は false（例外にしない） */
+export async function verifyPassword(password: string, phc: string): Promise<boolean> {
+  const parsed = parseHash(phc);
+  if (!parsed) return false;
+  const actual = await derive(password, parsed.salt, parsed.params, parsed.tag.length);
+  return timingSafeEqual(actual, parsed.tag);
+}
+
+/**
+ * 保存したハッシュが、いまの強さ（params）より弱いか（記憶・回数・並び・salt・tag のどれかが小さい）。
+ * ログインに成功したとき、平文があるうちに作り直す（src/lib/auth/local-auth.ts）
+ */
+export function needsRehash(phc: string, params: Argon2Params = DEFAULT_ARGON2_PARAMS): boolean {
+  const parsed = parseHash(phc);
+  if (!parsed) return true;
+  return (
+    parsed.params.memory < params.memory ||
+    parsed.params.passes < params.passes ||
+    parsed.params.parallelism < params.parallelism ||
+    parsed.salt.length < SALT_BYTES ||
+    parsed.tag.length < TAG_BYTES
+  );
 }
 
 /** 知らない利用者名でも同じほどの時間をかける（利用者名の有無を時間で知られないように）ための、捨てるハッシュ */

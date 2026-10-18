@@ -13,9 +13,10 @@ export function errorResponse(error: unknown): Response {
     return Response.json({ error: error.message }, { status: error.status });
   }
   if (error instanceof AuthFailure || error instanceof RequestError) {
+    const retryAfter = error instanceof AuthFailure ? error.retryAfterSeconds : undefined;
     return Response.json(
       { error: error.message, ...(error.problems.length > 0 ? { problems: error.problems } : {}) },
-      { status: error.status },
+      { status: error.status, ...(retryAfter !== undefined ? { headers: { "retry-after": String(retryAfter) } } : {}) },
     );
   }
   console.error(error);

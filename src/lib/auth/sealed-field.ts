@@ -15,9 +15,13 @@ function key(sessionSecret: string): Buffer {
   return Buffer.from(hkdfSync("sha256", Buffer.from(sessionSecret, "utf8"), SALT, INFO, 32));
 }
 
+const IV_BYTES = 12;
+/** GCM の認証のタグは 16 バイトだけを受ける（短いタグでの偽造を断る） */
+const TAG_BYTES = 16;
+
 export function sealField(plain: string, sessionSecret: string, aad: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key(sessionSecret), iv);
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", key(sessionSecret), iv, { authTagLength: TAG_BYTES });
   cipher.setAAD(Buffer.from(aad, "utf8"));
   const body = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -29,10 +33,13 @@ export function openField(sealed: string, sessionSecret: string, aad: string): s
   const parts = sealed.split(":");
   if (parts.length !== 4 || parts[0] !== VERSION) return null;
   try {
-    const [, iv, body, tag] = parts as [string, string, string, string];
-    const decipher = createDecipheriv("aes-256-gcm", key(sessionSecret), Buffer.from(iv, "base64url"));
+    const [, ivText, body, tagText] = parts as [string, string, string, string];
+    const iv = Buffer.from(ivText, "base64url");
+    const tag = Buffer.from(tagText, "base64url");
+    if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) return null;
+    const decipher = createDecipheriv("aes-256-gcm", key(sessionSecret), iv, { authTagLength: TAG_BYTES });
     decipher.setAAD(Buffer.from(aad, "utf8"));
-    decipher.setAuthTag(Buffer.from(tag, "base64url"));
+    decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(Buffer.from(body, "base64url")), decipher.final()]).toString("utf8");
   } catch {
     return null;

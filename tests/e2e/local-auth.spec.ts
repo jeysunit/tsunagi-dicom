@@ -63,6 +63,28 @@ async function changeOwnPassword(page: Page, password: string) {
   await form.getByRole("button", { name: "パスワードを変える" }).click();
 }
 
+/** 検査の一覧の1行目の、患者 ID・氏名・StudyInstanceUID（合成の見本の値） */
+async function patientValues(page: Page): Promise<string[]> {
+  const row = page.getByTestId("study-table").locator("tbody tr").first();
+  const values = [
+    (await row.locator("td").nth(1).innerText()).trim(),
+    (await row.locator("td").nth(2).innerText()).trim(),
+    (await row.getAttribute("data-study-uid")) ?? "",
+  ];
+  for (const v of values) expect(v.length).toBeGreaterThan(3);
+  return values;
+}
+
+/** 頁の HTML（描画の元のデータを含む）に、患者の値が無い（読み直しの後） */
+async function expectNoPatientValues(page: Page, values: string[]) {
+  await expect
+    .poll(async () => {
+      const html = await page.content();
+      return values.filter((v) => html.includes(v));
+    })
+    .toEqual([]);
+}
+
 let admin: { context: BrowserContext; page: Page };
 let adminSecret = "";
 
@@ -91,8 +113,9 @@ test("最初の管理者：TOTP を登録し、決められたパスワードを
   await submitLogin(page, E2E_ADMIN.username, E2E_ADMIN.password);
   await expect(page).toHaveURL(/\/login\/enroll$/);
 
-  const cookie = (await context.cookies()).find((c) => c.name === "tsunagi_session");
-  expect(cookie).toMatchObject({ httpOnly: true, secure: true, sameSite: "Strict" });
+  // __Host- の名前：ブラウザは Secure・Path=/・Domain 無しのときだけ受ける
+  const cookie = (await context.cookies()).find((c) => c.name === "__Host-tsunagi_session");
+  expect(cookie).toMatchObject({ httpOnly: true, secure: true, sameSite: "Strict", path: "/" });
 
   // 途中のセッションでは、まだ検査を見られない
   expect((await page.request.get("/api/studies")).status()).toBe(401);
@@ -261,6 +284,7 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await page.goto("/");
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await expect(page.getByTestId("screen-lock")).toHaveCount(0);
+  const patient = await patientValues(page);
 
   // SCREEN_LOCK_MINUTES=1
   await page.clock.fastForward("01:10");
@@ -270,6 +294,8 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   // ぼかすだけでなく、中身（患者の情報）を頁から外す
   await expect(page.getByTestId("study-count")).toHaveCount(0);
   await expect(page.getByTestId("study-table")).toHaveCount(0);
+  // 頁を読み直すので、頁の HTML（描画の元のデータ・RSC の payload を含む）にも患者の値が残らない
+  await expectNoPatientValues(page, patient);
   // サーバーの側もロックしている：画面の API と中継は 423、開き直しても中身を描かない
   await expect.poll(async () => (await page.request.get("/api/studies")).status()).toBe(423);
   expect((await page.request.get(`/api/dicom-web/studies/${STUDY}/metadata`)).status()).toBe(423);
@@ -290,6 +316,31 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("study-count")).toHaveText("8");
   expect((await page.request.get("/api/studies")).status()).toBe(200);
   expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
+});
+
+test("画面のロック：ヘッダーの「ロック」で、同じブラウザのほかのタブも読み直し、頁に患者の値を残さない", async () => {
+  test.setTimeout(120_000);
+  const { page, context } = admin;
+  const other = await context.newPage();
+  await page.goto("/");
+  await other.goto("/");
+  await expect(other.getByTestId("study-count")).toHaveText("8");
+  const patient = await patientValues(other);
+
+  await page.getByRole("button", { name: "ロック", exact: true }).click();
+  await expect(page.getByTestId("screen-lock")).toBeVisible();
+  await expect(other.getByTestId("screen-lock")).toBeVisible();
+  await expectNoPatientValues(page, patient);
+  await expectNoPatientValues(other, patient);
+
+  // 1つのタブで解けば、ほかのタブも戻る
+  const lock = page.getByTestId("screen-lock");
+  await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
+  await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
+  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(other.getByTestId("study-count")).toHaveText("8");
+  await other.close();
 });
 
 test("ログアウトすると、セッションは使えない", async () => {
