@@ -10,7 +10,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "tsunagi-dicom",
-  description: "Not for Diagnostic Use / 非医療機器",
+  description: "DICOMweb 対応の画像サーバー向けの Web の画面と BFF",
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

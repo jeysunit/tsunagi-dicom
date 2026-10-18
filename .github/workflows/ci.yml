@@ -98,7 +98,8 @@ jobs:
             sleep 2
           done
           curl -fsS http://127.0.0.1:3000/ | grep -q 'data-testid="study-count">8<'
-          curl -fsS http://127.0.0.1:3000/ | grep -q '非医療機器'
+          page="$(curl -fsS http://127.0.0.1:3000/)"
+          case "$page" in *非医療機器*) echo '画面に「非医療機器」の表示が出ている'; exit 1;; esac
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3000/api/dicom-web/studies)" = 405
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/dicom-web/studies)" = 404
           test "$(docker compose exec -T tsunagi id -u)" != 0
