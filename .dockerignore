@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+.next
+.e2e
+data
+coverage
+playwright-report
+test-results
+blob-report
+src/generated
+docker/prisma-cli/node_modules
+.env*
+!.env.example
+secrets
+*.db
+*.db-*

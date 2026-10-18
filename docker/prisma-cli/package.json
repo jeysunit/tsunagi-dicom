@@ -1,0 +1,14 @@
+{
+  "name": "tsunagi-dicom-prisma-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "イメージの起動の時に migration を流す Prisma の CLI だけ。版はリポジトリの直下の package.json の prisma とそろえる",
+  "license": "MIT",
+  "dependencies": {
+    "prisma": "7.10.1"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.10.1": true,
+    "prisma@7.10.1": true
+  }
+}

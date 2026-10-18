@@ -9,8 +9,9 @@ A standalone web front end and BFF (Backend For Frontend) that uses a DICOMweb-c
 
 ## Status
 
-**Design stage (2026-10-18). Not functional yet.** The repository currently contains only the specification, development rules, and test material. There is no application code yet.
-Implementation will proceed stage by stage; each PR covers one cohesive change within a single stage (see "6. 段階" in [`docs/spec.md`](docs/spec.md)).
+**Stage 1a (2026-10-18).** The foundation, the BFF (a screen API for search, and a relay limited to WADO-RS reads so that viewers can retrieve images), the audit trail, development authentication (`AUTH_MODE=dev`), the common screen, and CI with container images are in place.
+The only page shows the number of studies and a plain study list, fetched through the BFF. Application user login (`AUTH_MODE=local`) comes in stage 1b; until then the application starts only with `AUTH_MODE=dev`, and `AUTH_MODE=dev` starts only with the mock backend (`BACKEND_MOCK=true`). In other words, stage 1a does not connect to a real image server.
+Implementation proceeds stage by stage; each PR covers one cohesive change within a single stage (see "6. 段階" in [`docs/spec.md`](docs/spec.md)).
 
 The user interface will be Japanese only at first. The documents are written mainly in Japanese.
 
@@ -25,6 +26,29 @@ The user interface will be Japanese only at first. The documents are written mai
 **Example uses**: as an everyday viewing front end in front of a hospital or lab image server; and in front of a research image archive for clinical studies, where readers must not see the original patient information (a blind-reading role, planned after stage 4).
 
 The image server and viewers are not modified. Every endpoint is configured through environment variables. Search and retrieval use DICOMweb first; Orthanc-only features are kept in separate components that are enabled only with an Orthanc backend.
+
+## Trying it out (mock backend)
+
+Without an image server, run it against the mock backend (synthetic samples in `tests/fixtures/orthanc`) and development authentication (`AUTH_MODE=dev`; writes are blocked):
+
+```sh
+mkdir -p secrets && openssl rand -base64 48 > secrets/session_secret.txt   # passed as SESSION_SECRET_FILE (secrets/ is not committed)
+BACKEND_MOCK=true AUTH_MODE=dev docker compose up --build
+# open http://127.0.0.1:3000/
+```
+
+For local development (Node version in `.nvmrc`; npm 11 `allowScripts` is enforced by `strict-allow-scripts` in `.npmrc`):
+
+```sh
+npm ci
+cp .env.example .env   # set BACKEND_MOCK="true", AUTH_MODE="dev" and SESSION_SECRET (or SESSION_SECRET_FILE)
+mkdir -p data && DATABASE_URL="file:./data/tsunagi.db" npm run db:migrate
+DATABASE_URL="file:./data/tsunagi.db" npm run dev
+```
+
+Tests: `npm run lint`, `npm run typecheck`, `npm test` (Vitest), `npm run build && npm run test:e2e` (Playwright, against the mock backend).
+
+For deployment, pin the GHCR image (`ghcr.io/jeysunit/tsunagi-dicom`) by version tag (`vX.Y.Z`) or digest (`TSUNAGI_IMAGE` in `compose.yaml`).
 
 ## Where the rules live
 

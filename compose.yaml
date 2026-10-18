@@ -1,0 +1,62 @@
+# tsunagi-dicom を1つのコンテナで動かす例。名前は例の名前だけ（pacs.example.org）。
+# 秘密は書かない：SESSION_SECRET と画像サーバーのパスワードは secret のファイルで渡す（リポジトリに入れない。/secrets/ は .gitignore）。
+#
+#   mkdir -p secrets
+#   openssl rand -base64 48 > secrets/session_secret.txt
+#   cp .env.example .env            # 施設の値を入れる（SESSION_SECRET は .env に書かない。下の secret のファイルで渡す）
+#   docker compose up
+#
+# secret のファイルは、コンテナの中の利用者（uid 1000）が読めるようにしておく（例：chmod 0644、か所有者を 1000 にする）。
+#
+# モックで画面を試すだけなら（画像サーバー無し。AUTH_MODE=dev はモックのときだけ起動する）：
+#   mkdir -p secrets && openssl rand -base64 48 > secrets/session_secret.txt
+#   BACKEND_MOCK=true AUTH_MODE=dev docker compose up
+# このときも待ち受けは手元（127.0.0.1）だけにしてある。
+
+services:
+  tsunagi:
+    # 既定は、このリポジトリから手元で作るイメージ（build: .）。
+    # 配備では GHCR の版のタグか digest を TSUNAGI_IMAGE に指定する
+    #（例：ghcr.io/jeysunit/tsunagi-dicom:v0.1.0、ghcr.io/jeysunit/tsunagi-dicom@sha256:…）
+    image: ${TSUNAGI_IMAGE:-tsunagi-dicom:local}
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BACKEND_KIND: ${BACKEND_KIND:-orthanc}
+      BACKEND_MOCK: ${BACKEND_MOCK:-false}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      # 値は secret のファイル（下の secrets）。SESSION_SECRET と同時には指定しない（起動しない）
+      SESSION_SECRET_FILE: /run/secrets/session_secret
+      # 画像サーバーのパスワードを secret のファイルで渡すとき（下の secrets を有効にする）
+      # BACKEND_PASSWORD_FILE: /run/secrets/backend_password
+      # 自前の CA を渡すとき（下の volumes を有効にする）
+      # BACKEND_CA_FILE: /etc/tsunagi/ca.pem
+      DATABASE_URL: file:/data/tsunagi.db
+    volumes:
+      - tsunagi-data:/data
+      # - ./ca.pem:/etc/tsunagi/ca.pem:ro
+    secrets:
+      - session_secret
+      # - backend_password
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+secrets:
+  session_secret:
+    file: ./secrets/session_secret.txt
+  # backend_password:
+  #   file: ./secrets/backend_password.txt
+
+volumes:
+  tsunagi-data:

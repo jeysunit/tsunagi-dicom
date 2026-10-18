@@ -21,6 +21,8 @@ blob-report/
 # 設定と秘密（.env.example だけは入れる）
 .env*
 !.env.example
+# compose.yaml の secret のファイル（SESSION_SECRET_FILE・BACKEND_PASSWORD_FILE）
+/secrets/
 
 # BFF のデータ（SQLite）
 /data/
@@ -41,3 +43,7 @@ blob-report/
 .DS_Store
 .vscode/
 .idea/
+src/generated/
+
+# Playwright の試験のデータベース
+/.e2e/
