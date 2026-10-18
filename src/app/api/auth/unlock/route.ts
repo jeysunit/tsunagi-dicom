@@ -11,13 +11,14 @@ const Body = z.object({
 });
 
 // 画面のロックを解く（パスワードと、登録していれば TOTP）。失敗はログインの失敗と同じに数える。
+// BFF の側がロックしていないとき（画面のロックの知らせが届かなかったときなど）も、いつも確かめる
+// （画面の側だけがロックしているずれで、確かめずに中身を出させない。閉じる側に倒す）。
 export async function POST(request: Request) {
   try {
     const state = await checkedState(request);
     const local = state.kind === "locked" || state.kind === "active" ? state.session.local : undefined;
     if (!local) throw new AuthError(401, "ログインしていない");
     const body = await readJson(request, Body);
-    if (state.kind === "active") return Response.json({ locked: false });
     try {
       await unlockScreen(await authContext(), local.row, local.user, body);
     } catch (error) {

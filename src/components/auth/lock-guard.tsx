@@ -14,6 +14,11 @@ import { cn } from "@/lib/utils";
 // - 同じブラウザのほかのタブとは localStorage で、最後の操作の時刻とロック・解除を分け合う。
 // - BFF がロックしたら（ほかのタブのロックの知らせでも）頁を読み直す。描かないだけでは、ルーターのキャッシュと
 //   頁に残った描画の元のデータ（RSC の payload）に、患者の情報が残るため。読み直した頁は、中身を描かない。
+// - 画面の側と BFF の側のロックの状態がずれたら、いつも閉じる（ロック）側に倒す：
+//   ロックの POST が失敗しても画面はロックのまま送り直す、どの要求でも 423 ならロックの画面にして読み直す、
+//   BFF の状態を一定の間隔で確かめる（ほかのタブの知らせの取りこぼし）、解くのは BFF の確かめ（パスワード）が
+//   通ってから（BFF がロックしていなくても確かめる）、ほかのタブの「解いた」の知らせは BFF に聞き直してから。
+//   操作の無い時間は、このタブの時計の進み方で数え、ほかのタブの時刻は延ばす向きにだけ使う。
 // - 操作があれば、30 秒に1回まで BFF に知らせる（サーバーの側のロックの時間を数え直す）。
 
 const LAST_ACTIVITY_KEY = "tsunagi:last-activity";
@@ -22,6 +27,18 @@ const LOCK_EVENT_KEY = "tsunagi:lock-event";
 export const LOCK_NOW_EVENT = "tsunagi:lock-now";
 const PING_INTERVAL_MS = 30_000;
 const CHECK_INTERVAL_MS = 5_000;
+/** BFF の状態（/api/auth/status）を確かめる間隔 */
+const STATUS_INTERVAL_MS = 10_000;
+
+/** BFF の状態の番号（200：ロックしていない、423：ロック中、401：ログインしていない）。つながらなければ 0 */
+async function fetchStatus(): Promise<number> {
+  try {
+    const res = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
+    return res.status;
+  } catch {
+    return 0;
+  }
+}
 
 function readShared(key: string): number {
   try {
@@ -57,16 +74,31 @@ export function LockGuard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const lastActivity = useRef(0);
+  /** このタブの最後の操作（performance.now。時計の合わせ直しの影響を受けない） */
+  const lastActivityMono = useRef(0);
   const lastPing = useRef(0);
   const lockedRef = useRef(initiallyLocked);
   /** BFF がロックした状態で描いた頁で、まだ解いていない（頁に患者の情報が無い） */
   const cleanRef = useRef(initiallyLocked);
 
-  const lockNow = useCallback(
+  /** 画面はロックしたが、BFF がロックしたことをまだ確かめていない（ロックの POST が失敗した）。その理由 */
+  const pendingLock = useRef<"client_idle" | "manual" | null>(null);
+
+  /** BFF がロックしている（どこかの要求が 423 を返した）。必ずロックの画面にし、データを持つ頁なら読み直す */
+  const onServerLocked = useCallback(() => {
+    lockedRef.current = true;
+    pendingLock.current = null;
+    setLocked(true);
+    if (!cleanRef.current) window.location.reload();
+  }, []);
+
+  /**
+   * BFF にロックを知らせる。通ったら（または 423 なら）ほかのタブに知らせて頁を読み直す。
+   * 通らなければ（網の切れ・BFF の失敗）、画面はロックのまま、間隔ごとに送り直す（閉じる側に倒す）
+   */
+  const confirmLock = useCallback(
     async (reason: "client_idle" | "manual") => {
-      if (lockedRef.current) return;
-      lockedRef.current = true;
-      setLocked(true);
+      pendingLock.current = reason;
       const res = await postJson("/api/auth/lock", { reason }, csrfToken);
       if (res.status === 401) {
         window.location.assign("/login");
@@ -75,30 +107,42 @@ export function LockGuard({
       if (res.ok || res.status === 423) {
         // BFF がロックしてから、ほかのタブに知らせ、頁を読み直す（読み直した頁は、中身を描かずにロックの画面を出す）。
         // ルーターのキャッシュ・頁に残った描画の元のデータ（RSC の payload）から、患者の情報を消すため
+        pendingLock.current = null;
         writeShared(LOCK_EVENT_KEY, `lock:${Date.now()}`);
-        window.location.reload();
+        if (!cleanRef.current) window.location.reload();
       }
     },
     [csrfToken],
   );
 
+  const lockNow = useCallback(
+    async (reason: "client_idle" | "manual") => {
+      if (lockedRef.current) return;
+      // BFF の答えを待たずに、まず画面の中身を外す
+      lockedRef.current = true;
+      setLocked(true);
+      await confirmLock(reason);
+    },
+    [confirmLock],
+  );
+
   useEffect(() => {
     lastActivity.current = Date.now();
+    lastActivityMono.current = performance.now();
     lastPing.current = Date.now();
 
     const onActivity = () => {
       if (lockedRef.current) return;
       const now = Date.now();
       lastActivity.current = now;
+      lastActivityMono.current = performance.now();
       writeShared(LAST_ACTIVITY_KEY, String(now));
       if (now - lastPing.current >= PING_INTERVAL_MS) {
         lastPing.current = now;
         void postJson("/api/auth/activity", {}, csrfToken).then((res) => {
           if (res.status === 423) {
             // BFF の側が先にロックしていた。読み直して、頁に残ったデータを消す
-            lockedRef.current = true;
-            setLocked(true);
-            window.location.reload();
+            onServerLocked();
           } else if (res.status === 401) {
             window.location.assign("/login");
           }
@@ -108,43 +152,67 @@ export function LockGuard({
     const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart", "scroll"] as const;
     for (const name of events) window.addEventListener(name, onActivity, { passive: true });
 
+    // ほかのタブとの知らせは補助。取りこぼしても、下の BFF の状態の確かめと、このタブの時計で閉じる
     const onStorage = (event: StorageEvent) => {
       if (event.key !== LOCK_EVENT_KEY || !event.newValue) return;
       if (event.newValue.startsWith("lock:")) {
         // ほかのタブが BFF をロックし終えてから知らせてくる。このタブも読み直して、頁に残ったデータを消す。
         // ロックした状態で描いた頁（データを持たない）は、読み直さなくてよい
-        if (cleanRef.current) return;
-        lockedRef.current = true;
-        setLocked(true);
-        window.location.reload();
-      } else if (event.newValue.startsWith("unlock:")) {
-        lockedRef.current = false;
-        cleanRef.current = false;
-        lastActivity.current = Date.now();
-        setLocked(false);
-        router.refresh();
+        onServerLocked();
+      } else if (event.newValue.startsWith("unlock:") && lockedRef.current && !pendingLock.current) {
+        // 解いたという知らせだけでは中身を出さない。BFF がロックしていないと答えたときだけ戻す
+        void fetchStatus().then((status) => {
+          if (status !== 200 || !lockedRef.current) return;
+          lockedRef.current = false;
+          cleanRef.current = false;
+          lastActivity.current = Date.now();
+          lastActivityMono.current = performance.now();
+          setLocked(false);
+          router.refresh();
+        });
       }
     };
     window.addEventListener("storage", onStorage);
     const onLockNow = () => void lockNow("manual");
     window.addEventListener(LOCK_NOW_EVENT, onLockNow);
 
+    const idleMs = minutes * 60_000;
     const timer =
       minutes > 0
         ? window.setInterval(() => {
             if (lockedRef.current) return;
-            const last = Math.max(lastActivity.current, readShared(LAST_ACTIVITY_KEY));
-            if (Date.now() - last >= minutes * 60_000) void lockNow("client_idle");
+            // このタブの操作の時刻（時計の進み方だけで数え、時計の合わせ直しに引きずられない）で判断する。
+            // ほかのタブの操作の時刻は延ばす向きにだけ使い、先の時刻（時計のずれ・壊れた値）は使わない
+            const ownIdle = performance.now() - lastActivityMono.current;
+            const shared = readShared(LAST_ACTIVITY_KEY);
+            const now = Date.now();
+            const sharedIdle = shared > 0 && shared <= now + 1000 ? now - shared : Infinity;
+            if (Math.min(ownIdle, sharedIdle) >= idleMs) void lockNow("client_idle");
           }, CHECK_INTERVAL_MS)
         : undefined;
+
+    // BFF の状態を一定の間隔で確かめる（操作の時刻は数え直さない）。ほかのタブ・BFF の側でロックしていたら閉じる
+    const statusTimer = window.setInterval(() => {
+      if (lockedRef.current && cleanRef.current) return;
+      // ロックの POST が通っていなければ、送り直す（SCREEN_LOCK_MINUTES=0 でボタンでロックしたときも）
+      if (lockedRef.current && pendingLock.current) {
+        void confirmLock(pendingLock.current);
+        return;
+      }
+      void fetchStatus().then((status) => {
+        if (status === 423) onServerLocked();
+        else if (status === 401) window.location.assign("/login");
+      });
+    }, STATUS_INTERVAL_MS);
 
     return () => {
       for (const name of events) window.removeEventListener(name, onActivity);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(LOCK_NOW_EVENT, onLockNow);
       if (timer !== undefined) window.clearInterval(timer);
+      window.clearInterval(statusTimer);
     };
-  }, [csrfToken, minutes, lockNow, router]);
+  }, [csrfToken, minutes, lockNow, confirmLock, onServerLocked, router]);
 
   async function onUnlock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,9 +233,12 @@ export function LockGuard({
       setError(errorText(res));
       return;
     }
+    // BFF が確かめて通した（成功の応答）ときだけ、中身を出す
     lockedRef.current = false;
     cleanRef.current = false;
+    pendingLock.current = null;
     lastActivity.current = Date.now();
+    lastActivityMono.current = performance.now();
     writeShared(LAST_ACTIVITY_KEY, String(Date.now()));
     writeShared(LOCK_EVENT_KEY, `unlock:${Date.now()}`);
     setLocked(false);

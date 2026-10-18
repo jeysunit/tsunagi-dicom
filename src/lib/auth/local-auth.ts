@@ -150,20 +150,27 @@ const UNKNOWN_ACTOR: DigestActor = { actorId: "unknown", actorRole: "none" };
  * force なら枠の途中でも書く。ログインの要求のはじめと、一定の間隔の片付け（src/lib/startup.ts）から呼ぶ
  */
 export async function flushFailureDigest(ctx: AuthContext, force = false): Promise<number> {
-  const entries = digestOf(ctx).take(now(ctx).getTime(), force);
-  for (const e of entries) {
-    await appendAudit(ctx.db, {
-      actorId: e.actorId,
-      actorRole: e.actorRole,
-      authMode: AUTH_MODE_LOCAL,
-      action: "login",
-      outcome: "denied",
-      // まとめた行は、いろいろな接続元の試みを含みうるので、接続元を入れない
-      sourceAddress: null,
-      sourceAddressUnverified: null,
-      occurredAt: now(ctx),
-      detail: { reason: e.reason, aggregated: e.count, firstAt: e.firstAt.toISOString(), lastAt: e.lastAt.toISOString() },
-    });
+  const digest = digestOf(ctx);
+  const entries = digest.take(now(ctx).getTime(), force);
+  for (const [i, e] of entries.entries()) {
+    try {
+      await appendAudit(ctx.db, {
+        actorId: e.actorId,
+        actorRole: e.actorRole,
+        authMode: AUTH_MODE_LOCAL,
+        action: "login",
+        outcome: "denied",
+        // まとめた行は、いろいろな接続元の試みを含みうるので、接続元を入れない
+        sourceAddress: null,
+        sourceAddressUnverified: null,
+        occurredAt: now(ctx),
+        detail: { reason: e.reason, aggregated: e.count, firstAt: e.firstAt.toISOString(), lastAt: e.lastAt.toISOString() },
+      });
+    } catch (error) {
+      // 書けなかった分（この行と、まだ書いていない行）を戻して、次に書き直す
+      digest.restore(entries.slice(i));
+      throw error;
+    }
   }
   return entries.length;
 }
@@ -188,7 +195,8 @@ async function recordLoginDenied(ctx: AuthContext, actor: DigestActor, reason: s
  * 遅らせたら throttled（その試みの失敗は、まとめて記録する）
  */
 async function throttleLogin(ctx: AuthContext, username: string): Promise<{ throttled: boolean }> {
-  await flushFailureDigest(ctx);
+  // 前の枠のまとめた行を書く。書けなくても（戻して次に書き直すので）このログインは止めない
+  await flushFailureDigest(ctx).catch((error: unknown) => console.error("tsunagi-dicom: まとめた失敗の記録を書けなかった", error));
   const throttle = ctx.loginThrottle ?? defaultLoginThrottle;
   const { delayMs, firstOver, globalOver, firstGlobalOver } = throttle.take(
     username,
@@ -506,11 +514,17 @@ export async function login(
 }
 
 /**
- * セッションを開く。1つの transaction の中で、利用者が確かめた時のまま（有効・一時停止でない・
- * パスワードの変更の時刻と TOTP の秘密が同じ）であることを確かめてから作る。確かめている間に
- * パスワードを変えた・TOTP をやり直した・止めた・一時停止にした利用者のセッションを、後から生き残らせない。
- * replacing を渡したら、そのセッション（ログインの途中のセッション）を同じ transaction で消し、
- * 消せたとき（1件）だけ作る（ほかの画面で先に進んだ・閉じた途中のセッションから、二度ログインさせない）
+ * セッションを開く。確かめている間にパスワードを変えた・TOTP をやり直した・止めた・一時停止にした利用者の
+ * セッションを、後から生き残らせない。
+ *
+ * データベースの transaction の隔たりには頼らない（Prisma の SQLite の adapter は1つのつなぎを使い、
+ * transaction の途中にほかの要求の文が入りうるため。わざと取り消すと、その文まで消える）。代わりに
+ * 「作ってから確かめ、違えば消す」の順にする：利用者を変える操作（止める・一時停止・TOTP のやり直し・
+ * パスワードの変更）は、どれも利用者の行を変えた後にセッションを消すので、
+ * - 変更が、下の確かめより前なら、確かめで見つけて、作ったセッションを消す。
+ * - 変更が、下の確かめより後なら、その操作の後のセッションの削除が、作ったセッションも消す。
+ * replacing を渡したら、そのセッション（ログインの途中のセッション）を先に消し、消せたとき（1件）だけ作る
+ * （ほかの画面で先に進んだ・閉じた途中のセッションから、二度ログインさせない）
  */
 async function openSession(
   ctx: AuthContext,
@@ -520,51 +534,46 @@ async function openSession(
 ): Promise<LoginResult> {
   const at = now(ctx);
   const token = randomBytes(32).toString("base64url");
+  const id = hashToken(token);
   const expiresAt =
     stage === "active" ? addMinutes(at, SESSION_MAX_HOURS * 60) : addMinutes(at, PENDING_SESSION_MINUTES);
-  const outcome = await ctx.db.$transaction(async (tx) => {
-    if (options.replacing !== undefined) {
-      const gone = await tx.session.deleteMany({ where: { id: options.replacing, userId: user.id } });
-      if (gone.count !== 1) return "session_gone" as const;
-    }
-    const fresh = await tx.user.findUnique({ where: { id: user.id } });
-    if (
-      !fresh ||
-      fresh.status !== "active" ||
-      (fresh.lockedUntil !== null && fresh.lockedUntil > at) ||
-      fresh.passwordChangedAt.getTime() !== user.passwordChangedAt.getTime() ||
-      fresh.totpSecretEnc !== user.totpSecretEnc
-    ) {
-      // 消した途中のセッションも戻す（transaction ごと取り消す）。途中のセッションは、止めた・一時停止の利用者なら
-      // 次の要求で消え、パスワードの変更・TOTP のやり直しなら、そちらの側で消している
-      throw new StaleUser();
-    }
-    await tx.session.create({
-      data: {
-        id: hashToken(token),
-        userId: user.id,
-        stage,
-        csrfToken: randomBytes(32).toString("base64url"),
-        createdAt: at,
-        expiresAt,
-        lastActivityAt: at,
-      },
-    });
-    return "opened" as const;
-  }).catch((error: unknown) => {
-    if (error instanceof StaleUser) return "changed" as const;
-    throw error;
+  if (options.replacing !== undefined) {
+    const gone = await ctx.db.session.deleteMany({ where: { id: options.replacing, userId: user.id } });
+    if (gone.count !== 1) throw new AuthFailure(409, SESSION_GONE_MESSAGE);
+  }
+  await ctx.db.session.create({
+    data: {
+      id,
+      userId: user.id,
+      stage,
+      csrfToken: randomBytes(32).toString("base64url"),
+      createdAt: at,
+      expiresAt,
+      lastActivityAt: at,
+    },
   });
-  if (outcome === "session_gone") throw new AuthFailure(409, SESSION_GONE_MESSAGE);
-  if (outcome === "changed") {
+  const fresh = await ctx.db.user.findUnique({ where: { id: user.id } });
+  if (
+    !fresh ||
+    fresh.status !== "active" ||
+    (fresh.lockedUntil !== null && fresh.lockedUntil > at) ||
+    fresh.passwordChangedAt.getTime() !== user.passwordChangedAt.getTime() ||
+    fresh.totpSecretEnc !== user.totpSecretEnc
+  ) {
+    await ctx.db.session.deleteMany({ where: { id } });
     await record(ctx, actorOf(user), { action: "login", outcome: "denied", detail: { reason: "changed_during_login" } });
     throw new AuthFailure(401, LOGIN_FAILED_MESSAGE);
   }
   return { token, stage, expiresAt };
 }
 
-/** openSession の transaction を取り消すための印 */
-class StaleUser extends Error {}
+/**
+ * 途中のセッションがまだ使える（残っていて、同じ段で、期限の前）という条件。利用者の行を変える
+ * 1つの文（updateMany）の where に入れて、確かめと書き込みを分けない
+ */
+const liveSession = (session: SessionRow, at: Date) => ({
+  sessions: { some: { id: session.id, stage: session.stage, expiresAt: { gt: at } } },
+});
 
 async function completeLogin(ctx: AuthContext, user: User, detail: Record<string, unknown>) {
   const at = now(ctx);
@@ -675,20 +684,32 @@ export async function confirmEnrollment(
     totpLastStep: step,
     updatedAt: at,
   };
-  const won = await ctx.db.$transaction(async (tx) => {
-    const res = await tx.user.updateMany({
-      where: { id: user.id, status: "active", totpSecretEnc: null },
-      data: enrolled,
-    });
-    if (res.count !== 1) return false;
-    await tx.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
-    if (optional) await tx.session.updateMany({ where: { id: session.id }, data: { pendingTotpEnc: null } });
-    return true;
+  // 確かめと書き込みを1つの文にする：まだ登録していない・有効・パスワードが読んだ時のまま・この途中の
+  // セッションがまだ使える（残っていて、同じ段で、期限の前）ときだけ書く
+  const res = await ctx.db.user.updateMany({
+    where: {
+      id: user.id,
+      status: "active",
+      totpSecretEnc: null,
+      passwordChangedAt: user.passwordChangedAt,
+      ...liveSession(session, at),
+    },
+    data: enrolled,
   });
-  if (!won) {
-    await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "denied", detail: { reason: "already_enrolled" } });
-    throw new AuthFailure(409, "TOTP はもう登録してある。登録し直すときは、管理者に TOTP のやり直しを頼む");
+  if (res.count !== 1) {
+    const current = await ctx.db.user.findUnique({ where: { id: user.id } });
+    const reason = current?.totpSecretEnc ? "already_enrolled" : "session_gone";
+    await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "denied", detail: { reason } });
+    throw new AuthFailure(
+      409,
+      reason === "already_enrolled"
+        ? "TOTP はもう登録してある。登録し直すときは、管理者に TOTP のやり直しを頼む"
+        : SESSION_GONE_MESSAGE,
+    );
   }
+  // 登録したら、その利用者のほかのセッションを閉じる
+  await ctx.db.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
+  if (optional) await ctx.db.session.updateMany({ where: { id: session.id }, data: { pendingTotpEnc: null } });
   const updated: User = { ...user, ...enrolled };
   await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "success" });
   if (optional) return { stage: "active" };
@@ -727,18 +748,24 @@ export async function changePassword(
     mustChangePassword: false,
     updatedAt: at,
   };
-  // 読んだ時のパスワードのままのときだけ変え、同じ transaction でほかのセッションを閉じる
+  // 確かめと書き込みを1つの文にする：有効・パスワードと TOTP の秘密が読んだ時のまま・このセッションが
+  // まだ使える（残っていて、同じ段で、期限の前）ときだけ変える。変えたら、ほかのセッションを閉じる
   // （同時に進んでいた古いパスワードのログインは、openSession の確かめか、この削除で消える）
-  const changed = await ctx.db.$transaction(async (tx) => {
-    const res = await tx.user.updateMany({
-      where: { id: user.id, passwordChangedAt: user.passwordChangedAt },
-      data: changes,
-    });
-    if (res.count !== 1) return false;
-    await tx.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
-    return true;
+  const res = await ctx.db.user.updateMany({
+    where: {
+      id: user.id,
+      status: "active",
+      passwordChangedAt: user.passwordChangedAt,
+      totpSecretEnc: user.totpSecretEnc,
+      ...liveSession(session, at),
+    },
+    data: changes,
   });
-  if (!changed) throw new AuthFailure(409, "パスワードは、ほかの画面で先に変えられている。頁を開き直す");
+  if (res.count !== 1) {
+    await record(ctx, actorOf(user), { action: "password_change", outcome: "denied", detail: { reason: "changed_during_change" } });
+    throw new AuthFailure(409, "パスワードを変えられない（ほかの画面で先に変えたか、このセッションはもう使えない）。頁を開き直す");
+  }
+  await ctx.db.session.deleteMany({ where: { userId: user.id, id: { not: session.id } } });
   const updated: User = { ...user, ...changes };
   await record(ctx, actorOf(user), { action: "password_change", outcome: "success" });
   if (session.stage === "active") return { stage: "active" };
@@ -892,15 +919,17 @@ export interface UserChange {
 
 type Tx = Parameters<Parameters<Db["$transaction"]>[0]>[0];
 
-/** 有効な管理者が1人もいなくなる変更は断る */
-async function assertAdminRemains(db: Tx, target: User, change: UserChange) {
+const NO_ADMIN_LEFT = "有効な管理者が1人もいなくなるので、変えられない";
+
+/** 有効な管理者が1人もいなくなる変更か */
+async function wouldLoseLastAdmin(db: Tx, target: User, change: UserChange): Promise<boolean> {
   const losesAdmin =
     target.role === "admin" &&
     target.status === "active" &&
     ((change.role !== undefined && change.role !== "admin") || change.status === "disabled");
-  if (!losesAdmin) return;
+  if (!losesAdmin) return false;
   const others = await db.user.count({ where: { role: "admin", status: "active", id: { not: target.id } } });
-  if (others === 0) throw new AuthFailure(409, "有効な管理者が1人もいなくなるので、変えられない");
+  return others === 0;
 }
 
 export async function updateUser(
@@ -922,10 +951,12 @@ export async function updateUser(
   const statusChanged = change.status !== undefined && change.status !== target.status;
   if (roleChanged || statusChanged) {
     // 「有効な管理者が残るか」の確かめと変更を1つの transaction にする
-    // （2人の管理者が同時に互いを外しても、0 人にしない。SQLite は書き込みを一列に並べる）
-    user = await ctx.db.$transaction(async (tx) => {
+    // （2人の管理者が同時に互いを外しても、0 人にしない。transaction どうしは一列に並ぶ）。
+    // 断るときも transaction の中で例外を投げない（取り消すと、同じつなぎに入ったほかの要求の文まで消えうるため。
+    // 何も書かずに終え、外で断る）
+    const updated = await ctx.db.$transaction(async (tx) => {
       const fresh = await tx.user.findUniqueOrThrow({ where: { id: target.id } });
-      await assertAdminRemains(tx, fresh, change);
+      if (await wouldLoseLastAdmin(tx, fresh, change)) return null;
       return tx.user.update({
         where: { id: target.id },
         data: {
@@ -935,8 +966,10 @@ export async function updateUser(
         },
       });
     });
-  } else {
-    await assertAdminRemains(ctx.db, target, change);
+    if (!updated) throw new AuthFailure(409, NO_ADMIN_LEFT);
+    user = updated;
+  } else if (await wouldLoseLastAdmin(ctx.db, target, change)) {
+    throw new AuthFailure(409, NO_ADMIN_LEFT);
   }
   if (roleChanged) {
     await record(ctx, by, { action: "role_change", detail: { target: target.username, from: target.role, to: change.role } });

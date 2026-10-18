@@ -79,8 +79,9 @@ async function patientValues(page: Page): Promise<string[]> {
 async function expectNoPatientValues(page: Page, values: string[]) {
   await expect
     .poll(async () => {
-      const html = await page.content();
-      return values.filter((v) => html.includes(v));
+      // 読み直しの途中は頁を読めないことがあるので、そのときは次の回に見直す
+      const html = await page.content().catch(() => null);
+      return html === null ? ["(読み直しの途中)"] : values.filter((v) => html.includes(v));
     })
     .toEqual([]);
 }
@@ -341,6 +342,75 @@ test("画面のロック：ヘッダーの「ロック」で、同じブラウ�
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await expect(other.getByTestId("study-count")).toHaveText("8");
   await other.close();
+});
+
+test("画面のロック：ロックの知らせが BFF に届かなくても、画面は閉じたまま。解くにはいつもパスワードが要り、届いたら読み直す", async () => {
+  test.setTimeout(120_000);
+  // 時計を進めた管理者のタブは、操作の無い時間でロックを掛けうるので、この試験の間は閉じた頁にしておく
+  await admin.page.goto("about:blank");
+  const page = await admin.context.newPage();
+  await page.goto("/");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  const patient = await patientValues(page);
+
+  // ロックの POST を網の切れのように落とす
+  await page.route("**/api/auth/lock", (route) => route.abort("internetdisconnected"));
+  await page.getByRole("button", { name: "ロック", exact: true }).click();
+  const lock = page.getByTestId("screen-lock");
+  await expect(lock).toBeVisible();
+  await expect(page.getByTestId("study-count")).toHaveCount(0);
+  // BFF はまだロックしていない（ずれている）が、画面の側は閉じたまま。解くには BFF のパスワードの確かめが要る
+  expect((await page.request.get("/api/studies")).status()).toBe(200);
+  await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
+  await lock.getByLabel(/確認の番号/).fill("000000");
+  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await expect(lock.getByRole("alert")).toContainText("違う");
+  await expect(page.getByTestId("study-count")).toHaveCount(0);
+
+  // 網が戻ったら送り直し、BFF もロックして頁を読み直す（頁に患者の値が残らない）
+  await page.unroute("**/api/auth/lock");
+  await expect.poll(async () => (await page.request.get("/api/studies")).status(), { timeout: 30_000 }).toBe(423);
+  await expectNoPatientValues(page, patient);
+
+  await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
+  await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
+  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await page.close();
+});
+
+test("画面のロック：ほかのタブの知らせを取りこぼしても、BFF の状態を確かめて閉じ、読み直す", async () => {
+  test.setTimeout(120_000);
+  const page = await admin.context.newPage();
+  const deaf = await admin.context.newPage();
+  // このタブには、タブの間の知らせ（storage の事件）を届けない
+  await deaf.addInitScript(() => {
+    const original = window.addEventListener.bind(window);
+    window.addEventListener = ((type: string, ...rest: unknown[]) => {
+      if (type === "storage") return;
+      return (original as (...a: unknown[]) => void)(type, ...rest);
+    }) as typeof window.addEventListener;
+  });
+  await page.goto("/");
+  await deaf.goto("/");
+  await expect(deaf.getByTestId("study-count")).toHaveText("8");
+  const patient = await patientValues(deaf);
+
+  await page.getByRole("button", { name: "ロック", exact: true }).click();
+  await expect(page.getByTestId("screen-lock")).toBeVisible();
+  // 知らせは届かないが、BFF の状態の確かめ（423）で閉じる
+  await expect(deaf.getByTestId("screen-lock")).toBeVisible({ timeout: 30_000 });
+  await expectNoPatientValues(deaf, patient);
+
+  const lock = page.getByTestId("screen-lock");
+  await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
+  await lock.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
+  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  // 知らせを受けないタブは、閉じたまま（自分で解く）
+  await expect(deaf.getByTestId("screen-lock")).toBeVisible();
+  await page.close();
+  await deaf.close();
 });
 
 test("ログアウトすると、セッションは使えない", async () => {

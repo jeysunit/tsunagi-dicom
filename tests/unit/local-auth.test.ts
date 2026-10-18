@@ -988,6 +988,57 @@ describe("独立のレビューの指摘で直したこと", () => {
     expect(await verifyAuditChain(db)).toMatchObject({ ok: true });
   });
 
+  it("F2：まとめた失敗を書けなかったら戻し、次に書き直す", async () => {
+    const { ctx, db, clock } = await setup();
+    ctx.failureDigest!.add({ actorId: "unknown", actorRole: "none" }, "unknown_user", clock.now());
+    clock.advance(60_000);
+    const broken = { ...ctx, db: { $transaction: () => Promise.reject(new Error("書けない")) } as unknown as Db };
+    await expect(flushFailureDigest(broken)).rejects.toThrow("書けない");
+    expect(ctx.failureDigest!.size).toBe(1);
+    expect(await flushFailureDigest(ctx)).toBe(1);
+    expect((await auditRows(db)).filter((x) => x.detail?.includes("aggregated"))).toHaveLength(1);
+  });
+
+  it("F1（Codex の指摘）：読んだ後に消えた登録の途中のセッションからは、TOTP を書かない", async () => {
+    const { ctx, db, clock } = await setup();
+    await createUser(ctx, { ...SATO, password: PASSWORD }, ADMIN);
+    const r = await login(ctx, "sato", PASSWORD);
+    const s = await sessionOf(db, r.token);
+    const { secret } = await startEnrollment(ctx, s.session, s.user);
+    const stale = await sessionOf(db, r.token);
+    await logout(ctx, stale.session, stale.user);
+    await expect(confirmEnrollment(ctx, stale.session, stale.user, totpAt(secret, clock.t))).rejects.toMatchObject({
+      status: 409,
+      message: SESSION_GONE_MESSAGE,
+    });
+    expect((await db.user.findUniqueOrThrow({ where: { username: "sato" } })).totpSecretEnc).toBeNull();
+  });
+
+  it("F5（Codex の指摘）：読んだ後に消えた途中のセッションでは、パスワードを変えない", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    await createUser(ctx, { ...SATO, mustChangePassword: true }, ADMIN);
+    const r = await login(ctx, "sato", SATO.password);
+    expect(r.stage).toBe("change_password");
+    const stale = await sessionOf(db, r.token);
+    await logout(ctx, stale.session, stale.user);
+    await expect(changePassword(ctx, stale.session, stale.user, { newPassword: "zr4tx8pe-next-long" })).rejects.toMatchObject({
+      status: 409,
+    });
+    const after = await db.user.findUniqueOrThrow({ where: { username: "sato" } });
+    expect(after.passwordHash).toBe(stale.user.passwordHash);
+  });
+
+  it("F5（Codex の指摘）：ログインしたセッションで、読んだ後に TOTP の秘密が替わったら、パスワードを変えない", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret, token } = await enrolledUser(ctx, clock, "tanaka");
+    const s = await sessionOf(db, token);
+    await db.user.update({ where: { id: s.user.id }, data: { totpSecretEnc: sealField(secret, SESSION_SECRET, s.user.id) } });
+    await expect(
+      changePassword(ctx, s.session, s.user, { currentPassword: PASSWORD, code: totpAt(secret, clock.t), newPassword: NEW_PASSWORD }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect((await db.user.findUniqueOrThrow({ where: { id: s.user.id } })).passwordHash).toBe(s.user.passwordHash);
+  });
+
   it("F10：ログインし直したら前のセッションを消す。期限の切れたセッションを片付ける", async () => {
     const { ctx, db, clock } = await setup({ mfaRequired: false });
     await createUser(ctx, SATO, ADMIN);
