@@ -82,6 +82,19 @@ describe("設定の読み込み", () => {
     expect(variablesOf({ ...base, PASSWORD_HASH_QUEUE: "1025" })).toEqual(["PASSWORD_HASH_QUEUE"]);
   });
 
+  it("セッションの長さと再認証の時間（既定 10 分・12 時間・5 分。範囲の外は起動しない）", () => {
+    expect(loadConfig(base).auth).toMatchObject({ pendingSessionMinutes: 10, sessionMaxHours: 12, reauthMinutes: 5 });
+    expect(
+      loadConfig({ ...base, LOGIN_PENDING_MINUTES: "5", SESSION_MAX_HOURS: "8", REAUTH_MINUTES: "15" }).auth,
+    ).toMatchObject({ pendingSessionMinutes: 5, sessionMaxHours: 8, reauthMinutes: 15 });
+    expect(variablesOf({ ...base, LOGIN_PENDING_MINUTES: "0" })).toEqual(["LOGIN_PENDING_MINUTES"]);
+    expect(variablesOf({ ...base, LOGIN_PENDING_MINUTES: "61" })).toEqual(["LOGIN_PENDING_MINUTES"]);
+    expect(variablesOf({ ...base, SESSION_MAX_HOURS: "0" })).toEqual(["SESSION_MAX_HOURS"]);
+    expect(variablesOf({ ...base, SESSION_MAX_HOURS: "25" })).toEqual(["SESSION_MAX_HOURS"]);
+    expect(variablesOf({ ...base, REAUTH_MINUTES: "0" })).toEqual(["REAUTH_MINUTES"]);
+    expect(variablesOf({ ...base, REAUTH_MINUTES: "61" })).toEqual(["REAUTH_MINUTES"]);
+  });
+
   it("いくつも誤っていれば、全部を並べる", () => {
     expect(variablesOf({ ...base, BACKEND_KIND: undefined, SESSION_SECRET: "" }).sort()).toEqual([
       "BACKEND_KIND",

@@ -17,8 +17,10 @@ import {
   login,
   logout,
   reauthenticate,
+  PENDING_SESSION_MINUTES,
   REAUTH_MINUTES,
   REAUTH_REQUIRED,
+  SESSION_MAX_HOURS,
   assertRecentReauth,
   resolveSession,
   SERVER_LOCK_GRACE_SECONDS,
@@ -77,6 +79,9 @@ async function setup(settings: Partial<AuthSettings> = {}) {
       rateLimitGlobalPerMinute: 1000,
       passwordHashConcurrency: 2,
       passwordHashQueue: 1000,
+      pendingSessionMinutes: PENDING_SESSION_MINUTES,
+      sessionMaxHours: SESSION_MAX_HOURS,
+      reauthMinutes: REAUTH_MINUTES,
       ...settings,
     },
     source: { sourceAddress: null, sourceAddressUnverified: "198.51.100.7" },
@@ -338,7 +343,9 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     expect((await resolveSession(ctx, token)).kind).toBe("active");
   });
 
-  it("解く失敗も一時停止に数え、一時停止になったらセッションを消す", async () => {
+  // 一時停止のときのセッションの扱いは、2026-10-18 に承認者が決めた（F3）：ログインし終えたセッションは閉じず、
+  // ログインの途中のセッションだけを閉じる。一時停止の間は、パスワードを確かめる操作（ロックの解除・再認証）を断る
+  it("解く失敗も一時停止に数える。一時停止の後もセッションはロックのまま残り、解除は一時停止が解けるまで断る", async () => {
     const { ctx, db, clock } = await setup({ mfaRequired: false, loginLockThreshold: 2 });
     await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
     const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
@@ -348,9 +355,43 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     await expect(unlockScreen(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({
       problems: ["locked"],
     });
-    expect((await resolveSession(ctx, token)).kind).toBe("anonymous");
+    // セッションは閉じない（ロックのまま）。正しいパスワードでも、一時停止の間は解けない
+    expect((await resolveSession(ctx, token)).kind).toBe("locked");
+    const locked = await sessionOf(db, token);
+    await expect(unlockScreen(ctx, locked.session, locked.user, { password: "kq7vz2mw-long1" })).rejects.toMatchObject({
+      status: 401,
+      problems: ["locked"],
+    });
+    expect((await resolveSession(ctx, token)).kind).toBe("locked");
+    // 一時停止が解けたら、同じセッションで解ける
     clock.advance(16 * 60_000);
-    expect((await login(ctx, "sato", "kq7vz2mw-long1")).stage).toBe("active");
+    const later = await sessionOf(db, token);
+    await unlockScreen(ctx, later.session, later.user, { password: "kq7vz2mw-long1" });
+    expect((await resolveSession(ctx, token)).kind).toBe("active");
+  });
+
+  it("F3：一時停止のとき、ログインし終えたセッションは使える。ログインの途中のセッションは閉じ、再認証は断る", async () => {
+    const { ctx, db, clock } = await setup({ loginLockThreshold: 2 });
+    const { secret, token: active } = await enrolledUser(ctx, clock);
+    const pending = await login(ctx, "tanaka", PASSWORD);
+    expect(pending.stage).toBe("totp");
+    // ほかの人が、この利用者名でパスワードを続けて間違える
+    for (let i = 0; i < 2; i++) await login(ctx, "tanaka", "wrong-pass-123").catch(() => undefined);
+    const user = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
+    expect(user.lockedUntil!.getTime()).toBeGreaterThan(clock.t);
+    // ログインし終えたセッションは残り、使える
+    expect((await resolveSession(ctx, active)).kind).toBe("active");
+    // ログインの途中のセッションは閉じた
+    expect(await db.session.findUnique({ where: { id: hashToken(pending.token) } })).toBeNull();
+    expect((await resolveSession(ctx, pending.token)).kind).toBe("anonymous");
+    // 一時停止の間は、パスワードを確かめる操作を断る（セッションは閉じない）
+    const s = await sessionOf(db, active);
+    await expect(
+      reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) }),
+    ).rejects.toMatchObject({ status: 401, problems: ["locked"] });
+    expect((await resolveSession(ctx, active)).kind).toBe("active");
+    const rows = await auditRows(db);
+    expect(rows.some((x) => x.action === "reauth" && x.outcome === "denied" && x.detail?.includes("locked"))).toBe(true);
   });
 });
 
@@ -471,6 +512,9 @@ describe("最初の管理者", () => {
       rateLimitGlobalPerMinute: 300,
       passwordHashConcurrency: 2,
       passwordHashQueue: 32,
+      pendingSessionMinutes: 10,
+      sessionMaxHours: 12,
+      reauthMinutes: 5,
       oidc: {},
       initialAdmin,
     },
@@ -1103,6 +1147,37 @@ describe("独立のレビューの指摘で直したこと", () => {
     // 管理者が TOTP をやり直す（削除が失敗しても、その利用者のセッションは使えない）
     await updateUser({ ...ctx, db: flaky }, u.id, { resetTotp: true }, ADMIN);
     expect((await resolveSession(ctx, mine.token)).kind).toBe("anonymous");
+  });
+
+  it("認証の世代：登録の段で TOTP を登録して、パスワードの変更の段に進んでも、同じ途中のセッションを使える", async () => {
+    const { ctx, db, clock } = await setup();
+    await createUser(ctx, { ...SATO, password: PASSWORD, mustChangePassword: true }, ADMIN);
+    const r = await login(ctx, "sato", PASSWORD);
+    const s = await sessionOf(db, r.token);
+    const { secret } = await startEnrollment(ctx, s.session, s.user);
+    const s2 = await sessionOf(db, r.token);
+    expect((await confirmEnrollment(ctx, s2.session, s2.user, totpAt(secret, clock.t))).stage).toBe("change_password");
+    const resolved = await resolveSession(ctx, r.token);
+    expect(resolved).toMatchObject({ kind: "pending", session: { stage: "change_password" } });
+    const s3 = await sessionOf(db, r.token);
+    const done = await changePassword(ctx, s3.session, s3.user, { newPassword: NEW_PASSWORD });
+    expect(done.stage).toBe("active");
+    expect((await resolveSession(ctx, done.rotated!.token)).kind).toBe("active");
+  });
+
+  it("セッションの長さと再認証の時間は設定で変えられる", async () => {
+    const { ctx, db, clock } = await setup({ pendingSessionMinutes: 3, sessionMaxHours: 1, reauthMinutes: 2 });
+    const { secret, token } = await enrolledUser(ctx, clock, "admin1", "admin");
+    const active = await sessionOf(db, token);
+    expect(active.session.expiresAt.getTime() - active.session.createdAt.getTime()).toBe(60 * 60_000);
+    const pending = await login(ctx, "admin1", PASSWORD);
+    expect(pending.expiresAt.getTime() - clock.t).toBe(3 * 60_000);
+    await reauthenticate(ctx, active.session, active.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    const after = await sessionOf(db, token);
+    clock.advance(2 * 60_000 - 1000);
+    expect(() => assertRecentReauth(ctx, after.session)).not.toThrow();
+    clock.advance(1000);
+    expect(() => assertRecentReauth(ctx, after.session)).toThrow(AuthFailure);
   });
 
   it("認証の世代：確かめた後に世代が上がったら、作ったセッションは使えない", async () => {

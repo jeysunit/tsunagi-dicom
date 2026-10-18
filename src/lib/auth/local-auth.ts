@@ -24,11 +24,13 @@ import type { Session as SessionRow, User } from "@/generated/prisma/client";
 // 監査の記録には、パスワード・TOTP の値・セッションの token を入れない。
 
 export const AUTH_MODE_LOCAL = "local";
-/** ログインの途中（TOTP の入力・登録・パスワードの変更の待ち）のセッションの長さ */
+// 下の3つは既定の値。運用に合わせて設定で変える（LOGIN_PENDING_MINUTES・SESSION_MAX_HOURS・REAUTH_MINUTES。
+// src/lib/config.ts、docs/spec.md の 2.1。2026-10-18 に承認者が決めた）
+/** ログインの途中（TOTP の入力・登録・パスワードの変更の待ち）のセッションの長さの既定 */
 export const PENDING_SESSION_MINUTES = 10;
-/** ログインしたセッションの長さ（操作があっても、これを過ぎたらログインし直す） */
+/** ログインしたセッションの長さの既定（操作があっても、これを過ぎたらログインし直す） */
 export const SESSION_MAX_HOURS = 12;
-/** 大事な操作の前の本人の確かめ（再認証）が効く時間 */
+/** 大事な操作の前の本人の確かめ（再認証）が効く時間の既定 */
 export const REAUTH_MINUTES = 5;
 /**
  * サーバーの側の画面のロックの猶予。ロックはサーバーの側を正にするので、画面が最後に操作を知らせてから
@@ -52,6 +54,10 @@ export interface AuthSettings {
   /** パスワードのハッシュ（argon2id）をログインの枠で同時に回す数と、待たせる数（src/lib/auth/hash-limiter.ts） */
   passwordHashConcurrency: number;
   passwordHashQueue: number;
+  /** ログインの途中のセッションの長さ（分）・ログインしたセッションの長さ（時間）・再認証が効く時間（分） */
+  pendingSessionMinutes: number;
+  sessionMaxHours: number;
+  reauthMinutes: number;
 }
 
 export interface AuthContext {
@@ -328,8 +334,10 @@ async function registerFailure(
     const current = await ctx.db.user.findUnique({ where: { id: user.id } });
     return current !== null && current.lockedUntil !== null && current.lockedUntil > at;
   }
-  // 一時停止の間は、ログインの途中のセッションも、ログインしたセッションも使わせない
-  await ctx.db.session.deleteMany({ where: { userId: user.id } });
+  // 一時停止にしたら、ログインの途中のセッションだけを閉じる。ログインし終えたセッションは閉じない
+  // （ほかの人がその利用者名で失敗を重ねても、使っている職員を締め出さない。一時停止の間は、パスワードを確かめる
+  // 操作（ロックの解除・再認証・パスワードの変更）を断る。2026-10-18 に承認者が決めた。docs/spec.md の 3.6）
+  await ctx.db.session.deleteMany({ where: { userId: user.id, stage: { not: "active" } } });
   await record(ctx, actorOf(user), {
     action: "login_lock",
     outcome: "success",
@@ -538,7 +546,9 @@ async function openSession(
   const token = randomBytes(32).toString("base64url");
   const id = hashToken(token);
   const expiresAt =
-    stage === "active" ? addMinutes(at, SESSION_MAX_HOURS * 60) : addMinutes(at, PENDING_SESSION_MINUTES);
+    stage === "active"
+      ? addMinutes(at, ctx.settings.sessionMaxHours * 60)
+      : addMinutes(at, ctx.settings.pendingSessionMinutes);
   if (options.replacing !== undefined) {
     const gone = await ctx.db.session.deleteMany({ where: { id: options.replacing, userId: user.id } });
     if (gone.count !== 1) throw new AuthFailure(409, SESSION_GONE_MESSAGE);
@@ -736,8 +746,9 @@ export async function confirmEnrollment(
         : SESSION_GONE_MESSAGE,
     );
   }
-  // いまのセッションを新しい世代に合わせ（途中のセッションは advance が替える）、ほかのセッションを片付ける
-  if (optional) await followVersion(ctx, session, user.credentialVersion, { pendingTotpEnc: null });
+  // いまのセッションを新しい世代に合わせ（パスワードの変更の段に進むときも、この途中のセッションを使い続ける）、
+  // ほかのセッションを片付ける
+  await followVersion(ctx, session, user.credentialVersion, optional ? { pendingTotpEnc: null } : {});
   await closeOtherSessions(ctx, user.id, session.id);
   const updated: User = { ...user, ...enrolled, credentialVersion: user.credentialVersion + 1 };
   await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "success" });
@@ -805,7 +816,7 @@ export async function changePassword(
 
 // ── 再認証（大事な操作の前の、もう一度の本人の確かめ） ──
 
-/** パスワードと TOTP で本人を確かめ、REAUTH_MINUTES の間、大事な操作を許す */
+/** パスワードと TOTP で本人を確かめ、設定の reauthMinutes の間、大事な操作を許す */
 export async function reauthenticate(
   ctx: AuthContext,
   session: SessionRow,
@@ -818,10 +829,13 @@ export async function reauthenticate(
   await record(ctx, actorOf(user), { action: "reauth", outcome: "success" });
 }
 
-/** 大事な操作（利用者の管理）の前に呼ぶ。REAUTH_MINUTES の中に再認証していなければ 403（problems に REAUTH_REQUIRED） */
+/**
+ * 大事な操作（利用者の管理）の前に呼ぶ。設定の reauthMinutes（既定 REAUTH_MINUTES）の中に再認証していなければ
+ * 403（problems に REAUTH_REQUIRED）
+ */
 export function assertRecentReauth(ctx: AuthContext, session: SessionRow): void {
   const at = now(ctx).getTime();
-  if (session.reauthAt && at - session.reauthAt.getTime() < REAUTH_MINUTES * 60_000) return;
+  if (session.reauthAt && at - session.reauthAt.getTime() < ctx.settings.reauthMinutes * 60_000) return;
   throw new AuthFailure(403, "この操作の前に、パスワード（と確認の番号）をもう一度入れる", [REAUTH_REQUIRED]);
 }
 
@@ -851,7 +865,9 @@ export async function resolveSession(
   // 認証の世代が違う（作った後にパスワードの変更・TOTP の登録・やり直しがあった）セッションは使わない。
   // ほかのセッションの削除が止まった・失敗したときも、ここで閉じる側に倒れる
   const staleCredential = session.credentialVersion !== user.credentialVersion;
-  if (session.expiresAt <= at || user.status !== "active" || userLocked || staleCredential) {
+  // 一時停止の間は、ログインの途中のセッションだけを使わせない（ログインし終えたセッションは使える）
+  const pendingWhileLocked = userLocked && session.stage !== "active";
+  if (session.expiresAt <= at || user.status !== "active" || pendingWhileLocked || staleCredential) {
     await ctx.db.session.deleteMany({ where: { id: session.id } });
     return { kind: "anonymous" };
   }

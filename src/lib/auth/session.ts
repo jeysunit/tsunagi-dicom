@@ -57,6 +57,9 @@ export async function authContext(): Promise<AuthContext> {
       rateLimitGlobalPerMinute: config.auth.rateLimitGlobalPerMinute,
       passwordHashConcurrency: config.auth.passwordHashConcurrency,
       passwordHashQueue: config.auth.passwordHashQueue,
+      pendingSessionMinutes: config.auth.pendingSessionMinutes,
+      sessionMaxHours: config.auth.sessionMaxHours,
+      reauthMinutes: config.auth.reauthMinutes,
     },
     source: sourceFromHeaders(await headers()),
   };

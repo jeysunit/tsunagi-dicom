@@ -32,6 +32,9 @@ export async function checkConfigOrExit(): Promise<void> {
     rateLimitGlobalPerMinute: config.auth.rateLimitGlobalPerMinute,
     passwordHashConcurrency: config.auth.passwordHashConcurrency,
     passwordHashQueue: config.auth.passwordHashQueue,
+    pendingSessionMinutes: config.auth.pendingSessionMinutes,
+    sessionMaxHours: config.auth.sessionMaxHours,
+    reauthMinutes: config.auth.reauthMinutes,
   };
   const source = { sourceAddress: null, sourceAddressUnverified: null };
   const db = await createDb(config.databaseUrl);
