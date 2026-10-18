@@ -85,6 +85,8 @@ To accept only a release image, replace `--certificate-identity-regexp` with `--
 |---|---|
 | [`docs/spec.md`](docs/spec.md) | Specification (principles, stack, features, stages, known limitations) |
 | [`docs/guideline-mapping.md`](docs/guideline-mapping.md) | Section-by-section mapping to the guideline (System Operations volume, v7.0) |
+| [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | Security and maintenance policy (system diagram, connection list, where secrets live, audit records, versioning and support period, decommissioning). In Japanese |
+| [`SECURITY.md`](SECURITY.md) | How to report a vulnerability, and supported versions |
 | [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | Patient name test cases (machine-readable copy: `tests/fixtures/patient-names.json`) |
 | [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | Sample responses for synthetic patients used by the mock backend, and the redaction rules |
 | [`AGENTS.md`](AGENTS.md) | Development rules (the same for people and for coding assistants) |
