@@ -1,9 +1,26 @@
 import "server-only";
 import { getCACertificates } from "node:tls";
 import { Agent, fetch, type Dispatcher } from "undici";
-import { sortStudiesNewestFirst, studyFromDicomJson, type DicomJsonDataset } from "@/lib/backend/dicom-json";
-import { wadoRsTarget } from "@/lib/backend/relay-path";
-import { BackendError, clampStudyLimit, STUDY_LIMIT, type Backend, type RelayRequest } from "@/lib/backend/types";
+import {
+  inDateRange,
+  seriesFromDicomJson,
+  sortSeries,
+  sortStudiesNewestFirst,
+  stringValue,
+  studyDateRange,
+  studyFromDicomJson,
+  TAG,
+  type DicomJsonDataset,
+} from "@/lib/backend/dicom-json";
+import { isDicomUid, wadoRsTarget } from "@/lib/backend/relay-path";
+import {
+  BackendError,
+  clampStudyLimit,
+  STUDY_LIMIT,
+  type Backend,
+  type RelayRequest,
+  type StudyQuery,
+} from "@/lib/backend/types";
 import type { AppConfig } from "@/lib/config";
 
 // 実の画像サーバーへの接続。資格情報はここだけで使う。
@@ -54,8 +71,10 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     return (await res.json()) as T;
   }
 
-  async function qidoStudies(limit: number) {
+  async function qidoStudies(limit: number, studyQuery?: StudyQuery) {
     const query = new URLSearchParams({ limit: String(clampStudyLimit(limit)) });
+    const range = studyDateRange(studyQuery);
+    if (range) query.set("StudyDate", range);
     // 既定で返らないことがある項目を求める
     query.append("includefield", "00081030");
     query.append("includefield", "00080061");
@@ -64,12 +83,40 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     return getJson<DicomJsonDataset[]>(dicomwebUrl!, `studies?${query}`);
   }
 
+  /** UID は字を確かめてから URL に入れる（画像サーバーの path の外へ出さない） */
+  function checkedUid(uid: string): string {
+    if (!isDicomUid(uid)) throw new BackendError("StudyInstanceUID の形が誤り", 400);
+    return uid;
+  }
+
   return {
     kind,
     mock: false,
 
-    async searchStudies(limit = STUDY_LIMIT) {
-      return sortStudiesNewestFirst((await qidoStudies(limit)).map(studyFromDicomJson));
+    async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
+      // 範囲は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
+      const studies = (await qidoStudies(limit, query)).map(studyFromDicomJson).filter((s) => inDateRange(s.studyDate, query));
+      return sortStudiesNewestFirst(studies);
+    },
+
+    async searchSeries(studyInstanceUid: string) {
+      const query = new URLSearchParams();
+      query.append("includefield", TAG.SeriesDescription);
+      query.append("includefield", TAG.BodyPartExamined);
+      query.append("includefield", TAG.NumberOfSeriesRelatedInstances);
+      query.append("includefield", TAG.SeriesDate);
+      const rows = await getJson<DicomJsonDataset[]>(
+        dicomwebUrl!,
+        `studies/${checkedUid(studyInstanceUid)}/series?${query}`,
+      );
+      return sortSeries(Array.isArray(rows) ? rows.map(seriesFromDicomJson) : []);
+    },
+
+    async studyDataset(studyInstanceUid: string) {
+      const query = new URLSearchParams({ StudyInstanceUID: checkedUid(studyInstanceUid), includefield: "all", limit: "1" });
+      const rows = await getJson<DicomJsonDataset[]>(dicomwebUrl!, `studies?${query}`);
+      if (!Array.isArray(rows)) return null;
+      return rows.find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid) ?? null;
     },
 
     async countStudies() {

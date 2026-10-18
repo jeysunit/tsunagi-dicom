@@ -31,6 +31,15 @@
   --color-danger: #d1242f;
   --color-dev-band: #6b4a00;
   --color-dev-band-foreground: #ffe8a3;
+  /* モダリティの色分け（一覧の印。文字ではなく飾りで、名前の文字を必ず添える） */
+  --color-mod-ct: #0969da;
+  --color-mod-mr: #8250df;
+  --color-mod-crdx: #1a7f37;
+  --color-mod-us: #bc4c00;
+  --color-mod-es: #bf3989;
+  --color-mod-mg: #9a6700;
+  --color-mod-doc: #6e7781;
+  --color-mod-sr: #1b7c83;
   /* 字体は OS の標準に任せる（商用の字体の名前を書かない） */
   --font-sans: system-ui, "Noto Sans JP", sans-serif;
   --font-mono: ui-monospace, "Noto Sans Mono", monospace;

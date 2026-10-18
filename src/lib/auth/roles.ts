@@ -29,16 +29,49 @@ export const PERMISSIONS = [
   "audit.verify",
   // 利用者の管理（一覧・作る・役割・止める・TOTP のやり直し・一時停止の解除）
   "user.manage",
+  // 段 2：検査の状態（BFF のデータベースだけを変える。画像サーバーには書かない）
+  // 検像（未検像・検像済）
+  "study.inspect",
+  // 読影の状態（未読・既読）
+  "study.read_status",
+  // 緊急の印
+  "study.urgent",
+  // ブックマーク（利用者ごと）
+  "study.bookmark",
+  // 検査ごとの既定のビューアを覚える（ほかの利用者にも効く）
+  "viewer.remember",
+  // モダリティごとの既定のビューアを変える（管理の画面）
+  "viewer.defaults",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 export type PermissionMap = Record<Role, readonly Permission[]>;
 
 export const ROLE_PERMISSIONS: PermissionMap = {
-  admin: ["study.search", "image.retrieve", "dicom.all_values", "audit.verify", "user.manage"],
-  doctor: ["study.search", "image.retrieve"],
-  technologist: ["study.search", "image.retrieve", "dicom.all_values"],
-  viewer: ["study.search", "image.retrieve"],
+  admin: [
+    "study.search",
+    "image.retrieve",
+    "dicom.all_values",
+    "audit.verify",
+    "user.manage",
+    "study.inspect",
+    "study.read_status",
+    "study.urgent",
+    "study.bookmark",
+    "viewer.remember",
+    "viewer.defaults",
+  ],
+  doctor: ["study.search", "image.retrieve", "study.read_status", "study.urgent", "study.bookmark", "viewer.remember"],
+  technologist: [
+    "study.search",
+    "image.retrieve",
+    "dicom.all_values",
+    "study.inspect",
+    "study.urgent",
+    "study.bookmark",
+    "viewer.remember",
+  ],
+  viewer: ["study.search", "image.retrieve", "study.bookmark"],
 };
 
 export function can(role: Role, permission: Permission, map: PermissionMap = ROLE_PERMISSIONS): boolean {

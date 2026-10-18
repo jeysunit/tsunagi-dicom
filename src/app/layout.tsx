@@ -29,7 +29,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           username: local.user.username,
           roleLabel: ROLE_LABELS[state.session.role],
           csrfToken: local.row.csrfToken,
-          canManageUsers: can(state.session.role, "user.manage"),
         }
       : undefined;
   // ログインの途中は、頁の道を出さず、ログアウトだけを出す
@@ -48,6 +47,15 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           user={user}
           pendingCsrfToken={pendingCsrfToken}
           theme={state.kind === "active" ? { current: theme, csrfToken: local?.row.csrfToken } : undefined}
+          nav={
+            state.kind === "active"
+              ? {
+                  canManageUsers: !!local && can(state.session.role, "user.manage"),
+                  canEditViewerDefaults: can(state.session.role, "viewer.defaults"),
+                  account: !!local,
+                }
+              : undefined
+          }
         />
         {local ? (
           <LockGuard

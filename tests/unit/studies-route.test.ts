@@ -31,7 +31,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
 
 vi.mock("@/lib/fields", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/fields")>();
-  const map = { ...real.ROLE_FIELD_ALLOWLIST, viewer: { study: ["studyInstanceUid", "studyDate"] as const } };
+  const map = { ...real.ROLE_FIELD_ALLOWLIST, viewer: { study: ["studyInstanceUid", "studyDate"] as const, series: ["seriesInstanceUid"] as const } };
   return { ...real, ROLE_FIELD_ALLOWLIST: map, allowlistFor: (role: never, m = map) => real.allowlistFor(role, m) };
 });
 
@@ -59,7 +59,7 @@ beforeEach(() => {
 
 async function getStudies() {
   const { GET } = await import("@/app/api/studies/route");
-  const res = await GET();
+  const res = await GET(new Request("http://127.0.0.1/api/studies"));
   return { status: res.status, body: (await res.json()) as { studies: Record<string, unknown>[] } };
 }
 
