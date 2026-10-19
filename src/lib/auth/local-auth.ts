@@ -861,17 +861,20 @@ export async function reauthenticate(
   const withTotp = input.code !== undefined && input.code !== "" && user.totpSecretEnc !== null;
   const totp = await verifyAgain(ctx, user, withTotp ? input : { password: input.password }, "reauth", { requireTotp: withTotp });
   const at = now(ctx);
-  // 確かめた時の認証の世代と役割のままのときだけ印を書く（確かめている間に、同じ利用者のパスワードの変更・TOTP の登録・
-  // 役割の変更が先に済んでいれば、前の資格情報・前の役割で通した印を新しい状態に書かない）。ロックしていないことも条件にする
+  // 確かめた時の認証の世代と役割の世代のままのときだけ印を書く（確かめている間に、同じ利用者のパスワードの変更・TOTP の登録・
+  // 役割の変更が先に済んでいれば、前の資格情報・前の役割で通した印を新しい状態に書かない）。ロックしていないことも条件にする。
+  // 印には役割の世代を添え、使うときに今の世代と比べる（assertRecentReauth）。パスワードだけで通したときは、前の TOTP の印を
+  // 消す（添える世代が1つなので、前の世代の TOTP の印を今の世代の印に見せない。パスワードだけの再認証を求めるのは、
+  // 前の印が有効時間を過ぎた後なので、消しても聞き直しは増えない）
   const written = await ctx.db.session.updateMany({
     where: {
       id: session.id,
       stage: "active",
       lockedAt: null,
       credentialVersion: user.credentialVersion,
-      user: { credentialVersion: user.credentialVersion, role: user.role, status: "active" },
+      user: { credentialVersion: user.credentialVersion, roleVersion: user.roleVersion, role: user.role, status: "active" },
     },
-    data: { reauthAt: at, ...(totp ? { reauthMfaAt: at } : {}) },
+    data: { reauthAt: at, reauthMfaAt: totp ? at : null, reauthRoleVersion: user.roleVersion },
   });
   if (written.count !== 1) {
     await record(ctx, actorOf(user), { action: "reauth", outcome: "denied", detail: { reason: "changed_during_reauth" } });
@@ -881,10 +884,9 @@ export async function reauthenticate(
 }
 
 /** 確かめた時刻が、サーバーの時計で reauthMinutes の中か（先の時刻は、時計の数秒の巻き戻りのほかは受けない） */
-function withinReauth(ctx: AuthContext, at: number, when: Date | null, roleChangedAt: Date | null): boolean {
-  if (!when) return false;
-  // 役割を変えた時刻より前に通した印は使わない（前の役割の印を、格上げの後に使わせない）
-  if (roleChangedAt && when.getTime() <= roleChangedAt.getTime()) return false;
+function withinReauth(ctx: AuthContext, at: number, when: Date | null, sameRole: boolean): boolean {
+  // 通した時と役割の世代が違う印は使わない（前の役割の印を、格上げの後に使わせない）
+  if (!when || !sameRole) return false;
   const age = at - when.getTime();
   return age > -5_000 && age < ctx.settings.reauthMinutes * 60_000;
 }
@@ -900,18 +902,19 @@ function withinReauth(ctx: AuthContext, at: number, when: Date | null, roleChang
 export function assertRecentReauth(
   ctx: AuthContext,
   session: SessionRow,
-  user: Pick<User, "lockedUntil" | "totpSecretEnc" | "roleChangedAt">,
+  user: Pick<User, "lockedUntil" | "totpSecretEnc" | "roleVersion">,
   options: { requireTotp?: boolean } = {},
 ): void {
   const at = now(ctx).getTime();
   if (user.lockedUntil !== null && user.lockedUntil.getTime() > at) {
     throw new AuthFailure(403, "ロック中のため、この操作はできません（ロックが解除されてから、再度お試しください）", ["locked"]);
   }
+  const sameRole = session.reauthRoleVersion === user.roleVersion;
   if (options.requireTotp && user.totpSecretEnc !== null) {
-    if (withinReauth(ctx, at, session.reauthMfaAt, user.roleChangedAt)) return;
+    if (withinReauth(ctx, at, session.reauthMfaAt, sameRole)) return;
     throw new AuthFailure(403, "この操作にはパスワードと認証コードの再入力が必要です", [REAUTH_REQUIRED, REAUTH_TOTP_REQUIRED]);
   }
-  if (withinReauth(ctx, at, session.reauthAt, user.roleChangedAt)) return;
+  if (withinReauth(ctx, at, session.reauthAt, sameRole)) return;
   throw new AuthFailure(403, "この操作にはパスワードの再入力が必要です", [REAUTH_REQUIRED]);
 }
 
@@ -1119,14 +1122,14 @@ export async function updateUser(
       const next = await tx.user.update({
         where: { id: target.id },
         data: {
-          // 役割を変えた時刻も同じ文で記す。再認証の印は、この時刻より後に通したものだけを使う（assertRecentReauth）。
+          // 役割の世代も同じ文で上げる。再認証の印は、通した時の世代が今の世代と同じときだけ使う（assertRecentReauth）。
           // 役割の変更と印の消去の間に要求が入っても（つなぎは1つで、transaction の隔たりに頼れない）、前の役割の印は使えない
-          ...(roleChanged ? { role: change.role, roleChangedAt: at } : {}),
+          ...(roleChanged ? { role: change.role, roleVersion: { increment: 1 } } : {}),
           ...(statusChanged ? { status: change.status } : {}),
           updatedAt: at,
         },
       });
-      // 役割が変わったら、その利用者のどのセッションの再認証の印も消す（後片付け。使えないことは上の時刻で決まる）
+      // 役割が変わったら、その利用者のどのセッションの再認証の印も消す（後片付け。使えないことは上の世代で決まる）
       if (roleChanged) await tx.session.updateMany({ where: { userId: target.id }, data: { reauthAt: null, reauthMfaAt: null } });
       return next;
     });

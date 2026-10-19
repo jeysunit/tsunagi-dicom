@@ -1044,11 +1044,12 @@ describe("レビューと安全の確かめで直したこと", () => {
     // 役割の変更の前に読んだ利用者（前の役割）で確かめても、印は書かない
     await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
     expect((await sessionOf(db, token)).session.reauthAt).toBeNull();
-    // 役割の変更と印の消去の間に、前の役割で通した印が残っていた形（並んだ要求の隙間）を作っても、役割を変えた時刻より前の印は使わない
-    const roleAt = (await db.user.findUniqueOrThrow({ where: { id: s.user.id } })).roleChangedAt!;
+    // 役割の変更と印の消去の間に、前の役割で通した新しい時刻の印が残っていた形（並んだ要求の隙間）を作っても、
+    // 通した時の役割の世代が今と違う印は使わない
+    expect(after.user.roleVersion).toBe(s.user.roleVersion + 1);
     await db.session.update({
       where: { id: s.session.id },
-      data: { reauthAt: new Date(roleAt.getTime() - 1), reauthMfaAt: new Date(roleAt.getTime() - 1) },
+      data: { reauthAt: new Date(clock.t), reauthMfaAt: new Date(clock.t), reauthRoleVersion: s.user.roleVersion },
     });
     const stale = await sessionOf(db, token);
     expect(() => assertRecentReauth(ctx, stale.session, stale.user)).toThrow(expect.objectContaining({ problems: [REAUTH_REQUIRED] }));
@@ -1058,6 +1059,12 @@ describe("レビューと安全の確かめで直したこと", () => {
     await reauthenticate(ctx, stale.session, stale.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
     const fresh = await sessionOf(db, token);
     expect(() => assertRecentReauth(ctx, fresh.session, fresh.user, { requireTotp: true })).not.toThrow();
+    // パスワードだけの再認証は、前の TOTP の印を残さない（世代を1つだけ添えるので、前の世代の TOTP の印を今の印に見せない）
+    clock.advance(30_000);
+    await reauthenticate(ctx, fresh.session, fresh.user, { password: PASSWORD });
+    const pw = await sessionOf(db, token);
+    expect(pw.session.reauthMfaAt).toBeNull();
+    expect(() => assertRecentReauth(ctx, pw.session, pw.user)).not.toThrow();
   });
 
   it("任意の二要素認証の設定（MFA_REQUIRED=false）で認証の世代が上がったら、前に通した再認証の印を消す", async () => {
