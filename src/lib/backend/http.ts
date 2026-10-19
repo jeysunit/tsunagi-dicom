@@ -47,6 +47,8 @@ import type { AppConfig } from "@/lib/config";
 const TIMEOUT_MS = 15_000;
 /** 書き込みの操作の答えを待つ時間。過ぎたら結果不明（docs/spec.md の 3.5） */
 const POST_TIMEOUT_MS = 30_000;
+/** 書き出し（ZIP）の答えが始まるまでを待つ時間 */
+const EXPORT_TIMEOUT_MS = 10 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
 /**
  * 受け取りの記録のために、変更の記録をさかのぼって読む数（1 回 100 件、最大 50 回＝5000 件）。
@@ -82,7 +84,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     base: string,
     path: string,
     init: {
-      method?: "GET" | "HEAD" | "POST";
+      method?: "GET" | "HEAD" | "POST" | "DELETE";
       headers?: Record<string, string>;
       body?: string;
       timeoutMs?: number;
@@ -94,7 +96,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
   ) {
     const method = init.method ?? "GET";
     const headers: Record<string, string> = { ...init.headers };
-    const auth = (init.credential ?? (method === "POST" ? "write" : "read")) === "write" ? writeAuthorization : authorization;
+    const auth =
+      (init.credential ?? (method === "POST" || method === "DELETE" ? "write" : "read")) === "write" ? writeAuthorization : authorization;
     if (auth) headers.authorization = auth;
     try {
       return await fetch(`${base.replace(/\/+$/, "")}/${path}`, {
@@ -334,6 +337,32 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!isJobId(jobId)) return null;
       const json = await restJsonOrNull(`jobs/${jobId}`);
       return json ? jobFromRest(json) : null;
+    },
+
+    async exportStudy(orthancStudyId: string) {
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      // ZIP は大きくなりうるので、答えを待つ時間を長くとる（本文は流しながら渡す）
+      const res = await call(orthancUrl, `studies/${orthancStudyId}/archive`, { headers: { accept: "application/zip" }, timeoutMs: EXPORT_TIMEOUT_MS });
+      if (res.status === 404) {
+        await res.body?.cancel();
+        throw new BackendError("検査が見つからない", 404);
+      }
+      if (!res.ok || res.status >= 300) {
+        await res.body?.cancel();
+        throw new BackendError(`画像サーバーの応答が ${res.status}`);
+      }
+      return new Response(res.body as ReadableStream<Uint8Array> | null, {
+        status: 200,
+        headers: { "content-type": "application/zip" },
+      });
+    },
+
+    async deleteStudy(orthancStudyId: string) {
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      const res = await call(orthancUrl, `studies/${orthancStudyId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
+      await res.body?.cancel();
+      if (res.status === 404) throw new BackendError("検査が見つからない", 404);
+      if (!res.ok) throw new BackendError(`画像サーバーの応答が ${res.status}`);
     },
   };
 }

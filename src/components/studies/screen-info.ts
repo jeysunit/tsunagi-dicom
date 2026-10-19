@@ -12,5 +12,11 @@ export interface ScreenInfo {
     allValues: boolean;
     /** ほかの機器へ送る（段 4）。検証モードで書き込みを止めているときは false */
     send: boolean;
+    /** 書き出し（ZIP。段 5）。検証モードで書き込みを止めているときは false */
+    export: boolean;
+    /** 削除（段 5。管理者だけ）。検証モードで書き込みを止めているときは false */
+    delete: boolean;
   };
+  /** 大事な操作の前の再認証（AUTH_MODE=local のときだけ）。needsTotp は確認の番号も求めるか */
+  reauth?: { needsTotp: boolean };
 }

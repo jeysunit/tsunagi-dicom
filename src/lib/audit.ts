@@ -45,6 +45,8 @@ export const AUDIT_ACTIONS = [
   "receive_log",
   "echo",
   "send",
+  // 段 5：書き出し（ZIP）。削除は上の delete（detail の phase は send と同じ）
+  "export",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 /**

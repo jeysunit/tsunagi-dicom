@@ -77,6 +77,13 @@ export interface Backend {
   sendStudy(modalityId: string, orthancStudyId: string): Promise<{ jobId: string }>;
   /** Orthanc の仕事の状態（/jobs/{id}）。無ければ null */
   jobStatus(jobId: string): Promise<JobStatus | null>;
+
+  // ── 段 5：書き出し・削除（docs/spec.md の 3.5） ──
+
+  /** 検査の画像の全部の ZIP（/studies/{id}/archive）。本文はそのまま流す。無ければ BackendError(404) */
+  exportStudy(orthancStudyId: string): Promise<Response>;
+  /** 検査を消す（DELETE /studies/{id}）。書き込みの操作。無ければ BackendError(404)。答えが分からなければ BackendUnknownError */
+  deleteStudy(orthancStudyId: string): Promise<void>;
 }
 
 /** 受け取った検査（docs/spec.md の 3.3） */

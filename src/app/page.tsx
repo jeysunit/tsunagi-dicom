@@ -45,15 +45,19 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
 
   const role = session.role;
   const config = getConfig();
+  // 検証モードで書き込みを止めているときは、書き込みの操作のボタンを出さない（BFF の側でも断る）
+  const writes = config.auth.mode !== "dev" || !!config.auth.devAllowWrite;
   const screen: ScreenInfo = {
     csrfToken: session.local?.row.csrfToken,
     viewers: deps.viewers,
     can: {
       rememberViewer: can(role, "viewer.remember"),
       allValues: can(role, "dicom.all_values"),
-      // 検証モードで書き込みを止めているときは、送るのボタンを出さない（BFF の側でも断る）
-      send: can(role, "study.send") && (config.auth.mode !== "dev" || !!config.auth.devAllowWrite),
+      send: can(role, "study.send") && writes,
+      export: can(role, "study.export") && writes,
+      delete: can(role, "study.delete") && writes,
     },
+    ...(session.local ? { reauth: { needsTotp: session.local.user.totpSecretEnc !== null } } : {}),
   };
 
   return (

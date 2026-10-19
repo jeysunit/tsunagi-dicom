@@ -1,7 +1,6 @@
 "use client";
 
-import { Send } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { getJson } from "@/lib/client/api";
@@ -37,13 +36,24 @@ const STATE_TEXT: Record<JobView["state"], string> = {
   Retry: "やり直しを待っている",
 };
 
-export function SendPanel({ study, screen }: { study: StudyView; screen: ScreenInfo }) {
-  const [open, setOpen] = useState(false);
+/** 送る画面（開閉は呼ぶ側の PacsActions が持つ。ボタンもそちら） */
+export function SendPanel({
+  study,
+  screen,
+  open,
+  panelId,
+  onClose,
+}: {
+  study: StudyView;
+  screen: ScreenInfo;
+  open: boolean;
+  panelId: string;
+  onClose: () => void;
+}) {
   const [modalities, setModalities] = useState<ModalityView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const panelId = useId();
   const uid = study.studyInstanceUid ?? "";
   const timer = useRef<number | undefined>(undefined);
 
@@ -108,19 +118,7 @@ export function SendPanel({ study, screen }: { study: StudyView; screen: ScreenI
   const busy = phase.kind === "sending" || (phase.kind === "job" && !(phase.job?.state === "Success" || phase.job?.state === "Failure"));
 
   return (
-    <div className="w-full">
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        aria-expanded={open}
-        aria-controls={panelId}
-        data-testid="send-open"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Send aria-hidden />
-        送る
-      </Button>
+    <>
       {open && (
         <div
           id={panelId}
@@ -163,7 +161,7 @@ export function SendPanel({ study, screen }: { study: StudyView; screen: ScreenI
                 <Button type="button" size="sm" disabled={busy || !target} data-testid="send-submit" onClick={() => void send()}>
                   送る
                 </Button>
-                <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setOpen(false)}>
+                <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onClose}>
                   やめる
                 </Button>
               </div>
@@ -176,7 +174,7 @@ export function SendPanel({ study, screen }: { study: StudyView; screen: ScreenI
           />
         </div>
       )}
-    </div>
+    </>
   );
 }
 
