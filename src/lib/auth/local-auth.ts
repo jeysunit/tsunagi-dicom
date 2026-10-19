@@ -881,8 +881,10 @@ export async function reauthenticate(
 }
 
 /** 確かめた時刻が、サーバーの時計で reauthMinutes の中か（先の時刻は、時計の数秒の巻き戻りのほかは受けない） */
-function withinReauth(ctx: AuthContext, at: number, when: Date | null): boolean {
+function withinReauth(ctx: AuthContext, at: number, when: Date | null, roleChangedAt: Date | null): boolean {
   if (!when) return false;
+  // 役割を変えた時刻より前に通した印は使わない（前の役割の印を、格上げの後に使わせない）
+  if (roleChangedAt && when.getTime() <= roleChangedAt.getTime()) return false;
   const age = at - when.getTime();
   return age > -5_000 && age < ctx.settings.reauthMinutes * 60_000;
 }
@@ -898,7 +900,7 @@ function withinReauth(ctx: AuthContext, at: number, when: Date | null): boolean 
 export function assertRecentReauth(
   ctx: AuthContext,
   session: SessionRow,
-  user: Pick<User, "lockedUntil" | "totpSecretEnc">,
+  user: Pick<User, "lockedUntil" | "totpSecretEnc" | "roleChangedAt">,
   options: { requireTotp?: boolean } = {},
 ): void {
   const at = now(ctx).getTime();
@@ -906,10 +908,10 @@ export function assertRecentReauth(
     throw new AuthFailure(403, "ロック中のため、この操作はできません（ロックが解除されてから、再度お試しください）", ["locked"]);
   }
   if (options.requireTotp && user.totpSecretEnc !== null) {
-    if (withinReauth(ctx, at, session.reauthMfaAt)) return;
+    if (withinReauth(ctx, at, session.reauthMfaAt, user.roleChangedAt)) return;
     throw new AuthFailure(403, "この操作にはパスワードと認証コードの再入力が必要です", [REAUTH_REQUIRED, REAUTH_TOTP_REQUIRED]);
   }
-  if (withinReauth(ctx, at, session.reauthAt)) return;
+  if (withinReauth(ctx, at, session.reauthAt, user.roleChangedAt)) return;
   throw new AuthFailure(403, "この操作にはパスワードの再入力が必要です", [REAUTH_REQUIRED]);
 }
 
@@ -1114,14 +1116,19 @@ export async function updateUser(
     const updated = await ctx.db.$transaction(async (tx) => {
       const fresh = await tx.user.findUniqueOrThrow({ where: { id: target.id } });
       if (await wouldLoseLastAdmin(tx, fresh, change)) return null;
-      return tx.user.update({
+      const next = await tx.user.update({
         where: { id: target.id },
         data: {
-          ...(roleChanged ? { role: change.role } : {}),
+          // 役割を変えた時刻も同じ文で記す。再認証の印は、この時刻より後に通したものだけを使う（assertRecentReauth）。
+          // 役割の変更と印の消去の間に要求が入っても（つなぎは1つで、transaction の隔たりに頼れない）、前の役割の印は使えない
+          ...(roleChanged ? { role: change.role, roleChangedAt: at } : {}),
           ...(statusChanged ? { status: change.status } : {}),
           updatedAt: at,
         },
       });
+      // 役割が変わったら、その利用者のどのセッションの再認証の印も消す（後片付け。使えないことは上の時刻で決まる）
+      if (roleChanged) await tx.session.updateMany({ where: { userId: target.id }, data: { reauthAt: null, reauthMfaAt: null } });
+      return next;
     });
     if (!updated) throw new AuthFailure(409, NO_ADMIN_LEFT);
     user = updated;
@@ -1129,8 +1136,6 @@ export async function updateUser(
     throw new AuthFailure(409, NO_ADMIN_LEFT);
   }
   if (roleChanged) {
-    // 役割が変わったら、その利用者のどのセッションの再認証の印も消す（前の役割で通した印を、格上げの後に使わせない）
-    await ctx.db.session.updateMany({ where: { userId: target.id }, data: { reauthAt: null, reauthMfaAt: null } });
     await record(ctx, by, { action: "role_change", detail: { target: target.username, from: target.role, to: change.role } });
   }
   if (statusChanged) {

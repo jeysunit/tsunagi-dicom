@@ -1044,6 +1044,37 @@ describe("レビューと安全の確かめで直したこと", () => {
     // 役割の変更の前に読んだ利用者（前の役割）で確かめても、印は書かない
     await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
     expect((await sessionOf(db, token)).session.reauthAt).toBeNull();
+    // 役割の変更と印の消去の間に、前の役割で通した印が残っていた形（並んだ要求の隙間）を作っても、役割を変えた時刻より前の印は使わない
+    const roleAt = (await db.user.findUniqueOrThrow({ where: { id: s.user.id } })).roleChangedAt!;
+    await db.session.update({
+      where: { id: s.session.id },
+      data: { reauthAt: new Date(roleAt.getTime() - 1), reauthMfaAt: new Date(roleAt.getTime() - 1) },
+    });
+    const stale = await sessionOf(db, token);
+    expect(() => assertRecentReauth(ctx, stale.session, stale.user)).toThrow(expect.objectContaining({ problems: [REAUTH_REQUIRED] }));
+    expect(() => assertRecentReauth(ctx, stale.session, stale.user, { requireTotp: true })).toThrow(AuthFailure);
+    // 役割を変えた後に通した再認証は使える
+    clock.advance(30_000);
+    await reauthenticate(ctx, stale.session, stale.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    const fresh = await sessionOf(db, token);
+    expect(() => assertRecentReauth(ctx, fresh.session, fresh.user, { requireTotp: true })).not.toThrow();
+  });
+
+  it("任意の二要素認証の設定（MFA_REQUIRED=false）で認証の世代が上がったら、前に通した再認証の印を消す", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "general", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
+    const s = await sessionOf(db, token);
+    await reauthenticate(ctx, s.session, s.user, { password: "kq7vz2mw-long1" });
+    expect((await sessionOf(db, token)).session.reauthAt).not.toBeNull();
+    const e = await sessionOf(db, token);
+    const { secret } = await startEnrollment(ctx, e.session, e.user);
+    const c = await sessionOf(db, token);
+    await confirmEnrollment(ctx, c.session, c.user, totpAt(secret, Date.parse("2026-10-18T09:00:00Z")), "kq7vz2mw-long1");
+    const after = await sessionOf(db, token);
+    expect(after.user.totpSecretEnc).not.toBeNull();
+    expect(after.session.reauthAt).toBeNull();
+    expect(() => assertRecentReauth(ctx, after.session, after.user)).toThrow(AuthFailure);
   });
 
   it("ログインした後のパスワードの変更は、いまのパスワードと TOTP を求める", async () => {

@@ -58,6 +58,8 @@ model User {
   displayName        String
   // admin・general（src/lib/auth/roles.ts。2026-10-20 に4つから2つにした。migration 20261020100000_two_roles）
   role               String
+  // 役割を最後に変えた時刻。これより前に通した再認証の印は使わない（src/lib/auth/local-auth.ts の assertRecentReauth）
+  roleChangedAt      DateTime?
   // active・disabled
   status             String    @default("active")
   // argon2id の PHC の文字列（$argon2id$v=19$m=…,t=…,p=…$salt$hash）。平文には戻せない
