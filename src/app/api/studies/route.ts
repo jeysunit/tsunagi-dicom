@@ -13,8 +13,8 @@ export async function GET(request: Request) {
     // 権限が無ければ、断ったことを記録して 403
     const session = await requirePermission(await requireSession(), "study.search", { action: "search", detail: { via: "api" } });
     const filter = parseFilter(new URL(request.url).searchParams);
-    const { count, studies, facets, returned } = await listStudies(await screenDeps(session), filter);
-    await audit(session, searchAuditFields("api", returned));
+    const { count, studies, facets, facetAudit, returned } = await listStudies(await screenDeps(session), filter);
+    await audit(session, searchAuditFields("api", returned, facetAudit));
     return Response.json({ count, studies, facets });
   } catch (error) {
     return errorResponse(error);

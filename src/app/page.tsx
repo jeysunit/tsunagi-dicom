@@ -40,7 +40,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </p>
     );
   }
-  await audit(session, searchAuditFields("page", result.returned));
+  await audit(session, searchAuditFields("page", result.returned, result.facetAudit));
 
   const role = session.role;
   const screen: ScreenInfo = {

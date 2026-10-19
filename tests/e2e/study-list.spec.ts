@@ -127,6 +127,29 @@ test("詳細のシリーズ：狭い幅（600px）でも、並びは 1 列のま
   expect(new Set(boxes.map((t) => Math.round(t))).size).toBe(1);
 });
 
+// 戻した確かめ：一覧のサムネイルを外した（期待の変更 1）ときに外れた「実の画像が読めたか」を、詳細の横の並びで確かめる。
+// 要素の数だけでなく、画像が実際に読めたこと（naturalWidth > 0）と、写しの無い検査は印だけであること
+test("詳細のシリーズ：写しのある検査はサムネイルの画像が実際に読め、写しの無い検査は印だけ", async ({ page }) => {
+  await asRole(page, "医師");
+  await row(page).click();
+  const strip = page.getByTestId("series-strip");
+  await expect(strip.getByTestId("series-item")).toHaveCount(1);
+  const img = strip.getByTestId("thumbnail");
+  await expect(img).toBeVisible();
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+  // まわりは暗い地
+  await expect(img.locator("xpath=..")).toHaveCSS("background-color", "rgb(18, 20, 23)");
+  await expect(strip.getByTestId("thumbnail-missing")).toHaveCount(0);
+
+  // 写しの無い検査（1 行目以外のどれか）は印だけ
+  const other = page.locator(`tr[data-study-uid]:not([data-study-uid="${STUDY}"])`).last();
+  await other.click();
+  await expect(page.getByTestId("study-detail")).not.toHaveAttribute("data-study-uid", STUDY);
+  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip").getByTestId("thumbnail-missing").first()).toBeVisible();
+  await expect(page.getByTestId("series-strip").getByTestId("thumbnail")).toHaveCount(0);
+});
+
 // 期待の変更（1 件）：検査と患者の情報の 2 列と UID は、詳細の「すべての項目」を押して開いてから確かめる。
 // 見出しの 1〜2 行に詰め、ほかの値を「すべての項目」の中へ移したため（docs/spec.md の 3.1）。確かめる値は同じ。
 test("詳細のパネル：行のクリックで開き、見出しの要点と、すべての項目（検査と患者の情報・UID）・シリーズの並び（暗い地）を出す", async ({ page }) => {
@@ -728,6 +751,23 @@ test("許されない項目の件数は出ない：画面の API の応答から
   expect(await page.getByTestId("study-filters").locator("[data-testid^=modality-], [data-testid^=status-]").allInnerTexts()).not.toEqual(
     expect.arrayContaining([expect.stringMatching(/\(\d+\)/)]),
   );
+});
+
+test("上限に届いて数えきれない件数は「以上」と出す（確定の数のように出さない）", async ({ page }) => {
+  // 1000 件を超える応答の形（モックの検査は 8 件なので、応答の atLeast だけを付ける。BFF の側は tests/unit/study-list-limit.test.ts）
+  await page.route("**/api/studies?*", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { facets: Record<string, unknown> };
+    body.facets.atLeast = { date: ["all"], list: true };
+    await route.fulfill({ response: res, json: body });
+  });
+  await asRole(page, "医師");
+  await page.getByTestId("date-week").click();
+  await expect(page.getByTestId("date-week")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("date-all")).toHaveText(/全期間 \(\d+ 以上\)/);
+  await expect(page.getByTestId("date-today")).toHaveText(/今日 \(\d+\)/);
+  await expect(page.getByTestId("modality-CT")).toHaveText(/CT \(\d+ 以上\)/);
+  await expect(page.getByTestId("status-unread")).toHaveText(/未読 \(\d+ 以上\)/);
 });
 
 test("「詳しく」：期間の指定は、押したときだけ出る。開け閉めでき、期間で絞っているときは最初から開く", async ({ page }) => {

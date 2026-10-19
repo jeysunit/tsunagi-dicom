@@ -23,6 +23,7 @@ import {
   STATUS_FILTERS,
   statusMatches,
   todayIn,
+  type FacetDate,
   type StudyFacets,
   type StudyFilter,
 } from "@/lib/study-filter";
@@ -51,6 +52,8 @@ export interface StudyListResult {
   studies: StudyView[];
   /** 見出しごとの件数（許可の一覧に載っていない項目の見出しは含めない） */
   facets: StudyFacets;
+  /** 監査の記録に残す、件数を数えた条件・範囲・件数（ブラウザへは返さない） */
+  facetAudit: FacetAudit;
   /** 監査の記録に残す、返した検査（ブラウザへは返さない） */
   returned: StudySummary[];
   /** 画像サーバーへ求めた時刻（ミリ秒） */
@@ -79,10 +82,12 @@ async function decorate(deps: ListDeps, studies: StudySummary[]) {
  */
 export function computeFacets(
   views: readonly StudyView[],
-  dateViews: readonly StudyView[],
+  dateViews: readonly StudyView[] | null,
   filter: StudyFilter,
   today: SimpleDate,
   fields: readonly string[],
+  /** 検索が上限に届かず、全部を数えられたか（list：いまの一覧、date：検査日の件数の元）。既定は両方とも全部 */
+  complete: { list: boolean; date: boolean } = { list: true, date: true },
 ): StudyFacets {
   const facets: StudyFacets = {};
   if (fields.includes("modalities")) {
@@ -98,16 +103,43 @@ export function computeFacets(
     for (const s of statusKinds) status[s] = base.filter((v) => statusMatches(v, s)).length;
     facets.status = status;
   }
-  if (fields.includes("studyDate")) {
+  if ((facets.modality || facets.status) && !complete.list) facets.atLeast = { ...facets.atLeast, list: true };
+  // 検査日の件数の元が取れなかったとき（null）は、検査日の件数を出さない（一覧は出す）
+  if (fields.includes("studyDate") && dateViews) {
     const base = dateViews.filter((v) => matchesFilter(v, filter));
     const date: NonNullable<StudyFacets["date"]> = {};
+    const inexact: FacetDate[] = [];
+    // 検索は新しい順に上限まで。いちばん古い検査より前から始まる範囲は、全部が入っているので確定。そうでなければ「以上」
+    const oldest = dateViews.map((v) => v.studyDate ?? "").filter((d) => /^\d{8}$/.test(d)).sort()[0];
     for (const d of FACET_DATES) {
       const range = dateQuery({ date: d }, today);
       date[d] = base.filter((v) => inDateRange(v.studyDate ?? "", range)).length;
+      const covered = complete.date || (oldest !== undefined && range.dateFrom !== undefined && oldest < range.dateFrom);
+      if (!covered) inexact.push(d);
     }
     facets.date = date;
+    if (inexact.length > 0) facets.atLeast = { ...facets.atLeast, date: inexact };
   }
   return facets;
+}
+
+/** 件数を数えたことの、監査の記録の補足（患者の値は入れない。検索の語は有無だけ） */
+export interface FacetAudit {
+  /** 数えた検査の範囲：all-dates＝全期間（一覧が全期間か、別にもう 1 回検索した）、none＝検査日の件数は数えなかった */
+  dateScope: "all-dates" | "none";
+  /** 全期間の検索を、いまの一覧とは別に求めたか */
+  extraSearch: boolean;
+  /** 検査日の件数のために読んだ検査の数と、検索の上限に届いたか */
+  fetched: number;
+  limited: boolean;
+  /** 追加の検索が失敗して、検査日の件数を出さなかった */
+  failed: boolean;
+  /** 件数を数えたときの絞り込み（検索の語は有無だけ） */
+  filter: { date: string; from?: string; to?: string; modality?: string; status?: string; query: boolean };
+  /** 返した件数（数だけ） */
+  counts: { date?: Record<string, number>; modality?: Record<string, number>; status?: Record<string, number> };
+  /** 件数が「以上」（上限に届いた）ものがあったか */
+  atLeast: boolean;
 }
 
 export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_FILTER): Promise<StudyListResult> {
@@ -120,17 +152,56 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
   const decorated = await decorate(deps, studies);
   const rows = decorated.filter((r) => matchesFilter(r.view, filter));
   // 検査日の件数の元：いまの一覧が全期間でなければ、全期間をもう一度読む（件数を数えるだけ。監査の記録の「返した検査」には入れない）
-  const dateRows = dateAllowed && filter.date !== "all" ? await decorate(deps, await deps.backend.searchStudies(STUDY_LIMIT, {})) : decorated;
+  // 追加の検索が失敗したら、検査日の件数だけを出さず、一覧は出す
+  const extraSearch = dateAllowed && filter.date !== "all";
+  let dateRows: typeof decorated | null = decorated;
+  let dateFetched = studies.length;
+  let failed = false;
+  if (extraSearch) {
+    try {
+      const all = await deps.backend.searchStudies(STUDY_LIMIT, {});
+      dateFetched = all.length;
+      dateRows = await decorate(deps, all);
+    } catch (error) {
+      console.error("検査日の件数のための検索に失敗した", error instanceof Error ? error.name : "unknown");
+      dateRows = null;
+      failed = true;
+    }
+  }
+  const listExact = studies.length < STUDY_LIMIT;
+  const facets = computeFacets(
+    decorated.map((r) => r.view),
+    dateRows?.map((r) => r.view) ?? null,
+    filter,
+    today,
+    fields,
+    { list: listExact, date: dateFetched < STUDY_LIMIT },
+  );
   return {
-    count: { count: rows.length, exact: studies.length < STUDY_LIMIT },
+    count: { count: rows.length, exact: listExact },
     studies: rows.map((r) => r.view),
-    facets: computeFacets(
-      decorated.map((r) => r.view),
-      dateRows.map((r) => r.view),
-      filter,
-      today,
-      fields,
-    ),
+    facets,
+    facetAudit: {
+      dateScope: facets.date ? "all-dates" : "none",
+      extraSearch,
+      fetched: dateFetched,
+      limited: dateFetched >= STUDY_LIMIT,
+      failed,
+      filter: {
+        date: filter.date,
+        ...(filter.from ? { from: filter.from } : {}),
+        ...(filter.to ? { to: filter.to } : {}),
+        ...(filter.modality ? { modality: filter.modality } : {}),
+        ...(filter.status ? { status: filter.status } : {}),
+        query: !!filter.q,
+      },
+      counts: {
+        ...(facets.date ? { date: facets.date } : {}),
+        ...(facets.modality ? { modality: facets.modality } : {}),
+        ...(facets.status ? { status: facets.status } : {}),
+      },
+      atLeast: !!facets.atLeast,
+    },
     returned: rows.map((r) => r.summary),
     fetchedAt,
   };

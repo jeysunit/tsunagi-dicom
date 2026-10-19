@@ -54,6 +54,11 @@ export interface StudyFacets {
   date?: Partial<Record<FacetDate, number>>;
   modality?: { all: number } & Partial<Record<ModalityGroup, number>>;
   status?: { all: number } & Partial<Record<StatusFilter, number>>;
+  /**
+   * 件数が「以上」（検索の上限に届いて、数えきれていない）のもの。ここに無い件数は確定で、押したあとの一覧の件数と同じ。
+   * list：モダリティと状態の件数（いまの一覧が上限に届いた）。date：上限に届いた全期間の検索で、範囲がすべて入っていない検査日の見出し
+   */
+  atLeast?: { list?: boolean; date?: FacetDate[] };
 }
 
 /** 横断の検索の語の長さの上限 */

@@ -75,7 +75,8 @@ function ModalityTag({ modality }: { modality: string }) {
 }
 
 /** 見出しの名前に件数を添える（`未読 (12)`）。件数が無い（許可されていない項目）ときは名前だけ */
-const withCount = (label: string, n: number | undefined) => (n === undefined ? label : `${label} (${n})`);
+const withCount = (label: string, n: number | undefined, atLeast = false) =>
+  n === undefined ? label : `${label} (${n}${atLeast ? " 以上" : ""})`;
 
 /** 1 つの並び（タブ・ボタン）。押せる大きさは 28px の高さ（24px 以上） */
 function Segmented({ label, children }: { label: string; children: React.ReactNode }) {
@@ -134,28 +135,28 @@ function FilterBar({
         <Segmented label="検査日">
           {FACET_DATES.map((d) => (
             <Chip key={d} pressed={filter.date === d} onClick={() => onChange({ ...filter, date: d })} testId={`date-${d}`}>
-              {withCount(DATE_LABELS[d], facets?.date?.[d])}
+              {withCount(DATE_LABELS[d], facets?.date?.[d], facets?.atLeast?.date?.includes(d))}
             </Chip>
           ))}
         </Segmented>
         <Segmented label="モダリティ">
           <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all">
-            {withCount("すべて", facets?.modality?.all)}
+            {withCount("すべて", facets?.modality?.all, facets?.atLeast?.list)}
           </Chip>
           {MODALITY_GROUPS.map((m) => (
             <Chip key={m} pressed={filter.modality === m} onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })} testId={`modality-${m}`}>
               <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
-              {withCount(m, facets?.modality?.[m])}
+              {withCount(m, facets?.modality?.[m], facets?.atLeast?.list)}
             </Chip>
           ))}
         </Segmented>
         <Segmented label="状態">
           <Chip pressed={!filter.status} onClick={() => onChange({ ...filter, status: undefined })} testId="status-all">
-            {withCount("すべて", facets?.status?.all)}
+            {withCount("すべて", facets?.status?.all, facets?.atLeast?.list)}
           </Chip>
           {STATUS_FILTERS.map((s) => (
             <Chip key={s} pressed={filter.status === s} onClick={() => onChange({ ...filter, status: filter.status === s ? undefined : s })} testId={`status-${s}`}>
-              {withCount(STATUS_LABELS[s], facets?.status?.[s])}
+              {withCount(STATUS_LABELS[s], facets?.status?.[s], facets?.atLeast?.list)}
             </Chip>
           ))}
         </Segmented>
