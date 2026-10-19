@@ -11,7 +11,7 @@ import type { StudyView } from "@/lib/fields";
 import { formatSlashDate } from "@/lib/format/japanese-date";
 
 // 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確かめの画面：消す検査を並べ、「戻せない」ことを示し、
-// 理由を書いてから「削除」を押す。大事な操作なので、BFF が再認証を求めたら、パスワード（と確認の番号）を入れてから続ける。
+// 理由を書いてから「削除する」を押す。大事な操作なので、BFF が再認証を求めたら、パスワードを入れてから続ける（TOTP は求めない）。
 // 答えが分からなければ「結果不明」と要求の ID を出し、もう一度消さずに確かめる道（Orthanc にまだあるかを読む）だけを出す。
 // 検査がまだあっても「消えていない」とは確定しない。管理者（照らし合わせの役割）は、Orthanc の側で先の削除が終わっていることを
 // 確かめてから、確かめた内容を書いて手で解ける。
@@ -108,7 +108,7 @@ export function DeletePanel({
     setAuthing(true);
     const res = await postJson(
       "/api/auth/reauth",
-      { password: form.get("password"), ...(screen.reauth?.needsTotp ? { code: form.get("code") } : {}) },
+      { password: form.get("password") },
       screen.csrfToken,
     );
     setAuthing(false);
@@ -228,11 +228,9 @@ export function DeletePanel({
       )}
       {phase.kind === "reauth" && (
         <form onSubmit={(e) => void reauth(e)} aria-label="再認証" className="max-w-sm space-y-2" data-testid="delete-reauth">
-          <p className="text-label">{screen.reauth?.needsTotp ? "削除にはパスワードと認証コードの再入力が必要です" : "削除にはパスワードの再入力が必要です"}</p>
+          {/* 再認証はパスワードだけ。一度通れば REAUTH_MINUTES の間は聞き直さない（docs/spec.md の 3.6） */}
+          <p className="text-label">削除にはパスワードの再入力が必要です</p>
           <Input name="password" type="password" autoComplete="current-password" aria-label="パスワード" required />
-          {screen.reauth?.needsTotp && (
-            <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} aria-label="認証コード" required />
-          )}
           {phase.error && (
             <p role="alert" className="text-sm text-danger">
               {phase.error}

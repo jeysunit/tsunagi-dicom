@@ -131,8 +131,8 @@ async function listed(uid = STUDY) {
 }
 
 describe("書き出し（ZIP）", () => {
-  it("管理者・医師・技師は落とせ、落とす前に記録する。ファイルの名前に患者の情報を入れない", async () => {
-    for (const role of ["admin", "doctor", "technologist"]) {
+  it("管理者・一般は落とせ、落とす前に記録する。ファイルの名前に患者の情報を入れない", async () => {
+    for (const role of ["admin", "general"]) {
       state.role = role;
       const res = await exportZip();
       expect(res.status).toBe(200);
@@ -202,11 +202,7 @@ describe("書き出し（ZIP）", () => {
     expect(await lastAudit("export")).toMatchObject({ outcome: "failed" });
   });
 
-  it("閲覧には断り、断ったことを記録する", async () => {
-    state.role = "viewer";
-    expect((await exportZip()).status).toBe(403);
-    expect(await lastAudit("export")).toMatchObject({ outcome: "denied", actorRole: "viewer" });
-  });
+  // 外した試験：「閲覧には断る」。閲覧の役割を無くし（2026-10-20）、エクスポートは管理者と一般の両方が使う
 
   it("このアプリの画面のほか（別のサイト・別の origin）からの要求は断る", async () => {
     state.role = "admin";
@@ -267,7 +263,8 @@ describe("削除", () => {
   it("管理者のほかの役割には断り、Orthanc を呼ばずに、断ったことを記録する", async () => {
     const { getBackend } = await import("@/lib/backend");
     const spy = vi.spyOn(getBackend(), "deleteStudy");
-    for (const role of ["doctor", "technologist", "viewer"]) {
+    // 役割は管理者と一般の2つ（2026-10-20）。前の医師・技師・閲覧の代わりに一般で確かめる
+    for (const role of ["general"]) {
       state.role = role;
       const requestId = crypto.randomUUID();
       expect((await del({ requestId, reason: "試験" })).status).toBe(403);
@@ -354,8 +351,8 @@ describe("削除", () => {
     const blocked = await del({ requestId: crypto.randomUUID(), reason: "試験" });
     expect(blocked.status).toBe(409);
     expect((await blocked.json()).pendingRequestIds).toEqual([requestId]);
-    // 解くのは、管理者が確かめた内容を書いて手で解く操作だけ（技師は解けない）
-    state.role = "technologist";
+    // 解くのは、管理者が確かめた内容を書いて手で解く操作だけ（一般は解けない）
+    state.role = "general";
     expect((await resolveDelete({ requestId, note: "試験" })).status).toBe(403);
     state.role = "admin";
     expect((await resolveDelete({ requestId, note: "" })).status).toBe(400);
@@ -557,7 +554,7 @@ describe("削除：違う検査を消さない", () => {
     // token は暗号化してあり、中身（患者 ID）がそのまま読めない
     expect(body.confirmToken).not.toContain("JP-TEST");
     expect(detailOf(await lastAudit("view_study"))).toMatchObject({ via: "delete_preview" });
-    state.role = "technologist";
+    state.role = "general";
     expect((await preview()).status).toBe(403);
   });
 

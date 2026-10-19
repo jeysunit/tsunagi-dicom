@@ -5,7 +5,7 @@ import { isRole } from "@/lib/auth/roles";
 import { audit, getSession } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
 
-/** 本文は `{"role":"technologist"}` ほどなので、それより十分に大きいところで切る */
+/** 本文は `{"role":"general"}` ほどなので、それより十分に大きいところで切る */
 const MAX_BODY_BYTES = 1024;
 
 // 検証モード（AUTH_MODE=dev）の役割の切り替え。画像サーバーへの書き込みではない。

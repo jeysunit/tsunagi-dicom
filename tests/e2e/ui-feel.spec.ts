@@ -121,8 +121,12 @@ test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に�
 });
 
 // 画面の言葉は docs/spec.md の 2.2 の用語集から選ぶ。用語集で「使わない言い方」とした言葉が、画面に出ていないことを確かめる。
-// 役割の名前（医師・技師・閲覧）と「すべての項目」は、役割と詳細のパネルを直す次の PR で外すので、ここでは見ない
+// 前の役割の名前のうち「医師」は、見本の依頼医の名前（試験 医師）に含まれるので、ここでは見ない（検証モードの帯に無いことは
+// tests/e2e/home.spec.ts で見る）
 const RETIRED_WORDS = [
+  "すべての項目",
+  "技師",
+  "閲覧",
   "受け取り",
   "機器",
   "ビューアの既定",
@@ -198,11 +202,11 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   await page.getByTestId("study-detail").getByTestId("open-menu").click();
   await collect("詳細とビューアのメニュー");
   await page.keyboard.press("Escape");
-  await page.getByTestId("detail-all-items-toggle").click();
+  await page.getByTestId("detail-uid-toggle").click();
   await page.getByRole("button", { name: "DICOM タグ" }).click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
-  await collect("詳細の項目");
-  await page.getByTestId("detail-all-items-toggle").click();
+  await collect("詳細の UID と DICOM タグ");
+  await page.getByTestId("detail-uid-toggle").click();
   for (const path of ["/received", "/modalities", "/admin/viewers"]) {
     await page.goto(path);
     if (path === "/modalities") {

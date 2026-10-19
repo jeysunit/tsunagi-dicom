@@ -63,7 +63,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       export: can(role, "study.export") && writes,
       delete: can(role, "study.delete") && writes,
     },
-    ...(session.local ? { reauth: { needsTotp: session.local.user.totpSecretEnc !== null } } : {}),
+    ...(session.local ? { reauth: true } : {}),
   };
 
   return (

@@ -23,20 +23,18 @@ export interface UserRowView {
 }
 
 // 利用者の一覧（棚卸し）と、作る・役割を変える・止める／戻す・TOTP のやり直し・一時停止の解除。画面の言葉は docs/spec.md の 2.2。
-// これらは大事な操作なので、直前の本人の確かめ（再認証）が要る。BFF が求めたら、パスワードと確認の番号を入れてもらい、
-// 通ったら同じ操作をもう一度送る。
+// これらは大事な操作なので、直前の本人の確かめ（再認証）が要る。BFF が求めたら、パスワードだけを入れてもらい
+// （再認証は TOTP を求めない。docs/spec.md の 3.6）、通ったら同じ操作をもう一度送る。
 export function UserAdmin({
   users,
   csrfToken,
   selfId,
   minPasswordLength,
-  needsTotp,
 }: {
   users: UserRowView[];
   csrfToken: string;
   selfId: string;
   minPasswordLength: number;
-  needsTotp: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -67,7 +65,7 @@ export function UserAdmin({
     setAuthing(true);
     const res = await postJson(
       "/api/auth/reauth",
-      { password: form.get("password"), ...(needsTotp ? { code: form.get("code") } : {}) },
+      { password: form.get("password") },
       csrfToken,
     );
     setAuthing(false);
@@ -138,15 +136,10 @@ export function UserAdmin({
           aria-label="再認証"
           className="max-w-sm space-y-3 rounded-md border border-border bg-surface p-3"
         >
-          <p className="text-label">{needsTotp ? "この操作にはパスワードと認証コードの再入力が必要です" : "この操作にはパスワードの再入力が必要です"}</p>
+          <p className="text-label">この操作にはパスワードの再入力が必要です</p>
           <Field label="パスワード">
             <Input name="password" type="password" autoComplete="current-password" required />
           </Field>
-          {needsTotp && (
-            <Field label="認証コード（6 桁）">
-              <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} required />
-            </Field>
-          )}
           {reauthError && (
             <p role="alert" className="text-sm text-danger">
               {reauthError}
@@ -234,7 +227,8 @@ export function UserAdmin({
                     {u.status === "active" ? "無効にする" : "有効にする"}
                   </Button>
                 )}
-                {u.totpEnabled && (
+                {/* 自分の二要素認証のリセットは出さない（BFF も断る。別の管理者が行う。docs/spec.md の 3.6） */}
+                {u.totpEnabled && u.id !== selfId && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -269,7 +263,7 @@ export function UserAdmin({
           <Input name="displayName" required autoComplete="off" />
         </Field>
         <Field label="役割">
-          <select name="role" defaultValue="viewer" className="h-8 w-full rounded-md border border-border bg-background px-2">
+          <select name="role" defaultValue="general" className="h-8 w-full rounded-md border border-border bg-background px-2">
             {ROLES.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABELS[r]}

@@ -56,7 +56,7 @@ model User {
   // ログインの名前。作った後は変えない（監査の記録の actorId に使う）
   username           String    @unique
   displayName        String
-  // admin・doctor・technologist・viewer（src/lib/auth/roles.ts）
+  // admin・general（src/lib/auth/roles.ts。2026-10-20 に4つから2つにした。migration 20261020100000_two_roles）
   role               String
   // active・disabled
   status             String    @default("active")

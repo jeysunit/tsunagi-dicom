@@ -7,7 +7,7 @@ import { EMPTY_VIEWER_MEMORY, type ViewerMemoryView } from "@/lib/viewer-memory"
 // 画面の API（BFF が組み立てて返す JSON）は、ここに載った項目だけを返す。画像サーバーの応答をそのまま返さない。
 // - 項目は、画面に出す形の名前で持つ（DICOM のタグの名前ではない）。BFF が画像サーバーの応答から組み立てる。
 // - 役割の一覧に無い項目は返さない。一覧に無い役割は何も返さない（足し忘れたときは「出ない」側に倒れる）。
-// - 既定の役割（管理者・医師・技師・閲覧）は、その役割が使える画面に要る項目をすべて含む（見え方は変えない）。
+// - 既定の役割（管理者・一般。2026-10-20 に4つから2つにした）は、その役割が使える画面に要る項目をすべて含む（見え方は変えない）。
 // - すべての DICOM の値を見る権限（dicom.all_values。src/lib/auth/roles.ts）は、この一覧とは別に持つ。
 // - 画像と文書の本体、ビューアへ渡す取得の道（中継の WADO-RS）は、この選別の対象にしない。
 // 画面に項目を足すときは、ここに足し、「載っていない項目は返らない」試験（tests/unit/fields.test.ts）を付ける。
@@ -106,9 +106,8 @@ export type FieldAllowlistMap = Record<Role, FieldAllowlist>;
 /** 既定の役割の許可の一覧。どの既定の役割も、使える画面に要る項目をすべて見る（原則 8） */
 export const ROLE_FIELD_ALLOWLIST: FieldAllowlistMap = {
   admin: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_FIELDS },
-  doctor: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
-  technologist: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
-  viewer: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
+  // 接続先の住所（host・port）と許可は、システムの設定にあたるので管理者だけ（docs/spec.md の 3.6）
+  general: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
 };
 
 /** 受け取りの記録の1行（画面の API が返す形） */

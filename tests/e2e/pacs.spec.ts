@@ -6,7 +6,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 
-async function asRole(page: Page, label: "管理者" | "医師" | "技師" | "閲覧") {
+// 役割は管理者と一般の2つ（2026-10-20。docs/spec.md の 3.6）。前の技師で流していた試験は、一般で流す
+async function asRole(page: Page, label: "管理者" | "一般") {
   await page.goto("/");
   const button = page.getByTestId("dev-mode-band").getByRole("button", { name: label });
   if ((await button.getAttribute("aria-pressed")) !== "true") {
@@ -17,8 +18,8 @@ async function asRole(page: Page, label: "管理者" | "医師" | "技師" | "�
 
 // 期待の変更（文言）：画面の言葉を docs/spec.md の 2.2 の用語集に合わせた（受け取り→受信一覧・取り込み→インポート・
 // 一覧で開く→検査一覧で表示・つながった→成功（時刻つき）・書き込みは止めている→書き込み：無効など）。確かめる振る舞いは同じ。
-test("受け取りの記録：技師は、受け取った検査を新しい順に 1 件 1 行で見られ、REST で入った検査は「インポート」と分かる", async ({ page }) => {
-  await asRole(page, "技師");
+test("受け取りの記録：一般は、受け取った検査を新しい順に 1 件 1 行で見られ、REST で入った検査は「インポート」と分かる", async ({ page }) => {
+  await asRole(page, "一般");
   await page.getByRole("navigation", { name: "頁" }).getByRole("link", { name: "受信一覧" }).click();
   await expect(page).toHaveURL(/\/received$/);
   const rows = page.getByTestId("received-row");
@@ -36,8 +37,8 @@ test("受け取りの記録：技師は、受け取った検査を新しい順�
   await expect(page.getByTestId("study-count")).toHaveText("2");
 });
 
-test("機器：技師は名前と AE タイトルを見て C-ECHO で確かめられ、住所は見えない。管理者には住所が出る", async ({ page }) => {
-  await asRole(page, "技師");
+test("接続先：一般は名称と AE タイトルを見て接続確認ができ、ホスト:ポートは見えない。管理者には出る", async ({ page }) => {
+  await asRole(page, "一般");
   await page.goto("/modalities");
   const rows = page.getByTestId("modality-row");
   await expect(rows).toHaveCount(3);
@@ -53,16 +54,22 @@ test("機器：技師は名前と AE タイトルを見て C-ECHO で確かめ�
   await expect(page.locator('[data-modality="dtg"]')).toContainText("192.0.2.20:11112");
 });
 
-test("医師・閲覧には、受け取り・機器の頁の道が無く、開いても断る", async ({ page }) => {
-  for (const role of ["医師", "閲覧"] as const) {
-    await asRole(page, role);
-    const nav = page.getByRole("navigation", { name: "頁" });
-    await expect(nav.getByRole("link", { name: "受信一覧" })).toHaveCount(0);
-    await expect(nav.getByRole("link", { name: "接続先" })).toHaveCount(0);
-    await page.goto("/received");
-    await expect(page.getByRole("main").getByRole("alert")).toContainText("この画面を表示する権限がありません");
-    expect((await page.request.get("/api/receive-log")).status()).toBe(403);
-  }
+// 期待の変更：前は「医師・閲覧には受け取り・機器の頁の道が無い」。役割を管理者と一般の2つにした（2026-10-20）ので、
+// 一般には普段使う頁の道があり、管理者だけの頁（ビューア設定）の道は無く、開いても断ることを見る（docs/spec.md の 3.6）
+test("一般の画面には、普段使う頁の道があり、管理者だけの頁の道は出さない。開いても断る", async ({ page }) => {
+  await asRole(page, "一般");
+  const nav = page.getByRole("navigation", { name: "頁" });
+  await expect(nav.getByRole("link", { name: "検査一覧" })).toHaveCount(1);
+  await expect(nav.getByRole("link", { name: "受信一覧" })).toHaveCount(1);
+  await expect(nav.getByRole("link", { name: "接続先" })).toHaveCount(1);
+  await expect(nav.getByRole("link", { name: "ビューア設定" })).toHaveCount(0);
+  await page.goto("/admin/viewers");
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("管理者のみ利用できます");
+  expect((await page.request.get("/api/admin/viewer-defaults")).status()).toBe(403);
+  expect((await page.request.get("/api/receive-log")).status()).toBe(200);
+  // 管理者には、ビューア設定の道がある
+  await asRole(page, "管理者");
+  await expect(page.getByRole("navigation", { name: "頁" }).getByRole("link", { name: "ビューア設定" })).toHaveCount(1);
 });
 
 test("検証モードで書き込みを止めているときは、送るのボタンが無く、送る要求も断る", async ({ page }) => {

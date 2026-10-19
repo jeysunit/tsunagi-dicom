@@ -374,7 +374,7 @@ async function acceptTotp(ctx: AuthContext, user: User, secret: string, code: st
 /**
  * ログインした利用者の、もう一度の本人の確かめ（パスワードと、登録していれば TOTP）。
  * 画面のロックの解除・再認証・パスワードの変更に使う。回数の上限と一時停止を、ログインと同じに数える。
- * requireTotp が false なら（画面のロックの解除で SCREEN_UNLOCK_REQUIRE_TOTP=false のとき）、TOTP は確かめず、
+ * requireTotp が false なら（再認証と、画面のロックの解除で SCREEN_UNLOCK_REQUIRE_TOTP=false のとき）、TOTP は確かめず、
  * 送られた番号も使った段に数えない。TOTP を確かめたら true を返す
  */
 async function verifyAgain(
@@ -412,8 +412,8 @@ async function verifyAgain(
     // 利用者が持つ確かめを全部通した（TOTP を登録していればそれも）ので、続けての失敗の数を0に戻す
     await resetAttempts(ctx, user);
   } else {
-    // TOTP を登録しているのに確かめなかった（パスワードだけの画面のロックの解除）。この試みの枠だけを返し、
-    // 前の失敗の数は残す。消すと、再認証などで TOTP の番号を試し、一時停止の手前でパスワードだけの解除を通して
+    // TOTP を登録しているのに確かめなかった（パスワードだけの画面のロックの解除・再認証）。この試みの枠だけを返し、
+    // 前の失敗の数は残す。消すと、パスワードの変更などで TOTP の番号を試し、一時停止の手前でパスワードだけの解除を通して
     // 数を消すことを繰り返し、TOTP の試みの上限を迂回できるため（docs/spec.md の 3.6）
     await releaseAttempt(ctx, user);
   }
@@ -838,7 +838,11 @@ export async function changePassword(
 
 // ── 再認証（大事な操作の前の、もう一度の本人の確かめ） ──
 
-/** パスワードと TOTP で本人を確かめ、設定の reauthMinutes の間、大事な操作を許す */
+/**
+ * パスワードだけで本人を確かめ、設定の reauthMinutes の間、大事な操作を許す（TOTP はログインのときに確かめる。
+ * 2026-10-20 に承認者が決めた。docs/spec.md の 3.6 の「再認証」）。送られた TOTP の番号は確かめず、使った段にも数えない。
+ * TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない（verifyAgain。画面のロックの解除と同じ）
+ */
 export async function reauthenticate(
   ctx: AuthContext,
   session: SessionRow,
@@ -846,9 +850,9 @@ export async function reauthenticate(
   input: { password: string; code?: string },
 ): Promise<void> {
   if (session.stage !== "active" || session.lockedAt) throw new AuthFailure(409, "ログインしていません。再度ログインしてください");
-  await verifyAgain(ctx, user, input, "reauth");
+  await verifyAgain(ctx, user, { password: input.password }, "reauth", { requireTotp: false });
   await ctx.db.session.update({ where: { id: session.id }, data: { reauthAt: now(ctx) } });
-  await record(ctx, actorOf(user), { action: "reauth", outcome: "success" });
+  await record(ctx, actorOf(user), { action: "reauth", outcome: "success", detail: { totp: false } });
 }
 
 /**
@@ -1041,6 +1045,11 @@ export async function updateUser(
   // 自分の一時停止は、一時停止の有無に関わらず自分では解けない（別の管理者が解く）
   if (change.clearLoginLock && target.username === by.actorId) {
     throw new AuthFailure(403, "自分のロックは解除できません。別の管理者に依頼してください");
+  }
+  // 自分の TOTP のやり直しも、自分ではできない（別の管理者が行う）。再認証がパスワードだけになったので、管理者のセッションと
+  // パスワードを得た人が、再認証から自分の TOTP をやり直し、自分の認証のアプリを登録し直せないようにする（docs/spec.md の 3.6）
+  if (change.resetTotp && target.username === by.actorId) {
+    throw new AuthFailure(403, "自分の二要素認証はリセットできません。別の管理者に依頼してください");
   }
   if (change.role !== undefined && !isRole(change.role)) throw new AuthFailure(400, "役割の指定が正しくありません");
   if (change.status !== undefined && change.status !== "active" && change.status !== "disabled") {

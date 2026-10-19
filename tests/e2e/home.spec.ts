@@ -129,29 +129,31 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
     await expect(band).toContainText("検証モード");
     // 文言は docs/spec.md の 2.2 の用語集（書き込みは止めている→書き込み：無効）
     await expect(band).toContainText("書き込み：無効");
-    for (const label of ["管理者", "医師", "技師", "閲覧"]) {
+    // 役割は管理者と一般の2つ（2026-10-20。docs/spec.md の 3.6・4）。前の医師・技師・閲覧のボタンは無い
+    for (const label of ["管理者", "一般"]) {
       await expect(band.getByRole("button", { name: label })).toBeVisible();
     }
-    // 役割を選んでいなければ「閲覧」
-    await expect(band.getByRole("button", { name: "閲覧" })).toHaveAttribute("aria-pressed", "true");
+    for (const label of ["医師", "技師", "閲覧"]) await expect(band.getByRole("button", { name: label })).toHaveCount(0);
+    // 役割を選んでいなければ「一般」（狭いほう）
+    await expect(band.getByRole("button", { name: "一般" })).toHaveAttribute("aria-pressed", "true");
   });
 
   test("役割を切り替えると画面に反映し、切り替えを監査の記録に残す", async ({ page }) => {
     await page.goto("/");
     const band = page.getByTestId("dev-mode-band");
 
-    // 閲覧では監査の確かめを使えない
+    // 一般では監査の確かめを使えない
     expect((await page.request.get("/api/audit/verify")).status()).toBe(403);
 
     await band.getByRole("button", { name: "管理者" }).click();
     await expect(band.getByRole("button", { name: "管理者" })).toHaveAttribute("aria-pressed", "true");
-    await expect(band.getByRole("button", { name: "閲覧" })).toHaveAttribute("aria-pressed", "false");
+    await expect(band.getByRole("button", { name: "一般" })).toHaveAttribute("aria-pressed", "false");
 
     const before = await (await page.request.get("/api/audit/verify")).json();
     expect(before.ok).toBe(true);
 
-    await band.getByRole("button", { name: "医師" }).click();
-    await expect(band.getByRole("button", { name: "医師" })).toHaveAttribute("aria-pressed", "true");
+    await band.getByRole("button", { name: "一般" }).click();
+    await expect(band.getByRole("button", { name: "一般" })).toHaveAttribute("aria-pressed", "true");
     await band.getByRole("button", { name: "管理者" }).click();
     await expect(band.getByRole("button", { name: "管理者" })).toHaveAttribute("aria-pressed", "true");
 
@@ -164,7 +166,7 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
   test("署名の無い役割の cookie は使わない", async ({ page, context }) => {
     await context.addCookies([{ name: "tsunagi_dev_role", value: "admin.forged", url: "http://127.0.0.1:3100" }]);
     await page.goto("/");
-    await expect(page.getByTestId("dev-mode-band").getByRole("button", { name: "閲覧" })).toHaveAttribute(
+    await expect(page.getByTestId("dev-mode-band").getByRole("button", { name: "一般" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

@@ -1,18 +1,19 @@
 // 役割と、役割ごとにできる操作（docs/spec.md の 3.6、第7.0版 14.2）。
+// 役割は管理者と一般の2つ（2026-10-20 に承認者が決めた。それまでは管理者・医師・技師・閲覧の4つ）。
+// 一般は普段使う機能の全部、管理者は一般の全部に加えて、削除・ユーザー管理・システムの設定（接続先の住所・ビューア設定など）。
+// 閲覧だけの役割は作らない。これまでの医師・技師・閲覧の利用者は、migration 20261020100000_two_roles で一般に移した。
 // 操作は、この段までに道がある操作だけを並べる。後の段で道を足すときは、ここに操作を足して割り当て、試験を付ける。
 // 割り当てに無い操作は「できない」側に倒れる。AUTH_MODE=dev の検証モードで選んだ役割にも、同じ割り当てを当てる。
-export const ROLES = ["admin", "doctor", "technologist", "viewer"] as const;
+export const ROLES = ["admin", "general"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
   admin: "管理者",
-  doctor: "医師",
-  technologist: "技師",
-  viewer: "閲覧",
+  general: "一般",
 };
 
-/** 検証モードで役割を選んでいないときは、いちばん狭い「閲覧」にする */
-export const DEFAULT_DEV_ROLE: Role = "viewer";
+/** 検証モードで役割を選んでいないとき（前の役割の名前を覚えた cookie を含む）は、狭いほうの「一般」にする */
+export const DEFAULT_DEV_ROLE: Role = "general";
 
 export function isRole(value: unknown): value is Role {
   return typeof value === "string" && (ROLES as readonly string[]).includes(value);
@@ -23,7 +24,7 @@ export const PERMISSIONS = [
   "study.search",
   // ビューアが画像を取る道（BFF の中継の WADO-RS の読み取り）
   "image.retrieve",
-  // すべての DICOM の値を見る（docs/spec.md 原則 8。画面は段 2）
+  // すべての DICOM の値を見る（docs/spec.md 原則 8。詳細のパネルの「DICOM タグ」）
   "dicom.all_values",
   // 監査の記録のつなぎの確かめ（/api/audit/verify）
   "audit.verify",
@@ -32,10 +33,10 @@ export const PERMISSIONS = [
   // 段 2：検査ごとの既定のビューアを覚える（ほかの利用者にも効く。BFF のデータベースだけを変える）。
   // 段 2 の検査の状態の印の操作（検像・読影の状態・緊急の印・ブックマーク）は段 3 で外した
   "viewer.remember",
-  // モダリティごとの既定のビューアを変える（管理の画面）
+  // モダリティごとの既定のビューアを変える（ビューア設定。システムの設定）
   "viewer.defaults",
-  // 段 4（docs/spec.md の 3.3・3.4。割り当ては推奨の案で、承認者の判断の前）
-  // 受け取りの記録を見る（Orthanc の変更の記録から読む）
+  // 段 4（docs/spec.md の 3.3・3.4）
+  // 受け取りの記録を見る（受信一覧。Orthanc の変更の記録から読む）
   "receive.view",
   // 機器の一覧（名前と AE タイトル。住所は許可の一覧の modality で絞る）と、つながるかの確かめ（C-ECHO）
   "modality.check",
@@ -43,7 +44,7 @@ export const PERMISSIONS = [
   "study.send",
   // 結果の分からない書き込みの操作を、管理者が確かめて記録に足す（照らし合わせ。docs/spec.md の 3.5）
   "pacs.reconcile",
-  // 段 5（推奨の案）：書き出し（ZIP。患者の情報を含んだまま持ち出せる形になる）
+  // 段 5：書き出し（ZIP。患者の情報を含んだまま持ち出せる形になる）
   "study.export",
   // 削除（管理者だけ。理由を必須・再認証の後）
   "study.delete",
@@ -52,34 +53,22 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 export type PermissionMap = Record<Role, readonly Permission[]>;
 
+/** 一般の操作：普段使う機能の全部（docs/spec.md の 3.6 の表） */
+const GENERAL: readonly Permission[] = [
+  "study.search",
+  "image.retrieve",
+  "dicom.all_values",
+  "viewer.remember",
+  "receive.view",
+  "modality.check",
+  "study.send",
+  "study.export",
+];
+
 export const ROLE_PERMISSIONS: PermissionMap = {
-  admin: [
-    "study.search",
-    "image.retrieve",
-    "dicom.all_values",
-    "audit.verify",
-    "user.manage",
-    "viewer.remember",
-    "viewer.defaults",
-    "receive.view",
-    "modality.check",
-    "study.send",
-    "pacs.reconcile",
-    "study.export",
-    "study.delete",
-  ],
-  doctor: ["study.search", "image.retrieve", "viewer.remember", "study.export"],
-  technologist: [
-    "study.search",
-    "image.retrieve",
-    "dicom.all_values",
-    "viewer.remember",
-    "receive.view",
-    "modality.check",
-    "study.send",
-    "study.export",
-  ],
-  viewer: ["study.search", "image.retrieve"],
+  // 管理者：一般の全部に加えて、削除・ユーザー管理・システムの設定・照らし合わせ・監査の確かめ
+  admin: [...GENERAL, "audit.verify", "user.manage", "viewer.defaults", "pacs.reconcile", "study.delete"],
+  general: GENERAL,
 };
 
 export function can(role: Role, permission: Permission, map: PermissionMap = ROLE_PERMISSIONS): boolean {

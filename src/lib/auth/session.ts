@@ -68,7 +68,8 @@ export async function authContext(): Promise<AuthContext> {
 
 function toSession(user: User, row: SessionRow): Session {
   // 役割はデータベースの値を毎回読む（管理者が変えたら、次の要求から効く）
-  const role: Role = isRole(user.role) ? user.role : "viewer";
+  // 知らない役割の名前（migration 20261020100000_two_roles の前の医師・技師・閲覧など）は、その migration と同じく一般として扱う
+  const role: Role = isRole(user.role) ? user.role : "general";
   return { actorId: user.username, role, authMode: "local", local: { row, user } };
 }
 
