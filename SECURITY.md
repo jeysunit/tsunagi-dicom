@@ -1,6 +1,6 @@
 # Security / セキュリティ
 
-> **Not for Diagnostic Use / 非医療機器。** 無償の OSS で、保証は無い。
+> **医療機器としての承認・認証を受けていない。** 治験・研究・システムの試験の環境で使うためのもの。無償の OSS で、保証は無い。
 
 ## 脆弱性の報告 / Reporting a vulnerability
 
