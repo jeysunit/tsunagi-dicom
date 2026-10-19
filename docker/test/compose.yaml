@@ -36,6 +36,8 @@ services:
   storescp:
     image: tsunagi-itest-dcmtk:local
     build: ./dcmtk
+    # 止める知らせ（SIGTERM）を storescp に渡す
+    init: true
     command:
       - storescp
       - --aetitle

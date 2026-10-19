@@ -86,7 +86,8 @@ let code = 1;
 try {
   compose(["down", "--volumes", "--remove-orphans"], "ignore");
   compose(["build", "storescp"]);
-  compose(["up", "--detach", "--wait", "orthanc", "storescp"]);
+  // storescp が答えるようになってから Orthanc を起こす（compose の depends_on）。Orthanc が起きたかは下で確かめる
+  compose(["up", "--detach", "orthanc", "storescp"]);
   await waitForOrthanc();
   code = await new Promise((resolve) => {
     const child = spawn(

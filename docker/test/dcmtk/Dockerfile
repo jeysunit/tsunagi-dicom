@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # 結合の試験だけで使う DCMTK のイメージ（tests/integration）。配布しない。
 #
 # DCMTK を作っている側が出す公式のイメージは無いので、Debian の公式のイメージ（版と digest を固定）に、
