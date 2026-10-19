@@ -2,7 +2,7 @@ import { ViewerDefaults } from "@/components/admin/viewer-defaults";
 import { pageAccess } from "@/lib/auth/page-session";
 import { getConfig } from "@/lib/config";
 import { getDb } from "@/lib/db";
-import { modalityDefaults } from "@/lib/study-state";
+import { modalityDefaults } from "@/lib/viewer-memory";
 import { availableViewers } from "@/lib/viewers";
 
 // モダリティごとの既定のビューアを変える管理の画面（docs/spec.md の 3.2）。管理者だけ。

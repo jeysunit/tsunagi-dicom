@@ -3,12 +3,11 @@ import { can, PERMISSIONS, ROLE_PERMISSIONS, ROLES, type Permission, type Role }
 
 // 役割ごとにできる操作（docs/spec.md の 3.6、第7.0版 14.2）。段 1b の割り当てを表のとおりに確かめる。
 
-const STATE_ALL = ["study.inspect", "study.read_status", "study.urgent", "study.bookmark"] as const;
 const EXPECTED: Record<Role, Permission[]> = {
-  admin: ["study.search", "image.retrieve", "dicom.all_values", "audit.verify", "user.manage", ...STATE_ALL, "viewer.remember", "viewer.defaults"],
-  doctor: ["study.search", "image.retrieve", "study.read_status", "study.urgent", "study.bookmark", "viewer.remember"],
-  technologist: ["study.search", "image.retrieve", "dicom.all_values", "study.inspect", "study.urgent", "study.bookmark", "viewer.remember"],
-  viewer: ["study.search", "image.retrieve", "study.bookmark"],
+  admin: ["study.search", "image.retrieve", "dicom.all_values", "audit.verify", "user.manage", "viewer.remember", "viewer.defaults"],
+  doctor: ["study.search", "image.retrieve", "viewer.remember"],
+  technologist: ["study.search", "image.retrieve", "dicom.all_values", "viewer.remember"],
+  viewer: ["study.search", "image.retrieve"],
 };
 
 describe("役割ごとにできる操作", () => {
@@ -30,12 +29,15 @@ describe("役割ごとにできる操作", () => {
     expect(ROLES.filter((r) => can(r, "dicom.all_values"))).toEqual(["admin", "technologist"]);
   });
 
-  it("段 2：検像は管理者と技師、読影の状態は管理者と医師、モダリティの既定のビューアは管理者だけ", () => {
-    expect(ROLES.filter((r) => can(r, "study.inspect"))).toEqual(["admin", "technologist"]);
-    expect(ROLES.filter((r) => can(r, "study.read_status"))).toEqual(["admin", "doctor"]);
+  it("段 2：モダリティの既定のビューアは管理者だけ、閲覧は見るだけ", () => {
     expect(ROLES.filter((r) => can(r, "viewer.defaults"))).toEqual(["admin"]);
-    // 閲覧が変えられるのは、自分のブックマークだけ
-    expect(PERMISSIONS.filter((p) => can("viewer", p))).toEqual(["study.search", "image.retrieve", "study.bookmark"]);
+    expect(PERMISSIONS.filter((p) => can("viewer", p))).toEqual(["study.search", "image.retrieve"]);
+  });
+
+  it("段 3：検査の状態の印の操作は、どの役割にも無い（操作そのものを外した）", () => {
+    for (const removed of ["study.inspect", "study.read_status", "study.urgent", "study.bookmark"]) {
+      expect(PERMISSIONS as readonly string[]).not.toContain(removed);
+    }
   });
 
   it("割り当てに無い操作・役割はできない側に倒れる", () => {

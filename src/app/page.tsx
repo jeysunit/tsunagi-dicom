@@ -47,10 +47,6 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     csrfToken: session.local?.row.csrfToken,
     viewers: deps.viewers,
     can: {
-      inspect: can(role, "study.inspect"),
-      readStatus: can(role, "study.read_status"),
-      urgent: can(role, "study.urgent"),
-      bookmark: can(role, "study.bookmark"),
       rememberViewer: can(role, "viewer.remember"),
       allValues: can(role, "dicom.all_values"),
     },

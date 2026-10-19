@@ -1,7 +1,7 @@
 import type { Role } from "@/lib/auth/roles";
 import type { SeriesSummary, StudySummary } from "@/lib/backend/types";
 import { parsePatientName } from "@/lib/format/patient-name";
-import { EMPTY_STATE, type StudyStateView } from "@/lib/study-state";
+import { EMPTY_VIEWER_MEMORY, type ViewerMemoryView } from "@/lib/viewer-memory";
 
 // 役割ごとの許可の一覧（docs/spec.md 原則 8）。
 // 画面の API（BFF が組み立てて返す JSON）は、ここに載った項目だけを返す。画像サーバーの応答をそのまま返さない。
@@ -34,17 +34,13 @@ export const STUDY_FIELDS = [
   "modalities",
   "seriesCount",
   "instanceCount",
-  // BFF のデータベースの状態（src/lib/study-state.ts）
-  "inspected",
-  "read",
-  "urgent",
-  "bookmarked",
+  // BFF のデータベースのビューアの覚え（src/lib/viewer-memory.ts）
   /** 検査ごとに覚えたビューア（無ければ null） */
   "rememberedViewer",
   /** ダブルクリックで開く既定のビューア（覚え → モダリティの既定） */
   "defaultViewer",
-  /** 状態の版（変えるときに添え、ほかの利用者が先に変えていれば 409） */
-  "stateVersion",
+  /** ビューアの覚えの版（変えるときに添え、ほかの利用者が先に変えていれば 409） */
+  "viewerVersion",
 ] as const;
 export type StudyField = (typeof STUDY_FIELDS)[number];
 
@@ -79,13 +75,9 @@ export interface StudyRecord {
   modalities: string[];
   seriesCount: number | null;
   instanceCount: number | null;
-  inspected: boolean;
-  read: boolean;
-  urgent: boolean;
-  bookmarked: boolean;
   rememberedViewer: string | null;
   defaultViewer: string | null;
-  stateVersion: number;
+  viewerVersion: number;
 }
 
 /** 画面の API が返す1行。役割に許された項目だけがある */
@@ -112,11 +104,11 @@ export function allowlistFor(role: Role, map: FieldAllowlistMap = ROLE_FIELD_ALL
 }
 
 /**
- * 画像サーバーの応答（StudySummary）と BFF の状態から、画面の項目を組み立てる。氏名は漢字・かな・ローマ字に分ける
+ * 画像サーバーの応答（StudySummary）と BFF のビューアの覚えから、画面の項目を組み立てる。氏名は漢字・かな・ローマ字に分ける
  */
 export function studyRecord(
   s: StudySummary,
-  state: StudyStateView = EMPTY_STATE,
+  memory: ViewerMemoryView = EMPTY_VIEWER_MEMORY,
   defaultViewer: string | null = null,
 ): StudyRecord {
   const name = parsePatientName(s.patientName);
@@ -137,13 +129,9 @@ export function studyRecord(
     modalities: [...s.modalities],
     seriesCount: s.seriesCount,
     instanceCount: s.instanceCount,
-    inspected: state.inspected,
-    read: state.read,
-    urgent: state.urgent,
-    bookmarked: state.bookmarked,
-    rememberedViewer: state.rememberedViewer,
+    rememberedViewer: memory.rememberedViewer,
     defaultViewer,
-    stateVersion: state.stateVersion,
+    viewerVersion: memory.viewerVersion,
   };
 }
 
@@ -172,10 +160,10 @@ export function projectStudy(record: StudyRecord, allowlist: FieldAllowlist): St
 export function studyView(
   s: StudySummary,
   allowlist: FieldAllowlist,
-  state?: StudyStateView,
+  memory?: ViewerMemoryView,
   defaultViewer?: string | null,
 ): StudyView {
-  return projectStudy(studyRecord(s, state, defaultViewer), allowlist);
+  return projectStudy(studyRecord(s, memory, defaultViewer), allowlist);
 }
 
 /** シリーズを、役割の許可の一覧で絞る */

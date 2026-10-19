@@ -1,42 +1,115 @@
 # tsunagi-dicom（つなぎだいこむ）
 
-[English](README.en.md)
+画像サーバーの Orthanc の前に置く、日本の現場向けの PACS の画面。Orthanc は**改造せずに**そのまま使い、日本の医療機関の画像の見方に合わせた検査の一覧とビューアの選び分けに、PACS の運用の操作（受け取ったものを見る・ほかの機器へ送るなど）を足して、1つの画面で行えるようにする。独立した Web の画面と、その裏の中継のサーバー（BFF）として動く。中継のサーバーは、ブラウザと Orthanc の間に立ち、ログイン・役割の確かめ・記録をしてから Orthanc に問い合わせる部分。
 
-DICOMweb に対応した画像サーバー（Orthanc など）を**改造せずにバックエンドとして使い**、日本の医療機関の画像の見方に合わせた検査の一覧・患者ごとの時系列・ビューアの選び分けを提供する、独立した Web の画面と BFF（Backend For Frontend）。
+> **いまは試す段階で、治験・研究・システムの試験の環境で使う。** 診療の現場の PACS としては使わない。使うときの注意は、下の「注意」にまとめた。
 
-> **Not for Diagnostic Use / 非医療機器。**
-> 研究・教育・検証のためのソフトウェアで、医療機器としての承認・認証を受けていない。
+## システム構成
 
-## 状態
+### 図1　全体
 
-> **設計の段で、本番（診療の現場・実の患者のデータ）には使わない。** いまは仕様と土台を作っている途中。
+この図で分かること：Orthanc の前に tsunagi-dicom を置くと、検査装置・ビューア・利用者がどうつながるか。
 
-**段 2 まで（2026-10-19）。** 段 2 で、検査の一覧（すぐ絞れる見出し・氏名の漢字とかな・和暦と年齢・1 件 1 行の一覧と件数つきの絞り込み・詳細のパネルとシリーズのサムネイル・検像や読影などの状態）、ビューアの選び分けと記憶（検査ごと・モダリティごと）、画面の API の役割ごとの許可の一覧、明るい地と暗い地の切り替えを足した。実の画像サーバー（Orthanc）での確かめは、段 2 の PR に残した項目がある。
+検査装置は画像を Orthanc へ送る。Orthanc は**改造せずに**そのまま使い、tsunagi-dicom はその前に置く画面と中継のサーバーになる。利用者は tsunagi-dicom の画面で検査を探し、ビューアで開き、ほかの機器へ送るなどの操作をする。ビューアは Orthanc へ直接つながず、中継のサーバーを通して画像を取る。ほかの機器へ送るのは、tsunagi-dicom に求められた Orthanc が行う。点線の部分は予定（「これからの予定」）。tsunagi-dicom の画面の中は、図2で拡大している。
 
-段 1b まで（2026-10-18）：段 1a の土台・BFF（検索の画面の API と、ビューアが画像を取る WADO-RS の読み取りだけの中継）・監査の記録・開発用の認証（`AUTH_MODE=dev`）・共通の画面・CI とイメージに、アプリの利用者のログイン（`AUTH_MODE=local`）を足した：利用者と役割（管理者・医師・技師・閲覧）、パスワードの規則（argon2id のハッシュ）、二要素の認証（TOTP）、ログインの一時停止、画面のロック、利用者の棚卸しの画面、役割ごとにできる操作、中継の役割の確かめ。
-`AUTH_MODE=local` は実の画像サーバーにもつなげる（実の画像サーバーでの確かめはまだ）。`AUTH_MODE=dev` はこれまでどおり、モックのバックエンド（`BACKEND_MOCK=true`）のときだけ起動する。
-画面は、ログイン・検査の一覧と詳細のパネル・モダリティごとの既定のビューア（管理者）・利用者の管理・自分の設定。文字を読む画面は明るい地を既定にし、暗い地に切り替えられる（利用者ごとに覚える）。
-実装は段ごとの PR で進める（[`docs/spec.md`](docs/spec.md) の「6. 段階」）。
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+  classDef plan fill:#ffffff,stroke:#8c959f,stroke-dasharray:5 4,color:#57606a
 
-画面は、最初は日本語だけ。文書は日本語を主にし、README は日本語と英語。
+  MOD["検査装置（モダリティ）<br/>CT・MR・一般撮影など"]:::box
+  PACS[("Orthanc<br/>画像を受ける・保管する・送る<br/>改造しない")]:::box
+  subgraph TSUNAGI["tsunagi-dicom（画面の中は図2）"]
+    BFF["画面と中継のサーバー<br/>検査の一覧・詳細<br/>ビューアの選び分け<br/>PACS の操作<br/>記録・役割・ログイン"]:::box
+  end
+  VIEWER["ビューア<br/>OHIF・Stone など"]:::box
+  subgraph USERS["利用者のブラウザ"]
+    USER["技師・医師・管理者・閲覧"]:::box
+  end
+  OIDC["外部のログイン（OIDC）<br/>予定"]:::plan
 
-## 何をするか
+  MOD -->|"DICOM で画像を送る"| PACS
+  PACS -->|"求められたら DICOM で送る"| MOD
+  BFF -->|"検査を検索し、画像を取る<br/>決めた操作を求める"| PACS
+  USER -->|"画面を開く"| BFF
+  USER -->|"検査から開く"| VIEWER
+  VIEWER -->|"中継を通して画像を取る"| BFF
+  BFF -.-> OIDC
+```
 
-- **検査の一覧**：検査日・モダリティ・状態（未検像・検像済・未読・既読・緊急・ブックマーク）ですぐ絞れる。氏名は漢字とかなに分けて出し、生年月日は和暦と年齢で出す。
-- **ビューアの選び分け**：OHIF Viewer・Stone Web Viewer・VolView など、設定で与えたビューアから選んで開く。検査ごと・モダリティごとに既定を覚える。
-- **患者ごとの時系列**と、2つの検査の比較。
-- **簡易レポート**（段 3）。文書（PDF など）の取り込みと表示、他の施設のデータの取り込み・値の修正・分割・結合は、重いので後ろに回した（4 の後）。
-- **安全と運用の管理**：役割、二要素の認証、監査の記録など（画像サーバーの監視と読み取りだけの切り替えは 4 の後）。厚生労働省のガイドライン（第7.0版 システム運用編）の項目との対応を [`docs/guideline-mapping.md`](docs/guideline-mapping.md) に示す。**ガイドラインへの適合は、運用を含めて各施設が判断するもので、このソフトウェアだけで「準拠」とはならない。**
+### 図2　図1の tsunagi-dicom の画面の中
 
-**使い方の例**：病院・研究室の画像サーバーの前に置く日常の閲覧の画面として。臨床研究の画像の集め先（研究用の画像サーバー）の前に置き、読む人に元の患者の情報を見せない画面として（ブラインド読影の役割。段 2b で入れる予定）。
+この図で分かること：画面の中の流れ。ブラウザから検査の一覧、詳細、ビューアへ進む。
 
-この道具は治験・研究・システムの試験のための道具で、**機能は足すより削る**。
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
 
-画像サーバーとビューアのソースには手を入れない。つなぎ先はすべて設定（環境変数）で決める。検索と取得は DICOMweb を先に使い、Orthanc にしか無い機能は「Orthanc のときだけ有効」な部品に分ける。
+  B["ブラウザ<br/>（役割: 技師・医師・管理者・閲覧）"]:::box
+  subgraph SCREEN["tsunagi-dicom の画面"]
+    direction TB
+    LIST["検査の一覧（上）<br/>日付・モダリティ・検索で絞る"]:::box
+    DETAIL["検査の詳細（下）<br/>シリーズのサムネイル"]:::box
+    LIST --> DETAIL
+  end
+  V["ビューア<br/>（選び分け・既定を記憶）"]:::box
+
+  B --> LIST
+  DETAIL -->|"開く"| V
+```
+
+役割ごとにできる操作と見える項目は決まっていて、操作は監査の記録に残る。通信と安全の細かい図は [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の 2 にある。
+
+### 図3　開発・試験のときの構成（本物の患者のデータを使わずに試す）
+
+この図で分かること：試験のときに、検査装置のふりをするソフトと組み合わせる構成。
+
+[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator) は、CT などの検査装置のふりをして、試験用に作った架空の患者の画像を Orthanc へ送るソフト。その画像を tsunagi-dicom で見る。本物の患者のデータは使わない。
+
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+
+  DTG["dicom-test-generator<br/>検査装置のふりをする試験用のソフト<br/>架空の患者の画像を作る"]:::box
+  PACS[("Orthanc（試験用）")]:::box
+  TD["tsunagi-dicom<br/>画面と中継のサーバー"]:::box
+
+  DTG -->|"DICOM で画像を送る"| PACS
+  TD -->|"検査を検索し、画像を取る"| PACS
+```
+
+## できること
+
+いま使える機能。
+
+- **検査の一覧**：検査日・モダリティですぐ絞れる。患者 ID・氏名・受付番号・検査の記述での検索もできる。絞り込みの見出しには件数が付く。氏名は漢字とかなに分けて出し、生年月日は和暦と年齢で出す。1 件を 1 行で並べる。
+- **検査の詳細**：一覧の下に、選んだ検査の患者・検査の情報とシリーズのサムネイルを出す。
+- **ビューアの選び分け**：OHIF Viewer・Stone Web Viewer・VolView など、設定で与えたビューアから選んで開く。検査ごと・モダリティごとに既定を覚える。ビューアは、このアプリの中継（読み取りだけ）から画像を取る。
+- **ログインと役割**：利用者のログイン（パスワードと、二要素の認証の TOTP）、役割（管理者・医師・技師・閲覧）、役割ごとに見える項目とできる操作の制限。ログインの一時停止、画面のロック、利用者の棚卸しの画面もある。
+- **監査の記録**：検索・詳細の表示・ビューアで開いたこと・画像の取得を記録する。記録はハッシュでつなぎ、書き換えを見つけられる。
+- **画面**：明るい地を既定にし、暗い地に切り替えられる。画面は日本語だけ。
+
+検像・読影・緊急の印と、レポートは持たない。これらは、それぞれを受け持つ外の仕組み（検像の端末・RIS・レポートの仕組み・オーダ）の仕事とした。
+
+実の Orthanc での確かめは、一部がまだ残っている。
+
+Orthanc とビューアのソースには手を入れない。つなぎ先はすべて設定（環境変数）で決める。画像の検索と取得は Orthanc の DICOMweb を使い、PACS の運用の操作は Orthanc の REST を使う。これから足す書き込みの操作（送る・削除など）も、どれも役割の確かめと監査の記録を通す。
+
+## これからの予定
+
+作る順に近い並びで、変わることがある。この道具は治験・研究・システムの試験のための道具で、**機能は足すより削る**。
+
+1. 受け取ったものを見る：Orthanc が受け取った検査の記録（どの機器から・いつ・何件）、受け元・送り先の機器の一覧、つながるかの確かめ（C-ECHO）。
+2. ほかの機器へ送る：登録された機器を選んで検査を送り、結果を見せる。
+3. 書き出し（ZIP）と削除（管理者だけ・理由を必須）。
+4. 取り込み（ファイルから）と、患者・検査の値の修正（管理者だけ）。
+5. 保管の状態・検査の結合と分割・機器の登録。
+6. 患者ごとの時系列と、2つの検査の比較。受付番号の列、バーコードの読み取り機で絞る、決まった URL で直に開く。
+7. その後に決めるもの：ワークリスト、外部のログイン（OIDC）、ブラインド読影の役割、監査の検索と CSV、文書（PDF など）の取り込み、Weasis、Passkey。
 
 ## 試しに動かす（モック）
 
-画像サーバー無しで、合成の見本（`tests/fixtures/orthanc`）を返すモックのバックエンドと、開発用の認証（`AUTH_MODE=dev`、書き込みは止める）で動かす。
+Orthanc 無しで、架空の患者の見本（`tests/fixtures/orthanc`）を Orthanc の形で返すモックのバックエンドと、開発用の認証（`AUTH_MODE=dev`、書き込みは止める）で動かす。
 
 ```sh
 mkdir -p secrets && openssl rand -base64 48 > secrets/session_secret.txt   # SESSION_SECRET_FILE で渡す（secrets/ はリポジトリに入れない）
@@ -60,6 +133,8 @@ printf '%s\n' '<最初のパスワード>' > secrets/initial_admin_password.txt 
 # compose.yaml の INITIAL_ADMIN_* と secrets の initial_admin_password の行を有効にしてから
 BACKEND_MOCK=true AUTH_MODE=local docker compose up --build
 ```
+
+実の Orthanc につなぐときは、`BACKEND_ORTHANC_URL`（Orthanc の REST）と `BACKEND_DICOMWEB_URL`（Orthanc の DICOMweb のプラグイン）の2つを設定する（`docs/spec.md` の 2.1）。
 
 試験：`npm run lint`・`npm run typecheck`・`npm test`（Vitest）・`npm run build && npm run test:e2e`（Playwright。モックに対して、`AUTH_MODE=dev` と `AUTH_MODE=local` のサーバーを起こして流す）。
 
@@ -92,22 +167,31 @@ cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
 - **いまは dry-run**（消さずに、消す候補を実行の記録に出すだけ）。記録を確かめてから dry-run を外す。
 - digest で止めて配備するなら、版のタグの付いたイメージの digest を使う（ほかのイメージは、いずれ消える）。
 
-## 決まりの在り処
+## 注意
+
+- **医療機器としての承認・認証を受けていない。** 治験・研究・システムの試験の環境で使うための画面で、診療の現場の PACS として使うためのものではない。診療の現場へ広げるかは、医療機器プログラムに当たるかを公開の資料で確かめてから決める。
+- 厚生労働省のガイドライン（第7.0版 システム運用編）の項目との対応を [`docs/guideline-mapping.md`](docs/guideline-mapping.md) に示す。**ガイドラインに合っているかどうかは、運用を含めて各施設が判断する。このソフトウェアだけでは決まらない。**
+- `AUTH_MODE=dev` は、モックのバックエンド（`BACKEND_MOCK=true`）のときだけ起動する。
+- Orthanc に直に入れる道（Orthanc の REST・Orthanc の画面・DICOM の通信）は、このアプリの確かめと記録の外にある。Orthanc の側の絞り込みは [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の 4.1。
+
+## 作る側の資料（決まりの在り処）
+
+開発の段階と、各段の完了の線は [`docs/spec.md`](docs/spec.md) の「6. 段階」にある。
 
 | 文書 | 中身 |
 |---|---|
-| [`docs/spec.md`](docs/spec.md) | 仕様（原則・技術の構成・機能・段階・既知の制約） |
-| [`docs/guideline-mapping.md`](docs/guideline-mapping.md) | 第7.0版 システム運用編の節ごとの対応表 |
+| [`docs/spec.md`](docs/spec.md) | 仕様（目的と使う場面・原則・技術の構成・機能・段階・既知の制約） |
+| [`docs/guideline-mapping.md`](docs/guideline-mapping.md) | 第7.0版 システム運用編の節ごとの対応表と、電子保存の三原則ごとの対応 |
 | [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | セキュリティと保守の方針（システム構成図・通信の一覧・秘密の置き場・記録・版と支える期間・使い終えるときの片付け） |
 | [`SECURITY.md`](SECURITY.md) | 脆弱性の報告の窓口と支える版 |
 | [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | 氏名の形の試験の一覧（機械で読める写しは `tests/fixtures/patient-names.json`） |
-| [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、合成の患者の応答の見本と、その置き換えの規則 |
+| [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、架空の患者の応答の見本と、その置き換えの規則 |
 | [`AGENTS.md`](AGENTS.md) | 開発の決まり（人にも、コーディングの支援の道具にも同じ） |
 | [`.env.example`](.env.example) | 設定の例 |
 
 ## ライセンス
 
-[MIT](LICENSE)。画像サーバーとは REST・DICOMweb でやり取りするだけで、そのコードを取り込まない。
+[MIT](LICENSE)。Orthanc とは REST・DICOMweb でやり取りするだけで、そのコードを取り込まない。
 
 ## 商標
 

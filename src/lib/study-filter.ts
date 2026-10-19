@@ -5,7 +5,8 @@ import { parseDicomDate } from "@/lib/format/japanese-date";
 import { isModalityGroup, studyInGroup, type ModalityGroup } from "@/lib/modalities";
 
 // 検査の一覧のすぐ絞れる見出し（docs/spec.md の 3.1）。
-// 検査日：今日・昨日・1週間・今月・全期間・期間の指定。モダリティ。状態。横断の検索。
+// 検査日：今日・昨日・1週間・今月・全期間・期間の指定。モダリティ。横断の検索。
+// 検査の状態の見出し（未検像・検像済・未読・既読・緊急・ブックマーク）は持たない（docs/spec.md の 0）。
 // 絞り込みの値は頁の URL（?date=…）に持ち、BFF の画面の API にも同じ形で渡す。
 // 検査日は画像サーバーの QIDO-RS の条件にし、ほかは BFF で、役割の許可の一覧で絞った後の項目に当てる
 // （許可されていない項目では探せない）。
@@ -21,27 +22,6 @@ export const DATE_LABELS: Record<DatePreset, string> = {
   range: "期間の指定",
 };
 
-export const STATUS_FILTERS = ["uninspected", "inspected", "unread", "read", "urgent", "bookmarked"] as const;
-export type StatusFilter = (typeof STATUS_FILTERS)[number];
-export const STATUS_LABELS: Record<StatusFilter, string> = {
-  uninspected: "未検像",
-  inspected: "検像済",
-  unread: "未読",
-  read: "既読",
-  urgent: "緊急",
-  bookmarked: "ブックマーク",
-};
-
-/** 状態の見出しが読む項目。許可の一覧に載っていない役割には、その見出しの件数を出さない */
-export const STATUS_FIELD = {
-  uninspected: "inspected",
-  inspected: "inspected",
-  unread: "read",
-  read: "read",
-  urgent: "urgent",
-  bookmarked: "bookmarked",
-} as const satisfies Record<StatusFilter, keyof StudyView>;
-
 /** 件数を添える検査日の見出し（期間の指定には添えない） */
 export const FACET_DATES = ["today", "yesterday", "week", "month", "all"] as const;
 export type FacetDate = (typeof FACET_DATES)[number];
@@ -53,10 +33,9 @@ export type FacetDate = (typeof FACET_DATES)[number];
 export interface StudyFacets {
   date?: Partial<Record<FacetDate, number>>;
   modality?: { all: number } & Partial<Record<ModalityGroup, number>>;
-  status?: { all: number } & Partial<Record<StatusFilter, number>>;
   /**
    * 件数が「以上」（検索の上限に届いて、数えきれていない）のもの。ここに無い件数は確定で、押したあとの一覧の件数と同じ。
-   * list：モダリティと状態の件数（いまの一覧が上限に届いた）。date：上限に届いた全期間の検索で、範囲がすべて入っていない検査日の見出し
+   * list：モダリティの件数（いまの一覧が上限に届いた）。date：上限に届いた全期間の検索で、範囲がすべて入っていない検査日の見出し
    */
   atLeast?: { list?: boolean; date?: FacetDate[] };
 }
@@ -70,7 +49,6 @@ export interface StudyFilter {
   from?: string;
   to?: string;
   modality?: ModalityGroup;
-  status?: StatusFilter;
   q?: string;
 }
 
@@ -95,7 +73,6 @@ function isoDate(value: string | undefined): string | undefined {
 export function parseFilter(params: Params): StudyFilter {
   const date = param(params, "date");
   const modality = param(params, "modality");
-  const status = param(params, "status");
   const q = param(params, "q")?.trim().slice(0, MAX_QUERY_LENGTH);
   const filter: StudyFilter = { date: (DATE_PRESETS as readonly string[]).includes(date ?? "") ? (date as DatePreset) : "all" };
   if (filter.date === "range") {
@@ -105,7 +82,6 @@ export function parseFilter(params: Params): StudyFilter {
     if (to) filter.to = to;
   }
   if (isModalityGroup(modality)) filter.modality = modality;
-  if ((STATUS_FILTERS as readonly string[]).includes(status ?? "")) filter.status = status as StatusFilter;
   if (q) filter.q = q;
   return filter;
 }
@@ -119,7 +95,6 @@ export function filterToSearchParams(filter: StudyFilter): URLSearchParams {
     if (filter.to) out.set("to", filter.to);
   }
   if (filter.modality) out.set("modality", filter.modality);
-  if (filter.status) out.set("status", filter.status);
   if (filter.q) out.set("q", filter.q);
   return out;
 }
@@ -181,30 +156,12 @@ const SEARCH_FIELDS = [
   "studyDescription",
 ] as const satisfies readonly (keyof StudyView)[];
 
-export function statusMatches(view: StudyView, status: StatusFilter): boolean {
-  switch (status) {
-    case "uninspected":
-      return view.inspected === false;
-    case "inspected":
-      return view.inspected === true;
-    case "unread":
-      return view.read === false;
-    case "read":
-      return view.read === true;
-    case "urgent":
-      return view.urgent === true;
-    case "bookmarked":
-      return view.bookmarked === true;
-  }
-}
-
 /**
- * 許可の一覧で絞った後の1行が、モダリティ・状態・横断の検索に合うか。
+ * 許可の一覧で絞った後の1行が、モダリティ・横断の検索に合うか。
  * 項目が許可されていない（view に無い）ときは、その項目では合わない（隠した項目では探せない）
  */
 export function matchesFilter(view: StudyView, filter: StudyFilter): boolean {
   if (filter.modality && !(view.modalities && studyInGroup(view.modalities, filter.modality))) return false;
-  if (filter.status && !statusMatches(view, filter.status)) return false;
   if (filter.q) {
     const needle = normalizeForSearch(filter.q);
     if (needle && !SEARCH_FIELDS.some((k) => typeof view[k] === "string" && normalizeForSearch(view[k]).includes(needle))) {

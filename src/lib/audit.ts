@@ -37,7 +37,8 @@ export const AUDIT_ACTIONS = [
   "user_create",
   "user_status_change",
   "role_change",
-  // 段 2：検査の状態（検像・読影・緊急・ブックマーク・検査ごとのビューアの覚え）の変更。BFF のデータベースだけを変える
+  // 段 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
+  // 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、段 3 で道を外すまでこの名前で記録した
   "study_state",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

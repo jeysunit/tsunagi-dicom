@@ -4,7 +4,7 @@ import { errorResponse } from "@/lib/api/respond";
 import { auditWith, requirePermission, requireSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db";
 import { MODALITY_GROUPS } from "@/lib/modalities";
-import { modalityDefaults, setModalityDefault } from "@/lib/study-state";
+import { modalityDefaults, setModalityDefault } from "@/lib/viewer-memory";
 import { VIEWER_IDS } from "@/lib/viewers";
 
 // モダリティごとの既定のビューア（docs/spec.md の 3.2「選び方の3段」の3）。管理の画面で変える（viewer.defaults）。

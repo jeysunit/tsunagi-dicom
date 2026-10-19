@@ -8,10 +8,6 @@ export interface ScreenInfo {
   viewers: ViewerInfo[];
   /** いまの役割でできること（src/lib/auth/roles.ts） */
   can: {
-    inspect: boolean;
-    readStatus: boolean;
-    urgent: boolean;
-    bookmark: boolean;
     rememberViewer: boolean;
     allValues: boolean;
   };

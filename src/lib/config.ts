@@ -5,7 +5,8 @@ import { isValidUsername, USERNAME_HINT } from "@/lib/auth/username";
 // 設定の読み込み（docs/spec.md の 2.1。正本は .env.example）。
 // 足りない・誤った値があれば、どの変数かを並べて ConfigError を投げる。値そのものは文言に出さない（秘密を漏らさない）。
 
-export type BackendKind = "orthanc" | "dicomweb";
+/** Orthanc 専用（docs/spec.md の 0）。汎用の DICOMweb（dicomweb）は段 3 で外した */
+export type BackendKind = "orthanc";
 export type AuthMode = "local" | "oidc" | "dev";
 
 export interface AppConfig {
@@ -94,7 +95,10 @@ const int = (fallback: number, min: number, max = Number.MAX_SAFE_INTEGER) =>
 const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で始まる URL にする" });
 
 const envSchema = z.object({
-  BACKEND_KIND: z.enum(["orthanc", "dicomweb"], { error: "orthanc か dicomweb にする" }),
+  // 省ける（orthanc だけ）。前の設定の dicomweb は、黙って Orthanc として動かさずに断る
+  BACKEND_KIND: z
+    .enum(["orthanc"], { error: "orthanc だけにする（汎用の DICOMweb の dicomweb は外した）。省いてもよい" })
+    .default("orthanc"),
   BACKEND_DICOMWEB_URL: httpUrl.optional(),
   BACKEND_ORTHANC_URL: httpUrl.optional(),
   BACKEND_USERNAME: z.string().optional(),
@@ -220,10 +224,8 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
   }
 
   if (!e.BACKEND_MOCK) {
-    if (!e.BACKEND_DICOMWEB_URL) problem("BACKEND_DICOMWEB_URL", "必須（BACKEND_MOCK=true のときだけ省ける）");
-    if (e.BACKEND_KIND === "orthanc" && !e.BACKEND_ORTHANC_URL) {
-      problem("BACKEND_ORTHANC_URL", "BACKEND_KIND=orthanc のときは必須");
-    }
+    if (!e.BACKEND_DICOMWEB_URL) problem("BACKEND_DICOMWEB_URL", "必須（Orthanc の DICOMweb のプラグインの URL。BACKEND_MOCK=true のときだけ省ける）");
+    if (!e.BACKEND_ORTHANC_URL) problem("BACKEND_ORTHANC_URL", "必須（Orthanc の REST の URL。BACKEND_MOCK=true のときだけ省ける）");
   }
 
   const bothPasswords = e.BACKEND_PASSWORD !== undefined && e.BACKEND_PASSWORD_FILE !== undefined;

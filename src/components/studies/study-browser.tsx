@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bookmark, ChevronDown, ChevronRight, Search, Siren, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Search, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { Input } from "@/components/ui/input";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -26,8 +26,6 @@ import {
   FACET_DATES,
   filterToSearchParams,
   MAX_QUERY_LENGTH,
-  STATUS_FILTERS,
-  STATUS_LABELS,
   type StudyFacets,
   type StudyFilter,
 } from "@/lib/study-filter";
@@ -74,7 +72,7 @@ function ModalityTag({ modality }: { modality: string }) {
   );
 }
 
-/** 見出しの名前に件数を添える（`未読 (12)`）。件数が無い（許可されていない項目）ときは名前だけ */
+/** 見出しの名前に件数を添える（`CT (6)`）。件数が無い（許可されていない項目）ときは名前だけ */
 const withCount = (label: string, n: number | undefined, atLeast = false) =>
   n === undefined ? label : `${label} (${n}${atLeast ? " 以上" : ""})`;
 
@@ -150,16 +148,6 @@ function FilterBar({
             </Chip>
           ))}
         </Segmented>
-        <Segmented label="状態">
-          <Chip pressed={!filter.status} onClick={() => onChange({ ...filter, status: undefined })} testId="status-all">
-            {withCount("すべて", facets?.status?.all, facets?.atLeast?.list)}
-          </Chip>
-          {STATUS_FILTERS.map((s) => (
-            <Chip key={s} pressed={filter.status === s} onClick={() => onChange({ ...filter, status: filter.status === s ? undefined : s })} testId={`status-${s}`}>
-              {withCount(STATUS_LABELS[s], facets?.status?.[s], facets?.atLeast?.list)}
-            </Chip>
-          ))}
-        </Segmented>
         <div className="relative w-56 max-w-full">
           <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-label" />
           <Input
@@ -226,30 +214,6 @@ function FilterBar({
   );
 }
 
-function StateBadges({ s }: { s: StudyView }) {
-  return (
-    <span className="flex flex-nowrap items-center gap-1 text-xs">
-      {s.urgent && (
-        <span className="inline-flex items-center gap-0.5 rounded bg-danger px-1 py-0.5 font-bold text-background" data-testid="badge-urgent">
-          <Siren aria-hidden className="size-3" />
-          緊急
-        </span>
-      )}
-      {typeof s.inspected === "boolean" && (
-        <span className={cn("rounded border border-border px-1 py-0.5 whitespace-nowrap", s.inspected ? "text-foreground" : "text-label")}>
-          {s.inspected ? "検像済" : "未検像"}
-        </span>
-      )}
-      {typeof s.read === "boolean" && (
-        <span className={cn("rounded border border-border px-1 py-0.5 whitespace-nowrap", s.read ? "text-foreground" : "text-label")}>
-          {s.read ? "既読" : "未読"}
-        </span>
-      )}
-      {s.bookmarked && <Bookmark aria-label="ブックマーク" className="size-3.5 shrink-0 fill-current text-link" />}
-    </span>
-  );
-}
-
 /** 行を一覧の見える所に入れる。固定の見出し行の下に隠れないよう、見出しの高さを除いた範囲で寄せる（一覧が小さくても揺れない） */
 function revealRow(row: HTMLElement) {
   const list = row.closest<HTMLElement>("[data-testid=study-list-scroll]");
@@ -268,7 +232,6 @@ function revealRow(row: HTMLElement) {
  * 幅が合わない列は `…` で切れる（全文は title）。氏名の漢字とかなは別の列（かなは漢字の右）
  */
 const COLUMNS = [
-  { key: "state", width: 132 },
   { key: "date", width: 148 },
   { key: "id", width: 116 },
   { key: "name", width: 104 },
@@ -302,7 +265,7 @@ function StudyRows({
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
-      <table className="w-full min-w-[1180px] table-fixed border-collapse" data-testid="study-table">
+      <table className="w-full min-w-[1048px] table-fixed border-collapse" data-testid="study-table">
         <colgroup>
           {COLUMNS.map((c) => (
             <col key={c.key} style={c.width ? { width: c.width } : undefined} />
@@ -310,7 +273,6 @@ function StudyRows({
         </colgroup>
         <thead className="sticky top-0 z-10 bg-surface text-left text-xs text-label shadow-[0_1px_0_var(--color-border)]">
           <tr className="border-b border-border">
-            <th className={cn("px-2 py-1 font-normal", CUT)}>状態</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>検査日時</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>患者 ID</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
@@ -372,9 +334,6 @@ function StudyRows({
                     }
                   }}
                 >
-                  <td className={cn(CELL, "overflow-hidden")}>
-                    <StateBadges s={s} />
-                  </td>
                   <td className={cn(CELL, CUT)} title={dateTime}>
                     {formatSlashDate(s.studyDate)}
                     <span className="ml-1.5 text-label">{formatDicomTime(s.studyTime)}</span>
@@ -415,7 +374,7 @@ function StudyRows({
                         studyUid={uid}
                         defaultViewer={s.defaultViewer}
                         rememberedViewer={s.rememberedViewer}
-                        stateVersion={s.stateVersion}
+                        viewerVersion={s.viewerVersion}
                         screen={screen}
                         onChanged={onChanged}
                       />

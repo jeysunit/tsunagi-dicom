@@ -20,8 +20,9 @@ import {
   type StudyQuery,
 } from "@/lib/backend/types";
 
-// モックのバックエンド（BACKEND_MOCK=true）。tests/fixtures/orthanc の合成の見本を返す。
-// - 検査の検索は QIDO-RS の写し（dicom-web/studies.json）。
+// モックのバックエンド（BACKEND_MOCK=true）。Orthanc の形で、tests/fixtures/orthanc の合成の見本を返す
+// （Orthanc の DICOMweb のプラグインと Orthanc の REST の応答の写し）。
+// - 検査の検索は QIDO-RS の写し（dicom-web/studies.json）。件数は Orthanc の REST の /statistics の写し。
 // - シリーズは Orthanc の REST の写し（rest/series・rest/studies）から組み立てる（QIDO-RS の写しは1件の検査の分しか無いため）。
 // - 中継（WADO-RS の読み取り）は、サムネイル（thumbnail・rendered）だけ、写しのある1枚の画像（rest/instances/{id}/preview.png）を返す。
 //   ほかの宛先は、確かめたうえで 404 を返す。
@@ -63,7 +64,7 @@ interface PreviewImage {
   file: string;
 }
 
-export function createMockBackend(kind: "orthanc" | "dicomweb"): Backend {
+export function createMockBackend(): Backend {
   const qidoStudies = () => readJson<DicomJsonDataset[]>("dicom-web", "studies.json");
 
   async function restSeriesByStudy(): Promise<Map<string, RestSeries[]>> {
@@ -98,7 +99,7 @@ export function createMockBackend(kind: "orthanc" | "dicomweb"): Backend {
   }
 
   return {
-    kind,
+    kind: "orthanc",
     mock: true,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
@@ -107,12 +108,8 @@ export function createMockBackend(kind: "orthanc" | "dicomweb"): Backend {
     },
 
     async countStudies() {
-      if (kind === "orthanc") {
-        const stats = await readJson<{ CountStudies: number }>("rest", "statistics.json");
-        return { count: stats.CountStudies, exact: true };
-      }
-      const studies = await qidoStudies();
-      return { count: studies.length, exact: studies.length < STUDY_LIMIT };
+      const stats = await readJson<{ CountStudies: number }>("rest", "statistics.json");
+      return { count: stats.CountStudies, exact: true };
     },
 
     async searchSeries(studyInstanceUid: string) {

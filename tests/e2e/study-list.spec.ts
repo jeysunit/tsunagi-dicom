@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// 段 2 の検査の一覧（docs/spec.md の 3.1・3.2）：すぐ絞れる見出し・詳細のパネル・状態・ビューアの選び分けと記憶。
-// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して流す。状態は試験のデータベースに残るので、
-// 変えた状態は同じ試験の中で戻し、順に流す。
+// 段 2 の検査の一覧（docs/spec.md の 3.1・3.2）：すぐ絞れる見出し・詳細のパネル・ビューアの選び分けと記憶。
+// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して流す。ビューアの覚えは試験のデータベースに残るので、
+// 変えた覚えは同じ試験の中で戻し、順に流す。
 
 test.describe.configure({ mode: "serial" });
 
@@ -347,9 +347,22 @@ test("上下に分ける：狭い画面では一覧だけを出し、行を選�
   const pane = page.getByTestId("detail-pane");
   await expect(pane).toBeFocused();
   await expect(page.locator("[data-split-root] > div[inert]")).toHaveCount(1);
-  for (let i = 0; i < 6; i++) await page.keyboard.press("Tab");
-  expect(await page.evaluate(() => !!document.activeElement?.closest("tr[data-study-uid]"))).toBe(false);
+  // 段 3 で詳細の状態のボタンを外し、詳細の中の止まり先が減った。前の「Tab を 6 回」は、詳細の中の止まり先の数に
+  // 頼っていたので、詳細の中の止まり先の数だけ Tab を送って詳細の中に留まること、さらに送っても一覧の行に出ないことに分けた
+  const stops = await pane.evaluate(
+    (el) => el.querySelectorAll("button:not([disabled]), a[href], input, [tabindex]:not([tabindex='-1'])").length,
+  );
+  expect(stops).toBeGreaterThan(1);
+  for (let i = 0; i < stops - 1; i++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("tr[data-study-uid]"))).toBe(false);
+  }
   expect(await pane.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("tr[data-study-uid]"))).toBe(false);
+  }
+  await pane.focus();
 
   // 詳細の中からの Escape で閉じ、フォーカスは元の行へ戻り、一覧が操作できるに戻る
   await page.keyboard.press("Escape");
@@ -438,7 +451,8 @@ test("詳細を見せるときは必ず記録が残る：A→B→A と戻って�
   expect(gets).toEqual([uids[0]]);
 });
 
-test("状態を変えても、詳細は取り直さず、「詳細を開いた」の記録は増えない", async ({ page }) => {
+test("ビューアの覚えを変えても、詳細は取り直さず、「詳細を開いた」の記録は増えない", async ({ page }) => {
+  // 段 2 では検査の状態の印で確かめていた。段 3 で状態の印を外したので、同じく一覧だけを読み直すビューアの覚えで確かめる
   await asRole(page, "技師");
   const gets: string[] = [];
   page.on("request", (req) => {
@@ -447,15 +461,16 @@ test("状態を変えても、詳細は取り直さず、「詳細を開いた�
   await row(page).click();
   await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
   expect(gets).toHaveLength(1);
-  const inspected = page.getByTestId("state-inspected");
-  const before = await inspected.getAttribute("aria-pressed");
-  await inspected.click();
-  await expect(inspected).not.toHaveAttribute("aria-pressed", before!);
+  const menu = page.getByTestId("study-detail").getByTestId("open-menu");
+  await menu.click();
+  await page.getByRole("menuitem", { name: "この検査は次から Stone" }).click();
+  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("既定: Stone");
   await page.waitForTimeout(500);
   expect(gets).toHaveLength(1);
   // 戻す
-  await inspected.click();
-  await expect(inspected).toHaveAttribute("aria-pressed", before!);
+  await menu.click();
+  await page.getByRole("menuitem", { name: /覚えを消す/ }).click();
+  await expect(row(page).getByTestId("remembered-viewer")).toHaveCount(0);
   expect(gets).toHaveLength(1);
 });
 
@@ -485,36 +500,20 @@ test("応答の順が逆になっても、古い応答が新しい選びを上�
   await expect(page.getByTestId("detail-pane")).not.toContainText(uids[0]!);
 });
 
-test("状態：技師が検像し、一覧の状態の見出しで絞れる。閲覧には検像のボタンが無い", async ({ page }) => {
+test("技師はすべての DICOM の値を見られる。どの役割にも検査の状態の印は無い（段 3 で外した）", async ({ page }) => {
   await asRole(page, "技師");
   await row(page).click();
-  const inspected = page.getByTestId("state-inspected");
-  await expect(inspected).toHaveText("未検像");
-  await inspected.click();
-  await expect(inspected).toHaveAttribute("aria-pressed", "true");
-  await expect(inspected).toHaveText("検像済");
-  await expect(row(page)).toContainText("検像済");
-  // 技師には読影の状態のボタンが無く、すべての値は見られる
-  await expect(page.getByTestId("state-read")).toHaveCount(0);
   await page.getByRole("button", { name: "すべての DICOM の値" }).click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
 
-  await page.getByTestId("status-inspected").click();
-  await expect(page.getByTestId("study-count")).toHaveText("1");
-
-  await asRole(page, "閲覧");
-  await page.goto("/");
-  await row(page).click();
-  await expect(page.getByTestId("study-detail")).toBeVisible();
-  await expect(page.getByTestId("state-inspected")).toHaveCount(0);
-  await expect(page.getByTestId("state-bookmarked")).toBeVisible();
-
-  // 戻す
-  await asRole(page, "技師");
-  await page.goto("/");
-  await row(page).click();
-  await page.getByTestId("state-inspected").click();
-  await expect(page.getByTestId("state-inspected")).toHaveText("未検像");
+  for (const role of ["管理者", "医師", "技師", "閲覧"] as const) {
+    await asRole(page, role);
+    await page.goto("/");
+    await row(page).click();
+    await expect(page.getByTestId("study-detail")).toBeVisible();
+    await expect(page.locator("[data-testid^=state-], [data-testid^=status-], [data-testid=badge-urgent]")).toHaveCount(0);
+    for (const word of ["未検像", "検像済", "未読", "既読", "ブックマーク"]) await expect(page.getByTestId("study-filters")).not.toContainText(word);
+  }
 });
 
 test("ビューア：▶ と、ダブルクリックで既定のビューアを別のタブで開き、開いたことを記録する", async ({ page }) => {
@@ -526,7 +525,8 @@ test("ビューア：▶ と、ダブルクリックで既定のビューアを�
     () => row(page).getByTestId("open-default").click(),
     `https://viewer.example.org/ohif/viewer?StudyInstanceUIDs=${STUDY}`,
   );
-  await expectOpened(page, () => row(page).locator("td").nth(3).dblclick(), /viewer\.example\.org\/ohif\/viewer/);
+  // 氏名のセル（段 3 で状態の列を外したので 3 番目）
+  await expectOpened(page, () => row(page).locator("td").nth(2).dblclick(), /viewer\.example\.org\/ohif\/viewer/);
 
   const after = await (await page.request.get("/api/audit/verify")).json();
   expect(after.ok).toBe(true);
@@ -651,7 +651,8 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
   await page.getByTestId("date-all").click(); // 押し直しでは読み直さない
   await page.getByTestId("modality-CT").click();
   await expect(rows(page).first()).toBeVisible();
-  const cell = rows(page).first().locator("td").nth(6);
+  // モダリティと検査の記述のセル（段 3 で状態の列を外したので 6 番目）
+  const cell = rows(page).first().locator("td").nth(5);
   await expect(cell).toHaveAttribute("title", new RegExp(long));
   expect(await cell.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
   expect(await cell.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
@@ -666,49 +667,46 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
   }
 });
 
-test("絞り込みは 1 行の並び：検査日・モダリティ・状態に件数を添える。件数は押したあとの一覧の件数と合う", async ({ page }) => {
+test("絞り込みは 1 行の並び：検査日・モダリティに件数を添える。件数は押したあとの一覧の件数と合う", async ({ page }) => {
   await asRole(page, "医師");
   await expect(page.getByTestId("study-count")).toHaveText("8");
   // 並びは高さ 28px のボタン（24px 以上）
-  for (const id of ["date-today", "modality-CT", "status-unread", "filter-more"]) {
+  for (const id of ["date-today", "modality-CT", "filter-more"]) {
     expect((await page.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(24);
   }
   await expect(page.getByTestId("date-all")).toHaveText("全期間 (8)");
   await expect(page.getByTestId("modality-all")).toHaveText("すべて (8)");
-  await expect(page.getByTestId("status-all")).toHaveText("すべて (8)");
   await expect(page.getByTestId("modality-CT")).toHaveText("CT (6)");
   await expect(page.getByTestId("modality-MR")).toHaveText("MR (2)");
   // 全部の見出しの件数が、押したあとの件数の見出しと、行の数に合う
-  for (const id of ["date-today", "date-yesterday", "date-week", "date-month", "modality-CT", "modality-MR", "modality-US", "status-uninspected", "status-unread", "status-urgent", "status-bookmarked"]) {
+  for (const id of ["date-today", "date-yesterday", "date-week", "date-month", "modality-CT", "modality-MR", "modality-US"]) {
     const n = await count(page.getByTestId(id));
     await page.getByTestId(id).click();
     await expect(page.getByTestId(id)).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => headCount(page)).toBe(n);
     if (n === 0) await expect(page.getByText("合う検査が無い")).toBeVisible();
     else await expect(rows(page)).toHaveCount(n);
-    await page.getByTestId(id.startsWith("date-") ? "date-all" : id.startsWith("modality-") ? "modality-all" : "status-all").click();
+    await page.getByTestId(id.startsWith("date-") ? "date-all" : "modality-all").click();
     await expect.poll(() => headCount(page)).toBe(8);
   }
 });
 
-test("件数は、ほかの見出しと検索を当てたあとの数になる（モダリティを選ぶと状態の件数が変わる）", async ({ page }) => {
+test("件数は、ほかの見出しと検索を当てたあとの数になる（モダリティを選ぶと検査日の件数が変わる）", async ({ page }) => {
   await asRole(page, "医師");
   await page.getByTestId("modality-MR").click();
   await expect(page.getByTestId("study-count")).toHaveText("2");
-  // 状態の「すべて」は、いまの一覧の件数と同じ
-  await expect.poll(() => count(page.getByTestId("status-all"))).toBe(2);
   await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
-  // 状態を押したあとの件数は、押す前の見出しの件数と同じ
-  const n = await count(page.getByTestId("status-uninspected"));
-  await page.getByTestId("status-uninspected").click();
+  // 検査日を押したあとの件数は、押す前の見出しの件数と同じ
+  const n = await count(page.getByTestId("date-week"));
+  await page.getByTestId("date-week").click();
   await expect.poll(() => headCount(page)).toBe(n);
-  // モダリティの見出しは、状態を当てた数（MR 以外の CT は、この状態のぶん）
+  // モダリティの見出しは、検査日を当てた数
   const ct = await count(page.getByTestId("modality-CT"));
   await page.getByTestId("modality-CT").click();
   await expect.poll(() => headCount(page)).toBe(ct);
   // 横断の検索を当てると、全部の見出しの件数が絞られる
   await page.getByTestId("modality-all").click();
-  await page.getByTestId("status-all").click();
+  await page.getByTestId("date-all").click();
   await page.getByTestId("study-search").fill("JP-TEST-0004");
   await expect(page.getByTestId("study-count")).toHaveText("2");
   await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
@@ -722,7 +720,6 @@ test("件数は役割を替えても、その役割の許可の一覧の中だ�
     await expect(page.getByTestId("study-count")).toHaveText("8");
     expect(await count(page.getByTestId("date-all"))).toBe(8);
     expect(await count(page.getByTestId("modality-all"))).toBe(8);
-    expect(await count(page.getByTestId("status-all"))).toBe(8);
     // モダリティの件数の合計は、複数のモダリティの検査の分だけ一覧より多くなりうるが、少なくはならない
     let sum = 0;
     for (const m of ["CT", "MR", "CR/DX", "US", "ES", "MG", "DOC", "SR"]) sum += await count(page.getByTestId(`modality-${m}`));
@@ -731,12 +728,11 @@ test("件数は役割を替えても、その役割の許可の一覧の中だ�
 });
 
 test("許されない項目の件数は出ない：画面の API の応答から見出しの件数が無ければ、画面も件数を出さない", async ({ page }) => {
-  // 許可の一覧を狭めた役割の応答（モダリティ・状態の件数が無い。BFF の側は tests/unit/studies-route.test.ts で確かめる）
+  // 許可の一覧を狭めた役割の応答（モダリティの件数が無い。BFF の側は tests/unit/studies-route.test.ts で確かめる）
   await page.route("**/api/studies?*", async (route) => {
     const res = await route.fetch();
     const body = (await res.json()) as { facets: Record<string, unknown> };
     delete body.facets.modality;
-    delete body.facets.status;
     await route.fulfill({ response: res, json: body });
   });
   await asRole(page, "医師");
@@ -745,10 +741,8 @@ test("許されない項目の件数は出ない：画面の API の応答から
   await expect(page.getByTestId("date-all")).toHaveText(/全期間 \(\d+\)/);
   await expect(page.getByTestId("modality-CT")).toHaveText("CT");
   await expect(page.getByTestId("modality-all")).toHaveText("すべて");
-  await expect(page.getByTestId("status-unread")).toHaveText("未読");
-  await expect(page.getByTestId("status-all")).toHaveText("すべて");
   // 見出しの文字に、件数の括弧が出ていない
-  expect(await page.getByTestId("study-filters").locator("[data-testid^=modality-], [data-testid^=status-]").allInnerTexts()).not.toEqual(
+  expect(await page.getByTestId("study-filters").locator("[data-testid^=modality-]").allInnerTexts()).not.toEqual(
     expect.arrayContaining([expect.stringMatching(/\(\d+\)/)]),
   );
 });
@@ -767,7 +761,6 @@ test("上限に届いて数えきれない件数は「以上」と出す（確�
   await expect(page.getByTestId("date-all")).toHaveText(/全期間 \(\d+ 以上\)/);
   await expect(page.getByTestId("date-today")).toHaveText(/今日 \(\d+\)/);
   await expect(page.getByTestId("modality-CT")).toHaveText(/CT \(\d+ 以上\)/);
-  await expect(page.getByTestId("status-unread")).toHaveText(/未読 \(\d+ 以上\)/);
 });
 
 test("「詳しく」：期間の指定は、押したときだけ出る。開け閉めでき、期間で絞っているときは最初から開く", async ({ page }) => {

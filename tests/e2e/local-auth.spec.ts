@@ -68,8 +68,8 @@ async function changeOwnPassword(page: Page, password: string) {
 async function patientValues(page: Page): Promise<string[]> {
   const row = page.getByTestId("study-table").locator("tbody tr[data-study-uid]").first();
   const values = [
-    // 列：状態・検査日時・患者 ID・氏名…（src/components/studies/study-browser.tsx。サムネイルの列は 1 行の一覧で外した）
-    (await row.locator("td").nth(2).innerText()).trim(),
+    // 列：検査日時・患者 ID・氏名…（src/components/studies/study-browser.tsx。サムネイルの列は 1 行の一覧で、状態の列は段 3 で外した）
+    (await row.locator("td").nth(1).innerText()).trim(),
     (await row.getByTestId("patient-name").innerText()).trim(),
     (await row.getAttribute("data-study-uid")) ?? "",
   ];
