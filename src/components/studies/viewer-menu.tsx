@@ -7,6 +7,7 @@ import type { ScreenInfo } from "@/components/studies/screen-info";
 import { getJson } from "@/lib/client/api";
 import { errorText, postJson } from "@/lib/client/post-json";
 import { VIEWER_LABELS, isViewerId, type ViewerId } from "@/lib/viewers";
+import { cn } from "@/lib/utils";
 
 // 行の [▶ 開く | ▾]（docs/spec.md の 3.2）。▶ は既定のビューアで、▾ はビューアを選んで、別のタブで開く。
 // 開くのは BFF の /api/viewers/open を通す（どの検査をどのビューアで開いたかを監査の記録に残してから移す）。
@@ -30,6 +31,7 @@ export function ViewerMenu({
   screen,
   onChanged,
   seriesLabel,
+  compact = false,
 }: {
   studyUid: string;
   defaultViewer: string | null | undefined;
@@ -40,6 +42,8 @@ export function ViewerMenu({
   onChanged: () => void;
   /** 詳細のパネルのシリーズから開くときの、ボタンの名前の補い */
   seriesLabel?: string;
+  /** 一覧の 1 行に収める形：ボタンは 24px、覚えたビューアの印と知らせは同じ行の左に並べる（長ければ `…` で切る） */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -93,11 +97,15 @@ export function ViewerMenu({
 
   const label = isViewerId(defaultViewer) ? VIEWER_LABELS[defaultViewer] : null;
   return (
-    <div ref={root} className="relative inline-flex flex-col items-end gap-1" data-row-control>
-      <div className="inline-flex">
+    <div
+      ref={root}
+      className={cn("relative inline-flex items-end gap-1", compact ? "max-w-full flex-row-reverse items-center gap-1.5" : "flex-col")}
+      data-row-control
+    >
+      <div className="inline-flex shrink-0">
         <Button
           type="button"
-          size="sm"
+          size={compact ? "xs" : "sm"}
           className="rounded-r-none"
           disabled={!defaultViewer}
           title={defaultViewer ? undefined : "ビューアが設定されていない"}
@@ -110,7 +118,7 @@ export function ViewerMenu({
         </Button>
         <Button
           type="button"
-          size="sm"
+          size={compact ? "xs" : "sm"}
           className="rounded-l-none border-l border-primary-foreground/30 px-1.5"
           aria-label="ビューアを選ぶ"
           aria-haspopup="menu"
@@ -124,7 +132,7 @@ export function ViewerMenu({
         </Button>
       </div>
       {rememberedViewer && isViewerId(rememberedViewer) && (
-        <span className="text-xs text-label" data-testid="remembered-viewer">
+        <span className="min-w-0 truncate text-xs text-label" data-testid="remembered-viewer">
           既定: {VIEWER_LABELS[rememberedViewer]}
         </span>
       )}
@@ -132,7 +140,10 @@ export function ViewerMenu({
         <div
           id={menuId}
           role="menu"
-          className="absolute top-8 right-0 z-30 min-w-56 rounded-md border border-border bg-background py-1 text-left shadow-md"
+          className={cn(
+            "absolute right-0 z-30 min-w-56 rounded-md border border-border bg-background py-1 text-left shadow-md",
+            compact ? "top-7" : "top-8",
+          )}
         >
           {openers.map((v) => (
             <button
@@ -191,7 +202,7 @@ export function ViewerMenu({
         </div>
       )}
       {message && (
-        <span role="status" className="text-xs text-label">
+        <span role="status" title={message} className={cn("text-xs text-label", compact && "min-w-0 truncate")}>
           {message}
         </span>
       )}

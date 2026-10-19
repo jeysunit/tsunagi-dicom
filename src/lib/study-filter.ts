@@ -32,6 +32,35 @@ export const STATUS_LABELS: Record<StatusFilter, string> = {
   bookmarked: "ブックマーク",
 };
 
+/** 状態の見出しが読む項目。許可の一覧に載っていない役割には、その見出しの件数を出さない */
+export const STATUS_FIELD = {
+  uninspected: "inspected",
+  inspected: "inspected",
+  unread: "read",
+  read: "read",
+  urgent: "urgent",
+  bookmarked: "bookmarked",
+} as const satisfies Record<StatusFilter, keyof StudyView>;
+
+/** 件数を添える検査日の見出し（期間の指定には添えない） */
+export const FACET_DATES = ["today", "yesterday", "week", "month", "all"] as const;
+export type FacetDate = (typeof FACET_DATES)[number];
+
+/**
+ * 見出しごとの件数（BFF が数える）。各見出しの件数は「それを押したあとの一覧の件数」と同じ
+ * （ほかの見出しと横断の検索は、いまの値のまま）。役割の許可の一覧に載っていない項目の見出しは、キーごと無い
+ */
+export interface StudyFacets {
+  date?: Partial<Record<FacetDate, number>>;
+  modality?: { all: number } & Partial<Record<ModalityGroup, number>>;
+  status?: { all: number } & Partial<Record<StatusFilter, number>>;
+  /**
+   * 件数が「以上」（検索の上限に届いて、数えきれていない）のもの。ここに無い件数は確定で、押したあとの一覧の件数と同じ。
+   * list：モダリティと状態の件数（いまの一覧が上限に届いた）。date：上限に届いた全期間の検索で、範囲がすべて入っていない検査日の見出し
+   */
+  atLeast?: { list?: boolean; date?: FacetDate[] };
+}
+
 /** 横断の検索の語の長さの上限 */
 export const MAX_QUERY_LENGTH = 100;
 
@@ -152,7 +181,7 @@ const SEARCH_FIELDS = [
   "studyDescription",
 ] as const satisfies readonly (keyof StudyView)[];
 
-function statusMatches(view: StudyView, status: StatusFilter): boolean {
+export function statusMatches(view: StudyView, status: StatusFilter): boolean {
   switch (status) {
     case "uninspected":
       return view.inspected === false;

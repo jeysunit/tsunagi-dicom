@@ -80,30 +80,99 @@ test("すぐ絞れる見出し：期間の指定・モダリティ・横断の�
   await expect(page.getByText("合う検査が無い")).toBeVisible();
 });
 
-test("一覧の行：氏名（漢字・かな）・和暦と年齢・代表のサムネイル・シリーズ数と画像数", async ({ page }) => {
+// 期待の変更（1 件）：一覧の行のサムネイル（写しのある検査は画像・無い検査は印）の確かめを外した。
+// 1 行 28px の一覧ではサムネイルの列を外したため（docs/spec.md の 3.1）。サムネイルは詳細のシリーズの横 1 列で確かめる（下の試験）。
+test("一覧の行：氏名（漢字・かな）・和暦と年齢・シリーズ数と画像数", async ({ page }) => {
   await asRole(page, "医師");
   const r = row(page);
   await expect(r).toContainText("試験 髙子");
   await expect(r).toContainText("しけん たかこ");
   await expect(r).toContainText("1960/07/15（昭和35年・65歳・女）");
   await expect(r).toContainText("1 / 4");
-  // 写しのある検査はサムネイルが出て、まわりは暗い地
-  const img = r.getByTestId("thumbnail");
-  await expect(img).toBeVisible();
-  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
-  // 写しの無い検査は印だけ
-  const other = page.getByTestId("study-table").locator(`tbody > tr[data-study-uid]:not([data-study-uid="${STUDY}"])`).last();
-  await other.scrollIntoViewIfNeeded();
-  await expect(other.getByTestId("thumbnail-missing")).toBeVisible();
+  // 一覧の行にはサムネイルを出さない
+  await expect(r.getByTestId("thumbnail")).toHaveCount(0);
+  await expect(r.getByTestId("thumbnail-missing")).toHaveCount(0);
   // PN の元の形（^ と =）は画面に出さない
   expect(await page.locator("main").innerText()).not.toContain("^");
 });
 
-test("詳細のパネル：行のクリックで開き、検査と患者の情報・UID・シリーズの並び（暗い地）を出す", async ({ page }) => {
+test("詳細のシリーズ：サムネイルが横に 1 列に並び、横にスクロールでき、まわりは暗い地", async ({ page }) => {
+  await asRole(page, "医師");
+  // シリーズが 2 つの検査（一覧の「2 / 6」の行）
+  await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click();
+  const strip = page.getByTestId("series-strip");
+  await expect(strip.getByTestId("series-item")).toHaveCount(2);
+  await expect(strip).toHaveCSS("background-color", "rgb(18, 20, 23)");
+  const items = strip.getByTestId("series-item");
+  // サムネイルは同じ高さに左から右へ並ぶ（縦に積まない）
+  const boxes = await items.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()));
+  expect(Math.abs(boxes[0]!.top - boxes[1]!.top)).toBeLessThan(1);
+  expect(boxes[1]!.left).toBeGreaterThan(boxes[0]!.left);
+  // 画像が出る（取れなければ印だけ）：シリーズごとに 1 つ
+  await expect(strip.getByTestId("thumbnail").or(strip.getByTestId("thumbnail-missing"))).toHaveCount(2);
+  // 横にスクロールする入れ物で、キーボードでもフォーカスを受ける
+  const row = strip.getByTestId("series-row");
+  expect(await row.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+  await row.focus();
+  await expect(row).toBeFocused();
+});
+
+test("詳細のシリーズ：狭い幅（600px）でも、並びは 1 列のまま（縦に積まない）", async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 900 });
+  await asRole(page, "医師");
+  await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click({ position: { x: 100, y: 12 } });
+  const row = page.getByTestId("series-row");
+  await expect(row).toBeVisible();
+  const boxes = await page.getByTestId("series-item").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+  expect(new Set(boxes.map((t) => Math.round(t))).size).toBe(1);
+});
+
+// 戻した確かめ：一覧のサムネイルを外した（期待の変更 1）ときに外れた「実の画像が読めたか」を、詳細の横の並びで確かめる。
+// 要素の数だけでなく、画像が実際に読めたこと（naturalWidth > 0）と、写しの無い検査は印だけであること
+test("詳細のシリーズ：写しのある検査はサムネイルの画像が実際に読め、写しの無い検査は印だけ", async ({ page }) => {
+  await asRole(page, "医師");
+  await row(page).click();
+  const strip = page.getByTestId("series-strip");
+  await expect(strip.getByTestId("series-item")).toHaveCount(1);
+  const img = strip.getByTestId("thumbnail");
+  await expect(img).toBeVisible();
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+  // まわりは暗い地
+  await expect(img.locator("xpath=..")).toHaveCSS("background-color", "rgb(18, 20, 23)");
+  await expect(strip.getByTestId("thumbnail-missing")).toHaveCount(0);
+
+  // 写しの無い検査（1 行目以外のどれか）は印だけ
+  const other = page.locator(`tr[data-study-uid]:not([data-study-uid="${STUDY}"])`).last();
+  await other.click();
+  await expect(page.getByTestId("study-detail")).not.toHaveAttribute("data-study-uid", STUDY);
+  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip").getByTestId("thumbnail-missing").first()).toBeVisible();
+  await expect(page.getByTestId("series-strip").getByTestId("thumbnail")).toHaveCount(0);
+});
+
+// 期待の変更（1 件）：検査と患者の情報の 2 列と UID は、詳細の「すべての項目」を押して開いてから確かめる。
+// 見出しの 1〜2 行に詰め、ほかの値を「すべての項目」の中へ移したため（docs/spec.md の 3.1）。確かめる値は同じ。
+test("詳細のパネル：行のクリックで開き、見出しの要点と、すべての項目（検査と患者の情報・UID）・シリーズの並び（暗い地）を出す", async ({ page }) => {
   await asRole(page, "医師");
   await row(page).click();
   const detail = page.getByTestId("study-detail");
   await expect(detail).toBeVisible();
+  // 見出し（1〜2 行）：氏名・かな・患者 ID・生年月日と和暦・年齢・性別／検査日時・モダリティ・検査の記述
+  const head = detail.getByTestId("detail-head");
+  await expect(head).toContainText("試験 髙子");
+  await expect(head).toContainText("しけん たかこ");
+  await expect(head).toContainText("JP-TEST-0004");
+  await expect(head).toContainText("1960/07/15（昭和35年・65歳・女）");
+  await expect(head).toContainText("2026/04/10");
+  await expect(head).toContainText("CT");
+  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(2 * 24 + 4);
+  // 閉じているうちは、ほかの値と UID は出ない
+  const toggle = detail.getByTestId("detail-all-items-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(detail.getByTestId("detail-all-items")).toHaveCount(0);
+  await expect(detail.getByTestId("uid-line")).toHaveCount(0);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(detail).toContainText("患者の情報");
   await expect(detail).toContainText("検査の情報");
   await expect(detail).toContainText("JP-TEST-0004");
@@ -111,6 +180,7 @@ test("詳細のパネル：行のクリックで開き、検査と患者の情�
   await expect(detail.getByTestId("uid-line").first()).toContainText(STUDY);
   const uid = detail.getByTestId("uid-line").first().locator("code");
   await expect(uid).toHaveCSS("font-size", "12px");
+  await expect(uid).toHaveCSS("font-family", /mono|Mono|Courier/);
   const strip = detail.getByTestId("series-strip");
   await expect(strip.getByTestId("series-item")).toHaveCount(1);
   await expect(strip).toContainText("Chest Axial 5mm");
@@ -128,7 +198,8 @@ test("詳細のパネル：行のクリックで開き、検査と患者の情�
   await expect(page.getByTestId("study-detail-empty")).toBeVisible();
 });
 
-const detailUid = (page: Page) => page.getByTestId("study-detail").getByTestId("uid-line").first().locator("code");
+// 詳細がどの検査のものか。UID の行は「すべての項目」の中（閉じている）なので、詳細の枠に付けた data-study-uid で確かめる
+const expectDetail = (page: Page, uid: string) => expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
 
 test("上下に分ける：行を選ぶと下の詳細が替わり、一覧の行は動かない。頁全体はスクロールしない", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -146,14 +217,18 @@ test("上下に分ける：行を選ぶと下の詳細が替わり、一覧の�
   const secondUid = (await second.getAttribute("data-study-uid"))!;
   const before = await rows(page).nth(1).boundingBox();
   await rows(page).first().click();
-  await expect(detailUid(page)).toHaveText((await rows(page).first().getAttribute("data-study-uid"))!);
+  await expectDetail(page, (await rows(page).first().getAttribute("data-study-uid"))!);
   await second.click();
-  await expect(detailUid(page)).toHaveText(secondUid);
+  await expectDetail(page, secondUid);
   // 行の位置は動かない（詳細は行の下に開かない。一覧は選んだだけではスクロールしない）
   const after = await rows(page).nth(1).boundingBox();
   expect(after).toEqual(before);
   expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollTop)).toBe(0);
   // 詳細が長くても頁は伸びない。一覧の中だけがスクロールする
+  expect(await noPageScroll()).toBe(true);
+  // 期待の変更（1 件）：一覧の中だけがスクロールすることの確かめを、高さ 900px から 600px の画面に替えた。
+  // 1 行が 28px になり、見本の 8 件は 900px の高さの一覧に全部収まる（前は 65px で収まらなかった）ため。確かめる内容は同じ
+  await page.setViewportSize({ width: 1280, height: 600 });
   expect(await noPageScroll()).toBe(true);
   const list = page.getByTestId("study-list-scroll");
   expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
@@ -171,7 +246,7 @@ test("上下に分ける：矢印の上下で行を移すと詳細が付いて�
   const uids = await rows(page).evaluateAll((els) => els.map((el) => el.getAttribute("data-study-uid") ?? ""));
 
   await rows(page).first().click();
-  await expect(detailUid(page)).toHaveText(uids[0]!);
+  await expectDetail(page, uids[0]!);
   await expect.poll(() => detailRequests.length).toBe(1);
 
   // 続けて3回：選びは行に付いて動くが、詳細を読むのは止まった行（4 番目）だけ
@@ -180,13 +255,13 @@ test("上下に分ける：矢印の上下で行を移すと詳細が付いて�
   await page.keyboard.press("ArrowDown");
   await expect(rows(page).nth(3)).toHaveAttribute("aria-selected", "true");
   await expect(rows(page).nth(3)).toBeFocused();
-  await expect(detailUid(page)).toHaveText(uids[3]!);
+  await expectDetail(page, uids[3]!);
   await expect(page.getByTestId("series-item").first()).toBeVisible();
   expect(detailRequests).toEqual([uids[0], uids[3]]);
 
   await page.keyboard.press("ArrowUp");
   await expect(rows(page).nth(2)).toHaveAttribute("aria-selected", "true");
-  await expect(detailUid(page)).toHaveText(uids[2]!);
+  await expectDetail(page, uids[2]!);
 
   // 一覧の端から外へは出ない
   await rows(page).first().focus();
@@ -266,7 +341,7 @@ test("上下に分ける：狭い画面では一覧だけを出し、行を選�
   // 表は幅が広く、行の中央は画面の外なので、見えている左の端を押す
   await row(page).click({ position: { x: 100, y: 20 } });
   await expect(page.getByTestId("study-detail")).toBeVisible();
-  await expect(detailUid(page)).toHaveText(STUDY);
+  await expectDetail(page, STUDY);
   expect(await noPageScroll()).toBe(true);
   // 開いたら詳細へフォーカスが移り、背後の一覧は操作の対象から外れる（inert）。Tab を送っても一覧の行には出ない
   const pane = page.getByTestId("detail-pane");
@@ -398,11 +473,15 @@ test("応答の順が逆になっても、古い応答が新しい選びを上�
   });
   await rows(page).first().click();
   await rows(page).nth(1).click();
-  await expect(detailUid(page)).toHaveText(uids[1]!);
+  await expectDetail(page, uids[1]!);
   await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
   release();
   await page.waitForTimeout(500);
-  await expect(detailUid(page)).toHaveText(uids[1]!);
+  await expectDetail(page, uids[1]!);
+  await expect(page.getByTestId("study-detail")).not.toHaveAttribute("data-study-uid", uids[0]!);
+  // 「すべての項目」を開いても、出ている UID は選んだ検査のものだけ
+  await page.getByTestId("detail-all-items-toggle").click();
+  await expect(page.getByTestId("detail-pane")).toContainText(uids[1]!);
   await expect(page.getByTestId("detail-pane")).not.toContainText(uids[0]!);
 });
 
@@ -498,4 +577,283 @@ test("モダリティごとの既定のビューア：管理者が管理の画�
   await page.goto("/admin/viewers");
   await page.getByLabel("CT の既定のビューア").selectOption("ohif");
   await expect(page.getByText("CT の既定を変えた")).toBeVisible();
+});
+
+// ---- 1 行の一覧・件数つきの絞り込み・詰めた詳細（docs/spec.md の 3.1） ----
+
+const count = async (loc: ReturnType<Page["getByTestId"]>) => Number(/\((\d+)\)/.exec(await loc.innerText())![1]);
+const headCount = async (page: Page) => Number(await page.getByTestId("study-count").innerText());
+
+test("1 行の一覧：行の高さは 28px（14px の文字）、氏名の漢字とかなは別の列（かなは右）", async ({ page }) => {
+  await asRole(page, "医師");
+  await expect(rows(page)).toHaveCount(8);
+  const heights = await rows(page).evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+  for (const h of heights) {
+    expect(h).toBeGreaterThanOrEqual(28);
+    expect(h).toBeLessThanOrEqual(30);
+  }
+  await expect(page.getByTestId("study-table").locator("tbody td").first()).toHaveCSS("font-size", "14px");
+  const r = row(page);
+  const name = r.getByTestId("patient-name");
+  const kana = r.getByTestId("patient-kana");
+  await expect(name).toHaveText("試験 髙子");
+  await expect(kana).toHaveText("しけん たかこ");
+  // かなは漢字とは別のセル（別の列）で、漢字の右にある
+  expect(await name.evaluate((el) => el.closest("td") === el.closest("tr")!.querySelector("td[data-testid=patient-kana]"))).toBe(false);
+  const nb = (await name.boundingBox())!;
+  const kb = (await kana.boundingBox())!;
+  expect(kb.x).toBeGreaterThan(nb.x + nb.width - 1);
+  expect(Math.abs(kb.y + kb.height / 2 - (nb.y + nb.height / 2))).toBeLessThan(8);
+  // 見出しの行にも別の列
+  await expect(page.getByRole("columnheader", { name: "かな" })).toBeVisible();
+});
+
+test("1 行の一覧：1280×720 の画面で、見える行が前（2 行）より多い。ビューアの部品も 1 行に収まり、押せる大きさは 24px 以上", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await asRole(page, "医師");
+  await expect(rows(page)).toHaveCount(8);
+  const visible = await page.evaluate(() => {
+    const list = document.querySelector("[data-testid=study-list-scroll]")!.getBoundingClientRect();
+    return [...document.querySelectorAll("tbody > tr[data-study-uid]")].filter((r) => {
+      const b = r.getBoundingClientRect();
+      return b.top >= list.top && b.bottom <= list.bottom + 1;
+    }).length;
+  });
+  // 前（行の高さ 65px・一覧 224px）は 2 行。見本の検査は全部で 8 件
+  expect(visible).toBeGreaterThanOrEqual(6);
+  // ▶ 開く と ▾ は 24px 以上、行は 28px のまま
+  for (const id of ["open-default", "open-menu"]) {
+    const b = (await row(page).getByTestId(id).boundingBox())!;
+    expect(b.height).toBeGreaterThanOrEqual(24);
+    expect(b.width).toBeGreaterThanOrEqual(24);
+  }
+  expect((await row(page).boundingBox())!.height).toBeLessThanOrEqual(30);
+  // 覚えたビューアの印が付いても、行は 28px のまま
+  await row(page).getByTestId("open-menu").click();
+  await page.getByRole("menuitem", { name: "この検査は次から Stone" }).click();
+  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("既定: Stone");
+  expect((await row(page).boundingBox())!.height).toBeLessThanOrEqual(30);
+  await row(page).getByTestId("open-menu").click();
+  await page.getByRole("menuitem", { name: /覚えを消す/ }).click();
+  await expect(row(page).getByTestId("remembered-viewer")).toHaveCount(0);
+});
+
+test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は title。詳細のパネルでは切らない", async ({ page }) => {
+  const long = "とても長い検査の記述".repeat(20);
+  // 絞り込みで読み直したときの一覧の応答を、記述の長いものに替える（画面の API の形は変えない）
+  await page.route("**/api/studies?*", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { studies: Record<string, unknown>[] };
+    for (const s of body.studies) s.studyDescription = long;
+    await route.fulfill({ response: res, json: body });
+  });
+  await asRole(page, "医師");
+  await page.getByTestId("date-all").click(); // 押し直しでは読み直さない
+  await page.getByTestId("modality-CT").click();
+  await expect(rows(page).first()).toBeVisible();
+  const cell = rows(page).first().locator("td").nth(6);
+  await expect(cell).toHaveAttribute("title", new RegExp(long));
+  expect(await cell.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
+  expect(await cell.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  // 切っても行は 1 行（28px）のまま
+  expect((await rows(page).first().boundingBox())!.height).toBeLessThanOrEqual(30);
+  // 詳細のパネルでは切らない（折り返す）
+  await rows(page).first().click();
+  const head = page.getByTestId("detail-head");
+  await expect(head).toBeVisible();
+  for (const sel of ["[data-testid=detail-name]", "p"]) {
+    expect(await head.locator(sel).first().evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis");
+  }
+});
+
+test("絞り込みは 1 行の並び：検査日・モダリティ・状態に件数を添える。件数は押したあとの一覧の件数と合う", async ({ page }) => {
+  await asRole(page, "医師");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  // 並びは高さ 28px のボタン（24px 以上）
+  for (const id of ["date-today", "modality-CT", "status-unread", "filter-more"]) {
+    expect((await page.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(24);
+  }
+  await expect(page.getByTestId("date-all")).toHaveText("全期間 (8)");
+  await expect(page.getByTestId("modality-all")).toHaveText("すべて (8)");
+  await expect(page.getByTestId("status-all")).toHaveText("すべて (8)");
+  await expect(page.getByTestId("modality-CT")).toHaveText("CT (6)");
+  await expect(page.getByTestId("modality-MR")).toHaveText("MR (2)");
+  // 全部の見出しの件数が、押したあとの件数の見出しと、行の数に合う
+  for (const id of ["date-today", "date-yesterday", "date-week", "date-month", "modality-CT", "modality-MR", "modality-US", "status-uninspected", "status-unread", "status-urgent", "status-bookmarked"]) {
+    const n = await count(page.getByTestId(id));
+    await page.getByTestId(id).click();
+    await expect(page.getByTestId(id)).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => headCount(page)).toBe(n);
+    if (n === 0) await expect(page.getByText("合う検査が無い")).toBeVisible();
+    else await expect(rows(page)).toHaveCount(n);
+    await page.getByTestId(id.startsWith("date-") ? "date-all" : id.startsWith("modality-") ? "modality-all" : "status-all").click();
+    await expect.poll(() => headCount(page)).toBe(8);
+  }
+});
+
+test("件数は、ほかの見出しと検索を当てたあとの数になる（モダリティを選ぶと状態の件数が変わる）", async ({ page }) => {
+  await asRole(page, "医師");
+  await page.getByTestId("modality-MR").click();
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  // 状態の「すべて」は、いまの一覧の件数と同じ
+  await expect.poll(() => count(page.getByTestId("status-all"))).toBe(2);
+  await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
+  // 状態を押したあとの件数は、押す前の見出しの件数と同じ
+  const n = await count(page.getByTestId("status-uninspected"));
+  await page.getByTestId("status-uninspected").click();
+  await expect.poll(() => headCount(page)).toBe(n);
+  // モダリティの見出しは、状態を当てた数（MR 以外の CT は、この状態のぶん）
+  const ct = await count(page.getByTestId("modality-CT"));
+  await page.getByTestId("modality-CT").click();
+  await expect.poll(() => headCount(page)).toBe(ct);
+  // 横断の検索を当てると、全部の見出しの件数が絞られる
+  await page.getByTestId("modality-all").click();
+  await page.getByTestId("status-all").click();
+  await page.getByTestId("study-search").fill("JP-TEST-0004");
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
+  await expect.poll(() => count(page.getByTestId("modality-all"))).toBe(2);
+});
+
+test("件数は役割を替えても、その役割の許可の一覧の中だけで数える（どの役割でも、見出しの合計は一覧と合う）", async ({ page }) => {
+  for (const role of ["管理者", "医師", "技師", "閲覧"] as const) {
+    await asRole(page, role);
+    await page.goto("/");
+    await expect(page.getByTestId("study-count")).toHaveText("8");
+    expect(await count(page.getByTestId("date-all"))).toBe(8);
+    expect(await count(page.getByTestId("modality-all"))).toBe(8);
+    expect(await count(page.getByTestId("status-all"))).toBe(8);
+    // モダリティの件数の合計は、複数のモダリティの検査の分だけ一覧より多くなりうるが、少なくはならない
+    let sum = 0;
+    for (const m of ["CT", "MR", "CR/DX", "US", "ES", "MG", "DOC", "SR"]) sum += await count(page.getByTestId(`modality-${m}`));
+    expect(sum).toBeGreaterThanOrEqual(8);
+  }
+});
+
+test("許されない項目の件数は出ない：画面の API の応答から見出しの件数が無ければ、画面も件数を出さない", async ({ page }) => {
+  // 許可の一覧を狭めた役割の応答（モダリティ・状態の件数が無い。BFF の側は tests/unit/studies-route.test.ts で確かめる）
+  await page.route("**/api/studies?*", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { facets: Record<string, unknown> };
+    delete body.facets.modality;
+    delete body.facets.status;
+    await route.fulfill({ response: res, json: body });
+  });
+  await asRole(page, "医師");
+  await page.getByTestId("date-week").click();
+  await expect(page.getByTestId("date-week")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("date-all")).toHaveText(/全期間 \(\d+\)/);
+  await expect(page.getByTestId("modality-CT")).toHaveText("CT");
+  await expect(page.getByTestId("modality-all")).toHaveText("すべて");
+  await expect(page.getByTestId("status-unread")).toHaveText("未読");
+  await expect(page.getByTestId("status-all")).toHaveText("すべて");
+  // 見出しの文字に、件数の括弧が出ていない
+  expect(await page.getByTestId("study-filters").locator("[data-testid^=modality-], [data-testid^=status-]").allInnerTexts()).not.toEqual(
+    expect.arrayContaining([expect.stringMatching(/\(\d+\)/)]),
+  );
+});
+
+test("上限に届いて数えきれない件数は「以上」と出す（確定の数のように出さない）", async ({ page }) => {
+  // 1000 件を超える応答の形（モックの検査は 8 件なので、応答の atLeast だけを付ける。BFF の側は tests/unit/study-list-limit.test.ts）
+  await page.route("**/api/studies?*", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { facets: Record<string, unknown> };
+    body.facets.atLeast = { date: ["all"], list: true };
+    await route.fulfill({ response: res, json: body });
+  });
+  await asRole(page, "医師");
+  await page.getByTestId("date-week").click();
+  await expect(page.getByTestId("date-week")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("date-all")).toHaveText(/全期間 \(\d+ 以上\)/);
+  await expect(page.getByTestId("date-today")).toHaveText(/今日 \(\d+\)/);
+  await expect(page.getByTestId("modality-CT")).toHaveText(/CT \(\d+ 以上\)/);
+  await expect(page.getByTestId("status-unread")).toHaveText(/未読 \(\d+ 以上\)/);
+});
+
+test("「詳しく」：期間の指定は、押したときだけ出る。開け閉めでき、期間で絞っているときは最初から開く", async ({ page }) => {
+  await asRole(page, "医師");
+  const more = page.getByTestId("filter-more");
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("filter-more-panel")).toHaveCount(0);
+  await expect(page.getByTestId("date-range")).toHaveCount(0);
+  await more.click();
+  await expect(more).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("filter-more-panel")).toBeVisible();
+  await page.getByTestId("date-range").click();
+  await expect(page).toHaveURL(/date=range/);
+  await expect(page.getByLabel("期間の始まり")).toBeVisible();
+  await page.getByLabel("期間の始まり").fill("2026-10-17");
+  await page.getByLabel("期間の終わり").fill("2026-10-17");
+  await expect(page.getByTestId("study-count")).toHaveText("4");
+  await more.click();
+  await expect(page.getByTestId("filter-more-panel")).toHaveCount(0);
+  // 開き直すと、期間で絞っているので最初から開いている
+  await page.reload();
+  await expect(page.getByTestId("filter-more")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("date-range")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("狭い画面では絞り込みが折り返し、横にはみ出さない", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await asRole(page, "医師");
+  const g = await page.evaluate(() => {
+    const f = document.querySelector("[data-testid=study-filters]")!;
+    return { scroll: f.scrollWidth, client: f.clientWidth, page: document.documentElement.scrollWidth <= window.innerWidth };
+  });
+  expect(g.scroll).toBeLessThanOrEqual(g.client + 1);
+  expect(g.page).toBe(true);
+});
+
+test("詳細の「すべての項目」：初めは閉じ、押すと検査と患者の情報・UID が開く。開閉は行を替えても、開き直しても残る", async ({ page }) => {
+  await asRole(page, "医師");
+  await rows(page).first().click();
+  const detail = page.getByTestId("study-detail");
+  const toggle = detail.getByTestId("detail-all-items-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(detail.getByTestId("detail-all-items")).toHaveCount(0);
+  // 閉じているうちも、見出しとシリーズは出ている
+  await expect(detail.getByTestId("detail-head")).toBeVisible();
+  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(24);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const all = detail.getByTestId("detail-all-items");
+  await expect(all).toContainText("検査の情報");
+  await expect(all).toContainText("患者の情報");
+  await expect(all).toContainText("氏名（英字）");
+  await expect(all.getByTestId("uid-line").first().locator("code")).toHaveCSS("font-size", "12px");
+  // シリーズの UID も、この中に 0.75rem・等幅で出て、コピーのボタンがある
+  // 1 行目の検査（シリーズが 2 つ）：StudyInstanceUID の 1 行と、SeriesInstanceUID の 2 行
+  await expect(all.getByTestId("uid-line")).toHaveCount(3);
+  await expect(all.getByRole("button", { name: /SeriesInstanceUID.*をコピー/ })).toHaveCount(2);
+
+  // 行を替えても開いたまま。開き直しても開いたまま
+  await rows(page).nth(1).click();
+  await expect(page.getByTestId("detail-all-items-toggle")).toHaveAttribute("aria-expanded", "true");
+  await page.reload();
+  await rows(page).first().click();
+  await expect(page.getByTestId("detail-all-items-toggle")).toHaveAttribute("aria-expanded", "true");
+  // 閉じると、それも残る
+  await page.getByTestId("detail-all-items-toggle").click();
+  await expect(page.getByTestId("detail-all-items")).toHaveCount(0);
+  await page.reload();
+  await rows(page).first().click();
+  await expect(page.getByTestId("detail-all-items-toggle")).toHaveAttribute("aria-expanded", "false");
+});
+
+test("詳細の見出しは 1〜2 行：氏名・かな・患者 ID・生年月日と和暦・年齢・性別・検査日・モダリティ・検査の記述", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await asRole(page, "医師");
+  await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click();
+  const head = page.getByTestId("detail-head");
+  await expect(head).toContainText("JP-TEST-0004");
+  const lines = await head.locator("> p").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+  expect(lines).toHaveLength(2);
+  // 1 行ずつ（14px の文字の行の高さ 20px。1 行に収まる幅）
+  for (const h of lines) expect(h).toBeLessThanOrEqual(24);
+  // 下のシリーズのサムネイルが、同じ画面に見えている（詳細の場所の中。スクロールしなくても）
+  const pane = (await page.getByTestId("detail-pane").boundingBox())!;
+  const strip = (await page.getByTestId("series-strip").boundingBox())!;
+  expect(strip.y + Math.min(strip.height, 80)).toBeLessThanOrEqual(pane.y + pane.height);
 });
