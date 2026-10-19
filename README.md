@@ -20,6 +20,75 @@ DICOMweb に対応した画像サーバー（Orthanc など）を**改造せず�
 
 画面は、最初は日本語だけ。文書は日本語を主にし、README は日本語と英語。
 
+## システム構成
+
+### 図1　全体
+
+画像サーバーは**改造せずに**そのまま使い、tsunagi-dicom はその前に置く画面と BFF になる。ビューアは画像サーバーへ直接つながず、BFF の中継から画像を取る。点線は段 4 の予定。
+
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+  classDef plan fill:#ffffff,stroke:#8c959f,stroke-dasharray:5 4,color:#57606a
+
+  MOD["モダリティ<br/>CT・MR・一般撮影など"]:::box
+  PACS[("画像サーバー<br/>Orthanc など DICOMweb 対応<br/>改造しない")]:::box
+  subgraph TSUNAGI["tsunagi-dicom"]
+    BFF["画面と BFF<br/>検査の一覧・詳細<br/>ビューアの選び分け<br/>監査・役割・ログイン"]:::box
+  end
+  VIEWER["ビューア<br/>OHIF・Stone など"]:::box
+  subgraph USERS["利用者のブラウザ"]
+    USER["技師・医師・管理者・閲覧"]:::box
+  end
+  OIDC["外部のログイン（OIDC）<br/>段 4 の予定"]:::plan
+  WL["ワークリスト<br/>段 4 の予定"]:::plan
+
+  MOD -->|"DICOM で送る"| PACS
+  BFF -->|"DICOMweb で検索・取得"| PACS
+  USER -->|"画面を開く"| BFF
+  USER -->|"検査から開く"| VIEWER
+  VIEWER -->|"BFF の中継から画像を取る"| BFF
+  BFF -.-> OIDC
+  BFF -.-> WL
+```
+
+### 図2　役割と画面
+
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+
+  B["ブラウザ<br/>（役割: 技師・医師・管理者・閲覧）"]:::box
+  subgraph SCREEN["tsunagi-dicom の画面"]
+    direction TB
+    LIST["検査の一覧（上）<br/>日付・モダリティ・状態で絞る"]:::box
+    DETAIL["検査の詳細（下）<br/>シリーズのサムネイル"]:::box
+    LIST --> DETAIL
+  end
+  V["ビューア<br/>（選び分け・既定を記憶）"]:::box
+
+  B --> LIST
+  DETAIL -->|"開く"| V
+```
+
+役割ごとにできる操作と見える項目は決まっていて、操作は監査の記録に残る。通信と安全の細かい図は [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の 2 にある。
+
+### 試しに使う組み合わせ
+
+モダリティのダミー（[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator)）で合成の検査を画像サーバーへ送り、tsunagi-dicom で見る。実の患者のデータは使わない。
+
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+
+  DTG["dicom-test-generator<br/>モダリティのダミー<br/>合成の検査を作る"]:::box
+  PACS[("画像サーバー<br/>Orthanc など（試験用）")]:::box
+  TD["tsunagi-dicom<br/>画面と BFF"]:::box
+
+  DTG -->|"C-STORE で送る"| PACS
+  TD -->|"DICOMweb で検索・取得"| PACS
+```
+
 ## 何をするか
 
 - **検査の一覧**：検査日・モダリティ・状態（未検像・検像済・未読・既読・緊急・ブックマーク）ですぐ絞れる。氏名は漢字とかなに分けて出し、生年月日は和暦と年齢で出す。

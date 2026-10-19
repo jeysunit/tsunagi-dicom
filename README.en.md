@@ -20,6 +20,75 @@ Implementation proceeds stage by stage; each PR covers one cohesive change withi
 
 The user interface will be Japanese only at first. The documents are written mainly in Japanese.
 
+## System overview
+
+### Figure 1: Overall
+
+The image server is used **unmodified**; tsunagi-dicom sits in front of it as the screens and the BFF. Viewers do not connect to the image server directly: they fetch images through the BFF relay. Dotted items are planned for stage 4.
+
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+  classDef plan fill:#ffffff,stroke:#8c959f,stroke-dasharray:5 4,color:#57606a
+
+  MOD["Modalities<br/>CT, MR, radiography, etc."]:::box
+  PACS[("Image server<br/>DICOMweb-capable, e.g. Orthanc<br/>unmodified")]:::box
+  subgraph TSUNAGI["tsunagi-dicom"]
+    BFF["Screens and BFF<br/>study list and detail<br/>viewer selection<br/>audit, roles, login"]:::box
+  end
+  VIEWER["Viewers<br/>OHIF, Stone, etc."]:::box
+  subgraph USERS["Users' browsers"]
+    USER["Technologist, physician,<br/>administrator, read-only"]:::box
+  end
+  OIDC["External login (OIDC)<br/>planned, stage 4"]:::plan
+  WL["Worklist<br/>planned, stage 4"]:::plan
+
+  MOD -->|"send via DICOM"| PACS
+  BFF -->|"search and retrieve via DICOMweb"| PACS
+  USER -->|"open the screens"| BFF
+  USER -->|"open from a study"| VIEWER
+  VIEWER -->|"fetch images via the BFF relay"| BFF
+  BFF -.-> OIDC
+  BFF -.-> WL
+```
+
+### Figure 2: Roles and screens
+
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+
+  B["Browser<br/>(role: technologist, physician,<br/>administrator, read-only)"]:::box
+  subgraph SCREEN["tsunagi-dicom screens"]
+    direction TB
+    LIST["Study list (top)<br/>filter by date, modality, status"]:::box
+    DETAIL["Study detail (bottom)<br/>series thumbnails"]:::box
+    LIST --> DETAIL
+  end
+  V["Viewer<br/>(selectable, default remembered)"]:::box
+
+  B --> LIST
+  DETAIL -->|"open"| V
+```
+
+What each role can do and see is fixed per role, and operations are recorded in the audit trail. A more detailed diagram of communications and safety is in section 2 of [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) (in Japanese).
+
+### Trying it out together
+
+The modality dummy ([dicom-test-generator](https://github.com/jeysunit/dicom-test-generator)) sends synthetic studies to an image server, and tsunagi-dicom views them. No real patient data is used.
+
+```mermaid
+flowchart LR
+  classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
+
+  DTG["dicom-test-generator<br/>modality dummy<br/>creates synthetic studies"]:::box
+  PACS[("Image server<br/>e.g. Orthanc (test use)")]:::box
+  TD["tsunagi-dicom<br/>screens and BFF"]:::box
+
+  DTG -->|"send via C-STORE"| PACS
+  TD -->|"search and retrieve via DICOMweb"| PACS
+```
+
 ## What it does
 
 - **Study list**: quick filters by study date, modality, and status (the Japanese terms used in clinical practice: 未検像, 検像済, 未読, 既読, 緊急, bookmark). Patient names are shown split into the ideographic (kanji) name and the phonetic (kana) name; birth dates are shown with the Japanese era and age.
