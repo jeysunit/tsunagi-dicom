@@ -1,0 +1,28 @@
+{
+  "Name": "Orthanc",
+  "DicomAet": "ORTHANC",
+  "DicomPort": 4242,
+  "HttpPort": 8042,
+  "AuthenticationEnabled": true,
+  "RemoteAccessAllowed": true,
+  "DicomCheckCalledAet": false,
+  "DicomAlwaysAllowStore": true,
+  "DicomAlwaysAllowEcho": true,
+  "DicomModalitiesInDatabase": false,
+  "DicomModalities": {
+    "itest-scp": {
+      "AET": "ITEST_SCP",
+      "Host": "storescp",
+      "Port": 11112,
+      "Manufacturer": "Generic"
+    }
+  },
+  "DicomScuTimeout": 10,
+  "StableAge": 2,
+  "SaveJobs": false,
+  "StorageCompression": false,
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/"
+  }
+}
