@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
+import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
 import { syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
 import { startGate, type Gate } from "./support/gate";
@@ -142,14 +142,18 @@ test("1 受信一覧：storescu から Orthanc へ送った検査が、時刻・
     expect(item.study.patientId).toBe(study.patientId);
   }
 
-  // 時刻：Orthanc の時刻（時間帯なし）が、いまの時刻からどれだけずれて見えるか（時間帯の違いの分を測る）
+  // 時刻：Orthanc の変更の記録の Date（時間帯の印なし）は UTC（docs/spec.md の 3.3）。コンテナの時間帯（TZ=Asia/Tokyo）に依らないことを測る。
+  // BFF の receivedAt は UTC の時刻（印なしか Z つき）で、いまの時刻から 10 分の内
+  const containerZone = (await compose(["exec", "-T", "orthanc", "date", "+%z"])).trim();
+  const lastChange = await orthancJson<{ Changes: { Date: string }[] }>("changes?last");
+  const raw = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(lastChange.Changes[0]!.Date)!;
+  const rawOffsetHours = Math.round((Date.UTC(+raw[1]!, +raw[2]! - 1, +raw[3]!, +raw[4]!, +raw[5]!, +raw[6]!) - Date.now()) / 3_600_000);
+  observe("changes.dateClock", { containerZone, offsetFromUtcHours: rawOffsetHours });
+  expect(rawOffsetHours).toBe(0);
   const receivedAt = body.items.find((i) => i.study.studyInstanceUid === A.studyInstanceUid)!.receivedAt;
-  expect(receivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
-  const offsetMinutes = (Date.parse(`${receivedAt}Z`) - Date.now()) / 60_000;
-  const hours = Math.round(offsetMinutes / 60);
-  observe("receiveLog.receivedAtOffsetFromUtcHours", hours);
-  expect(Math.abs(offsetMinutes - hours * 60)).toBeLessThan(10);
-  expect(Math.abs(hours)).toBeLessThanOrEqual(14);
+  expect(receivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?$/);
+  const at = Date.parse(receivedAt.endsWith("Z") ? receivedAt : `${receivedAt}Z`);
+  expect(Math.abs(at - Date.now())).toBeLessThan(10 * 60_000);
 
   // 画面：受け取りの頁に、送り元の AE タイトルと患者 ID が出る
   await page.goto("/received");
@@ -167,6 +171,11 @@ test("1 受信一覧：storescu から Orthanc へ送った検査が、時刻・
     CalledAET: metadata.CalledAET,
     ReceptionDateForm: metadata.ReceptionDate?.replace(/\d/g, "9"),
   });
+  const rd = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(metadata.ReceptionDate ?? "");
+  if (rd) {
+    const hoursFromUtc = Math.round((Date.UTC(+rd[1]!, +rd[2]! - 1, +rd[3]!, +rd[4]!, +rd[5]!, +rd[6]!) - Date.now()) / 3_600_000);
+    observe("instanceMetadata.receptionDateOffsetFromUtcHours", hoursFromUtc);
+  }
   expect(metadata).toMatchObject({ Origin: "DicomProtocol", RemoteAET: ITEST.scuAet, CalledAET: ITEST.orthancAet });
 
   // 実測：/changes?last と、1 回に返す数の上限
@@ -277,6 +286,11 @@ test("5 送り先を止めると：接続確認は「つながらない」、送
     const row = page.locator(`[data-modality="${ITEST.scp.id}"]`);
     await row.getByTestId("echo").click();
     await expect(row.getByTestId("echo-result")).toHaveText("つながらない", { timeout: 60_000 });
+    // 実測：C-ECHO が通らないときの Orthanc の答え（BFF は 500 を「つながらない」と読む）
+    const echo = await orthanc(`modalities/${ITEST.scp.id}/echo`, { method: "POST", body: JSON.stringify({ Timeout: 10 }), contentType: "application/json" });
+    const echoBody = await echo.text();
+    observe("echo.failure", { status: echo.status, bodyKeys: echoBody.startsWith("{") ? Object.keys(JSON.parse(echoBody)).sort() : null });
+    expect(echo.status).toBe(500);
 
     const panel = await sendToScp(page, A);
     await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Failure", { timeout: 120_000 });

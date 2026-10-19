@@ -18,6 +18,8 @@ services:
     environment:
       DICOM_WEB_PLUGIN_ENABLED: "true"
       VERBOSE_STARTUP: "false"
+      # 施設の時間帯にしても、変更の記録の Date が UTC のままかを試験で測る（tests/integration の 1）
+      TZ: Asia/Tokyo
     volumes:
       - ./orthanc/orthanc.json:/etc/orthanc/itest.json:ro
     secrets:
