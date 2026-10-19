@@ -1,5 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  firstInstanceId,
+  isOrthancId,
+  jobFromRest,
+  modalitiesFromRest,
+  orthancTime,
+  parseChanges,
+  receivedStudyIds,
+  receptionFromMetadata,
+  studyFromRest,
+} from "@/lib/backend/orthanc-rest";
 import {
   inDateRange,
   sortSeries,
@@ -15,6 +27,7 @@ import {
   clampStudyLimit,
   STUDY_LIMIT,
   type Backend,
+  type ReceivedStudy,
   type RelayRequest,
   type SeriesSummary,
   type StudyQuery,
@@ -26,6 +39,23 @@ import {
 // - シリーズは Orthanc の REST の写し（rest/series・rest/studies）から組み立てる（QIDO-RS の写しは1件の検査の分しか無いため）。
 // - 中継（WADO-RS の読み取り）は、サムネイル（thumbnail・rendered）だけ、写しのある1枚の画像（rest/instances/{id}/preview.png）を返す。
 //   ほかの宛先は、確かめたうえで 404 を返す。
+// - 段 4：受け取りの記録・機器・C-ECHO・送るは、Orthanc Book の形に合わせて手で作った見本（tests/fixtures/orthanc/made）と、
+//   このプロセスの記憶の中の仕事（job）で返す。送ると、仕事は読むたびに Pending → Running → Success（機器 offline へは Failure）と進む。
+//   機器 offline は C-ECHO に答えない。
+
+/** モックの仕事（このプロセスの記憶の中だけ。Next.js が部品を分けて組んでも1つにする） */
+interface MockJob {
+  id: string;
+  modality: string;
+  study: string;
+  reads: number;
+  creationTime: string;
+}
+const JOBS_KEY = Symbol.for("tsunagi-dicom.mock-jobs");
+const jobsHolder = globalThis as typeof globalThis & { [JOBS_KEY]?: Map<string, MockJob> };
+const mockJobs = (jobsHolder[JOBS_KEY] ??= new Map<string, MockJob>());
+
+const orthancNow = (d = new Date()) => d.toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 
 export function fixturesDir(): string {
   return path.join(process.cwd(), "tests", "fixtures", "orthanc");
@@ -152,6 +182,68 @@ export function createMockBackend(): Backend {
         }
       }
       return Response.json({ error: "見本に無い" }, { status: 404 });
+    },
+
+    async receivedStudies(limit: number) {
+      const changes = parseChanges(await readJson<unknown>("made", "changes.json")).changes;
+      const [studies, series, metadata] = await Promise.all([
+        readAll<RestStudy & { Series?: string[] }>("studies"),
+        readAll<RestSeries>("series"),
+        readJson<Record<string, unknown>>("made", "instance-metadata.json"),
+      ]);
+      return receivedStudyIds(changes, limit).flatMap(({ id, date }): ReceivedStudy[] => {
+        const study = studies.find((s) => s.ID === id);
+        if (!study) return [];
+        // Orthanc の /studies/{id}/series の形（検査のシリーズの順）
+        const rows = (study.Series ?? []).flatMap((sid) => series.filter((s) => s.ID === sid));
+        const { summary, instanceCount } = studyFromRest(study, rows);
+        const first = firstInstanceId(rows);
+        const reception = receptionFromMetadata(first ? metadata[first] : undefined);
+        return [{ orthancId: id, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
+      });
+    },
+
+    async listModalities() {
+      return modalitiesFromRest(await readJson<unknown>("made", "modalities.json"));
+    },
+
+    async echoModality(modalityId: string) {
+      const list = modalitiesFromRest(await readJson<unknown>("made", "modalities.json"));
+      if (!list.some((m) => m.id === modalityId)) throw new BackendError("機器が登録されていない", 404);
+      return modalityId !== "offline";
+    },
+
+    async lookupStudy(studyInstanceUid: string) {
+      const studies = await readAll<RestStudy>("studies");
+      return studies.find((s) => s.MainDicomTags.StudyInstanceUID === studyInstanceUid)?.ID ?? null;
+    },
+
+    async sendStudy(modalityId: string, orthancStudyId: string) {
+      const list = modalitiesFromRest(await readJson<unknown>("made", "modalities.json"));
+      if (!list.some((m) => m.id === modalityId)) throw new BackendError("機器が登録されていない", 404);
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      const id = randomUUID();
+      mockJobs.set(id, { id, modality: modalityId, study: orthancStudyId, reads: 0, creationTime: orthancNow() });
+      return { jobId: id };
+    },
+
+    async jobStatus(jobId: string) {
+      const job = mockJobs.get(jobId);
+      if (!job) return null;
+      job.reads += 1;
+      const failed = job.modality === "offline";
+      const state = job.reads <= 1 ? "Pending" : job.reads === 2 ? "Running" : failed ? "Failure" : "Success";
+      const done = state === "Success" || state === "Failure";
+      return jobFromRest({
+        ID: job.id,
+        State: state,
+        Progress: state === "Pending" ? 0 : state === "Running" ? 50 : 100,
+        ErrorCode: state === "Failure" ? 9 : 0,
+        ErrorDescription: state === "Failure" ? "Error in the network protocol" : "Success",
+        CreationTime: job.creationTime,
+        CompletionTime: done ? orthancNow() : "",
+        Type: "DicomModalityStore",
+      });
     },
   };
 }

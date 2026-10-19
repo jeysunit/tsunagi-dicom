@@ -1,0 +1,35 @@
+{
+  "dtg": {
+    "AET": "DTG_SCP",
+    "AllowEcho": true,
+    "AllowFind": false,
+    "AllowGet": false,
+    "AllowMove": false,
+    "AllowStore": true,
+    "Host": "192.0.2.20",
+    "Manufacturer": "Generic",
+    "Port": 11112
+  },
+  "offline": {
+    "AET": "OFFLINE_EXAMPLE",
+    "AllowEcho": true,
+    "AllowFind": false,
+    "AllowGet": false,
+    "AllowMove": false,
+    "AllowStore": true,
+    "Host": "192.0.2.22",
+    "Manufacturer": "Generic",
+    "Port": 104
+  },
+  "workstation": {
+    "AET": "WS_EXAMPLE",
+    "AllowEcho": true,
+    "AllowFind": false,
+    "AllowGet": false,
+    "AllowMove": false,
+    "AllowStore": true,
+    "Host": "192.0.2.21",
+    "Manufacturer": "Generic",
+    "Port": 104
+  }
+}

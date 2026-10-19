@@ -1,0 +1,23 @@
+{
+  "Changes": [
+    { "ChangeType": "NewStudy", "Date": "20261017T090100", "ID": "fd432ba4-73bbd221-afb64d63-c4822c63-b059de02", "Path": "/studies/fd432ba4-73bbd221-afb64d63-c4822c63-b059de02", "ResourceType": "Study", "Seq": 1 },
+    { "ChangeType": "StableStudy", "Date": "20261017T090200", "ID": "fd432ba4-73bbd221-afb64d63-c4822c63-b059de02", "Path": "/studies/fd432ba4-73bbd221-afb64d63-c4822c63-b059de02", "ResourceType": "Study", "Seq": 2 },
+    { "ChangeType": "NewStudy", "Date": "20261017T090300", "ID": "f95c57a6-df48c83c-1f94d99d-bfc62075-92822dc9", "Path": "/studies/f95c57a6-df48c83c-1f94d99d-bfc62075-92822dc9", "ResourceType": "Study", "Seq": 3 },
+    { "ChangeType": "StableStudy", "Date": "20261017T090400", "ID": "f95c57a6-df48c83c-1f94d99d-bfc62075-92822dc9", "Path": "/studies/f95c57a6-df48c83c-1f94d99d-bfc62075-92822dc9", "ResourceType": "Study", "Seq": 4 },
+    { "ChangeType": "NewStudy", "Date": "20261017T090500", "ID": "b2f45382-2222c5f9-9b5cca10-949c2081-82cf080c", "Path": "/studies/b2f45382-2222c5f9-9b5cca10-949c2081-82cf080c", "ResourceType": "Study", "Seq": 5 },
+    { "ChangeType": "StableStudy", "Date": "20261017T090600", "ID": "b2f45382-2222c5f9-9b5cca10-949c2081-82cf080c", "Path": "/studies/b2f45382-2222c5f9-9b5cca10-949c2081-82cf080c", "ResourceType": "Study", "Seq": 6 },
+    { "ChangeType": "NewStudy", "Date": "20261017T090700", "ID": "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919", "Path": "/studies/3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919", "ResourceType": "Study", "Seq": 7 },
+    { "ChangeType": "StableStudy", "Date": "20261017T090800", "ID": "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919", "Path": "/studies/3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919", "ResourceType": "Study", "Seq": 8 },
+    { "ChangeType": "NewStudy", "Date": "20261017T103100", "ID": "43cc9d89-1ce25c2f-d0e105bb-145b760a-022b5f77", "Path": "/studies/43cc9d89-1ce25c2f-d0e105bb-145b760a-022b5f77", "ResourceType": "Study", "Seq": 9 },
+    { "ChangeType": "StableStudy", "Date": "20261017T103200", "ID": "43cc9d89-1ce25c2f-d0e105bb-145b760a-022b5f77", "Path": "/studies/43cc9d89-1ce25c2f-d0e105bb-145b760a-022b5f77", "ResourceType": "Study", "Seq": 10 },
+    { "ChangeType": "NewStudy", "Date": "20261017T113100", "ID": "84baa029-3747fabe-d3a0eb02-08d81350-9e429c80", "Path": "/studies/84baa029-3747fabe-d3a0eb02-08d81350-9e429c80", "ResourceType": "Study", "Seq": 11 },
+    { "ChangeType": "StableStudy", "Date": "20261017T113200", "ID": "84baa029-3747fabe-d3a0eb02-08d81350-9e429c80", "Path": "/studies/84baa029-3747fabe-d3a0eb02-08d81350-9e429c80", "ResourceType": "Study", "Seq": 12 },
+    { "ChangeType": "NewStudy", "Date": "20261017T123100", "ID": "d04ceb4f-50ee0483-f8fbbf2a-54eb75f2-e95088ee", "Path": "/studies/d04ceb4f-50ee0483-f8fbbf2a-54eb75f2-e95088ee", "ResourceType": "Study", "Seq": 13 },
+    { "ChangeType": "StableStudy", "Date": "20261017T123200", "ID": "d04ceb4f-50ee0483-f8fbbf2a-54eb75f2-e95088ee", "Path": "/studies/d04ceb4f-50ee0483-f8fbbf2a-54eb75f2-e95088ee", "ResourceType": "Study", "Seq": 14 },
+    { "ChangeType": "NewStudy", "Date": "20261017T133100", "ID": "91a114e5-6c9b217a-d03a2baa-6d0bea79-2888c793", "Path": "/studies/91a114e5-6c9b217a-d03a2baa-6d0bea79-2888c793", "ResourceType": "Study", "Seq": 15 },
+    { "ChangeType": "NewSeries", "Date": "20261017T133100", "ID": "4312fc63-216b1c0d-ba931d50-c875ff02-26adeafe", "Path": "/series/4312fc63-216b1c0d-ba931d50-c875ff02-26adeafe", "ResourceType": "Series", "Seq": 16 },
+    { "ChangeType": "StableStudy", "Date": "20261017T133200", "ID": "91a114e5-6c9b217a-d03a2baa-6d0bea79-2888c793", "Path": "/studies/91a114e5-6c9b217a-d03a2baa-6d0bea79-2888c793", "ResourceType": "Study", "Seq": 17 }
+  ],
+  "Done": true,
+  "Last": 17
+}

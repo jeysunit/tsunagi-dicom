@@ -44,7 +44,7 @@ async function handle(request: Request, { params }: Context): Promise<Response> 
 
 export const GET = handle;
 export const HEAD = handle;
-// 書き込みの道は段 4 まで無い。断ったことを記録に残すため、405 を返す処理を置く
+// 中継には書き込みの道を作らない（書き込みは操作ごとの画面の API。docs/spec.md の 3.2）。断ったことを記録に残すため、405 を返す処理を置く
 export const POST = handle;
 export const PUT = handle;
 export const PATCH = handle;

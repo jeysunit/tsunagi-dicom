@@ -258,6 +258,45 @@ test("CSRF の対策：token の無い要求・別の Origin の要求は断る"
   expect((await page.request.get("/api/studies")).status()).toBe(200);
 });
 
+test("段 4：管理者が受け取りの記録で届いた検査を見て、機器を確かめ、検査をほかの機器へ送る（モックの一巡り）", async () => {
+  test.setTimeout(60_000);
+  const { page } = admin;
+  const before = await (await page.request.get("/api/audit/verify")).json();
+
+  // 届いた：受け取りの記録に、検査装置の試験用のソフト（DTG_SCU）から受けた検査が出る
+  await page.goto("/received");
+  await expect(page.getByTestId("received-row").first()).toContainText("DTG_SCU");
+
+  // 送り先を確かめる（C-ECHO）
+  await page.goto("/modalities");
+  await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
+  await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText("つながった");
+
+  // 送る：詳細のパネルの「送る」から、確かめの画面を通して送り、仕事の終わりまで出す
+  await page.goto("/");
+  await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
+  await page.getByTestId("send-open").click();
+  const panel = page.getByTestId("send-panel");
+  await panel.getByTestId("send-modality").selectOption("dtg");
+  await expect(panel.getByTestId("send-confirm")).toContainText("JP-TEST-0004");
+  await expect(panel.getByTestId("send-confirm")).toContainText("dtg（DTG_SCP）");
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 15_000 });
+  await expect(panel.getByTestId("send-status")).toHaveText("送った");
+
+  // CSRF：token の無い送る要求は断る
+  const noToken = await page.request.post(`/api/studies/${STUDY}/send`, {
+    headers: { origin: LOCAL_BASE_URL },
+    data: { modality: "dtg", requestId: crypto.randomUUID() },
+  });
+  expect(noToken.status()).toBe(403);
+
+  // 記録：受け取りの記録・C-ECHO・送る（呼ぶ前・呼んだ後・終わり）が足され、つなぎは壊れていない
+  const after = await (await page.request.get("/api/audit/verify")).json();
+  expect(after.ok).toBe(true);
+  expect(after.checked).toBeGreaterThanOrEqual(before.checked + 5);
+});
+
 test("ログインの一時停止：3回続けて失敗したら、正しいパスワードでも止める。管理者は解ける", async ({ browser }) => {
   const { context, page } = await newPage(browser);
   for (let i = 0; i < 3; i++) {

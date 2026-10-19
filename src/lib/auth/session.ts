@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import { appendAudit, appendAuditWith, type AuditEntryInput, type Tx } from "@/lib/audit";
+import { appendAudit, appendAuditIf, appendAuditWith, type AuditEntryInput, type Tx } from "@/lib/audit";
 import { decodeDevRole, DEV_ROLE_COOKIE } from "@/lib/auth/dev-role-cookie";
 import { type AuthContext, resolveSession, type Stage } from "@/lib/auth/local-auth";
 import { LOCK_COOKIE, parseLockCookie } from "@/lib/auth/lock-cookie";
@@ -151,6 +151,28 @@ export async function auditWith<T>(
     return {
       value,
       input: { ...fields, actorId: session.actorId, actorRole: session.role, authMode: session.authMode, ...source },
+    };
+  });
+  return value;
+}
+
+/**
+ * auditWith と同じく記録の並びと transaction の中で write を流し、write が fields に null を返したときは記録を足さない
+ * （「もう書いてあれば書かない」を、並びの中で確かめるため）
+ */
+export async function auditIf<T>(
+  session: Session,
+  write: (tx: Tx) => Promise<{ value: T; fields: AuditFields | null }>,
+): Promise<T> {
+  const db = await getDb();
+  const source = sourceFromHeaders(await headers());
+  const { value } = await appendAuditIf(db, async (tx) => {
+    const { value, fields } = await write(tx);
+    return {
+      value,
+      input: fields
+        ? { ...fields, actorId: session.actorId, actorRole: session.role, authMode: session.authMode, ...source }
+        : null,
     };
   });
   return value;

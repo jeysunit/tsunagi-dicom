@@ -209,3 +209,41 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
     if (found!.study !== STUDY) expect((await backend.relayDicomweb({ method: "GET", target: other, search: "" })).status).toBe(404);
   });
 });
+
+describe("モックのバックエンド（段 4：受け取りの記録・機器・C-ECHO・送る）", () => {
+  it("受け取った検査を、新しい順に上限まで返す（見本の 8 件。REST で入った1件は送ってきた機器が無い）", async () => {
+    const backend = createMockBackend();
+    const all = await backend.receivedStudies(100);
+    expect(all).toHaveLength(8);
+    expect(all.map((r) => r.receivedAt)).toEqual([...all.map((r) => r.receivedAt)].sort().reverse());
+    expect(all[0]).toMatchObject({ remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6 });
+    expect(all.filter((r) => r.origin === "RestApi").map((r) => r.remoteAet)).toEqual([null]);
+    expect(all.find((r) => r.summary.studyInstanceUid === STUDY)).toMatchObject({ remoteAet: "CT_EXAMPLE", instanceCount: 4 });
+    expect(await backend.receivedStudies(2)).toHaveLength(2);
+  });
+
+  it("機器の一覧・C-ECHO（offline だけ答えない）・登録の無い機器は 404", async () => {
+    const backend = createMockBackend();
+    expect((await backend.listModalities()).map((m) => m.id)).toEqual(["dtg", "offline", "workstation"]);
+    expect(await backend.echoModality("dtg")).toBe(true);
+    expect(await backend.echoModality("offline")).toBe(false);
+    await expect(backend.echoModality("nothing")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("送ると、仕事は読むたびに Pending → Running → Success と進む（offline へは Failure）", async () => {
+    const backend = createMockBackend();
+    const id = (await backend.lookupStudy(STUDY))!;
+    expect(id).toBe("3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919");
+    expect(await backend.lookupStudy("1.2.3")).toBeNull();
+    const { jobId } = await backend.sendStudy("dtg", id);
+    const states = [];
+    for (let i = 0; i < 4; i++) states.push((await backend.jobStatus(jobId))!.state);
+    expect(states).toEqual(["Pending", "Running", "Success", "Success"]);
+    const failed = (await backend.sendStudy("offline", id)).jobId;
+    let last = (await backend.jobStatus(failed))!;
+    for (let i = 0; i < 3; i++) last = (await backend.jobStatus(failed))!;
+    expect(last).toMatchObject({ state: "Failure", errorCode: 9 });
+    await expect(backend.sendStudy("nothing", id)).rejects.toMatchObject({ status: 404 });
+    expect(await backend.jobStatus("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+});

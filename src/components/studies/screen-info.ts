@@ -10,5 +10,7 @@ export interface ScreenInfo {
   can: {
     rememberViewer: boolean;
     allValues: boolean;
+    /** ほかの機器へ送る（段 4）。検証モードで書き込みを止めているときは false */
+    send: boolean;
   };
 }

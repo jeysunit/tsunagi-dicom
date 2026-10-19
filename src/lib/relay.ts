@@ -5,7 +5,7 @@ import { BackendError, type Backend } from "@/lib/backend/types";
 // BFF の中継（/api/dicom-web/...）の中身。docs/spec.md の 3.2・原則 8。
 // 通すのは、ビューアが画像を取る道（WADO-RS の GET・HEAD の読み取り）だけ。
 // - 検索（QIDO-RS）は通さない。検索は画面の API（役割ごとの許可の一覧の対象）を使う。
-// - 書き込み（STOW-RS など）の道は段 4 まで作らない。POST・PUT・PATCH・DELETE はいつも 405 で断る。
+// - 中継には書き込み（STOW-RS など）の道を作らない（書き込みは操作ごとの画面の API）。POST・PUT・PATCH・DELETE はいつも 405 で断る。
 // - 利用者のセッションで認可し（ログインしていない・画面のロック中は route handler が断る）、役割に
 //   画像の取得（image.retrieve）が無ければ 403 で断る（段 1b）。
 // - 通したものも断ったものも、監査の記録に残す。通したものは、画像サーバーの答え（状態の番号）が出てから
@@ -27,7 +27,7 @@ export interface RelayDeps {
   record: (fields: AuditFields) => Promise<unknown>;
 }
 
-export const RELAY_READ_ONLY_MESSAGE = "中継は WADO-RS の読み取り（GET）だけ。書き込みの道は段 4 まで無い";
+export const RELAY_READ_ONLY_MESSAGE = "中継は WADO-RS の読み取り（GET）だけ。書き込みは中継では受けない（操作ごとの画面の API を使う）";
 export const RELAY_NOT_WADO_MESSAGE = "中継は WADO-RS の読み取りだけ。検索は画面の API を使う";
 export const RELAY_FORBIDDEN_MESSAGE = "この役割では画像を取れない";
 

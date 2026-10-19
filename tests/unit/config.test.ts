@@ -195,9 +195,28 @@ describe("設定の読み込み", () => {
       expect(loadConfig(base).auth.mode).toBe("dev");
     });
 
-    it("書き込みの道は段 4 まで無いので、DEV_ALLOW_WRITE=true では起動しない", () => {
-      expect(variablesOf({ ...base, DEV_ALLOW_WRITE: "true" })).toEqual(["DEV_ALLOW_WRITE"]);
-      expect(loadConfig({ ...base, DEV_ALLOW_WRITE: "false" }).auth.mode).toBe("dev");
+    it("段 4：DEV_ALLOW_WRITE は検証モード（モックだけ）でだけ使え、既定は書き込みを止める", () => {
+      // 段 4 で書き込みの操作（送る）ができたので、検証モードでは true を受ける（前は段 4 まで起動しなかった）
+      expect(loadConfig({ ...base, DEV_ALLOW_WRITE: "true" }).auth.devAllowWrite).toBe(true);
+      expect(loadConfig({ ...base, DEV_ALLOW_WRITE: "false" }).auth).toMatchObject({ mode: "dev", devAllowWrite: false });
+      expect(loadConfig(base).auth.devAllowWrite).toBe(false);
+      // 検証モードのほか（実の画像サーバーにつなぐ local）では使えない
+      expect(problemsOf({ ...base, AUTH_MODE: "local", BACKEND_MOCK: "true", DEV_ALLOW_WRITE: "true" })).toEqual([
+        { variable: "DEV_ALLOW_WRITE", message: expect.stringContaining("AUTH_MODE=dev のときだけ") },
+      ]);
+    });
+
+    it("段 4：書く資格情報は名前とパスワードの組で渡し、無ければ読む資格情報で書く", () => {
+      expect(loadConfig(base).backend.writeUsername).toBeUndefined();
+      expect(loadConfig({ ...base, BACKEND_WRITE_USERNAME: "writer", BACKEND_WRITE_PASSWORD: "w" }).backend).toMatchObject({
+        writeUsername: "writer",
+        writePassword: "w",
+      });
+      expect(variablesOf({ ...base, BACKEND_WRITE_USERNAME: "writer" })).toEqual(["BACKEND_WRITE_PASSWORD"]);
+      expect(variablesOf({ ...base, BACKEND_WRITE_PASSWORD: "w" })).toEqual(["BACKEND_WRITE_USERNAME"]);
+      expect(variablesOf({ ...base, BACKEND_WRITE_USERNAME: "writer", BACKEND_WRITE_PASSWORD: "w", BACKEND_WRITE_PASSWORD_FILE: "/x" })).toEqual([
+        "BACKEND_WRITE_PASSWORD_FILE",
+      ]);
     });
   });
 

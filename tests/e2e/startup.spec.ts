@@ -76,7 +76,12 @@ const cases: [string, Record<string, string>, string][] = [
     },
     "AUTH_MODE: dev は BACKEND_MOCK=true のときだけ起動する",
   ],
-  ["DEV_ALLOW_WRITE=true（書き込みの道は段 4 まで無い）", { DEV_ALLOW_WRITE: "true" }, "DEV_ALLOW_WRITE"],
+  // 段 4 から検証モードでは true を受けるので、検証モードのほか（local）で使ったときに止まることを確かめる
+  [
+    "DEV_ALLOW_WRITE=true を検証モードのほかで使う",
+    { AUTH_MODE: "local", DEV_ALLOW_WRITE: "true" },
+    "DEV_ALLOW_WRITE: AUTH_MODE=dev のときだけ使える",
+  ],
   [
     "SESSION_SECRET と SESSION_SECRET_FILE を同時に指定",
     { SESSION_SECRET_FILE: "/nonexistent/session_secret" },
