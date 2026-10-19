@@ -8,6 +8,7 @@ import {
   modalitiesFromRest,
   orthancTime,
   parseChanges,
+  readChanges,
   receivedStudyIds,
   receptionFromMetadata,
   studyFromRest,
@@ -54,6 +55,9 @@ interface MockJob {
 const JOBS_KEY = Symbol.for("tsunagi-dicom.mock-jobs");
 const jobsHolder = globalThis as typeof globalThis & { [JOBS_KEY]?: Map<string, MockJob> };
 const mockJobs = (jobsHolder[JOBS_KEY] ??= new Map<string, MockJob>());
+
+/** モックの /changes が 1 回に返す数の上限（実の Orthanc が切り詰める形をまねる。BFF が Last から続けて読むことを試す） */
+const MOCK_CHANGES_MAX = 5;
 
 const orthancNow = (d = new Date()) => d.toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 
@@ -185,13 +189,23 @@ export function createMockBackend(): Backend {
     },
 
     async receivedStudies(limit: number) {
-      const changes = parseChanges(await readJson<unknown>("made", "changes.json")).changes;
+      // 実の Orthanc と同じく、1 回に返す数に上限（MOCK_CHANGES_MAX）のある頁を、since・Last・Done で読み切る
+      const all = parseChanges(await readJson<unknown>("made", "changes.json"));
+      const { changes, complete } = await readChanges(
+        async (since, pageLimit) => {
+          const part = all.changes.filter((c) => c.seq > since).slice(0, Math.min(pageLimit, MOCK_CHANGES_MAX));
+          const last = part.at(-1)?.seq ?? since;
+          return { changes: part, last, done: last >= all.last };
+        },
+        0,
+        { limit: 100, maxCalls: 200 },
+      );
       const [studies, series, metadata] = await Promise.all([
         readAll<RestStudy & { Series?: string[] }>("studies"),
         readAll<RestSeries>("series"),
         readJson<Record<string, unknown>>("made", "instance-metadata.json"),
       ]);
-      return receivedStudyIds(changes, limit).flatMap(({ id, date }): ReceivedStudy[] => {
+      const received = receivedStudyIds(changes, limit).flatMap(({ id, date }): ReceivedStudy[] => {
         const study = studies.find((s) => s.ID === id);
         if (!study) return [];
         // Orthanc の /studies/{id}/series の形（検査のシリーズの順）
@@ -201,6 +215,7 @@ export function createMockBackend(): Backend {
         const reception = receptionFromMetadata(first ? metadata[first] : undefined);
         return [{ orthancId: id, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
       });
+      return { studies: received, complete };
     },
 
     async listModalities() {

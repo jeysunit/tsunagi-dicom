@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
@@ -87,6 +87,21 @@ async function readJob(token: string) {
   const { GET } = await import("@/app/api/jobs/[token]/route");
   return GET(new Request(`${ORIGIN}/api/jobs/${token}`), tokenParams(token));
 }
+async function resolveSend(requestId: string, delivered: boolean, note = "受け取る側の記録で確かめた（試験）") {
+  const { POST } = await import("@/app/api/studies/[uid]/send/resolve/route");
+  return POST(post(`/api/studies/${STUDY}/send/resolve`, { requestId, delivered, note }), uidParams(STUDY));
+}
+
+// 結果不明の試験の後に、ほかの試験が同じ検査・同じ送り先へ送れるよう、残った結果不明を管理者が照らしておく
+afterEach(async () => {
+  vi.restoreAllMocks();
+  const { unresolvedRequests } = await import("@/lib/pacs-ops");
+  const pending = await unresolvedRequests(await db(), "send", STUDY, () => true);
+  const role = state.role;
+  state.role = "admin";
+  for (const id of pending) await resolveSend(id, false);
+  state.role = role;
+});
 
 describe("受け取りの記録", () => {
   it("技師には、受け取った検査を新しい順に、時刻・送ってきた機器・画像の数とともに返し、返した検査を記録する", async () => {
@@ -374,6 +389,51 @@ describe("ほかの機器へ送る", () => {
     await readJob(job);
     await Promise.all([readJob(job), readJob(job), readJob(job)]);
     expect((await rowsOf(requestId)).filter((r) => detailOf(r).phase === "done")).toHaveLength(1);
+  });
+
+  it("結果不明の送信があるうちは、同じ検査を同じ送り先へ、新しい要求の ID でも送れない（照らし合わせの後は送れる）", async () => {
+    state.role = "technologist";
+    const { getBackend } = await import("@/lib/backend");
+    const { BackendUnknownError } = await import("@/lib/backend/types");
+    const spy = vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendUnknownError());
+    const first = crypto.randomUUID();
+    expect((await (await send({ modality: "dtg", requestId: first })).json()).outcome).toBe("unknown");
+    // 新しい要求の ID でも、同じ送り先へは断る。断ったことも記録する
+    const second = crypto.randomUUID();
+    const blocked = await send({ modality: "dtg", requestId: second });
+    expect(blocked.status).toBe(409);
+    expect((await blocked.json()).pendingRequestIds).toEqual([first]);
+    expect(detailOf((await rowsOf(second))[0]!)).toMatchObject({ reason: "unresolved", pending: [first] });
+    // 別の送り先へは送れる
+    expect((await send({ modality: "workstation", requestId: crypto.randomUUID() })).status).toBe(202);
+    expect(spy).toHaveBeenCalledTimes(2);
+    // 技師は照らし合わせを記録できない。管理者が送り先で確かめて記録する
+    expect((await resolveSend(first, false)).status).toBe(403);
+    state.role = "admin";
+    expect(await (await resolveSend(first, false)).json()).toEqual({ requestId: first, outcome: "not_delivered" });
+    expect((await rowsOf(first)).at(-1)).toMatchObject({ outcome: "failed", actorRole: "admin" });
+    expect(detailOf((await rowsOf(first)).at(-1)!)).toMatchObject({ phase: "reconcile", manual: true, delivered: false });
+    // 結果の分かった送信は、もう照らせない
+    expect((await resolveSend(first, true)).status).toBe(409);
+    // 照らした後は、同じ送り先へ送れる
+    state.role = "technologist";
+    expect((await send({ modality: "dtg", requestId: crypto.randomUUID() })).status).toBe(202);
+  });
+
+  it("照らし合わせで「届いていた」と記録した送信は、確かめの道で「届いた」を返す", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const { BackendUnknownError } = await import("@/lib/backend/types");
+    vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendUnknownError());
+    const requestId = crypto.randomUUID();
+    await send({ modality: "dtg", requestId });
+    expect((await resolveSend(requestId, true)).status).toBe(200);
+    const { GET } = await import("@/app/api/studies/[uid]/send/route");
+    const status = await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/send?requestId=${requestId}`), uidParams(STUDY));
+    expect(await status.json()).toMatchObject({ requestId, outcome: "delivered" });
+    // 照らし合わせの理由が無ければ断る
+    const { POST } = await import("@/app/api/studies/[uid]/send/resolve/route");
+    expect((await POST(post(`/api/studies/${STUDY}/send/resolve`, { requestId, delivered: true, note: " " }), uidParams(STUDY))).status).toBe(400);
   });
 });
 

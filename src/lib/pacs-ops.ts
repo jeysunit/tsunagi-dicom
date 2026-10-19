@@ -33,6 +33,35 @@ export async function rowsOfRequest(db: Db | Tx, action: AuditAction, requestId:
   });
 }
 
+/**
+ * 同じ検査の、まだ結果の分からない要求（「求めた」はあるが、結果が unknown か、結果の行がまだ無いもの）。
+ * same は、同じ要求とみなす条件（送るなら同じ送り先）。照らし合わせが済むまで、同じ操作の新しい要求を断るために使う
+ */
+export async function unresolvedRequests(
+  db: Db | Tx,
+  action: AuditAction,
+  studyInstanceUid: string,
+  same: (outcome: RequestOutcome) => boolean,
+  now = new Date(),
+): Promise<string[]> {
+  const rows = await db.auditLog.findMany({
+    where: { action, studyInstanceUid, occurredAt: { gte: new Date(now.getTime() - REQUEST_WINDOW_DAYS * 86_400_000) } },
+    orderBy: { seq: "asc" },
+  });
+  const byRequest = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const id = parseDetail(row.detail).requestId;
+    if (isRequestId(id)) byRequest.set(id, [...(byRequest.get(id) ?? []), row]);
+  }
+  const out: string[] = [];
+  for (const [id, group] of byRequest) {
+    const o = requestOutcome(group);
+    if (o.phase === "none" || !same(o)) continue;
+    if (o.phase === "requested" || (o.phase === "result" && o.outcome === "unknown")) out.push(id);
+  }
+  return out;
+}
+
 export interface RequestRow {
   actorId: string;
   outcome: string;

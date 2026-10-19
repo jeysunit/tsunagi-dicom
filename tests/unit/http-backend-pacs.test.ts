@@ -14,15 +14,16 @@ const fixtures = "tests/fixtures/orthanc";
 const read = (...p: string[]) => JSON.parse(readFileSync(path.join(fixtures, ...p), "utf8"));
 const studies = readdirSync(path.join(fixtures, "rest/studies")).map((n) => read("rest/studies", n));
 const series = readdirSync(path.join(fixtures, "rest/series")).map((n) => read("rest/series", n));
-// 変更の記録：見本の検査の出来事（番号 1〜17）の後に、ほかの出来事を 250 件並べる（新しい側から読むと、3 頁目で検査に届く）
+// 変更の記録：見本の検査の出来事（番号 1〜17）の後に、ほかの出来事を noise 件並べる
 const NOISE_ID = "aaaaaaaa-bbbbbbbb-cccccccc-dddddddd-eeeeeeee";
-const allChanges = [
+const withNoise = (noise: number) => [
   ...read("made/changes.json").Changes,
-  ...Array.from({ length: 250 }, (_, i) => ({ ChangeType: "NewInstance", Date: "20261018T000000", ID: NOISE_ID, Path: `/instances/${NOISE_ID}`, ResourceType: "Instance", Seq: 18 + i })),
+  ...Array.from({ length: noise }, (_, i) => ({ ChangeType: "NewInstance", Date: "20261018T000000", ID: NOISE_ID, Path: `/instances/${NOISE_ID}`, ResourceType: "Instance", Seq: 18 + i })),
 ];
-const LAST = allChanges.at(-1)!.Seq as number;
-/** Orthanc が 1 回に返す数を切り詰める形（見本のサーバーの上限） */
-const SERVER_MAX = 100;
+let allChanges = withNoise(250);
+const lastSeq = () => allChanges.at(-1)!.Seq as number;
+/** Orthanc が 1 回に返す数を切り詰める形（見本のサーバーの上限。BFF が求める 100 より小さい） */
+const SERVER_MAX = 50;
 const metadata = read("made/instance-metadata.json");
 const modalities = read("made/modalities.json");
 const JOB = "0a1b2c3d-4e5f-4061-8728-394a5b6c7d8e";
@@ -30,7 +31,7 @@ const JOB = "0a1b2c3d-4e5f-4061-8728-394a5b6c7d8e";
 let server: Server;
 let baseUrl: string;
 const seen: { method: string; url: string; authorization?: string; body: string }[] = [];
-let storeMode: "ok" | "drop" | "missing-id" = "ok";
+let storeMode: "ok" | "drop" | "missing-id" | number = "ok";
 
 function body(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -50,13 +51,13 @@ beforeAll(async () => {
       res.end(JSON.stringify(value));
     };
     const m = /^\/studies\/([0-9a-f-]+)(\/series)?$/.exec(url);
-    if (url === "/changes?last") return json(200, { Changes: allChanges.slice(-1), Done: true, Last: LAST });
+    if (url === "/changes?last") return json(200, { Changes: allChanges.slice(-1), Done: true, Last: lastSeq() });
     if (url.startsWith("/changes?")) {
       const q = new URL(url, "http://x").searchParams;
       const since = Number(q.get("since") ?? 0);
       const limit = Math.min(Number(q.get("limit") ?? 100), SERVER_MAX);
       const part = allChanges.filter((c) => c.Seq > since).slice(0, limit);
-      return json(200, { Changes: part, Done: part.at(-1)?.Seq === LAST, Last: part.at(-1)?.Seq ?? since });
+      return json(200, { Changes: part, Done: part.at(-1)?.Seq === lastSeq(), Last: part.at(-1)?.Seq ?? since });
     }
     if (m) {
       const study = studies.find((s) => s.ID === m[1]);
@@ -75,6 +76,7 @@ beforeAll(async () => {
     }
     if (req.method === "POST" && url === "/modalities/dtg/store") {
       if (storeMode === "drop") return req.socket.destroy();
+      if (typeof storeMode === "number") return json(storeMode, {});
       return json(200, storeMode === "missing-id" ? {} : { ID: JOB, Path: `/jobs/${JOB}` });
     }
     if (url === `/jobs/${JOB}`) {
@@ -113,21 +115,29 @@ function backend(write = true) {
 }
 
 describe("実の Orthanc の REST（段 4）", () => {
-  it("受け取りの記録：変更の記録を新しい側から 1 頁ずつさかのぼり、検査・画像の数・送ってきた機器を組み立てる", async () => {
+  it("受け取りの記録：変更の記録を since・Last・Done で読み切り（上限 50 件で切り詰めるサーバーでも抜けない）、新しい順に組み立てる", async () => {
+    allChanges = withNoise(250);
     seen.length = 0;
-    const received = await backend().receivedStudies(3);
+    const { studies: received, complete } = await backend().receivedStudies(3);
+    expect(complete).toBe(true);
     expect(received.map((r) => r.summary.patientId)).toEqual(["JP-TEST-0004", "JP-TEST-0003", "JP-TEST-0002"]);
     expect(received[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00", remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6 });
     expect(received[0]!.summary).toMatchObject({ modalities: ["MR"], seriesCount: 2 });
     expect(seen[0]!.url).toBe("/changes?last");
-    // 新しい側から 100 件ずつ（サーバーが切り詰めても抜けない）。3 頁目で検査に届いて止まる
-    expect(seen.filter((s) => s.url.startsWith("/changes?since")).map((s) => s.url)).toEqual([
-      "/changes?since=167&limit=100",
-      "/changes?since=67&limit=100",
-      "/changes?since=0&limit=100",
-    ]);
+    // 答えの Last を次の since にする（50 件ずつ返るので、267 件を 6 回で読み切る）
+    expect(seen.filter((s) => s.url.startsWith("/changes?since")).map((s) => s.url)).toEqual(
+      [0, 50, 100, 150, 200, 250].map((since) => `/changes?since=${since}&limit=100`),
+    );
     expect(seen.every((s) => s.method === "GET" && s.authorization === basic("reader", "read-secret"))).toBe(true);
-    expect(await backend().receivedStudies(100)).toHaveLength(8);
+    expect((await backend().receivedStudies(100)).studies).toHaveLength(8);
+  });
+
+  it("受け取りの記録：直近の変更の記録の読む範囲（5000 件）が受け取りの検査で埋まらなければ「ここまでしか読めていない」", async () => {
+    // 検査の出来事の後に、ほかの出来事が 6000 件ある：読む範囲（直近 5000 件）に検査が無い
+    allChanges = withNoise(6000);
+    const r = await backend().receivedStudies(100);
+    expect(r).toEqual({ studies: [], complete: false });
+    allChanges = withNoise(250);
   });
 
   it("機器の一覧と C-ECHO（本文に Timeout の JSON。POST は書く資格情報）", async () => {
@@ -188,6 +198,18 @@ describe("実の Orthanc の REST（段 4）", () => {
     await expect(b.sendStudy("dtg", "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919")).rejects.toThrow(BackendUnknownError);
     storeMode = "missing-id";
     await expect(b.sendStudy("dtg", "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919")).rejects.toThrow(BackendUnknownError);
+    // 手前の入口の 502・503・504 と、移す答え（3xx）も、受けなかったと確かめられないので結果不明
+    for (const status of [502, 503, 504, 302]) {
+      storeMode = status;
+      await expect(b.sendStudy("dtg", "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919"), String(status)).rejects.toThrow(BackendUnknownError);
+    }
+    // Orthanc が断ったと分かる答え（400・500 など）は失敗
+    for (const status of [400, 500]) {
+      storeMode = status;
+      const error = await b.sendStudy("dtg", "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919").catch((e: unknown) => e);
+      expect(error, String(status)).toBeInstanceOf(BackendError);
+      expect(error).not.toBeInstanceOf(BackendUnknownError);
+    }
     storeMode = "ok";
     // 形の誤りは Orthanc へ送らずに断る（結果不明ではない）
     await expect(b.sendStudy("dtg", "../x")).rejects.toThrow(BackendError);

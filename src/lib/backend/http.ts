@@ -21,10 +21,10 @@ import {
   modalitiesFromRest,
   orthancTime,
   parseChanges,
+  readChanges,
   receivedStudyIds,
   receptionFromMetadata,
   studyFromRest,
-  type OrthancChange,
 } from "@/lib/backend/orthanc-rest";
 import { isDicomUid, wadoRsTarget } from "@/lib/backend/relay-path";
 import {
@@ -49,11 +49,16 @@ const TIMEOUT_MS = 15_000;
 const POST_TIMEOUT_MS = 30_000;
 const MAX_SEARCH_LENGTH = 2048;
 /**
- * 受け取りの記録のために、変更の記録をさかのぼって読む数（1 回 100 件、最大 50 回＝5000 件）。
- * 1 回の数は、Orthanc が切り詰めうる上限より小さくする（Orthanc の版で実測して確かめる。docs/round-trip-test.md）
+ * 書き込みの操作の答えのうち、Orthanc が受けなかったと確かめられないもの（docs/spec.md の 3.5 の結果不明）：
+ * 手前の入口の 502・503・504（Orthanc が受けた後に、入口が待ちきれなかったことがある）と、移す答え（3xx）
  */
+export const isUncertainStatus = (status: number) => status === 502 || status === 503 || status === 504 || (status >= 300 && status < 400);
+
+/** 受け取りの記録のために、変更の記録を 1 回に求める数（Orthanc が切り詰めても、Last から続けて読む） */
 const CHANGES_PAGE = 100;
-const CHANGES_PAGES = 50;
+/** 読む範囲（直近の変更の数）と、読む回数の上限（Orthanc が 1 回の数を切り詰めても範囲を読み切れるだけの回数） */
+const CHANGES_WINDOW = 5000;
+const CHANGES_MAX_CALLS = 200;
 /** 受け取った検査を組み立てるときに、同時に Orthanc へ求める数 */
 const RECEIVED_PARALLEL = 8;
 
@@ -248,28 +253,23 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     },
 
     async receivedStudies(limit: number) {
-      // 変更の記録の最後の番号から、新しい側を先に、1 頁ずつ古い側へさかのぼって読む。
-      // Orthanc は 1 回に返す数を小さく切り詰めることがある（頁は CHANGES_PAGE 件。実測で確かめる）ので、
-      // 頁ごとに since を後ろへ下げる。受け取りの検査が limit 件そろうか、決めた頁の数で止める
+      // 変更の記録の最後の番号から CHANGES_WINDOW 件前を since にして、Orthanc Book の追い方（Last・Done）どおりに読み切る。
+      // 読む範囲の前にも記録があり、受け取りの検査が limit 件に届かなければ「ここまでしか読めていない」（complete=false）
       const head = parseChanges(await restJsonOrNull("changes?last"));
-      const changes: OrthancChange[] = [];
-      for (let page = 0; page < CHANGES_PAGES; page++) {
-        const upper = head.last - page * CHANGES_PAGE;
-        if (upper <= 0) break;
-        const since = Math.max(0, upper - CHANGES_PAGE);
-        const part = parseChanges(
-          await restJsonOrNull(`changes?${new URLSearchParams({ since: String(since), limit: String(CHANGES_PAGE) })}`),
-        );
-        changes.push(...part.changes.filter((c) => c.seq > since && c.seq <= upper));
-        if (receivedStudyIds(changes, limit).length >= limit) break;
-      }
-      const ids = receivedStudyIds(changes, limit);
+      const from = Math.max(0, head.last - CHANGES_WINDOW);
+      const read = await readChanges(
+        async (since, pageLimit) =>
+          parseChanges(await restJsonOrNull(`changes?${new URLSearchParams({ since: String(since), limit: String(pageLimit) })}`)),
+        from,
+        { limit: CHANGES_PAGE, maxCalls: CHANGES_MAX_CALLS },
+      );
+      const ids = receivedStudyIds(read.changes, limit);
       const out: ReceivedStudy[] = [];
       for (let i = 0; i < ids.length; i += RECEIVED_PARALLEL) {
         const batch = await Promise.all(ids.slice(i, i + RECEIVED_PARALLEL).map((x) => receivedOne(x.id, x.date)));
         for (const r of batch) if (r) out.push(r);
       }
-      return out;
+      return { studies: out, complete: read.complete && (from === 0 || ids.length >= limit) };
     },
 
     async listModalities() {
@@ -316,6 +316,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       }
       if (!res.ok) {
         await res.body?.cancel();
+        // 手前の入口の 502・503・504 と移す答え（3xx）は、Orthanc が受けなかったと確かめられない（受けた後に答えが失われたかもしれない）
+        if (isUncertainStatus(res.status)) throw new BackendUnknownError();
         throw new BackendError(`画像サーバーの応答が ${res.status}`);
       }
       let body: unknown;

@@ -6,7 +6,18 @@ import { can, PERMISSIONS, ROLE_PERMISSIONS, ROLES, type Permission, type Role }
 // 段 4 の操作（受け取りの記録・機器の確かめ・送る）は、管理者と技師（docs/spec.md の 3.6。推奨の案）
 const PACS_OPS = ["receive.view", "modality.check", "study.send"] as const;
 const EXPECTED: Record<Role, Permission[]> = {
-  admin: ["study.search", "image.retrieve", "dicom.all_values", "audit.verify", "user.manage", "viewer.remember", "viewer.defaults", ...PACS_OPS],
+  admin: [
+    "study.search",
+    "image.retrieve",
+    "dicom.all_values",
+    "audit.verify",
+    "user.manage",
+    "viewer.remember",
+    "viewer.defaults",
+    ...PACS_OPS,
+    // 結果の分からない送信の照らし合わせは管理者だけ
+    "pacs.reconcile",
+  ],
   doctor: ["study.search", "image.retrieve", "viewer.remember"],
   technologist: ["study.search", "image.retrieve", "dicom.all_values", "viewer.remember", ...PACS_OPS],
   viewer: ["study.search", "image.retrieve"],

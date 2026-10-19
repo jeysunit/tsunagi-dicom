@@ -47,6 +47,27 @@ export function parseChanges(json: unknown): OrthancChanges {
   return { changes, last: typeof o.Last === "number" ? o.Last : 0, done: o.Done === true };
 }
 
+/**
+ * 変更の記録を、Orthanc Book の追い方（since・limit・Last・Done）どおりに読む：`from` の番号の後から、
+ * 答えの Last を次の since にして、Done になるまで読み切る。Orthanc が 1 回に返す数を切り詰めても、区間の中は抜けない。
+ * 読む回数が上限（maxCalls）に届いたら、そこで止めて complete=false を返す
+ */
+export async function readChanges(
+  fetchPage: (since: number, limit: number) => Promise<OrthancChanges>,
+  from: number,
+  options: { limit: number; maxCalls: number },
+): Promise<{ changes: OrthancChange[]; complete: boolean }> {
+  const changes: OrthancChange[] = [];
+  let since = from;
+  for (let call = 0; call < options.maxCalls; call++) {
+    const page = await fetchPage(since, options.limit);
+    changes.push(...page.changes.filter((c) => c.seq > since));
+    if (page.done || page.changes.length === 0 || page.last <= since) return { changes, complete: true };
+    since = page.last;
+  }
+  return { changes, complete: false };
+}
+
 /** 受け取った検査（新しい順）。検査の新しい・落ち着いたの出来事のうち、いちばん新しい時刻を受け取った時刻にする */
 export function receivedStudyIds(changes: readonly OrthancChange[], limit: number): { id: string; date: string }[] {
   const latest = new Map<string, { date: string; seq: number }>();

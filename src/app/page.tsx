@@ -53,6 +53,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       allValues: can(role, "dicom.all_values"),
       // 検証モードで書き込みを止めているときは、送るのボタンを出さない（BFF の側でも断る）
       send: can(role, "study.send") && (config.auth.mode !== "dev" || !!config.auth.devAllowWrite),
+      reconcile: can(role, "pacs.reconcile"),
     },
   };
 

@@ -11,15 +11,16 @@ export async function GET() {
   try {
     const session = await requireSession();
     await requirePermission(session, "receive.view", { action: "receive_log" });
-    const { items, returned } = await receiveLogView(getBackend(), session.role);
+    const { items, returned, complete } = await receiveLogView(getBackend(), session.role);
     const patients = new Set(returned.map((r) => r.patientId));
     await audit(session, {
       action: "receive_log",
       patientId: patients.size === 1 ? [...patients][0]! : null,
       studyInstanceUid: returned.length === 1 ? returned[0]!.studyInstanceUid : null,
-      detail: { results: returned.length, returned: returned.map((s) => [s.patientId, s.studyInstanceUid]) },
+      detail: { results: returned.length, complete, returned: returned.map((s) => [s.patientId, s.studyInstanceUid]) },
     });
-    return Response.json({ items });
+    // complete=false：読む範囲の上限で止まり、もっと古い受け取りを読めていない（画面は「ここまでしか読めていない」と出す）
+    return Response.json({ items, complete });
   } catch (error) {
     return errorResponse(error);
   }

@@ -191,7 +191,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
   - **読む元**：Orthanc の変更の記録（`/changes`。新しい検査・新しい画像・検査が落ち着いた（`StableStudy`）の出来事に、時刻と続き番号が付く）と、画像（インスタンス）のメタデータの `RemoteAET`（C-STORE で送ってきた側の AE タイトル）。どちらも Orthanc Book（REST API の「Tracking changes」、「Terminology of advanced features」の Metadata の節。2026-10-19 22:45 に本文を取り出して読んだ）で確かめた。REST で入ったか DICOM で入ったか（`Origin`）・受け取った時刻（`ReceptionDate`）・呼ばれた側の AE タイトル（`CalledAET`）などのほかのメタデータは、Orthanc の版で実測してから使う（Lua の `OnStoredInstance` の `origin` には `RequestOrigin`・`RemoteAet`・`CalledAet`・`RemoteIp` があると Orthanc Book の Lua の頁にある）。
   - 変更の記録は Orthanc の中で数に限りがあり、古い出来事は残らないことがある。受け取りの全部の記録の正本は Orthanc とその記録で、tsunagi-dicom の画面は「いまの Orthanc から読める範囲」を見せるものと示す。
   - 開いたことは監査の記録（`receive_log`）に残す。返した検査の患者 ID と StudyInstanceUID の組を、検索の記録と同じ形で残す。
-  - **段 4 の実装**：頁は `/received`、画面の API は `GET /api/receive-log`（役割の操作 `receive.view`）。BFF は `/changes?last` で最後の番号を読み、新しい側から 100 件ずつ、5000 件（50 回）までさかのぼって読む（受け取りの検査が上限の数だけそろえば止める。Orthanc が 1 回に返す数を切り詰めても抜けないよう、頁ごとに `since` を下げる）。検査ごとに `/studies/{id}`・`/studies/{id}/series`・最初の画像の `/instances/{id}/metadata?expand` を読む。行の「一覧で開く」は、患者 ID で絞った検査の一覧へ移す（決まった URL で直に開く形は段 8）。REST で入った検査（`Origin` が `RestApi`）には「取り込み」の印を出す（`Origin` の名前は実測の前の想定）。返す項目は許可の一覧の `receive`（`receivedAt`・`remoteAet`・`origin`・`receivedInstances`）と `study`。
+  - **段 4 の実装**：頁は `/received`、画面の API は `GET /api/receive-log`（役割の操作 `receive.view`）。BFF は `/changes?last` で最後の番号を読み、その 5000 件前を `since` にして、Orthanc Book の追い方（答えの `Last` を次の `since` にし、`Done` まで読む。1 回に 100 件を求める）で読み切る。Orthanc が 1 回に返す数を切り詰めても、区間の中は抜けない。読む範囲の前にも記録があり、受け取りの検査が上限の数に届かなかったとき（直近の変更が受け取りの検査のほかの出来事で埋まったときなど）と、読む回数の上限（200 回）に届いたときは、画面に「ここまでしか読めていない」と出す（API の `complete` が `false`）。検査ごとに `/studies/{id}`・`/studies/{id}/series`・最初の画像の `/instances/{id}/metadata?expand` を読む。行の「一覧で開く」は、患者 ID で絞った検査の一覧へ移す（決まった URL で直に開く形は段 8）。REST で入った検査（`Origin` が `RestApi`）には「取り込み」の印を出す（`Origin` の名前は実測の前の想定）。返す項目は許可の一覧の `receive`（`receivedAt`・`remoteAet`・`origin`・`receivedInstances`）と `study`。
 - **機器の一覧**（段 4）：Orthanc に登録された機器（`/modalities?expand`）を出す。名前（Orthanc の中の ID）と AE タイトルは、送る操作の役割に出す。住所（Host・Port）と、機器ごとの許可（`AllowEcho` など）は、機器の管理の役割にだけ返す（原則 8）。
   - **段 4 の実装**：頁は `/modalities`、画面の API は `GET /api/modalities`（役割の操作 `modality.check`）。返す項目は許可の一覧の `modality`（既定では、管理者に `id`・`aet`・`host`・`port`・`manufacturer`・`allowEcho`・`allowStore`、ほかの役割に `id`・`aet`）。
 - **つながるかの確かめ**（段 4）：機器を選んで「確かめる」を押すと、Orthanc から機器へ C-ECHO を送る（`POST /modalities/{id}/echo`、本文に `{"Timeout": 10}`。Orthanc 1.7.0 からは本文の JSON が要る）。結果（つながった・つながらない）を出し、監査の記録（`echo`）に残す。
@@ -203,7 +203,8 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 - 詳細のパネルの「送る」から、登録された機器を選んで、検査をまるごと送る。Orthanc の C-STORE の送信（`POST /modalities/{id}/store`）を、非同期（本文に `"Synchronous": false`）で求め、Orthanc の仕事（job）の ID を受ける。
 - **結果を見せる**：仕事の状態（`/jobs/{id}` の `State`：Pending・Running・Success・Failure・Paused・Retry と、`Progress`・`ErrorCode`・`ErrorDescription`）を、終わるまで数秒ごとに読んで出す。返すのは状態・進み・誤りの番号と文言・始めと終わりの時刻だけにする（仕事の中身の `Content` はそのまま返さない。原則 8）。
   - 仕事の ID は、BFF が求めた送信のものだけを読めるようにする（ほかの仕事を、ID を替えて覗けないように）。**段 4 で決めた形**：BFF が仕事の ID・要求の ID・検査・送り先・送った利用者・期限（24 時間）を、`SESSION_SECRET` から HKDF で導いた鍵の AES-256-GCM で暗号化した token にして画面へ渡し、読むとき（`GET /api/jobs/{token}`）に、書き換えられていないこと・期限・利用者を確かめる（BFF のデータベースに写さずに済む。token は URL に入るが、中身の UID・利用者名は読めない）。書き換えた token・期限の過ぎた token・ほかの利用者の token は 404。`SESSION_SECRET` を替えると、それまでの token は読めなくなる（送った結果は監査の記録と Orthanc の仕事の記録に残る）。
-  - **段 4 の実装**：画面の API は `POST /api/studies/{uid}/send`（本文は `modality` と `requestId`。役割の操作 `study.send`）。答えは 202 と `outcome`（`accepted`：仕事を受けた・`unknown`：結果不明・`failed`：Orthanc が断った）。同じ要求の ID の結果は `GET /api/studies/{uid}/send?requestId=…` で、送り直さずに確かめる。要求の ID は、同じ操作の直近 7 日の記録の中から探す（索引 `action`・`occurredAt`）。同じ要求の ID で別の検査・別の送り先・別の利用者を求めると 409。断った行（役割・検証モード）は「求めた」と数えない。結果不明のうち仕事の ID も分からないものを、管理者が記録から照らす画面は、段 7 の保管の状態（最近の仕事）と一緒に作る。
+  - **段 4 の実装**：画面の API は `POST /api/studies/{uid}/send`（本文は `modality` と `requestId`。役割の操作 `study.send`）。答えは 202 と `outcome`（`accepted`：仕事を受けた・`unknown`：結果不明・`failed`：Orthanc が断った）。同じ要求の ID の結果は `GET /api/studies/{uid}/send?requestId=…` で、送り直さずに確かめる。要求の ID は、同じ操作の直近 7 日の記録の中から探す（索引 `action`・`occurredAt`）。同じ要求の ID で別の検査・別の送り先・別の利用者を求めると 409。断った行（役割・検証モード）は「求めた」と数えない。**結果不明の送信があるうちは、同じ検査を同じ送り先へ、新しい要求の ID でも送らない**（BFF が 409 で断り、断ったことを記録する。画面も、結果不明の間は「送る」を押せない）。仕事の ID が分かっていれば、仕事の状態を読んで照らす。仕事の ID も分からないものは、管理者が送り先（受け取る側の記録）で届いたかを確かめ、確かめた内容と結果を記録に足す（`POST /api/studies/{uid}/send/resolve`。役割の操作 `pacs.reconcile`。Orthanc には何も求めない）。照らすまで、同じ検査を同じ送り先へは送れない。
+  - Orthanc が受けなかったと確かめられない答え（時間切れ・接続の切れ・手前の入口の 502・503・504・移す答え（3xx）・答えに仕事の ID が無い）は、どれも結果不明にする。Orthanc が断ったと分かる答え（400・404・500 など）だけを失敗にする。
 - **確かめの画面**：送る前に、検査（患者 ID・氏名・検査日・モダリティ・画像の数）と送り先（機器の名前・AE タイトル）を並べ、「送る」を押して始める。
 - 検査の UID から Orthanc の中の ID を引くのは `POST /tools/lookup`（答えの `Type` が `Study` のものだけを使う）。
 - 送ったことは監査の記録（`send`）に残す（下の「書き込みの操作の共通の決まり」）。仕事の終わり（成功・失敗）は、BFF が初めて終わりを読んだときに記録する。画面を閉じて終わりを読まなかった送信の結果は、Orthanc の仕事の記録（数に限りがある）で確かめる。
@@ -286,6 +287,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 | 受け取りの記録を見る（段 4） | ○ | — | ○ | — |
 | 機器の一覧（名前と AE タイトル）・つながるかの確かめ（C-ECHO。段 4） | ○ | — | ○ | — |
 | ほかの機器へ送る（段 4） | ○ | — | ○ | — |
+| 結果の分からない送信を、送り先で確かめた結果として記録に足す（照らし合わせ。段 4） | ○ | — | — | — |
 | 書き出し（ZIP。段 5） | ○ | ○ | ○ | — |
 | 削除（理由を必須・再認証。段 5） | ○ | — | — | — |
 | 取り込み（段 6） | ○ | — | ○ | — |
