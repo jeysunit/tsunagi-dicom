@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHttpBackend } from "@/lib/backend/http";
+import { readChanges } from "@/lib/backend/orthanc-rest";
 import { BackendError, BackendUnknownError } from "@/lib/backend/types";
 
 // 段 4：実の Orthanc の REST への要求（受け取りの記録・機器・C-ECHO・引き当て・送る・仕事の状態）を、
@@ -34,6 +35,7 @@ const seen: { method: string; url: string; authorization?: string; body: string 
 let storeMode: "ok" | "drop" | "missing-id" | number = "ok";
 let deleteMode: "ok" | number = "ok";
 const DUP_UID = "1.2.826.0.1.3680043.8.498.777";
+let changesMode: "ok" | "empty" | "stuck" = "ok";
 
 function body(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -59,6 +61,10 @@ beforeAll(async () => {
       const since = Number(q.get("since") ?? 0);
       const limit = Math.min(Number(q.get("limit") ?? 100), SERVER_MAX);
       const part = allChanges.filter((c) => c.Seq > since).slice(0, limit);
+      // 壊れた答えの形：2 頁目から、Done でないのに空の頁、または Last が進まない頁を返す
+      if (changesMode !== "ok" && since > 0) {
+        return json(200, { Changes: changesMode === "empty" ? [] : part, Done: false, Last: since });
+      }
       return json(200, { Changes: part, Done: part.at(-1)?.Seq === lastSeq(), Last: part.at(-1)?.Seq ?? since });
     }
     if (m) {
@@ -157,6 +163,28 @@ describe("実の Orthanc の REST（段 4）", () => {
     const r = await backend().receivedStudies(100);
     expect(r).toEqual({ studies: [], complete: false });
     allChanges = withNoise(250);
+  });
+
+  it("受け取りの記録：Done でないのに空の頁・Last が進まない頁が来たら、そこで止めて「ここまでしか読めていない」", async () => {
+    for (const mode of ["empty", "stuck"] as const) {
+      changesMode = mode;
+      seen.length = 0;
+      const r = await backend().receivedStudies(100);
+      expect(r.complete, mode).toBe(false);
+      // 同じ since を読み続けない（1 頁目と、止まった 2 頁目の 2 回だけ）
+      expect(seen.filter((s) => s.url.startsWith("/changes?since")), mode).toHaveLength(2);
+    }
+    changesMode = "ok";
+  });
+
+  it("readChanges：読み切ったとするのは Done のときだけ（いまの記録が空で Done なら、読み切った）", async () => {
+    const c = (seq: number) => ({ seq, changeType: "NewStudy", resourceType: "Study", id: NOISE_ID, date: "" });
+    const opts = { limit: 100, maxCalls: 5 };
+    expect(await readChanges(async () => ({ changes: [], last: 0, done: true }), 0, opts)).toEqual({ changes: [], complete: true });
+    expect((await readChanges(async () => ({ changes: [], last: 0, done: false }), 0, opts)).complete).toBe(false);
+    expect((await readChanges(async () => ({ changes: [c(1)], last: 0, done: false }), 0, opts)).complete).toBe(false);
+    // 回数の上限に届けば未完了
+    expect((await readChanges(async (since) => ({ changes: [c(since + 1)], last: since + 1, done: false }), 0, opts)).complete).toBe(false);
   });
 
   it("機器の一覧と C-ECHO（本文に Timeout の JSON。POST は書く資格情報）", async () => {
