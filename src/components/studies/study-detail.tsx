@@ -202,8 +202,11 @@ export function StudyDetailPanel({
     queryFn: () => fetchDetail(uid),
     enabled: uid !== "" && fetchEnabled,
     gcTime: 0,
+    // 取る許しが出るたびに必ず取り直す。gcTime: 0 でも、行を離れてすぐ戻ると（破棄の前に）キャッシュが残ることがあるため
+    staleTime: 0,
   });
-  const data = fetchEnabled ? detail.data : undefined;
+  // 取り直している間は、前に取った中身（残っていても）を出さない。出すのは、このときの取得が終わってから
+  const data = fetchEnabled && !detail.isFetching ? detail.data : undefined;
   const failed = fetchEnabled && detail.isError;
   // 詳細が届くまでは一覧の行の値で描き、届いたら詳細の値にする。
   // 状態の値（検像・読影・緊急・ブックマーク・覚えたビューア）は、状態を変えたあと読み直す一覧の行の値を優先する
