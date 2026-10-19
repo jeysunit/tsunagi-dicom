@@ -39,10 +39,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const signedIn = state.kind === "active" || state.kind === "locked" ? state.session : undefined;
   const theme = signedIn ? await getTheme(await getDb(), signedIn.actorId) : DEFAULT_THEME;
 
-  const main = <main className="mx-auto max-w-screen-2xl px-6 py-6">{children}</main>;
+  const main = <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-6 py-4">{children}</main>;
   return (
     <html lang="ja" data-theme={theme}>
-      <body className="min-h-screen antialiased">
+      <body className="flex min-h-dvh flex-col antialiased">
         {config.auth.mode === "dev" && state.kind === "active" && <DevModeBand role={state.session.role} />}
         <SiteHeader
           user={user}
