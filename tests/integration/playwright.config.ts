@@ -17,13 +17,16 @@ export default defineConfig({
   retries: 0,
   forbidOnly: !!process.env.CI,
   timeout: 120_000,
-  reporter: process.env.CI
-    ? [["list"], ["html", { open: "never", outputFolder: path.join(root, "playwright-report/integration") }]]
-    : "list",
+  // HTML の報告は、操作の手順の名前に入力した値が入りうるので作らない（CI の記録の list だけ）
+  reporter: "list",
   use: {
     baseURL: bffUrl,
     locale: "ja-JP",
-    trace: "retain-on-failure",
+    // trace は入力した値（試験だけの管理者のパスワード）と通信の中身を残し、CI の成果物として上がるので、取らない。
+    // 失敗の手がかりは、画面の写し（スクリーンショット。パスワードの欄は伏せ字で写る）と error-context.md・コンテナの記録
+    trace: "off",
+    screenshot: "only-on-failure",
+    video: "off",
   },
   projects: [
     {

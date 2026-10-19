@@ -39,8 +39,11 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: integration-report
+          name: integration-results
+          # 測った値（名前・数・状態だけ）と、失敗したときの画面の写しだけを上げる（trace と HTML の報告は作らない。
+          # 入力した資格情報が残りうるため。tests/integration/playwright.config.ts）
           path: |
-            playwright-report/integration/
-            test-results/integration/
+            test-results/integration/observations.json
+            test-results/integration/**/*.png
+          if-no-files-found: ignore
           retention-days: 7

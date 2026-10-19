@@ -2,6 +2,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from "@pla
 import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
 import { syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
+import { readAudit, requestTrails } from "./support/audit-db";
 import { startGate, type Gate } from "./support/gate";
 import { observe, writeObservations } from "./support/observations";
 import { listJobs, lookupStudy, orthanc, orthancJson, waitFor, type OrthancJob } from "./support/orthanc";
@@ -239,11 +240,10 @@ test("3 検査の一覧・詳細：本物のデータ（DICOMweb の QIDO-RS と
   expect(await metadata.json()).toHaveLength(A.sopInstanceUids.length);
   expect((await page.request.get("/api/dicom-web/studies")).status()).toBe(404);
 
-  // 画像サーバーのパスワードは、頁にも API の答えにも出ない
+  // 画像サーバーのパスワードは、頁にも API の答えにも出ない（失敗したときの文言に値を出さないよう、真偽だけを比べる）
   const { password } = orthancUser();
-  expect(await page.content()).not.toContain(password);
-  expect(await list.text()).not.toContain(password);
-  expect(await detail.text()).not.toContain(password);
+  const leaked = [await page.content(), await list.text(), await detail.text()].some((text) => text.includes(password));
+  expect(leaked, "画像サーバーのパスワードが頁か API の答えに出た").toBe(false);
 });
 
 test("4 送信：tsunagi-dicom から storescp へ送り、storescp に同じ UID の画像が同じ数だけ届く", async () => {
@@ -413,7 +413,34 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
   expect(res.status()).toBe(200);
   const body = await res.json();
   expect(body.ok).toBe(true);
-  // 受け取り・機器・一覧・詳細・送る（3 回分の求めた・結果）・書き出し・削除・照らし合わせ。少なめに数える
-  expect(body.checked).toBeGreaterThanOrEqual(auditBefore + 15);
+  expect(body.checked).toBeGreaterThan(auditBefore);
   observe("audit.rowsAdded", body.checked - auditBefore);
+
+  // 操作ごとの行：つなぎが正しいだけでなく、書き込みの操作ごとに「求めた」「結果」「終わり」が要求の ID で結ばれている
+  const rows = readAudit();
+  const trailsOf = (action: string, study: SyntheticStudy) => [...requestTrails(rows, action, study.studyInstanceUid).values()];
+  // 送る A：送れた 1 回と、送り先を止めて送れなかった 1 回
+  expect(trailsOf("send", A)).toEqual(
+    expect.arrayContaining([
+      ["request:success", "result:success", "done:success"],
+      ["request:success", "result:success", "done:failed"],
+    ]),
+  );
+  expect(trailsOf("send", A)).toHaveLength(2);
+  // 送る C：答えが失われた 1 回（結果不明 → 管理者が届いていたと照らした）と、照らした後の 1 回
+  expect(trailsOf("send", C)).toEqual([
+    ["request:success", "result:unknown", "reconcile:success"],
+    ["request:success", "result:success", "done:success"],
+  ]);
+  // 結果不明の間に重ねて送ろうとした要求は、Orthanc を呼ばずに断った行だけが残る
+  expect(
+    rows.filter((r) => r.action === "send" && r.studyInstanceUid === C.studyInstanceUid && r.outcome === "denied" && r.detail.reason === "unresolved"),
+  ).toHaveLength(1);
+  // 削除 B：求めた → 送る直前（dispatch）→ 結果
+  expect(trailsOf("delete", B)).toEqual([["request:success", "dispatch:success", "result:success"]]);
+  // 書き出し A：求めた → 流し終えた
+  expect(trailsOf("export", A)).toEqual([["request:success", "result:success"]]);
+  // C-ECHO：つながった・つながらないの両方が、送り先の名前つきで残る
+  const echoes = rows.filter((r) => r.action === "echo" && r.detail.modality === ITEST.scp.id).map((r) => r.detail.connected);
+  expect(echoes).toEqual(expect.arrayContaining([true, false]));
 });
