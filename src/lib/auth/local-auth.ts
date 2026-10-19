@@ -614,15 +614,11 @@ async function closeOtherSessions(ctx: AuthContext, userId: string, keepId?: str
 }
 
 /** いまのセッションを、上げた後の認証の世代に合わせる（上げる前の世代のままのときだけ） */
-async function followVersion(
-  ctx: AuthContext,
-  session: SessionRow,
-  from: number,
-  extra: { pendingTotpEnc?: null; reauthAt?: null; reauthMfaAt?: null } = {},
-) {
+async function followVersion(ctx: AuthContext, session: SessionRow, from: number, extra: { pendingTotpEnc?: null } = {}) {
+  // 認証の世代が上がったら（パスワードの変更・TOTP の登録）、前の世代で通した再認証の印は持ち越さない
   await ctx.db.session.updateMany({
     where: { id: session.id, credentialVersion: from },
-    data: { credentialVersion: from + 1, ...extra },
+    data: { credentialVersion: from + 1, reauthAt: null, reauthMfaAt: null, ...extra },
   });
 }
 
@@ -834,7 +830,7 @@ export async function changePassword(
     throw new AuthFailure(409, "パスワードを変更できませんでした（ほかの画面で先に変更したか、このセッションが無効です）。頁を開き直してください");
   }
   // 変えた人のいまのセッションは新しい世代に合わせ、前に通した再認証は消す（パスワードを変えた後に持ち越さない）
-  if (session.stage === "active") await followVersion(ctx, session, user.credentialVersion, { reauthAt: null, reauthMfaAt: null });
+  if (session.stage === "active") await followVersion(ctx, session, user.credentialVersion);
   await closeOtherSessions(ctx, user.id, session.id);
   const updated: User = { ...user, ...changes, credentialVersion: user.credentialVersion + 1 };
   await record(ctx, actorOf(user), { action: "password_change", outcome: "success" });
@@ -865,7 +861,22 @@ export async function reauthenticate(
   const withTotp = input.code !== undefined && input.code !== "" && user.totpSecretEnc !== null;
   const totp = await verifyAgain(ctx, user, withTotp ? input : { password: input.password }, "reauth", { requireTotp: withTotp });
   const at = now(ctx);
-  await ctx.db.session.update({ where: { id: session.id }, data: { reauthAt: at, ...(totp ? { reauthMfaAt: at } : {}) } });
+  // 確かめた時の認証の世代と役割のままのときだけ印を書く（確かめている間に、同じ利用者のパスワードの変更・TOTP の登録・
+  // 役割の変更が先に済んでいれば、前の資格情報・前の役割で通した印を新しい状態に書かない）。ロックしていないことも条件にする
+  const written = await ctx.db.session.updateMany({
+    where: {
+      id: session.id,
+      stage: "active",
+      lockedAt: null,
+      credentialVersion: user.credentialVersion,
+      user: { credentialVersion: user.credentialVersion, role: user.role, status: "active" },
+    },
+    data: { reauthAt: at, ...(totp ? { reauthMfaAt: at } : {}) },
+  });
+  if (written.count !== 1) {
+    await record(ctx, actorOf(user), { action: "reauth", outcome: "denied", detail: { reason: "changed_during_reauth" } });
+    throw new AuthFailure(409, "ログインしていません。再度ログインしてください");
+  }
   await record(ctx, actorOf(user), { action: "reauth", outcome: "success", detail: { totp } });
 }
 
@@ -1118,6 +1129,8 @@ export async function updateUser(
     throw new AuthFailure(409, NO_ADMIN_LEFT);
   }
   if (roleChanged) {
+    // 役割が変わったら、その利用者のどのセッションの再認証の印も消す（前の役割で通した印を、格上げの後に使わせない）
+    await ctx.db.session.updateMany({ where: { userId: target.id }, data: { reauthAt: null, reauthMfaAt: null } });
     await record(ctx, by, { action: "role_change", detail: { target: target.username, from: target.role, to: change.role } });
   }
   if (statusChanged) {

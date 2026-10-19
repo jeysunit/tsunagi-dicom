@@ -1025,6 +1025,25 @@ describe("レビューと安全の確かめで直したこと", () => {
     expect(changed.session.reauthAt).toBeNull();
     expect(changed.session.reauthMfaAt).toBeNull();
     expect(() => assertRecentReauth(ctx, changed.session, changed.user)).toThrow(AuthFailure);
+    // パスワードの変更の前に読んだ利用者（前の資格情報）で確かめても、印は書かない（並んで走った再認証が、変更の後に印を戻さない）
+    await expect(reauthenticate(ctx, before.session, before.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
+    expect((await sessionOf(db, done.rotated!.token)).session.reauthAt).toBeNull();
+  });
+
+  it("役割が変わったら、その利用者のどのセッションの再認証の印も消す（前の役割で通した印を、格上げの後に使わせない）", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    expect((await sessionOf(db, token)).session.reauthMfaAt).not.toBeNull();
+    await updateUser(ctx, s.user.id, { role: "admin" }, ADMIN);
+    const after = await sessionOf(db, token);
+    expect(after.session.reauthAt).toBeNull();
+    expect(after.session.reauthMfaAt).toBeNull();
+    expect(() => assertRecentReauth(ctx, after.session, after.user, { requireTotp: true })).toThrow(AuthFailure);
+    // 役割の変更の前に読んだ利用者（前の役割）で確かめても、印は書かない
+    await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
+    expect((await sessionOf(db, token)).session.reauthAt).toBeNull();
   });
 
   it("ログインした後のパスワードの変更は、いまのパスワードと TOTP を求める", async () => {
