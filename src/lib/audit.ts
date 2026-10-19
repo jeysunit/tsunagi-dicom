@@ -40,10 +40,18 @@ export const AUDIT_ACTIONS = [
   // 段 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
   // 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、段 3 で道を外すまでこの名前で記録した
   "study_state",
+  // 段 4（docs/spec.md の 3.3〜3.5）：受け取りの記録を開いた・機器へ C-ECHO・ほかの機器へ送る（detail の phase：
+  // request＝Orthanc を呼ぶ前、result＝呼んだ後、done＝仕事の終わりを読んだ、reconcile＝結果不明を照らした）
+  "receive_log",
+  "echo",
+  "send",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
-/** success：通した。denied：このアプリが断った。failed：画像サーバーが失敗を返した・つながらなかった */
-export type AuditOutcome = "success" | "denied" | "failed";
+/**
+ * success：通した。denied：このアプリが断った。failed：画像サーバーが失敗を返した・つながらなかった。
+ * unknown：書き込みの操作で、Orthanc を呼んだ後の結果が分からない（docs/spec.md の 3.5 の結果不明）
+ */
+export type AuditOutcome = "success" | "denied" | "failed" | "unknown";
 
 /** 最初の行の prevHash */
 export const GENESIS_HASH = "0".repeat(64);
@@ -135,9 +143,21 @@ export function appendAuditWith<T>(
   db: Db,
   write: (tx: Tx) => Promise<{ value: T; input: AuditEntryInput }>,
 ): Promise<{ value: T; row: AuditRow }> {
+  return appendAuditIf(db, write) as Promise<{ value: T; row: AuditRow }>;
+}
+
+/**
+ * appendAuditWith と同じ並びと transaction で、write が input に null を返したときは記録を足さない
+ * （記録の並びの中で「もう書いてあるか」を確かめてから書くため。docs/spec.md の 3.5。送った仕事の終わりの記録など）
+ */
+export function appendAuditIf<T>(
+  db: Db,
+  write: (tx: Tx) => Promise<{ value: T; input: AuditEntryInput | null }>,
+): Promise<{ value: T; row: AuditRow | null }> {
   const run = queue.tail.then(() =>
     db.$transaction(async (tx) => {
       const { value, input } = await write(tx);
+      if (input === null) return { value, row: null };
       const last = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
       const base: Omit<AuditRow, "hash"> = {
         sourceAddressUnverified: input.sourceAddressUnverified ?? null,

@@ -110,8 +110,19 @@ describe("監査の記録", () => {
         .map(([k]) => k)
         .sort();
       // appendAuditWith は、BFF のデータベースの変更と記録の1行の追記を、1つの transaction で書くもの（段 2）。
+      // appendAuditIf は、同じ並びの中で「もう書いてあれば書かない」を確かめてから追記するもの（段 4）。
       // 記録の行は追記するだけで、更新・削除はしない
-      expect(functions).toEqual(["appendAudit", "appendAuditWith", "computeAuditHash", "verifyAuditChain"]);
+      expect(functions).toEqual(["appendAudit", "appendAuditIf", "appendAuditWith", "computeAuditHash", "verifyAuditChain"]);
+    });
+
+    it("appendAuditIf：書かないと決めたら行を足さず、書くときは同じつなぎに足す", async () => {
+      const db = await freshDb();
+      const input: AuditEntryInput = { actorId: "alice", actorRole: "admin", authMode: "dev", action: "send" };
+      expect((await auditModule.appendAuditIf(db, async () => ({ value: 1, input: null }))).row).toBeNull();
+      expect(await db.auditLog.count()).toBe(0);
+      const { row } = await auditModule.appendAuditIf(db, async () => ({ value: 2, input }));
+      expect(row).toMatchObject({ seq: 1, action: "send" });
+      expect(await verifyAuditChain(db)).toEqual({ ok: true, checked: 1 });
     });
 
     it("データベースの側でも、行の更新を断る", async () => {

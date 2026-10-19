@@ -85,6 +85,7 @@ flowchart LR
 |---|---|---|---|
 | `SESSION_SECRET` | セッションの署名と、TOTP の秘密を暗号化する鍵の元（段 1b） | 値か `SESSION_SECRET_FILE`（`compose.yaml` の例は secret のファイル）。32 バイト以上の乱数 | **無し。** どちらも空なら起動しない |
 | `BACKEND_PASSWORD` | BFF が画像サーバーにつなぐ資格情報 | 値か `BACKEND_PASSWORD_FILE` | 無し。`BACKEND_USERNAME` があるのにパスワードが無ければ起動しない |
+| `BACKEND_WRITE_PASSWORD` | BFF が Orthanc へ書き込みの操作（POST）を求める資格情報（段 4。[4.1](#41-画像サーバーへの資格情報の形)） | 値か `BACKEND_WRITE_PASSWORD_FILE`。名前は `BACKEND_WRITE_USERNAME` | 無し。名前とパスワードの片方だけなら起動しない。両方とも無ければ読む資格情報で書く |
 | `OIDC_CLIENT_SECRET` | 外部の認証のクライアントの秘密（後ろ） | 値か `OIDC_CLIENT_SECRET_FILE` | 無し |
 | 利用者のパスワード | アプリのログイン（段 1b） | データベースにハッシュ（argon2id）で持つ。平文に戻せない | — |
 | 最初の管理者のパスワード | 利用者が1人もいないときに、最初の管理者を作る（段 1b） | `INITIAL_ADMIN_PASSWORD_FILE` だけ（値の変数は無い）。最初のログインで本人が変える | 無し。利用者がいず、この設定も無ければ起動しない |
@@ -107,11 +108,12 @@ flowchart LR
 - **画像サーバーの側の権限は、tsunagi-dicom の作りだけに頼らない。** Orthanc の Basic 認証（`RegisteredUsers`）には、読むだけ・決めた操作だけの権限が無い。tsunagi-dicom は役割を確かめてから決めた操作だけを呼ぶ作りだが、**それだけでは 14.2（利用者ごとの権限）を画像サーバーの側で満たさない。** tsunagi-dicom が乗っ取られて機械の ID が使われると、Orthanc で、tsunagi-dicom が持たない操作（機器の書き換え・設定の変更・どの検査の削除でも）までできる。
 - **段 4 から tsunagi-dicom は書き込みの操作を持つので、Orthanc の側の絞り込みの優先度が上がる。** 患者の情報を置く環境で書き込みの操作を使う前に、次のどちらかを入れる。
   - **A（本命）**：Orthanc の Authorization plugin（Orthanc の公式のプラグイン。要求ごとに外の Web の仕組みへ可否を問い合わせ、許されなければ 403 を返す。Orthanc Book の「Advanced authorization plugin」。2026-10-19 22:47 に本文を取り出して読んだ）。tsunagi-dicom の利用者・役割を Orthanc へ伝え、Orthanc の側でも役割と操作に応じて断る。問い合わせ先の Web の仕組みを誰が持つかは、作る前に決める。
-  - **B（当面）**：Orthanc の前に入口（リバースプロキシなど、施設で選ぶ）を置き、資格情報ごとに通す道を絞る。**読む資格情報**には読み取り（GET・HEAD）だけを、**書く資格情報**には tsunagi-dicom が使う書き込みの道（[`spec.md`](spec.md) の 3.3〜3.5 に並べたもの）だけを通す。
+  - **B（当面）**：Orthanc の前に入口（リバースプロキシなど、施設で選ぶ）を置き、資格情報ごとに通す道を絞る。**読む資格情報**には読み取り（GET・HEAD と、Orthanc の中身を変えない引き当ての `POST /tools/lookup`）だけを、**書く資格情報**には tsunagi-dicom が使う書き込みの道（[`spec.md`](spec.md) の 3.3〜3.5 に並べたもの）だけを通す。段 4 で書く資格情報が使う道は、`POST /modalities/{id}/echo`・`POST /modalities/{id}/store` の2つ。
+  - 書く資格情報を渡さないときに読む資格情報で書く動き（試しの環境のため）を、患者の情報を置く環境では設定で止められるようにするか（書く資格情報が無ければ書き込みの操作を断る、など）は、承認者の判断を待つ論点として残す。
 - **読む資格情報と書く資格情報を分けるか**は、置く環境で決める。
   - **患者の情報を置く環境では、分けることを必須にする**（施設の決まりとして。A でも B でも）。読む側の資格情報では、書き込みの道が通らないようにする。
   - **試しの環境（架空の患者だけを置く）では、分けることを勧める**（必須にしない）。
-  - tsunagi-dicom の側は、段 4 で書く資格情報を読む資格情報と別に渡せる設定を足す（名前はその段で決める）。書く資格情報を渡さなければ、読む資格情報で書く（試しの環境のため）。tsunagi-dicom は、置かれた環境に患者の情報があるかを知らないので、分けたかどうかは施設が確かめる。
+  - tsunagi-dicom の側は、書く資格情報を読む資格情報と別に渡せる（`BACKEND_WRITE_USERNAME`・`BACKEND_WRITE_PASSWORD`・`BACKEND_WRITE_PASSWORD_FILE`。段 4）。書く資格情報を渡さなければ、読む資格情報で書く（試しの環境のため）。tsunagi-dicom は、置かれた環境に患者の情報があるかを知らないので、分けたかどうかは施設が確かめる。
 - **Orthanc に直に入れる道は、tsunagi-dicom の確かめと記録の外にある。** Orthanc の REST の口・Orthanc Explorer 2・DICOM の口（C-STORE を受ける）を使える人は、tsunagi-dicom を通らずに書き込める。施設は、Orthanc の口を tsunagi-dicom と決めた機器にだけ開く（網・入口・Orthanc の設定で）。
 - **試しの環境（合成のデータだけを置く）では、専用の機械の ID 1つで足りる。** 患者の情報を置かないので、上の A・B は必須にしない。
 

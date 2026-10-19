@@ -13,7 +13,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "tsunagi-dicom",
-  description: "DICOMweb 対応の画像サーバー向けの Web の画面と BFF",
+  description: "Orthanc の前に置く、日本の現場向けの PACS の画面と中継のサーバー",
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -43,7 +43,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="ja" data-theme={theme}>
       <body className="flex min-h-dvh flex-col antialiased">
-        {config.auth.mode === "dev" && state.kind === "active" && <DevModeBand role={state.session.role} />}
+        {config.auth.mode === "dev" && state.kind === "active" && <DevModeBand role={state.session.role} allowWrite={!!config.auth.devAllowWrite} />}
         <SiteHeader
           user={user}
           pendingCsrfToken={pendingCsrfToken}
@@ -54,6 +54,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                   canManageUsers: !!local && can(state.session.role, "user.manage"),
                   canEditViewerDefaults: can(state.session.role, "viewer.defaults"),
                   account: !!local,
+                  canViewReceived: can(state.session.role, "receive.view"),
+                  canCheckModalities: can(state.session.role, "modality.check"),
                 }
               : undefined
           }

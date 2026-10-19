@@ -163,7 +163,7 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
     expect((await page.request.get("/api/audit/verify")).status()).toBe(403);
   });
 
-  test("書き込みの要求は止まる（書き込みの道は段 4 まで無い）", async ({ page }) => {
+  test("中継への書き込みの要求は止まる（中継には書き込みの道を作らない）", async ({ page }) => {
     await page.goto("/");
     await page.getByTestId("dev-mode-band").getByRole("button", { name: "管理者" }).click();
     await expect(page.getByTestId("dev-mode-band").getByRole("button", { name: "管理者" })).toHaveAttribute(
@@ -181,7 +181,8 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
       });
       expect(res.status(), method).toBe(405);
       expect(res.headers()["allow"]).toBe("GET, HEAD");
-      expect((await res.json()).error).toContain("書き込みの道は段 4 まで無い");
+      // 段 4 で書き込みの操作（送る）が画面の API にできたので、文言を「中継では受けない」に変えた
+      expect((await res.json()).error).toContain("書き込みは中継では受けない");
     }
 
     // 止めたことも監査の記録に残り、つなぎは壊れていない

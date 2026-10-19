@@ -41,6 +41,9 @@ services:
       # INITIAL_ADMIN_PASSWORD_FILE: /run/secrets/initial_admin_password
       # 画像サーバーのパスワードを secret のファイルで渡すとき（下の secrets を有効にする）
       # BACKEND_PASSWORD_FILE: /run/secrets/backend_password
+      # 書く資格情報を分けるとき（段 4。患者の情報を置く環境では分ける。下の secrets を有効にする）
+      # BACKEND_WRITE_USERNAME: tsunagi-writer
+      # BACKEND_WRITE_PASSWORD_FILE: /run/secrets/backend_write_password
       # 自前の CA を渡すとき（下の volumes を有効にする）
       # BACKEND_CA_FILE: /etc/tsunagi/ca.pem
       DATABASE_URL: file:/data/tsunagi.db
@@ -51,6 +54,7 @@ services:
       - session_secret
       # - initial_admin_password
       # - backend_password
+      # - backend_write_password
     init: true
     read_only: true
     tmpfs:
@@ -68,6 +72,8 @@ secrets:
   #   file: ./secrets/initial_admin_password.txt
   # backend_password:
   #   file: ./secrets/backend_password.txt
+  # backend_write_password:
+  #   file: ./secrets/backend_write_password.txt
 
 volumes:
   tsunagi-data:

@@ -34,6 +34,15 @@ export const PERMISSIONS = [
   "viewer.remember",
   // モダリティごとの既定のビューアを変える（管理の画面）
   "viewer.defaults",
+  // 段 4（docs/spec.md の 3.3・3.4。割り当ては推奨の案で、承認者の判断の前）
+  // 受け取りの記録を見る（Orthanc の変更の記録から読む）
+  "receive.view",
+  // 機器の一覧（名前と AE タイトル。住所は許可の一覧の modality で絞る）と、つながるかの確かめ（C-ECHO）
+  "modality.check",
+  // ほかの機器へ送る（書き込みの操作。docs/spec.md の 3.5 の共通の決まりを通す）
+  "study.send",
+  // 結果の分からない書き込みの操作を、管理者が確かめて記録に足す（照らし合わせ。docs/spec.md の 3.5）
+  "pacs.reconcile",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -48,9 +57,21 @@ export const ROLE_PERMISSIONS: PermissionMap = {
     "user.manage",
     "viewer.remember",
     "viewer.defaults",
+    "receive.view",
+    "modality.check",
+    "study.send",
+    "pacs.reconcile",
   ],
   doctor: ["study.search", "image.retrieve", "viewer.remember"],
-  technologist: ["study.search", "image.retrieve", "dicom.all_values", "viewer.remember"],
+  technologist: [
+    "study.search",
+    "image.retrieve",
+    "dicom.all_values",
+    "viewer.remember",
+    "receive.view",
+    "modality.check",
+    "study.send",
+  ],
   viewer: ["study.search", "image.retrieve"],
 };
 

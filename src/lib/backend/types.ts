@@ -62,6 +62,78 @@ export interface Backend {
    * 宛先は relay-path.ts の wadoRsTarget で確かめたもの
    */
   relayDicomweb(request: RelayRequest): Promise<Response>;
+
+  // ── 段 4：受け取ったものを見る・機器・送る（docs/spec.md の 3.3・3.4）。Orthanc の REST を使う ──
+
+  /**
+   * 受け取った検査（Orthanc の変更の記録 /changes から、新しい順に limit 件まで）。
+   * complete=false は、読む範囲（直近の変更の数・読む回数）の上限で止まり、もっと古い受け取りを読めていないこと
+   */
+  receivedStudies(limit: number): Promise<ReceivedStudies>;
+  /** Orthanc に登録された機器（/modalities?expand） */
+  listModalities(): Promise<ModalityEntry[]>;
+  /** Orthanc から機器へ C-ECHO（/modalities/{id}/echo）。つながったら true。機器が無ければ BackendError(404) */
+  echoModality(modalityId: string): Promise<boolean>;
+  /** StudyInstanceUID から Orthanc の中の検査の ID（/tools/lookup）。無ければ null */
+  lookupStudy(studyInstanceUid: string): Promise<string | null>;
+  /** 検査を機器へ送る（/modalities/{id}/store を非同期で）。書き込みの操作。Orthanc の仕事の ID を返す */
+  sendStudy(modalityId: string, orthancStudyId: string): Promise<{ jobId: string }>;
+  /** Orthanc の仕事の状態（/jobs/{id}）。無ければ null */
+  jobStatus(jobId: string): Promise<JobStatus | null>;
+}
+
+export interface ReceivedStudies {
+  studies: ReceivedStudy[];
+  /** 読むと決めた範囲を読み切ったうえで、それより古い変更の記録が無い（false なら「ここまでしか読めていない」） */
+  complete: boolean;
+}
+
+/** 受け取った検査（docs/spec.md の 3.3） */
+export interface ReceivedStudy {
+  /** Orthanc の中の検査の ID */
+  orthancId: string;
+  /** 受け取った時刻（Orthanc の時刻を ISO 8601 の形にしたもの。時間帯は Orthanc のサーバーの時刻） */
+  receivedAt: string;
+  /** C-STORE で送ってきた側の AE タイトル（画像のメタデータ RemoteAET）。分からなければ null */
+  remoteAet: string | null;
+  /** 入った道（画像のメタデータ Origin。DicomProtocol・RestApi など。Orthanc の版で実測してから使う）。分からなければ null */
+  origin: string | null;
+  /** 検査の画像の数 */
+  instanceCount: number;
+  summary: StudySummary;
+}
+
+/** Orthanc に登録された機器 */
+export interface ModalityEntry {
+  /** Orthanc の中の名前 */
+  id: string;
+  aet: string;
+  host: string;
+  port: number | null;
+  manufacturer: string;
+  allowEcho: boolean | null;
+  allowStore: boolean | null;
+}
+
+export type JobState = "Pending" | "Running" | "Success" | "Failure" | "Paused" | "Retry";
+
+/** Orthanc の仕事の状態（返すのは状態・進み・誤り・時刻だけ） */
+export interface JobStatus {
+  id: string;
+  state: JobState;
+  progress: number;
+  errorCode: number;
+  errorDescription: string;
+  creationTime: string;
+  completionTime: string | null;
+}
+
+/** 書き込みの要求の答えが分からなかった（時間切れ・通信の切れ。docs/spec.md の 3.5 の結果不明） */
+export class BackendUnknownError extends Error {
+  constructor(message = "画像サーバーの答えが分からない") {
+    super(message);
+    this.name = "BackendUnknownError";
+  }
 }
 
 export interface StudyCount {

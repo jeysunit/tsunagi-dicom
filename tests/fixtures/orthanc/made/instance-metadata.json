@@ -1,0 +1,10 @@
+{
+  "506e3402-0c666a9a-bcc85a46-7b2fb5ca-dc79e9df": { "CalledAET": "ORTHANC", "Origin": "DicomProtocol", "ReceptionDate": "20261017T090100", "RemoteAET": "DTG_SCU", "TransferSyntax": "1.2.840.10008.1.2.1" },
+  "01f3fc0b-8f4ceedb-e0758e85-2db97cb3-cbfa24aa": { "CalledAET": "ORTHANC", "Origin": "DicomProtocol", "ReceptionDate": "20261017T090300", "RemoteAET": "DTG_SCU", "TransferSyntax": "1.2.840.10008.1.2.1" },
+  "267c3c8d-84c6731e-b9e13d72-2b6c53ea-2bc629e2": { "Origin": "RestApi", "ReceptionDate": "20261017T090500", "TransferSyntax": "1.2.840.10008.1.2.1" },
+  "5c67b69e-a388dac0-093ce088-1533be43-d29ac792": { "CalledAET": "ORTHANC", "Origin": "DicomProtocol", "ReceptionDate": "20261017T090700", "RemoteAET": "CT_EXAMPLE", "TransferSyntax": "1.2.840.10008.1.2.1" },
+  "215ddf5f-eceb67da-76459a89-c8cafe3c-4bcc8d5b": { "CalledAET": "ORTHANC", "Origin": "DicomProtocol", "ReceptionDate": "20261017T103100", "RemoteAET": "DTG_SCU", "TransferSyntax": "1.2.840.10008.1.2.1" },
+  "20d1ba9b-60b77da4-5d56888b-acb79caf-7084100c": { "CalledAET": "ORTHANC", "Origin": "DicomProtocol", "ReceptionDate": "20261017T113100", "RemoteAET": "DTG_SCU", "TransferSyntax": "1.2.840.10008.1.2.1" },
+  "3feaff67-5771ab54-03f74b03-38c4a073-ed3e3522": { "CalledAET": "ORTHANC", "Origin": "DicomProtocol", "ReceptionDate": "20261017T123100", "RemoteAET": "CT_EXAMPLE", "TransferSyntax": "1.2.840.10008.1.2.1" },
+  "3dcecd59-f67d448a-31b02039-1653941b-7a000f5c": { "CalledAET": "ORTHANC", "Origin": "DicomProtocol", "ReceptionDate": "20261017T133100", "RemoteAET": "DTG_SCU", "TransferSyntax": "1.2.840.10008.1.2.1" }
+}

@@ -17,6 +17,13 @@ export interface AppConfig {
     orthancUrl?: string;
     username?: string;
     password?: string;
+    /**
+     * 書く資格情報（BACKEND_WRITE_USERNAME・BACKEND_WRITE_PASSWORD。段 4）。Orthanc への書き込みの操作（POST）に使う。
+     * 無ければ読む資格情報で書く（試しの環境のため。患者の情報を置く環境では分けることが施設の必須。
+     * docs/security-and-maintenance.md の 4.1）
+     */
+    writeUsername?: string;
+    writePassword?: string;
     /** BACKEND_CA_FILE の中身（PEM）。無ければ Node の既定の CA だけを使う */
     caPem?: string;
   };
@@ -51,6 +58,8 @@ export interface AppConfig {
      * パスワードはファイルで受け、ここにはファイルの場所だけを持つ（中身は使う時に読む）
      */
     initialAdmin?: { username: string; passwordFile: string };
+    /** AUTH_MODE=dev（モックだけ）で、書き込みの操作も通すか（DEV_ALLOW_WRITE。既定は止める。docs/spec.md の 4） */
+    devAllowWrite?: boolean;
   };
   databaseUrl: string;
   sessionSecret: string;
@@ -104,6 +113,9 @@ const envSchema = z.object({
   BACKEND_USERNAME: z.string().optional(),
   BACKEND_PASSWORD: z.string().optional(),
   BACKEND_PASSWORD_FILE: z.string().optional(),
+  BACKEND_WRITE_USERNAME: z.string().optional(),
+  BACKEND_WRITE_PASSWORD: z.string().optional(),
+  BACKEND_WRITE_PASSWORD_FILE: z.string().optional(),
   BACKEND_CA_FILE: z.string().optional(),
   BACKEND_MOCK: bool(false),
   VIEWER_OHIF_URL: httpUrl.optional(),
@@ -238,6 +250,17 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     problem("BACKEND_USERNAME", "パスワードがあるときは必須");
   }
 
+  // 書く資格情報（段 4。docs/security-and-maintenance.md の 4.1）。名前とパスワードは組で渡す
+  const bothWritePasswords = e.BACKEND_WRITE_PASSWORD !== undefined && e.BACKEND_WRITE_PASSWORD_FILE !== undefined;
+  const writePassword = secret("BACKEND_WRITE_PASSWORD", e.BACKEND_WRITE_PASSWORD, e.BACKEND_WRITE_PASSWORD_FILE);
+  const writePasswordFileFailed = e.BACKEND_WRITE_PASSWORD_FILE !== undefined && writePassword === undefined;
+  if (e.BACKEND_WRITE_USERNAME && !writePassword && !bothWritePasswords && !writePasswordFileFailed) {
+    problem("BACKEND_WRITE_PASSWORD", "BACKEND_WRITE_USERNAME があるときは BACKEND_WRITE_PASSWORD か BACKEND_WRITE_PASSWORD_FILE が必須");
+  }
+  if (!e.BACKEND_WRITE_USERNAME && (writePassword || bothWritePasswords)) {
+    problem("BACKEND_WRITE_USERNAME", "書く資格情報のパスワードがあるときは必須");
+  }
+
   let caPem: string | undefined;
   if (e.BACKEND_CA_FILE) {
     try {
@@ -270,9 +293,9 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   }
 
-  if (e.DEV_ALLOW_WRITE) {
-    // 書き込みの道（中継の STOW-RS など）は段 4 まで作らない（docs/spec.md の 3.2・4）
-    problem("DEV_ALLOW_WRITE", "書き込みの道は段 4 まで無い（中継は WADO-RS の読み取りだけ）。true は段 4 から使える");
+  if (e.DEV_ALLOW_WRITE && e.AUTH_MODE !== "dev") {
+    // 検証モード（モックだけ）のときだけ効く。ほかで書いても書き込みが通るように見えないよう、誤りにする
+    problem("DEV_ALLOW_WRITE", "AUTH_MODE=dev のときだけ使える（ほかの認証では役割の割り当てで書き込みを決める）");
   }
 
   if (problems.length > 0) throw new ConfigError(problems);
@@ -285,6 +308,8 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       orthancUrl: e.BACKEND_ORTHANC_URL,
       username: e.BACKEND_USERNAME,
       password,
+      writeUsername: e.BACKEND_WRITE_USERNAME,
+      writePassword,
       caPem,
     },
     viewers: {
@@ -310,6 +335,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       reauthMinutes: e.REAUTH_MINUTES,
       oidc: { issuer: e.OIDC_ISSUER, clientId: e.OIDC_CLIENT_ID, clientSecret: oidcClientSecret },
       initialAdmin,
+      devAllowWrite: e.DEV_ALLOW_WRITE,
     },
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている

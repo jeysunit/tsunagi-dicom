@@ -47,6 +47,22 @@ WADO-RS の応答（`metadata`・frames など）の見本はまだ無いので�
 上の QIDO-RS の写しは、画面の API（検索）のモックに使う。詳細のパネルのシリーズの並びは、QIDO-RS の写しが1件の検査の分しか無いので、
 REST の写し（`rest/studies`・`rest/series`）から組み立てる（`src/lib/backend/mock.ts`）。
 
+## 手で作った見本（`made/`。段 4）
+
+`made/` の中は、**実の Orthanc の応答の写しではない**。受け取りの記録・機器・C-ECHO・送るのモックのために、
+Orthanc Book（REST API の「Tracking changes」「Sending resources to remote modalities」と、
+「Terminology of advanced features」の Metadata の節。2026-10-19 に本文を読んだ）の応答の形に合わせて手で作った。
+ID は上の写しの検査・画像の ID を使い、住所は文書用の住所（`192.0.2.0/24`）、AE タイトルは例の名前だけにした。
+
+| ファイル | 形を合わせた要求 | 中身 |
+|---|---|---|
+| `made/changes.json` | `GET /changes?since=0&limit=1000` | 上の 8 件の検査の `NewStudy`・`StableStudy`（と、除くべき `NewSeries` の1つ）。時刻は 2026-10-17 |
+| `made/instance-metadata.json` | `GET /instances/{id}/metadata?expand` を、画像の ID ごとにまとめたもの | 各検査の最初の画像の `RemoteAET`・`Origin`・`CalledAET`・`ReceptionDate`・`TransferSyntax`。1件は REST で入った形（`Origin` が `RestApi`、`RemoteAET` が無い） |
+| `made/modalities.json` | `GET /modalities?expand` | 機器 3 つ（`dtg`：検査装置の試験用のソフトの受け取る側、`workstation`、`offline`：C-ECHO に答えない形） |
+
+- `Origin`・`CalledAET`・`ReceptionDate` の名前と値は、実の Orthanc の版で測って確かめる前の想定（`docs/spec.md` の 3.3）。測って違えば、ここを直す。
+- 送る仕事（`/jobs/{id}`）は見本を置かず、モックの中で作る（読むたびに `Pending` → `Running` → `Success`。`offline` へは `Failure`、`ErrorCode` 9）。
+
 ## 置き換えの規則
 
 写す前に、次の値を例の値に置き換えた。見本を足すとき・取り直すときも、同じ規則で置き換える。

@@ -83,20 +83,67 @@ export interface StudyRecord {
 /** 画面の API が返す1行。役割に許された項目だけがある */
 export type StudyView = Partial<StudyRecord>;
 
+/** 受け取りの記録の1行の、検査のほかの項目（段 4。docs/spec.md の 3.3） */
+export const RECEIVE_FIELDS = ["receivedAt", "remoteAet", "origin", "receivedInstances"] as const;
+export type ReceiveField = (typeof RECEIVE_FIELDS)[number];
+
+/** 機器の一覧の項目（段 4）。住所（host・port）と機器ごとの許可は、機器の管理の役割にだけ返す */
+export const MODALITY_FIELDS = ["id", "aet", "host", "port", "manufacturer", "allowEcho", "allowStore"] as const;
+export type ModalityField = (typeof MODALITY_FIELDS)[number];
+const MODALITY_NAME_FIELDS = ["id", "aet"] as const satisfies readonly ModalityField[];
+
 export interface FieldAllowlist {
   study: readonly StudyField[];
   series: readonly SeriesField[];
+  /** 無ければ受け取りの記録の項目を返さない（足し忘れは出ない側に倒れる） */
+  receive?: readonly ReceiveField[];
+  /** 無ければ機器の項目を返さない */
+  modality?: readonly ModalityField[];
 }
 
 export type FieldAllowlistMap = Record<Role, FieldAllowlist>;
 
-/** 既定の役割の許可の一覧。どの既定の役割も、検査の一覧の画面に要る項目をすべて見る（原則 8） */
+/** 既定の役割の許可の一覧。どの既定の役割も、使える画面に要る項目をすべて見る（原則 8） */
 export const ROLE_FIELD_ALLOWLIST: FieldAllowlistMap = {
-  admin: { study: STUDY_FIELDS, series: SERIES_FIELDS },
-  doctor: { study: STUDY_FIELDS, series: SERIES_FIELDS },
-  technologist: { study: STUDY_FIELDS, series: SERIES_FIELDS },
-  viewer: { study: STUDY_FIELDS, series: SERIES_FIELDS },
+  admin: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_FIELDS },
+  doctor: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
+  technologist: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
+  viewer: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
 };
+
+/** 受け取りの記録の1行（画面の API が返す形） */
+export interface ReceivedRecord {
+  receivedAt: string;
+  remoteAet: string | null;
+  origin: string | null;
+  receivedInstances: number;
+}
+export type ReceivedView = Partial<ReceivedRecord> & { study: StudyView };
+
+/** 機器の1行（画面の API が返す形） */
+export interface ModalityRecord {
+  id: string;
+  aet: string;
+  host: string;
+  port: number | null;
+  manufacturer: string;
+  allowEcho: boolean | null;
+  allowStore: boolean | null;
+}
+export type ModalityView = Partial<ModalityRecord>;
+
+/** 受け取りの1行を、役割の許可の一覧で絞る（検査の項目は study の一覧で） */
+export function receivedView(record: ReceivedRecord, study: StudyRecord, allowlist: FieldAllowlist): ReceivedView {
+  return {
+    ...(pickFields(record, RECEIVE_FIELDS, allowlist.receive ?? []) as Partial<ReceivedRecord>),
+    study: projectStudy(study, allowlist),
+  };
+}
+
+/** 機器の1行を、役割の許可の一覧で絞る */
+export function modalityView(record: ModalityRecord, allowlist: FieldAllowlist): ModalityView {
+  return pickFields(record, MODALITY_FIELDS, allowlist.modality ?? []) as ModalityView;
+}
 
 /** 役割の許可の一覧。一覧に無い役割は空（何も返さない） */
 export function allowlistFor(role: Role, map: FieldAllowlistMap = ROLE_FIELD_ALLOWLIST): FieldAllowlist {

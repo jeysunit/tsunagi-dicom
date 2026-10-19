@@ -11,7 +11,7 @@ export interface HeaderUser {
   csrfToken: string;
 }
 
-// どの頁にも出す見出し。「非医療機器」の表示は出さない（承認者の決定。医療機器でない旨は README と仕様書に書く）。
+// どの頁にも出す見出し。共通の注意の表示は出さない（承認者の決定。承認・認証を受けていないことと使う場面は README と仕様書に書く）。
 // AUTH_MODE=local でログインしていれば、利用者・役割・ログアウトを出す。
 // ログインしていれば（検証モードを含む）、明るい地と暗い地の切り替えを出す。
 export function SiteHeader({
@@ -23,7 +23,15 @@ export function SiteHeader({
   user?: HeaderUser;
   pendingCsrfToken?: string;
   /** 頁の道（ログインしているときだけ。検証モードを含む） */
-  nav?: { canManageUsers: boolean; canEditViewerDefaults: boolean; account: boolean };
+  nav?: {
+    canManageUsers: boolean;
+    canEditViewerDefaults: boolean;
+    account: boolean;
+    /** 受け取りの記録（段 4） */
+    canViewReceived?: boolean;
+    /** 機器の一覧と確かめ（段 4） */
+    canCheckModalities?: boolean;
+  };
   /** 地の色の切り替え（ログインしているときだけ） */
   theme?: { current: Theme; csrfToken?: string };
 }) {
@@ -38,6 +46,16 @@ export function SiteHeader({
             <Link href="/" className="hover:text-value">
               検査
             </Link>
+            {nav.canViewReceived && (
+              <Link href="/received" className="hover:text-value">
+                受け取り
+              </Link>
+            )}
+            {nav.canCheckModalities && (
+              <Link href="/modalities" className="hover:text-value">
+                機器
+              </Link>
+            )}
             {nav.canEditViewerDefaults && (
               <Link href="/admin/viewers" className="hover:text-value">
                 ビューアの既定
