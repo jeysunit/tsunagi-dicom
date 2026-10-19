@@ -109,10 +109,10 @@ describe("検査の詳細", () => {
   });
 });
 
-/** いまの状態の版（画面が読んだ時の版の代わり） */
+/** いまのビューアの覚えの版（画面が読んだ時の版の代わり） */
 async function currentVersion() {
   const { getDb } = await import("@/lib/db");
-  return (await (await getDb()).studyState.findUnique({ where: { studyInstanceUid: STUDY } }))?.version ?? 0;
+  return (await (await getDb()).studyViewer.findUnique({ where: { studyInstanceUid: STUDY } }))?.version ?? 0;
 }
 
 describe("すべての DICOM の値（別の権限）", () => {
@@ -137,65 +137,13 @@ describe("すべての DICOM の値（別の権限）", () => {
   });
 });
 
-describe("検査の状態の変更", () => {
-  it("閲覧は検像できない（403 と、断ったことの記録。状態は変わらない）", async () => {
-    state.role = "viewer";
-    const { POST } = await import("@/app/api/studies/[uid]/state/route");
-    const res = await POST(post(`/api/studies/${STUDY}/state`, { flag: "inspected", value: true, version: 0 }), params(STUDY));
-    expect(res.status).toBe(403);
-    expect(await lastAudit("study_state")).toMatchObject({ outcome: "denied", actorRole: "viewer" });
-    expect(await currentVersion()).toBe(0);
-  });
-
-  it("技師は検像でき、医師は既読にでき、閲覧はブックマークだけできる", async () => {
-    const { POST } = await import("@/app/api/studies/[uid]/state/route");
-    for (const [role, flag, status] of [
-      ["technologist", "inspected", 200],
-      ["technologist", "read", 403],
-      ["doctor", "read", 200],
-      ["doctor", "inspected", 403],
-      ["viewer", "bookmarked", 200],
-      ["viewer", "urgent", 403],
-    ] as const) {
-      state.role = role;
-      const res = await POST(post(`/api/studies/${STUDY}/state`, { flag, value: true, version: await currentVersion() }), params(STUDY));
-      expect(res.status, `${role} ${flag}`).toBe(status);
-    }
-    expect(await lastAudit("study_state")).toMatchObject({ outcome: "denied", actorRole: "viewer" });
-
-    state.role = "doctor";
+describe("段 3：検査の状態の印は返さない", () => {
+  it("詳細の検査に、状態の印の項目（検像・読影・緊急・ブックマーク）が無い", async () => {
+    state.role = "admin";
     const { GET } = await import("@/app/api/studies/[uid]/route");
     const body = await (await GET(new Request(`${ORIGIN}/api/studies/${STUDY}`), params(STUDY))).json();
-    expect(body.study).toMatchObject({ inspected: true, read: true, urgent: false, stateVersion: 2 });
-  });
-
-  it("古い画面（読んだ時の版が古い）からの変更は 409 で書かず、競合を記録する", async () => {
-    state.role = "doctor";
-    const { POST } = await import("@/app/api/studies/[uid]/state/route");
-    const v = await currentVersion();
-    // ほかの利用者が先に既読を外した
-    expect((await POST(post(`/api/studies/${STUDY}/state`, { flag: "read", value: false, version: v }), params(STUDY))).status).toBe(200);
-    // 古い版の画面から既読にしようとする
-    const res = await POST(post(`/api/studies/${STUDY}/state`, { flag: "read", value: true, version: v }), params(STUDY));
-    expect(res.status).toBe(409);
-    expect((await res.json()).version).toBe(v + 1);
-    expect(await currentVersion()).toBe(v + 1);
-    const row = await lastAudit("study_state");
-    expect(row).toMatchObject({ outcome: "denied" });
-    expect(JSON.parse(row!.detail!)).toMatchObject({ reason: "conflict", expected: v, current: v + 1 });
-    const { GET } = await import("@/app/api/studies/[uid]/route");
-    expect((await (await GET(new Request(`${ORIGIN}/api/studies/${STUDY}`), params(STUDY))).json()).study.read).toBe(false);
-  });
-
-  it("別の場所からの要求・決めた値の外・版の無い要求は断る", async () => {
-    state.role = "admin";
-    const { POST } = await import("@/app/api/studies/[uid]/state/route");
-    const version = await currentVersion();
-    expect((await POST(post(`/api/studies/${STUDY}/state`, { flag: "read", value: true, version }, "https://attacker.example.org"), params(STUDY))).status).toBe(403);
-    expect((await POST(post(`/api/studies/${STUDY}/state`, { flag: "deleted", value: true, version }), params(STUDY))).status).toBe(400);
-    expect((await POST(post(`/api/studies/${STUDY}/state`, { flag: "read", value: "yes", version }), params(STUDY))).status).toBe(400);
-    expect((await POST(post(`/api/studies/${STUDY}/state`, { flag: "read", value: true }), params(STUDY))).status).toBe(400);
-    expect(await currentVersion()).toBe(version);
+    for (const removed of ["inspected", "read", "urgent", "bookmarked", "stateVersion"]) expect(body.study).not.toHaveProperty(removed);
+    expect(body.study).toHaveProperty("viewerVersion");
   });
 });
 

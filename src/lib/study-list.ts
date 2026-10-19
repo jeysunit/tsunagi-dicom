@@ -19,23 +19,20 @@ import {
   DEFAULT_FILTER,
   FACET_DATES,
   matchesFilter,
-  STATUS_FIELD,
-  STATUS_FILTERS,
-  statusMatches,
   todayIn,
   type FacetDate,
   type StudyFacets,
   type StudyFilter,
 } from "@/lib/study-filter";
-import { EMPTY_STATE, modalityDefaults, readStates } from "@/lib/study-state";
+import { EMPTY_VIEWER_MEMORY, modalityDefaults, readViewerMemory } from "@/lib/viewer-memory";
 import { resolveDefaultViewer, type ViewerInfo } from "@/lib/viewers";
 
 // 検査の一覧と詳細（画面の API と、一覧の頁の最初の描画で同じものを使う）。
-// 画像サーバーの応答と BFF の状態を組み立て、役割の許可の一覧（src/lib/fields.ts）で絞った形にしてから返す。
+// 画像サーバーの応答と BFF のビューアの覚えを組み立て、役割の許可の一覧（src/lib/fields.ts）で絞った形にしてから返す。
 
 export interface ListDeps {
   backend: Pick<Backend, "searchStudies">;
-  /** 状態（検像・読影・緊急・ブックマーク）とビューアの覚えを読む。無ければ状態は空 */
+  /** ビューアの覚え（検査ごと・モダリティごと）を読む。無ければ覚えは空 */
   db?: Db;
   role: Role;
   actorId: string;
@@ -62,22 +59,22 @@ export interface StudyListResult {
 
 async function decorate(deps: ListDeps, studies: StudySummary[]) {
   const uids = studies.map((s) => s.studyInstanceUid);
-  const [states, defaults] = deps.db
-    ? await Promise.all([readStates(deps.db, deps.actorId, uids), modalityDefaults(deps.db)])
+  const [memory, defaults] = deps.db
+    ? await Promise.all([readViewerMemory(deps.db, uids), modalityDefaults(deps.db)])
     : [new Map(), null];
   const allowlist = allowlistFor(deps.role, deps.allowlists);
   return studies.map((s) => {
-    const state = states.get(s.studyInstanceUid) ?? EMPTY_STATE;
+    const remembered = memory.get(s.studyInstanceUid) ?? EMPTY_VIEWER_MEMORY;
     const group = primaryGroup(s.modalities);
-    const viewer = resolveDefaultViewer(state.rememberedViewer, group && defaults ? defaults[group] : null, deps.viewers ?? []);
-    return { summary: s, view: projectStudy(studyRecord(s, state, viewer), allowlist) };
+    const viewer = resolveDefaultViewer(remembered.rememberedViewer, group && defaults ? defaults[group] : null, deps.viewers ?? []);
+    return { summary: s, view: projectStudy(studyRecord(s, remembered, viewer), allowlist) };
   });
 }
 
 /**
  * 見出しごとの件数。許可の一覧で絞った後の項目だけから数える（見えない項目の件数は、キーごと出さない）。
- * 各見出しの件数は、それを押したあとの一覧の件数と同じ：モダリティの件数は状態と横断の検索を、
- * 状態の件数はモダリティと横断の検索を、検査日の件数は両方と横断の検索を、いまの値のまま当てる。
+ * 各見出しの件数は、それを押したあとの一覧の件数と同じ：モダリティの件数は横断の検索を、
+ * 検査日の件数はモダリティと横断の検索を、いまの値のまま当てる。
  * `dateViews` は検査日で絞らない一覧（検査日の件数の元。いまの一覧が全期間ならそれと同じ）
  */
 export function computeFacets(
@@ -96,14 +93,7 @@ export function computeFacets(
     for (const g of MODALITY_GROUPS) modality[g] = base.filter((v) => v.modalities && studyInGroup(v.modalities, g)).length;
     facets.modality = modality;
   }
-  const statusKinds = STATUS_FILTERS.filter((s) => fields.includes(STATUS_FIELD[s]));
-  if (statusKinds.length > 0) {
-    const base = views.filter((v) => matchesFilter(v, { ...filter, status: undefined }));
-    const status: NonNullable<StudyFacets["status"]> = { all: base.length };
-    for (const s of statusKinds) status[s] = base.filter((v) => statusMatches(v, s)).length;
-    facets.status = status;
-  }
-  if ((facets.modality || facets.status) && !complete.list) facets.atLeast = { ...facets.atLeast, list: true };
+  if (facets.modality && !complete.list) facets.atLeast = { ...facets.atLeast, list: true };
   // 検査日の件数の元が取れなかったとき（null）は、検査日の件数を出さない（一覧は出す）
   if (fields.includes("studyDate") && dateViews) {
     const base = dateViews.filter((v) => matchesFilter(v, filter));
@@ -135,9 +125,9 @@ export interface FacetAudit {
   /** 追加の検索が失敗して、検査日の件数を出さなかった */
   failed: boolean;
   /** 件数を数えたときの絞り込み（検索の語は有無だけ） */
-  filter: { date: string; from?: string; to?: string; modality?: string; status?: string; query: boolean };
+  filter: { date: string; from?: string; to?: string; modality?: string; query: boolean };
   /** 返した件数（数だけ） */
-  counts: { date?: Record<string, number>; modality?: Record<string, number>; status?: Record<string, number> };
+  counts: { date?: Record<string, number>; modality?: Record<string, number> };
   /** 件数が「以上」（上限に届いた）ものがあったか */
   atLeast: boolean;
 }
@@ -192,13 +182,11 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
         ...(filter.from ? { from: filter.from } : {}),
         ...(filter.to ? { to: filter.to } : {}),
         ...(filter.modality ? { modality: filter.modality } : {}),
-        ...(filter.status ? { status: filter.status } : {}),
         query: !!filter.q,
       },
       counts: {
         ...(facets.date ? { date: facets.date } : {}),
         ...(facets.modality ? { modality: facets.modality } : {}),
-        ...(facets.status ? { status: facets.status } : {}),
       },
       atLeast: !!facets.atLeast,
     },

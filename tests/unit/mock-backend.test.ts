@@ -6,20 +6,19 @@ import { safeRelayPath, wadoRsTarget, type WadoRsTarget } from "@/lib/backend/re
 import { BackendError, clampStudyLimit, STUDY_LIMIT } from "@/lib/backend/types";
 
 describe("モックのバックエンド", () => {
-  for (const kind of ["orthanc", "dicomweb"] as const) {
-    it(`${kind}：見本の 8 件の検査を新しい順に返し、件数も 8`, async () => {
-      const backend = createMockBackend(kind);
-      const studies = await backend.searchStudies();
-      expect(studies).toHaveLength(8);
-      expect(await backend.countStudies()).toEqual({ count: 8, exact: true });
-      const keys = studies.map((s) => s.studyDate + s.studyTime);
-      expect(keys).toEqual([...keys].sort().reverse());
-      expect(studies.every((s) => s.patientId.startsWith("JP-TEST-"))).toBe(true);
-    });
-  }
+  it("Orthanc の形：見本の 8 件の検査を新しい順に返し、件数も 8（/statistics の写し）", async () => {
+    const backend = createMockBackend();
+    expect(backend.kind).toBe("orthanc");
+    const studies = await backend.searchStudies();
+    expect(studies).toHaveLength(8);
+    expect(await backend.countStudies()).toEqual({ count: 8, exact: true });
+    const keys = studies.map((s) => s.studyDate + s.studyTime);
+    expect(keys).toEqual([...keys].sort().reverse());
+    expect(studies.every((s) => s.patientId.startsWith("JP-TEST-"))).toBe(true);
+  });
 
   it("DICOM JSON の値を検査の形にする", async () => {
-    const studies = await createMockBackend("dicomweb").searchStudies();
+    const studies = await createMockBackend().searchStudies();
     const study = studies.find((s) => s.accessionNumber === "ACC-0004-1");
     expect(study).toMatchObject({
       studyInstanceUid: "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012",
@@ -35,7 +34,7 @@ describe("モックのバックエンド", () => {
   });
 
   it("検索の件数を 1〜1000 に収める", async () => {
-    const backend = createMockBackend("dicomweb");
+    const backend = createMockBackend();
     expect(await backend.searchStudies(3)).toHaveLength(3);
     expect(await backend.searchStudies(0)).toHaveLength(1);
     expect(await backend.searchStudies(-5)).toHaveLength(1);
@@ -46,7 +45,7 @@ describe("モックのバックエンド", () => {
   });
 
   it("中継：WADO-RS の読み取りの宛先だけを受ける（見本は無いので 404）", async () => {
-    const backend = createMockBackend("orthanc");
+    const backend = createMockBackend();
     const target = wadoRsTarget(["studies", STUDY, "series", "1.2.3", "metadata"])!;
     const res = await backend.relayDicomweb({ method: "GET", target, search: "" });
     expect(res.status).toBe(404);
@@ -132,7 +131,7 @@ describe("PN の文字列", () => {
 
 describe("モックのバックエンド（段 2：検査日の範囲・シリーズ・値の全部・サムネイル）", () => {
   it("検査日の範囲で絞る", async () => {
-    const backend = createMockBackend("dicomweb");
+    const backend = createMockBackend();
     expect(await backend.searchStudies(1000, { dateFrom: "20261017", dateTo: "20261017" })).toHaveLength(4);
     expect(await backend.searchStudies(1000, { dateTo: "20260410" })).toHaveLength(4);
     expect(await backend.searchStudies(1000, { dateFrom: "20261018" })).toHaveLength(0);
@@ -143,7 +142,7 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
   });
 
   it("検査の中のシリーズをシリーズの番号の順に返す", async () => {
-    const series = await createMockBackend("orthanc").searchSeries(STUDY);
+    const series = await createMockBackend().searchSeries(STUDY);
     expect(series).toEqual([
       {
         seriesInstanceUid: "1.2.826.0.1.3680043.8.498.43907805789171690229100828585828292254",
@@ -155,20 +154,20 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
         instanceCount: 4,
       },
     ]);
-    expect(await createMockBackend("orthanc").searchSeries("1.2.3")).toEqual([]);
+    expect(await createMockBackend().searchSeries("1.2.3")).toEqual([]);
     // 見本の全部のシリーズ（10）が、どれかの検査に入る
-    const studies = await createMockBackend("orthanc").searchStudies();
-    const all = await Promise.all(studies.map((s) => createMockBackend("orthanc").searchSeries(s.studyInstanceUid)));
+    const studies = await createMockBackend().searchStudies();
+    const all = await Promise.all(studies.map((s) => createMockBackend().searchSeries(s.studyInstanceUid)));
     expect(all.flat()).toHaveLength(10);
   });
 
   it("1件の検査の値の全部（タグの順の行にする）", async () => {
-    const ds = await createMockBackend("dicomweb").studyDataset(STUDY);
+    const ds = await createMockBackend().studyDataset(STUDY);
     expect(ds).not.toBeNull();
     const rows = datasetRows(ds!);
     expect(rows.map((r) => r.tag)).toEqual([...rows.map((r) => r.tag)].sort());
     expect(rows).toContainEqual({ tag: "0010,0020", vr: "LO", value: "JP-TEST-0004" });
-    expect(await createMockBackend("dicomweb").studyDataset("1.2.3")).toBeNull();
+    expect(await createMockBackend().studyDataset("1.2.3")).toBeNull();
   });
 
   it("値の全部の行：シーケンス・バイナリ・複数の値・形の誤ったキー", () => {
@@ -187,7 +186,7 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
   });
 
   it("中継：写しのある画像の検査・シリーズのサムネイルだけを PNG で返す", async () => {
-    const backend = createMockBackend("orthanc");
+    const backend = createMockBackend();
     // 写しのある1枚（rest/instances/…/preview.png）の検査を、見本から探す
     const studies = await backend.searchStudies();
     let found: { study: string; series: string } | null = null;

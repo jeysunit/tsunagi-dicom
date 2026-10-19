@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ROLE_FIELD_ALLOWLIST, STUDY_FIELDS, type StudyView } from "@/lib/fields";
 import { MODALITY_GROUPS } from "@/lib/modalities";
-import { matchesFilter, STATUS_FILTERS, type StudyFilter } from "@/lib/study-filter";
+import { matchesFilter, type StudyFilter } from "@/lib/study-filter";
 import { computeFacets } from "@/lib/study-list";
 
 // 見出しごとの件数（BFF が数える。docs/spec.md の 3.1）。各件数は「その見出しを押したあとの一覧の件数」と同じ。
 // 許可の一覧に載っていない項目の件数は、キーごと出さない（原則 8）。
+// 段 3 で検査の状態の見出しを外したので、件数は検査日とモダリティだけ。
 
 const today = { year: 2026, month: 10, day: 19 };
 const ALL_FIELDS: readonly string[] = STUDY_FIELDS;
@@ -16,47 +17,31 @@ const view = (extra: Partial<StudyView>): StudyView => ({
   patientName: "山田 太郎",
   studyDate: "20261019",
   modalities: ["CT"],
-  inspected: false,
-  read: false,
-  urgent: false,
-  bookmarked: false,
   ...extra,
 });
 
 const views: StudyView[] = [
-  view({ studyDate: "20261019", modalities: ["CT"], inspected: true, read: false }),
-  view({ studyDate: "20261019", modalities: ["MR"], inspected: false, read: false, urgent: true }),
-  view({ studyDate: "20261018", modalities: ["DX", "SR"], inspected: true, read: true }),
-  view({ studyDate: "20261001", modalities: ["CT"], inspected: false, read: true, bookmarked: true }),
-  view({ studyDate: "20260101", modalities: ["US"], inspected: false, read: false, patientName: "佐藤 花子" }),
+  view({ studyDate: "20261019", modalities: ["CT"] }),
+  view({ studyDate: "20261019", modalities: ["MR"] }),
+  view({ studyDate: "20261018", modalities: ["DX", "SR"] }),
+  view({ studyDate: "20261001", modalities: ["CT"] }),
+  view({ studyDate: "20260101", modalities: ["US"], patientName: "佐藤 花子" }),
 ];
 const dateOf = (filter: StudyFilter) => (v: StudyView) => v.studyDate! >= (filter.date === "today" ? "20261019" : "00000000");
 
 describe("見出しの件数", () => {
   it("全部の見出しで、件数は押したあとの一覧の件数と同じ（ほかの見出しと検索は、いまの値のまま）", () => {
-    const filters: StudyFilter[] = [
-      { date: "all" },
-      { date: "all", status: "unread" },
-      { date: "all", modality: "CT" },
-      { date: "all", modality: "CT", status: "uninspected" },
-      { date: "all", q: "山田" },
-    ];
+    const filters: StudyFilter[] = [{ date: "all" }, { date: "all", modality: "CT" }, { date: "all", q: "山田" }, { date: "all", modality: "CT", q: "山田" }];
     for (const filter of filters) {
       const f = computeFacets(views, views, filter, today, ALL_FIELDS);
-      // モダリティ
       expect(f.modality!.all).toBe(views.filter((v) => matchesFilter(v, { ...filter, modality: undefined })).length);
       for (const g of MODALITY_GROUPS) {
         expect(f.modality![g]).toBe(views.filter((v) => matchesFilter(v, { ...filter, modality: g })).length);
       }
-      // 状態
-      expect(f.status!.all).toBe(views.filter((v) => matchesFilter(v, { ...filter, status: undefined })).length);
-      for (const s of STATUS_FILTERS) {
-        expect(f.status![s]).toBe(views.filter((v) => matchesFilter(v, { ...filter, status: s })).length);
-      }
     }
   });
 
-  it("検査日の件数は、検査日で絞らない一覧を元に、モダリティ・状態・検索を当てて数える", () => {
+  it("検査日の件数は、検査日で絞らない一覧を元に、モダリティ・検索を当てて数える", () => {
     // いまの一覧は「今日」だけ。検査日の件数は全期間の元（dateViews）から数える
     const nowList = views.filter(dateOf({ date: "today" }));
     const f = computeFacets(nowList, views, { date: "today", modality: "CT" }, today, ALL_FIELDS);
@@ -70,16 +55,10 @@ describe("見出しの件数", () => {
     expect(only()).toEqual({});
     expect(Object.keys(only("studyDate"))).toEqual(["date"]);
     expect(Object.keys(only("modalities"))).toEqual(["modality"]);
-    // 状態は、載っている項目の見出しだけ（読影が無ければ「未読」「既読」の件数は出ない）
-    const status = only("inspected", "urgent").status!;
-    expect(Object.keys(status).sort()).toEqual(["all", "inspected", "uninspected", "urgent"]);
-    expect(status).not.toHaveProperty("unread");
-    expect(status).not.toHaveProperty("read");
-    expect(status).not.toHaveProperty("bookmarked");
   });
 
   it("見えない項目の値は、件数にも漏れない：許可の一覧で絞った後の項目だけを数える", () => {
-    // 閲覧の想定（検査日だけ）。状態・モダリティは view に無いので、数えない
+    // 閲覧の想定（検査日だけ）。モダリティは view に無いので、数えない
     const narrow = views.map((v) => ({ studyInstanceUid: v.studyInstanceUid, studyDate: v.studyDate }));
     const f = computeFacets(narrow, narrow, { date: "all" }, today, ["studyInstanceUid", "studyDate"]);
     expect(f).toEqual({ date: { today: 2, yesterday: 1, week: 3, month: 4, all: 5 } });
@@ -88,7 +67,7 @@ describe("見出しの件数", () => {
   it("既定の役割は、どれも全部の見出しの件数を見る。一覧に無い役割は何も見ない", () => {
     for (const role of ["admin", "doctor", "technologist", "viewer"] as const) {
       const f = computeFacets(views, views, { date: "all" }, today, ROLE_FIELD_ALLOWLIST[role].study);
-      expect(Object.keys(f).sort()).toEqual(["date", "modality", "status"]);
+      expect(Object.keys(f).sort()).toEqual(["date", "modality"]);
     }
     expect(computeFacets(views, views, { date: "all" }, today, [])).toEqual({});
   });

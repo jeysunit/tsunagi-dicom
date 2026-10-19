@@ -27,7 +27,7 @@ export function ViewerMenu({
   studyUid,
   defaultViewer,
   rememberedViewer,
-  stateVersion,
+  viewerVersion,
   screen,
   onChanged,
   seriesLabel,
@@ -36,8 +36,8 @@ export function ViewerMenu({
   studyUid: string;
   defaultViewer: string | null | undefined;
   rememberedViewer: string | null | undefined;
-  /** 状態の版（覚えを変えるときに添える） */
-  stateVersion: number | undefined;
+  /** ビューアの覚えの版（覚えを変えるときに添える） */
+  viewerVersion: number | undefined;
   screen: ScreenInfo;
   onChanged: () => void;
   /** 詳細のパネルのシリーズから開くときの、ボタンの名前の補い */
@@ -72,7 +72,7 @@ export function ViewerMenu({
     setOpen(false);
     const result = await postJson(
       `/api/studies/${encodeURIComponent(studyUid)}/viewer`,
-      { viewer, version: stateVersion ?? 0 },
+      { viewer, version: viewerVersion ?? 0 },
       screen.csrfToken,
     );
     if (result.status === 409) {

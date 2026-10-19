@@ -57,7 +57,7 @@ describe("URL の値の読み取り", () => {
   });
 
   it("URL に戻す（既定の値は書かない）", () => {
-    const f = parseFilter(new URLSearchParams("date=range&from=2026-04-01&modality=CR%2FDX&status=urgent&q=yamada"));
+    const f = parseFilter(new URLSearchParams("date=range&from=2026-04-01&modality=CR%2FDX&q=yamada"));
     expect(parseFilter(filterToSearchParams(f))).toEqual(f);
     expect(filterToSearchParams({ date: "all" }).toString()).toBe("");
   });
@@ -72,29 +72,19 @@ const row = (extra: Partial<StudyView> = {}): StudyView => ({
   accessionNumber: "ACC-0001-1",
   studyDescription: "胸部CT",
   modalities: ["DX", "SR"],
-  inspected: false,
-  read: true,
-  urgent: false,
-  bookmarked: true,
   ...extra,
 });
 
-describe("モダリティ・状態・横断の検索", () => {
+describe("モダリティ・横断の検索", () => {
   it("CR/DX の群は CR と DX の両方に合う", () => {
     expect(matchesFilter(row(), { date: "all", modality: "CR/DX" })).toBe(true);
     expect(matchesFilter(row({ modalities: ["CR"] }), { date: "all", modality: "CR/DX" })).toBe(true);
     expect(matchesFilter(row(), { date: "all", modality: "CT" })).toBe(false);
   });
 
-  it.each([
-    ["uninspected", true],
-    ["inspected", false],
-    ["unread", false],
-    ["read", true],
-    ["urgent", false],
-    ["bookmarked", true],
-  ] as const)("状態 %s", (status, expected) => {
-    expect(matchesFilter(row(), { date: "all", status })).toBe(expected);
+  it("段 3：前の状態の見出しの値（status）は URL から読まない", () => {
+    expect(parseFilter(new URLSearchParams("status=urgent"))).toEqual({ date: "all" });
+    expect(filterToSearchParams(parseFilter(new URLSearchParams("status=bookmarked&modality=CT"))).toString()).toBe("modality=CT");
   });
 
   it.each(["JP-TEST-0001", "jp-test", "山田太郎", "山田 太郎", "やまだ", "ヤマダ", "ﾔﾏﾀﾞ", "yamada taro", "ACC-0001", "胸部"])(
@@ -115,10 +105,6 @@ describe("モダリティ・状態・横断の検索", () => {
     delete hidden.patientNameAlphabetic;
     expect(matchesFilter(hidden, { date: "all", q: "山田" })).toBe(false);
     expect(matchesFilter(hidden, { date: "all", q: "JP-TEST" })).toBe(true);
-    // 状態の項目が無ければ、状態の絞り込みにも合わない
-    const noState = row();
-    delete noState.bookmarked;
-    expect(matchesFilter(noState, { date: "all", status: "bookmarked" })).toBe(false);
   });
 
   it("検索の字のそろえ方", () => {

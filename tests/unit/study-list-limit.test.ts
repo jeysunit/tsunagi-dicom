@@ -140,7 +140,6 @@ describe("追加の検索", () => {
     expect(r.count).toEqual({ count: 1, exact: true });
     expect(r.facets.date).toBeUndefined();
     expect(r.facets.modality?.all).toBe(1);
-    expect(r.facets.status).toBeDefined();
     expect(r.facetAudit).toMatchObject({ failed: true, dateScope: "none", extraSearch: true });
     // 失敗の記録は、エラーの名前だけ（メッセージの中の宛先などは出さない）
     expect(JSON.stringify(error.mock.calls)).not.toContain("secret-host");

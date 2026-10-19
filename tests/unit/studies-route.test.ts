@@ -82,13 +82,12 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
     expect(JSON.stringify(body.facets)).not.toMatch(/CT|MR|unread|inspected/);
   });
 
-  it("ほかの役割には、検査日・モダリティ・状態の件数がある", async () => {
+  it("ほかの役割には、検査日・モダリティの件数がある（状態の件数は段 3 で外した）", async () => {
     state.role = "doctor";
     const { body } = await getStudies();
-    expect(Object.keys(body.facets).sort()).toEqual(["date", "modality", "status"]);
+    expect(Object.keys(body.facets).sort()).toEqual(["date", "modality"]);
     expect(body.facets.date!.all).toBe(8);
     expect(body.facets.modality).toMatchObject({ all: 8, CT: 6, MR: 2 });
-    expect(body.facets.status!.all).toBe(8);
   });
 
   it("ほかの役割の見え方は変わらない", async () => {

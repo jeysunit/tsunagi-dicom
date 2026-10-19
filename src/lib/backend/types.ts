@@ -41,9 +41,9 @@ export interface StudyQuery {
   dateTo?: string;
 }
 
-/** BFF から見た画像サーバー。資格情報はこの中だけで使い、ブラウザには渡さない */
+/** BFF から見た Orthanc（docs/spec.md の 0。Orthanc 専用）。資格情報はこの中だけで使い、ブラウザには渡さない */
 export interface Backend {
-  readonly kind: "orthanc" | "dicomweb";
+  readonly kind: "orthanc";
   readonly mock: boolean;
   /** QIDO-RS の検査の検索（新しい順に limit 件まで。検査日の範囲で絞れる） */
   searchStudies(limit?: number, query?: StudyQuery): Promise<StudySummary[]>;
@@ -55,10 +55,7 @@ export interface Backend {
    * すべての DICOM の値を見る権限（dicom.all_values）のときだけ
    */
   studyDataset(studyInstanceUid: string): Promise<DicomJsonDataset | null>;
-  /**
-   * 検査の件数。Orthanc では /statistics（Orthanc のときだけの部品）で正確に数える。
-   * DICOMweb だけのときは QIDO-RS の件数で、上限に届いたら exact=false（「以上」）
-   */
+  /** 検査の件数。Orthanc の /statistics で正確に数える */
   countStudies(): Promise<StudyCount>;
   /**
    * ビューアが画像を取る道（WADO-RS の読み取り）の中継。検索（QIDO-RS）と書き込みは通さない（docs/spec.md の 3.2）。

@@ -116,30 +116,16 @@ model UserPreference {
   updatedAt DateTime
 }
 
-// 検査の状態（段 2。docs/spec.md の 3.1）。検像・読影・緊急と、検査ごとに覚えたビューア。
-// 画像サーバーの DICOM の値は書き換えず、ここに持つ。変えた人と時刻は監査の記録（study_state）にも残す。
-model StudyState {
+// 検査ごとに覚えたビューア（段 2。docs/spec.md の 3.2）。変えた人と時刻は監査の記録（study_state。flag は viewer）にも残す。
+// 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の表は、段 3 で外した（migration 20261020000000_remove_study_state）。
+model StudyViewer {
   studyInstanceUid String   @id
-  // 検像済（false は未検像）
-  inspected        Boolean  @default(false)
-  // 既読（false は未読）
-  read             Boolean  @default(false)
-  urgent           Boolean  @default(false)
   // 検査ごとに覚えたビューア（src/lib/viewers.ts の ID）。null は覚えが無い（モダリティの既定で開く）
   viewer           String?
   // 版。変えるたびに 1 つ上げる。画面は読んだ時の版を添えて変え、違えば 409（古い画面からの上書きを断る）
   version          Int      @default(0)
   updatedBy        String
   updatedAt        DateTime
-}
-
-// ブックマーク（利用者ごと）。actorId は監査の記録の「誰が」と同じ値
-model StudyBookmark {
-  actorId          String
-  studyInstanceUid String
-  createdAt        DateTime
-
-  @@id([actorId, studyInstanceUid])
 }
 
 // モダリティごとの既定のビューア（管理の画面で変える。docs/spec.md の 3.2）

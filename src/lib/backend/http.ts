@@ -23,7 +23,8 @@ import {
 } from "@/lib/backend/types";
 import type { AppConfig } from "@/lib/config";
 
-// 実の画像サーバーへの接続。資格情報はここだけで使う。
+// 実の Orthanc への接続（Orthanc 専用。docs/spec.md の 0）。検索と中継は Orthanc の DICOMweb のプラグイン、
+// 件数は Orthanc の REST を使う。資格情報はここだけで使う。
 // 証明書は必ず確かめる。BACKEND_CA_FILE があれば、Node の既定の CA（NODE_EXTRA_CA_CERTS を含む）に足して使う。
 // 確かめを切る道は作らない。
 
@@ -38,8 +39,9 @@ const MAX_SEARCH_LENGTH = 2048;
 const PASS_HEADERS = ["content-type", "content-disposition", "etag", "last-modified"];
 
 export function createHttpBackend(config: AppConfig["backend"]): Backend {
-  const { kind, dicomwebUrl, orthancUrl, username, password, caPem } = config;
+  const { dicomwebUrl, orthancUrl, username, password, caPem } = config;
   if (!dicomwebUrl) throw new BackendError("BACKEND_DICOMWEB_URL が無い", 500);
+  if (!orthancUrl) throw new BackendError("BACKEND_ORTHANC_URL が無い", 500);
 
   const dispatcher: Dispatcher | undefined = caPem
     ? new Agent({ connect: { ca: [...getCACertificates("default"), caPem] } })
@@ -90,7 +92,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
   }
 
   return {
-    kind,
+    kind: "orthanc",
     mock: false,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
@@ -120,12 +122,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     },
 
     async countStudies() {
-      if (kind === "orthanc" && orthancUrl) {
-        const stats = await getJson<{ CountStudies: number }>(orthancUrl, "statistics");
-        return { count: stats.CountStudies, exact: true };
-      }
-      const studies = await qidoStudies(STUDY_LIMIT);
-      return { count: studies.length, exact: studies.length < STUDY_LIMIT };
+      const stats = await getJson<{ CountStudies: number }>(orthancUrl, "statistics");
+      return { count: stats.CountStudies, exact: true };
     },
 
     async relayDicomweb(req: RelayRequest) {

@@ -6,11 +6,11 @@ import { getConfig } from "@/lib/config";
 
 let shared: Backend | undefined;
 
-/** 設定（BACKEND_KIND・BACKEND_MOCK）に合わせた画像サーバー。サーバーの側だけで使う */
+/** 設定（BACKEND_MOCK）に合わせた Orthanc。サーバーの側だけで使う */
 export function getBackend(): Backend {
   if (!shared) {
     const { backend } = getConfig();
-    shared = backend.mock ? createMockBackend(backend.kind) : createHttpBackend(backend);
+    shared = backend.mock ? createMockBackend() : createHttpBackend(backend);
   }
   return shared;
 }

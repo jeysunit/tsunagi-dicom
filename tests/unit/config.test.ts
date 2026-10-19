@@ -104,17 +104,28 @@ describe("設定の読み込み", () => {
   });
 
   it("いくつも誤っていれば、全部を並べる", () => {
-    expect(variablesOf({ ...base, BACKEND_KIND: undefined, SESSION_SECRET: "" }).sort()).toEqual([
+    expect(variablesOf({ ...base, BACKEND_KIND: "pacs", SESSION_SECRET: "" }).sort()).toEqual([
       "BACKEND_KIND",
       "SESSION_SECRET",
     ]);
   });
 
-  it("モックでなければ画像サーバーの URL が要る", () => {
+  it("段 3：BACKEND_KIND は省ける（orthanc）。汎用の DICOMweb（dicomweb）は断る", () => {
+    expect(loadConfig({ ...base, BACKEND_KIND: undefined }).backend.kind).toBe("orthanc");
+    expect(loadConfig({ ...base, BACKEND_KIND: "" }).backend.kind).toBe("orthanc");
+    expect(problemsOf({ ...base, BACKEND_KIND: "dicomweb" })).toEqual([
+      { variable: "BACKEND_KIND", message: expect.stringContaining("dicomweb は外した") },
+    ]);
+  });
+
+  it("モックでなければ Orthanc の URL が2つとも要る", () => {
     // dev はモックのときだけなので、AUTH_MODE の誤りも一緒に並ぶ
     const env = { ...base, BACKEND_MOCK: "false" };
     expect(variablesOf(env).sort()).toEqual(["AUTH_MODE", "BACKEND_DICOMWEB_URL", "BACKEND_ORTHANC_URL"]);
-    expect(variablesOf({ ...env, BACKEND_KIND: "dicomweb" }).sort()).toEqual(["AUTH_MODE", "BACKEND_DICOMWEB_URL"]);
+    expect(variablesOf({ ...env, BACKEND_DICOMWEB_URL: "https://pacs.example.org/dicom-web" }).sort()).toEqual([
+      "AUTH_MODE",
+      "BACKEND_ORTHANC_URL",
+    ]);
   });
 
   describe("AUTH_MODE", () => {

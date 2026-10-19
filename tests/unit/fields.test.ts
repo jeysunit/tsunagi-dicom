@@ -60,10 +60,8 @@ afterAll(async () => {
 
 /** 試験の対象の画像サーバー。手元のサーバーの住所は起動の後に決まるので、使う時に作る */
 const BACKENDS: [string, () => Backend][] = [
-  ["モック（Orthanc）", () => createMockBackend("orthanc")],
-  ["モック（DICOMweb）", () => createMockBackend("dicomweb")],
+  ["モック（Orthanc の形）", () => createMockBackend()],
   ["Orthanc", () => createHttpBackend({ kind: "orthanc", mock: false, dicomwebUrl: `${baseUrl}/dicom-web`, orthancUrl: baseUrl })],
-  ["DICOMweb", () => createHttpBackend({ kind: "dicomweb", mock: false, dicomwebUrl: `${baseUrl}/dicom-web` })],
 ];
 
 /** 閲覧の役割だけ、許可の一覧を狭めた割り当て */
@@ -72,7 +70,7 @@ const NARROW: FieldAllowlistMap = {
   viewer: { study: ["studyInstanceUid", "modalities", "studyDate"], series: ["seriesInstanceUid"] },
 };
 
-describe("画面の API は、許可の一覧の項目だけを返す（モック・Orthanc・DICOMweb）", () => {
+describe("画面の API は、許可の一覧の項目だけを返す（モック・Orthanc）", () => {
   for (const [label, make] of BACKENDS) {
     describe(label, () => {
       it.each(ROLES)("既定の役割 %s：一覧の項目だけで、画面に出さない値は返らない", async (role) => {

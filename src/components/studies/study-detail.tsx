@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bookmark, Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useId, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -10,10 +10,8 @@ import { ViewerMenu } from "@/components/studies/viewer-menu";
 import type { DicomValueRow } from "@/lib/all-values";
 import { getJson } from "@/lib/client/api";
 import { getDetailOpen, getServerDetailOpen, setDetailOpen, subscribeDetailOpen } from "@/lib/client/detail-open";
-import { errorText, postJson } from "@/lib/client/post-json";
 import type { SeriesView, StudyView } from "@/lib/fields";
 import { formatBirthLine, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
-import type { StateFlag } from "@/lib/study-state";
 import { cn } from "@/lib/utils";
 
 // 詳細のパネル（docs/spec.md の 3.1）。一覧の下の場所に出す。行を選ぶと、動きの遅れ無しに替わる（一覧の行の値ですぐ描き、
@@ -74,67 +72,6 @@ function UidLine({ label, uid }: { label: string; uid: string }) {
   );
 }
 
-const STATE_BUTTONS: { flag: StateFlag; on: string; off: string; can: keyof ScreenInfo["can"] }[] = [
-  { flag: "inspected", on: "検像済", off: "未検像", can: "inspect" },
-  { flag: "read", on: "既読", off: "未読", can: "readStatus" },
-  { flag: "urgent", on: "緊急", off: "緊急", can: "urgent" },
-  { flag: "bookmarked", on: "ブックマーク", off: "ブックマーク", can: "bookmark" },
-];
-
-function StateControls({ study, screen, onChanged }: { study: StudyView; screen: ScreenInfo; onChanged: () => void }) {
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const buttons = STATE_BUTTONS.filter((b) => screen.can[b.can] && typeof study[b.flag] === "boolean");
-  if (buttons.length === 0) return null;
-
-  async function toggle(flag: StateFlag, value: boolean) {
-    setBusy(true);
-    setError(null);
-    const result = await postJson(
-      `/api/studies/${encodeURIComponent(study.studyInstanceUid ?? "")}/state`,
-      { flag, value, version: study.stateVersion ?? 0 },
-      screen.csrfToken,
-    );
-    setBusy(false);
-    if (result.status === 409) {
-      // ほかの利用者が先に変えた：読み直して、いまの値を見せる（上書きしない）
-      setError("ほかの利用者が先に変えたので、読み直した。値を確かめてから、もう一度押す");
-      onChanged();
-    } else if (!result.ok) setError(errorText(result));
-    else onChanged();
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2" role="group" aria-label="状態">
-      {buttons.map((b) => {
-        const on = study[b.flag] === true;
-        // 検像・読影は「いまの状態」を出し、押すと切り替える。緊急・ブックマークは印の有無
-        const text = b.flag === "inspected" || b.flag === "read" ? (on ? b.on : b.off) : b.on;
-        return (
-          <Button
-            key={b.flag}
-            type="button"
-            size="sm"
-            variant={on ? "default" : "outline"}
-            aria-pressed={on}
-            disabled={busy}
-            data-testid={`state-${b.flag}`}
-            onClick={() => void toggle(b.flag, !on)}
-          >
-            {b.flag === "bookmarked" && <Bookmark aria-hidden />}
-            {text}
-          </Button>
-        );
-      })}
-      {error && (
-        <span role="alert" className="text-xs text-danger">
-          {error}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function AllValues({ uid }: { uid: string }) {
   const [open, setOpen] = useState(false);
   const query = useQuery({
@@ -174,12 +111,12 @@ function AllValues({ uid }: { uid: string }) {
   );
 }
 
-const STATE_KEYS = ["inspected", "read", "urgent", "bookmarked", "rememberedViewer", "defaultViewer", "stateVersion"] as const;
+const VIEWER_KEYS = ["rememberedViewer", "defaultViewer", "viewerVersion"] as const;
 
-/** 一覧の行の、状態の項目のうち、値があるものだけ */
-function definedStateOf(row: StudyView): Partial<StudyView> {
+/** 一覧の行の、ビューアの覚えの項目のうち、値があるものだけ */
+function definedViewerOf(row: StudyView): Partial<StudyView> {
   const out: Record<string, unknown> = {};
-  for (const k of STATE_KEYS) if (row[k] !== undefined) out[k] = row[k];
+  for (const k of VIEWER_KEYS) if (row[k] !== undefined) out[k] = row[k];
   return out as Partial<StudyView>;
 }
 
@@ -212,16 +149,16 @@ export function StudyDetailPanel({
   const data = fetchEnabled && !detail.isFetching ? detail.data : undefined;
   const failed = fetchEnabled && detail.isError;
   // 詳細が届くまでは一覧の行の値で描き、届いたら詳細の値にする。
-  // 状態の値（検像・読影・緊急・ブックマーク・覚えたビューア）は、状態を変えたあと読み直す一覧の行の値を優先する
-  const study: StudyView = { ...row, ...data?.study, ...definedStateOf(row) };
-  // 状態を変えたら一覧を読み直す（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
+  // 覚えたビューアの値は、覚えを変えたあと読み直す一覧の行の値を優先する
+  const study: StudyView = { ...row, ...data?.study, ...definedViewerOf(row) };
+  // 覚えを変えたら一覧を読み直す（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
   const changed = onChanged;
   const allOpen = useSyncExternalStore(subscribeDetailOpen, getDetailOpen, getServerDetailOpen);
   const allId = useId();
 
   return (
     <section aria-label="検査の詳細" className="space-y-2 px-3 py-2" data-testid="study-detail" data-study-uid={uid}>
-      {/* 見出し：1〜2 行。左に患者と検査の要点、右に状態とビューア */}
+      {/* 見出し：1〜2 行。左に患者と検査の要点、右にビューア */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div className="min-w-0 flex-1 basis-96" data-testid="detail-head">
           <p className="flex flex-wrap items-baseline gap-x-3">
@@ -264,12 +201,11 @@ export function StudyDetailPanel({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StateControls study={study} screen={screen} onChanged={changed} />
           <ViewerMenu
             studyUid={uid}
             defaultViewer={study.defaultViewer}
             rememberedViewer={study.rememberedViewer}
-            stateVersion={study.stateVersion}
+            viewerVersion={study.viewerVersion}
             screen={screen}
             onChanged={changed}
           />

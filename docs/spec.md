@@ -60,7 +60,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 - 色と文字の値は1か所（設計の値・design tokens。`src/app/globals.css`）で持つ。対比は `tests/unit/design-tokens.test.ts` で確かめる。同じ作者のモダリティのダミーの画面も、同じ値を使う。
 - 地の色の切り替えは見出しの「暗い地」のボタン。選んだ地は BFF のデータベースに利用者ごとに覚える（検証モードは1つの利用者 `dev` として覚える）。ログインの前の頁は明るい地。
 
-画面の言葉：最初は日本語だけ。ほかの言葉への切り替えは後の段で決める。文書は日本語を主にし、README は日本語と英語。
+画面の言葉：最初は日本語だけ。ほかの言葉への切り替えは後の段で決める。文書は日本語だけ（英語の README は、段 3 で承認者の指示により外した）。
 
 ### 2.1 設定（`.env.example`）
 
@@ -356,7 +356,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 - イメージの片付け：版のタグの付いたイメージは消さない。ほかのタグのイメージは新しい順に 10 個と、2 日より新しいものを残し、残りとタグの無いイメージを週に1回消す（署名などの子は親と一緒）。いまは dry-run で、消す候補を記録に出すだけ（記録を確かめてから消す形にする）。範囲は README と `.github/workflows/image-cleanup.yml`。
 - **仕様の外で足した道**（アプリの機能ではないもの）：`/api/health`（コンテナの生死の確かめ。認証なし・画像サーバーにつながない）、`/api/audit/verify`（監査の記録のつなぎの確かめ。管理者だけ）。3.6 を参照。
 - **アプリの設定の外の変数**（`.env.example` に入れない。アプリは読まない）：`TSUNAGI_IMAGE`（`compose.yaml` で使うイメージ。既定は手元で作る `tsunagi-dicom:local`）、`PLAYWRIGHT_CHROMIUM_EXECUTABLE`（試験だけ。入っている Chromium を使うとき）、`E2E_INITIAL_ADMIN_PASSWORD`・`E2E_SKIP_PREPARE`（試験だけ。`scripts/e2e-server.mjs` が `AUTH_MODE=local` の試験のサーバーを起こすとき）。
-- 文書：README（日本語。英語の README は段 3 で外す）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`docs/security-and-maintenance.md`（セキュリティと保守の方針）、`SECURITY.md`（脆弱性の報告の窓口）、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
+- 文書：README（日本語）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`docs/security-and-maintenance.md`（セキュリティと保守の方針）、`SECURITY.md`（脆弱性の報告の窓口）、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
 - 「DICOM® は NEMA の登録商標」の一文を README に書く。
 
 ## 6. 段階（PR の単位）
