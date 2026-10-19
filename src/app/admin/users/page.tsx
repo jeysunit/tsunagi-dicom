@@ -32,6 +32,7 @@ export default async function UsersPage() {
       csrfToken={access.session.local.row.csrfToken}
       selfId={access.session.local.user.id}
       minPasswordLength={minPasswordLength(config.auth.mfaRequired)}
+      needsTotp={access.session.local.user.totpSecretEnc !== null}
       users={users.map((u) => ({
         id: u.id,
         username: u.username,

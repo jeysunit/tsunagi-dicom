@@ -614,7 +614,12 @@ async function closeOtherSessions(ctx: AuthContext, userId: string, keepId?: str
 }
 
 /** いまのセッションを、上げた後の認証の世代に合わせる（上げる前の世代のままのときだけ） */
-async function followVersion(ctx: AuthContext, session: SessionRow, from: number, extra: { pendingTotpEnc?: null } = {}) {
+async function followVersion(
+  ctx: AuthContext,
+  session: SessionRow,
+  from: number,
+  extra: { pendingTotpEnc?: null; reauthAt?: null; reauthMfaAt?: null } = {},
+) {
   await ctx.db.session.updateMany({
     where: { id: session.id, credentialVersion: from },
     data: { credentialVersion: from + 1, ...extra },
@@ -828,7 +833,8 @@ export async function changePassword(
     await record(ctx, actorOf(user), { action: "password_change", outcome: "denied", detail: { reason: "changed_during_change" } });
     throw new AuthFailure(409, "パスワードを変更できませんでした（ほかの画面で先に変更したか、このセッションが無効です）。頁を開き直してください");
   }
-  if (session.stage === "active") await followVersion(ctx, session, user.credentialVersion);
+  // 変えた人のいまのセッションは新しい世代に合わせ、前に通した再認証は消す（パスワードを変えた後に持ち越さない）
+  if (session.stage === "active") await followVersion(ctx, session, user.credentialVersion, { reauthAt: null, reauthMfaAt: null });
   await closeOtherSessions(ctx, user.id, session.id);
   const updated: User = { ...user, ...changes, credentialVersion: user.credentialVersion + 1 };
   await record(ctx, actorOf(user), { action: "password_change", outcome: "success" });
@@ -838,10 +844,16 @@ export async function changePassword(
 
 // ── 再認証（大事な操作の前の、もう一度の本人の確かめ） ──
 
+/** 利用者の管理の再認証で、TOTP も求めるときの印（AuthFailure の problems。画面は認証コードの欄を出す） */
+export const REAUTH_TOTP_REQUIRED = "reauth_totp_required";
+
 /**
- * パスワードだけで本人を確かめ、設定の reauthMinutes の間、大事な操作を許す（TOTP はログインのときに確かめる。
- * 2026-10-20 に承認者が決めた。docs/spec.md の 3.6 の「再認証」）。送られた TOTP の番号は確かめず、使った段にも数えない。
- * TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない（verifyAgain。画面のロックの解除と同じ）
+ * もう一度の本人の確かめ（docs/spec.md の 3.6 の「再認証」）。確かめた時刻は、サーバーの側のこのセッションの行だけに持つ。
+ * - 認証コードを添えなければ、パスワードだけで確かめる（削除などの再認証。2026-10-20 に承認者が決めた）。送られていない番号は
+ *   確かめず、使った段にも数えない。TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない
+ *   （verifyAgain。画面のロックの解除と同じ）。
+ * - 認証コードを添えれば、TOTP を登録した利用者には TOTP まで確かめ、reauthMfaAt も記す（利用者の管理の再認証）。
+ * どちらも、ログインし終えた（active）・ロックしていないセッションだけ。ログインの途中のセッションからは通さない
  */
 export async function reauthenticate(
   ctx: AuthContext,
@@ -850,22 +862,43 @@ export async function reauthenticate(
   input: { password: string; code?: string },
 ): Promise<void> {
   if (session.stage !== "active" || session.lockedAt) throw new AuthFailure(409, "ログインしていません。再度ログインしてください");
-  await verifyAgain(ctx, user, { password: input.password }, "reauth", { requireTotp: false });
-  await ctx.db.session.update({ where: { id: session.id }, data: { reauthAt: now(ctx) } });
-  await record(ctx, actorOf(user), { action: "reauth", outcome: "success", detail: { totp: false } });
+  const withTotp = input.code !== undefined && input.code !== "" && user.totpSecretEnc !== null;
+  const totp = await verifyAgain(ctx, user, withTotp ? input : { password: input.password }, "reauth", { requireTotp: withTotp });
+  const at = now(ctx);
+  await ctx.db.session.update({ where: { id: session.id }, data: { reauthAt: at, ...(totp ? { reauthMfaAt: at } : {}) } });
+  await record(ctx, actorOf(user), { action: "reauth", outcome: "success", detail: { totp } });
+}
+
+/** 確かめた時刻が、サーバーの時計で reauthMinutes の中か（先の時刻は、時計の数秒の巻き戻りのほかは受けない） */
+function withinReauth(ctx: AuthContext, at: number, when: Date | null): boolean {
+  if (!when) return false;
+  const age = at - when.getTime();
+  return age > -5_000 && age < ctx.settings.reauthMinutes * 60_000;
 }
 
 /**
- * 大事な操作（利用者の管理）の前に呼ぶ。設定の reauthMinutes（既定 REAUTH_MINUTES）の中に再認証していなければ
+ * 大事な操作の前に呼ぶ。設定の reauthMinutes（既定 REAUTH_MINUTES）の中に、このセッションで再認証していなければ
  * 403（problems に REAUTH_REQUIRED）。ログインの一時停止の間は、再認証の有効時間の内でも 403（problems に locked）
- * （一時停止の間は再認証を止める、という承認者の決定に合わせ、前に通した再認証も使わせない）
+ * （一時停止の間は再認証を止める、という承認者の決定に合わせ、前に通した再認証も使わせない）。
+ * requireTotp（利用者の管理）のときは、TOTP を登録した利用者には、TOTP まで確かめた再認証を求める（problems に
+ * REAUTH_TOTP_REQUIRED も）。パスワードとセッションだけで、管理者の作り足し・役割の格上げ・ほかの管理者の TOTP の
+ * やり直しをさせないため（2026-10-20 の独立レビューの指摘。docs/spec.md の 3.6）
  */
-export function assertRecentReauth(ctx: AuthContext, session: SessionRow, user: Pick<User, "lockedUntil">): void {
+export function assertRecentReauth(
+  ctx: AuthContext,
+  session: SessionRow,
+  user: Pick<User, "lockedUntil" | "totpSecretEnc">,
+  options: { requireTotp?: boolean } = {},
+): void {
   const at = now(ctx).getTime();
   if (user.lockedUntil !== null && user.lockedUntil.getTime() > at) {
     throw new AuthFailure(403, "ロック中のため、この操作はできません（ロックが解除されてから、再度お試しください）", ["locked"]);
   }
-  if (session.reauthAt && at - session.reauthAt.getTime() < ctx.settings.reauthMinutes * 60_000) return;
+  if (options.requireTotp && user.totpSecretEnc !== null) {
+    if (withinReauth(ctx, at, session.reauthMfaAt)) return;
+    throw new AuthFailure(403, "この操作にはパスワードと認証コードの再入力が必要です", [REAUTH_REQUIRED, REAUTH_TOTP_REQUIRED]);
+  }
+  if (withinReauth(ctx, at, session.reauthAt)) return;
   throw new AuthFailure(403, "この操作にはパスワードの再入力が必要です", [REAUTH_REQUIRED]);
 }
 
@@ -1049,6 +1082,8 @@ export async function updateUser(
   // 自分の TOTP のやり直しも、自分ではできない（別の管理者が行う）。再認証がパスワードだけになったので、管理者のセッションと
   // パスワードを得た人が、再認証から自分の TOTP をやり直し、自分の認証のアプリを登録し直せないようにする（docs/spec.md の 3.6）
   if (change.resetTotp && target.username === by.actorId) {
+    // 断ったことも記録に残す（再認証を通した管理者が、禁止の操作を試したことを後から追えるように）
+    await record(ctx, by, { action: "mfa_reset", outcome: "denied", detail: { target: target.username, reason: "self" } });
     throw new AuthFailure(403, "自分の二要素認証はリセットできません。別の管理者に依頼してください");
   }
   if (change.role !== undefined && !isRole(change.role)) throw new AuthFailure(400, "役割の指定が正しくありません");

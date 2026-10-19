@@ -167,14 +167,16 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
   await form.getByRole("button", { name: "追加" }).click();
 
   // 利用者の管理は大事な操作なので、BFF が再認証を求める。違うパスワードでは通らない。
-  // 期待の変更：再認証はパスワードだけ（TOTP はログインのときだけ。2026-10-20。docs/spec.md の 3.6）なので、認証コードの欄は無い
+  // 削除の再認証はパスワードだけ（2026-10-20）だが、利用者の管理は TOTP を登録した管理者には認証コードも求める
+  // （パスワードとセッションだけで管理者を作り足させない。docs/spec.md の 3.6）
   const reauth = page.getByRole("form", { name: "再認証" });
   await expect(reauth).toBeVisible();
-  await expect(reauth.locator('input[name="code"]')).toHaveCount(0);
   await reauth.locator('input[name="password"]').fill("wrong-Pass-1x");
+  await reauth.locator('input[name="code"]').fill("000000");
   await reauth.getByRole("button", { name: "認証して続行" }).click();
   await expect(reauth.getByRole("alert")).toContainText("正しくありません");
   await reauth.locator('input[name="password"]').fill(ADMIN_PASSWORD);
+  await reauth.locator('input[name="code"]').fill(await nextCode(adminSecret));
   await reauth.getByRole("button", { name: "認証して続行" }).click();
   await expect(reauth).toHaveCount(0);
   // 通ったら同じ操作をもう一度送る（ここでは規則に合わない最初のパスワードで断られる）
@@ -410,9 +412,9 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   // 時計を進めた管理者のタブは、操作の無い時間でロックを掛けうるので、この試験の間は閉じた頁にしておく
   await admin.page.goto("about:blank");
   const page = await admin.context.newPage();
-  // ここまでの試験で、管理者はパスワードを2回誤っている（再認証と画面のロックの解除）。再認証とロックの解除はパスワードだけで、
-  // TOTP を確かめないので、成功しても失敗の数は消えない（2026-10-20 から。docs/spec.md の 3.6）。この試験でもう1回誤ると
-  // 一時停止の閾値（3回）に届くので、先に TOTP まで確かめるログインをし直して、数を0に戻す
+  // ここまでの試験で、管理者は画面のロックの解除でパスワードを誤っている。パスワードだけのロックの解除と再認証は、TOTP を
+  // 確かめないので、成功しても失敗の数を消さない（docs/spec.md の 3.6）。この試験の誤りで閾値（3回）に近づきすぎないよう、
+  // 先に TOTP まで確かめるログインをし直して、数を0に戻す
   await page.goto("/");
   await page.getByRole("button", { name: "ログアウト" }).click();
   await expect(page).toHaveURL(/\/login$/);

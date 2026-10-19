@@ -102,8 +102,12 @@ model Session {
   lockedAt       DateTime?
   // 登録の途中の TOTP の秘密（暗号化）。登録を確かめたら User へ移す
   pendingTotpEnc String?
-  // 大事な操作（利用者の管理）の前の、もう一度の本人の確かめの時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）
+  // 大事な操作（利用者の管理・削除など）の前の、もう一度の本人の確かめの時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）。
+  // サーバーの側のこの行だけに持つ（cookie・本文から読まない）。パスワードの変更で消す
   reauthAt       DateTime?
+  // 上の確かめで TOTP まで確かめた時刻。利用者の管理（ユーザーの追加・役割・無効・TOTP のやり直しなど）は、TOTP を登録した
+  // 利用者にはこちらを求める（削除の再認証はパスワードだけ。docs/spec.md の 3.6。2026-10-20）
+  reauthMfaAt    DateTime?
   // 作った時の利用者の認証の世代（User.credentialVersion）。違えば、このセッションは使えない
   credentialVersion Int    @default(0)
 

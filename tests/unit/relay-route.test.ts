@@ -97,6 +97,16 @@ describe("中継の route handler の役割の確かめ", () => {
     expect(rows.at(-1)!.detail).toContain('"reason":"forbidden"');
   });
 
+  it("データベースの役割が知らない名前（前の閲覧・誤記）なら、セッションを使わせない（一般に読み替えない。閉じる側）", async () => {
+    await loginAs("legacy1", "general");
+    const { getDb } = await import("@/lib/db");
+    const db = await getDb();
+    for (const role of ["viewer", "doctor", "", "Admin"]) {
+      await db.user.update({ where: { username: "legacy1" }, data: { role } });
+      expect((await relay(["studies", STUDY, "metadata"])).status, role).toBe(401);
+    }
+  });
+
   it("割り当てられている役割は、同じ道で画像サーバー（モック）まで届く", async () => {
     await loginAs("admin1", "admin");
     const res = await relay(["studies", STUDY, "metadata"]);

@@ -21,6 +21,7 @@ import {
   PENDING_SESSION_MINUTES,
   REAUTH_MINUTES,
   REAUTH_REQUIRED,
+  REAUTH_TOTP_REQUIRED,
   SESSION_MAX_HOURS,
   assertRecentReauth,
   resolveSession,
@@ -529,21 +530,24 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
 
   // 期待の変更：前は「既定でも、ログインと再認証の TOTP は求める」。再認証は TOTP を求めなくなった（2026-10-20）ので、
   // ログインは TOTP を求め、再認証はパスワードだけで通り、送られた番号は確かめない（使った段にも数えない）ことを見る
-  it("ログインは TOTP を求め、再認証はパスワードだけで通る（送られた番号は確かめず、使った段にも数えない）", async () => {
+  it("ログインは TOTP を求め、認証コードを添えない再認証はパスワードだけで通る（番号を確かめず、使った段にも数えない）", async () => {
     const { ctx, db, clock } = await setup();
     const { secret, token } = await enrolledUser(ctx, clock);
     const s = await sessionOf(db, token);
-    // 誤った番号を添えても、パスワードが合えば通る（番号は見ない）
-    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: "000000" });
-    // 使った段に数えないので、同じ段の正しい番号をログインで使える
-    const code = totpAt(secret, clock.t);
-    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code });
-    expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep).not.toBe(Math.floor(clock.t / 30_000));
+    const stepBefore = (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep;
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD });
+    expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep).toBe(stepBefore);
+    expect((await sessionOf(db, token)).session.reauthMfaAt).toBeNull();
+    // 添えた番号は確かめる（利用者の管理の再認証）。誤れば断り、TOTP の誤りとして数える
+    await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: "000000" })).rejects.toMatchObject({ status: 401 });
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    expect((await sessionOf(db, token)).session.reauthMfaAt).not.toBeNull();
     expect((await login(ctx, "tanaka", PASSWORD)).stage).toBe("totp");
     // パスワードの誤りは断る
     await expect(reauthenticate(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({ status: 401 });
-    const ok = (await auditRows(db)).filter((r) => r.action === "reauth" && r.outcome === "success");
-    expect(ok.map((r) => JSON.parse(r.detail ?? "{}").totp)).toEqual([false, false]);
+    const rows = (await auditRows(db)).filter((r) => r.action === "reauth");
+    expect(rows.filter((r) => r.outcome === "success").map((r) => JSON.parse(r.detail ?? "{}").totp)).toEqual([false, true]);
+    expect(rows.filter((r) => r.outcome === "denied").map((r) => JSON.parse(r.detail ?? "{}").reason)).toEqual(["bad_totp", "bad_password"]);
   });
 
   it("操作の無い時間が SCREEN_LOCK_MINUTES に達したら、サーバーの側でもその要求の時点でロックにする（猶予なし）", async () => {
@@ -702,6 +706,10 @@ describe("管理者の操作（棚卸し・役割）", () => {
     const self = await db.user.findUniqueOrThrow({ where: { username: "admin1" } });
     await expect(updateUser(ctx, self.id, { resetTotp: true }, { actorId: "admin1", actorRole: "admin" })).rejects.toMatchObject({ status: 403 });
     expect((await db.user.findUniqueOrThrow({ where: { username: "admin1" } })).totpSecretEnc).not.toBeNull();
+    // 断ったことも記録に残る
+    const denied = (await auditRows(db)).filter((r) => r.action === "mfa_reset" && r.outcome === "denied");
+    expect(denied).toHaveLength(1);
+    expect(JSON.parse(denied[0]!.detail!)).toMatchObject({ target: "admin1", reason: "self" });
     // 別の管理者はリセットできる
     await updateUser(ctx, self.id, { resetTotp: true }, { actorId: "admin2", actorRole: "admin" });
     expect((await db.user.findUniqueOrThrow({ where: { username: "admin1" } })).totpSecretEnc).toBeNull();
@@ -949,8 +957,9 @@ describe("レビューと安全の確かめで直したこと", () => {
     expect(slept[0] ?? 0).toBe(known);
   });
 
-  // 期待の変更：前は「パスワードと TOTP で通る」。再認証はパスワードだけになった（2026-10-20。docs/spec.md の 3.6）
-  it("利用者の管理の前に再認証が要る。パスワードだけで通り、REAUTH_MINUTES（5 分）の間は聞き直さず、過ぎたら切れる", async () => {
+  // 期待の変更：前は「パスワードと TOTP で通る」の1段だけ。削除の再認証はパスワードだけになり（2026-10-20）、利用者の管理は
+  // TOTP を登録した管理者には TOTP まで求める（パスワードとセッションだけで管理者を作り足させない。docs/spec.md の 3.6）
+  it("再認証：削除はパスワードだけで通り、利用者の管理は TOTP まで求める。REAUTH_MINUTES（5 分）の間は聞き直さず、過ぎたら切れる", async () => {
     const { ctx, db, clock } = await setup();
     const { secret, token } = await enrolledUser(ctx, clock, "admin1", "admin");
     const s = await sessionOf(db, token);
@@ -962,22 +971,60 @@ describe("レビューと安全の確かめで直したこと", () => {
     ).rejects.toMatchObject({ status: 401 });
     await reauthenticate(ctx, s.session, s.user, { password: PASSWORD });
     const after = await sessionOf(db, token);
+    // パスワードだけの再認証：削除（requireTotp なし）は通り、利用者の管理（requireTotp）は通らない
+    expect(() => assertRecentReauth(ctx, after.session, after.user)).not.toThrow();
+    expect(() => assertRecentReauth(ctx, after.session, after.user, { requireTotp: true })).toThrow(
+      expect.objectContaining({ status: 403, problems: [REAUTH_REQUIRED, REAUTH_TOTP_REQUIRED] }),
+    );
+    // TOTP まで確かめた再認証で、利用者の管理も通る
+    await reauthenticate(ctx, after.session, after.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    const mfa = await sessionOf(db, token);
+    expect(() => assertRecentReauth(ctx, mfa.session, mfa.user, { requireTotp: true })).not.toThrow();
     // 有効の間は聞き直さない
     clock.advance(REAUTH_MINUTES * 60_000 - 1000);
-    expect(() => assertRecentReauth(ctx, after.session, after.user)).not.toThrow();
-    clock.advance(-(REAUTH_MINUTES * 60_000 - 1000));
-    expect(() => assertRecentReauth(ctx, after.session, after.user)).not.toThrow();
-    clock.advance(REAUTH_MINUTES * 60_000);
-    try {
-      assertRecentReauth(ctx, after.session, after.user);
-      throw new Error("通ってしまった");
-    } catch (error) {
-      expect(error).toMatchObject({ status: 403, problems: [REAUTH_REQUIRED] });
+    expect(() => assertRecentReauth(ctx, mfa.session, mfa.user)).not.toThrow();
+    expect(() => assertRecentReauth(ctx, mfa.session, mfa.user, { requireTotp: true })).not.toThrow();
+    clock.advance(1000);
+    for (const options of [{}, { requireTotp: true }]) {
+      expect(() => assertRecentReauth(ctx, mfa.session, mfa.user, options)).toThrow(expect.objectContaining({ status: 403 }));
     }
     const actions = (await auditRows(db)).map((r) => `${r.action}:${r.outcome}`);
     expect(actions.filter((a) => a === "reauth:denied")).toHaveLength(2);
-    expect(actions).toContain("reauth:success");
+    expect(
+      (await auditRows(db)).filter((r) => r.action === "reauth" && r.outcome === "success").map((r) => JSON.parse(r.detail ?? "{}").totp),
+    ).toEqual([false, true]);
     expect(JSON.stringify(await auditRows(db))).not.toContain(PASSWORD);
+  });
+
+  it("再認証の印は、このセッションのサーバーの行だけにあり、ほかのセッション・パスワードの変更の後・ログインの途中には持ち越さない", async () => {
+    const { ctx, db, clock } = await setup();
+    const { secret, token } = await enrolledUser(ctx, clock);
+    const s = await sessionOf(db, token);
+    await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
+    // 同じ利用者の別のセッション（もう一度ログインした）には、再認証の印が無い
+    clock.advance(30_000);
+    const first = await login(ctx, "tanaka", PASSWORD);
+    expect(first.stage).toBe("totp");
+    // ログインの途中のセッションからは、再認証も画面のロックの解除も通さない（本ログインに進めない）
+    const pending = await sessionOf(db, first.token);
+    await expect(reauthenticate(ctx, pending.session, pending.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
+    await expect(unlockScreen(ctx, pending.session, pending.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
+    expect((await resolveSession(ctx, first.token)).kind).toBe("pending");
+    const done = await submitTotp(ctx, pending.session, pending.user, totpAt(secret, clock.t));
+    const other = await sessionOf(db, done.rotated!.token);
+    expect(other.session.reauthAt).toBeNull();
+    expect(() => assertRecentReauth(ctx, other.session, other.user)).toThrow(expect.objectContaining({ problems: [REAUTH_REQUIRED] }));
+    // パスワードを変えたら、いまのセッションの再認証の印も消す
+    clock.advance(30_000);
+    const mine = await sessionOf(db, done.rotated!.token);
+    await reauthenticate(ctx, mine.session, mine.user, { password: PASSWORD });
+    expect((await sessionOf(db, done.rotated!.token)).session.reauthAt).not.toBeNull();
+    const before = await sessionOf(db, done.rotated!.token);
+    await changePassword(ctx, before.session, before.user, { currentPassword: PASSWORD, code: totpAt(secret, clock.t), newPassword: NEW_PASSWORD });
+    const changed = await sessionOf(db, done.rotated!.token);
+    expect(changed.session.reauthAt).toBeNull();
+    expect(changed.session.reauthMfaAt).toBeNull();
+    expect(() => assertRecentReauth(ctx, changed.session, changed.user)).toThrow(AuthFailure);
   });
 
   it("ログインした後のパスワードの変更は、いまのパスワードと TOTP を求める", async () => {

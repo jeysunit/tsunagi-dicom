@@ -30,8 +30,9 @@ export async function POST(request: Request) {
     await checkedState(request);
     const session = await requireSession("user.manage");
     const ctx = await authContext();
-    // 大事な操作：直前に本人の確かめ（/api/auth/reauth）が要る
-    assertRecentReauth(ctx, session.local!.row, session.local!.user);
+    // 大事な操作：直前に本人の確かめ（/api/auth/reauth）が要る。利用者の管理は、TOTP を登録した管理者には TOTP まで求める
+    // （パスワードとセッションだけで管理者を作り足させない。docs/spec.md の 3.6）
+    assertRecentReauth(ctx, session.local!.row, session.local!.user, { requireTotp: true });
     const body = await readJson(request, Body);
     const user = await createUser(
       ctx,

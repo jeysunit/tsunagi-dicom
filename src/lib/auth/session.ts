@@ -66,10 +66,14 @@ export async function authContext(): Promise<AuthContext> {
   };
 }
 
-function toSession(user: User, row: SessionRow): Session {
-  // 役割はデータベースの値を毎回読む（管理者が変えたら、次の要求から効く）
-  // 知らない役割の名前（migration 20261020100000_two_roles の前の医師・技師・閲覧など）は、その migration と同じく一般として扱う
-  const role: Role = isRole(user.role) ? user.role : "general";
+/**
+ * 役割はデータベースの値を毎回読む（管理者が変えたら、次の要求から効く）。
+ * 知らない役割の名前（誤記・空・migration 20261020100000_two_roles を通っていない前の名前など）は、どの役割にも当てず、
+ * セッションを使わせない（ログインしていない扱い。閉じる側に倒す）。前の役割の名前の移し替えは migration だけが行う
+ */
+function toSession(user: User, row: SessionRow): Session | null {
+  if (!isRole(user.role)) return null;
+  const role: Role = user.role;
   return { actorId: user.username, role, authMode: "local", local: { row, user } };
 }
 
@@ -93,11 +97,15 @@ export const getAuthState = cache(async (): Promise<AuthState> => {
       return { kind: "anonymous" };
     case "pending":
       return { kind: "pending", stage: resolved.session.stage as Exclude<Stage, "active">, row: resolved.session, user: resolved.user };
-    case "locked":
-      return { kind: "locked", session: toSession(resolved.user, resolved.session) };
-    case "active":
+    case "locked": {
+      const session = toSession(resolved.user, resolved.session);
+      return session ? { kind: "locked", session } : { kind: "anonymous" };
+    }
+    case "active": {
       // 操作の時刻は、画面が操作を知らせたとき（/api/auth/activity）だけ数え直す（画像の取得などの裏の要求では数えない）
-      return { kind: "active", session: toSession(resolved.user, resolved.session) };
+      const session = toSession(resolved.user, resolved.session);
+      return session ? { kind: "active", session } : { kind: "anonymous" };
+    }
   }
 });
 
