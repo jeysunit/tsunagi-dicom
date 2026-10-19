@@ -78,35 +78,42 @@ type ExportRecorder = (outcome: "success" | "failed", phase: "result", extra?: R
 
 /**
  * 本文を流しながら、終わり方を記録する：流し終えた（success・bytes）、Orthanc の側で切れた・時間切れ（failed・interrupted）、
- * ブラウザの側で切った（failed・cancelled）。もう流し始めているので、記録できなくても流れは止めない（ログに残す）
+ * ブラウザの側で切った（failed・cancelled）。結果の行を書き終えてから、本文を閉じる・誤りにする（書き終える前にプロセスが
+ * 止まって「求めた」だけが残る間を狭める）。もう流し始めているので、記録できなくても流れは止めない（BFF のログに残す）
  */
 function watchedBody(source: ReadableStream<Uint8Array>, record: ExportRecorder): ReadableStream<Uint8Array> {
   const reader = source.getReader();
   let bytes = 0;
   let settled = false;
-  const settle = (outcome: "success" | "failed", extra: Record<string, unknown>) => {
+  const settle = async (outcome: "success" | "failed", extra: Record<string, unknown>) => {
     if (settled) return;
     settled = true;
-    void record(outcome, "result", { bytes, ...extra }).catch(() => console.error(JSON.stringify({ event: "export_result_not_recorded" })));
+    try {
+      await record(outcome, "result", { bytes, ...extra });
+    } catch {
+      console.error(JSON.stringify({ event: "export_result_not_recorded", outcome, ...extra }));
+    }
   };
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
+      let chunk: ReadableStreamReadResult<Uint8Array>;
       try {
-        const { done, value } = await reader.read();
-        if (done) {
-          settle("success", {});
-          controller.close();
-          return;
-        }
-        bytes += value.byteLength;
-        controller.enqueue(value);
+        chunk = await reader.read();
       } catch (error) {
-        settle("failed", { interrupted: true });
+        await settle("failed", { interrupted: true });
         controller.error(error);
+        return;
       }
+      if (chunk.done) {
+        await settle("success", {});
+        controller.close();
+        return;
+      }
+      bytes += chunk.value.byteLength;
+      controller.enqueue(chunk.value);
     },
     async cancel(reason) {
-      settle("failed", { cancelled: true });
+      await settle("failed", { cancelled: true });
       await reader.cancel(reason).catch(() => undefined);
     },
   });

@@ -12,6 +12,7 @@ import { getDb } from "@/lib/db";
 import { parsePatientName } from "@/lib/format/patient-name";
 import {
   assertWriteAllowed,
+  DELETE_DISPATCH_DEADLINE_MS,
   deletedStudyStillPresent,
   isRequestId,
   openDeleteConfirm,
@@ -95,7 +96,7 @@ export async function POST(request: Request, { params }: Context) {
     await assertReauth(session);
 
     const db = await getDb();
-    const prior = await rowsOfRequest(db, "delete", requestId);
+    const prior = await rowsOfRequest(db, "delete", requestId, uid);
     if (requestOutcome(prior).phase !== "none") return priorResponse(session, uid, requestId, prior);
 
     const backend = getBackend();
@@ -130,7 +131,7 @@ export async function POST(request: Request, { params }: Context) {
     // 同じ検査の削除で、まだ結果の分からない要求（処理中・結果不明）があれば、照らし合わせが済むまで断る
     type Begin = { kind: "repeated" } | { kind: "pending"; pending: string[] } | { kind: "first" };
     const begin = await auditIf<Begin>(session, async (tx) => {
-      if (requestOutcome(await rowsOfRequest(tx, "delete", requestId)).phase !== "none") {
+      if (requestOutcome(await rowsOfRequest(tx, "delete", requestId, uid)).phase !== "none") {
         return { value: { kind: "repeated" as const }, fields: null };
       }
       const pending = await unresolvedRequests(tx, "delete", uid, () => true);
@@ -145,7 +146,7 @@ export async function POST(request: Request, { params }: Context) {
         fields: { action: "delete", outcome: "success", patientId: info.patientId, studyInstanceUid: uid, detail: { ...detail, phase: "request" } },
       };
     });
-    if (begin.kind === "repeated") return priorResponse(session, uid, requestId, await rowsOfRequest(db, "delete", requestId));
+    if (begin.kind === "repeated") return priorResponse(session, uid, requestId, await rowsOfRequest(db, "delete", requestId, uid));
     if (begin.kind === "pending") {
       return Response.json(
         { error: "この検査を消した結果が、まだ分からない。消し直さずに、先にその結果を確かめる", pendingRequestIds: begin.pending },
@@ -169,6 +170,31 @@ export async function POST(request: Request, { params }: Context) {
       const why = again.kind !== "ok" ? again.kind : "changed";
       await result("failed", { refused: why, ...(changedLater.length > 0 ? { changed: changedLater } : {}) });
       return Response.json({ error: REFUSALS[why].error }, { status: REFUSALS[why].status });
+    }
+
+    // DELETE を送る直前に、記録の並びの中で、自分の要求がまだ有効か（ほかで解かれていない・決めた時間の中）を確かめ、
+    // 「送る」の行（dispatch）を足す。この行の後でだけ、管理者は結果不明の削除を手で解ける（./resolve）
+    type Dispatch = "go" | "settled" | "stale";
+    const dispatch = await auditIf<Dispatch>(session, async (tx) => {
+      const o = requestOutcome(await rowsOfRequest(tx, "delete", requestId, uid));
+      if (o.phase !== "requested" || o.dispatched) return { value: "settled", fields: null };
+      const age = o.requestedAt ? Date.now() - o.requestedAt.getTime() : Infinity;
+      if (age > DELETE_DISPATCH_DEADLINE_MS) {
+        return {
+          value: "stale",
+          fields: { action: "delete", outcome: "failed", patientId: info.patientId, studyInstanceUid: uid, detail: { requestId, phase: "result", refused: "stale" } },
+        };
+      }
+      return {
+        value: "go",
+        fields: { action: "delete", outcome: "success", patientId: info.patientId, studyInstanceUid: uid, detail: { requestId, phase: "dispatch" } },
+      };
+    });
+    if (dispatch === "settled") {
+      return Response.json({ requestId, error: "この削除の要求は、送る前にほかで片付けられた（管理者が解いたなど）。消さない" }, { status: 409 });
+    }
+    if (dispatch === "stale") {
+      return Response.json({ requestId, error: "求めてから時間がたちすぎた。消さずに止めた。もう一度確かめてから消す" }, { status: 409 });
     }
 
     try {
@@ -210,7 +236,7 @@ export async function GET(request: Request, { params }: Context) {
     if (!isRequestId(requestId)) return Response.json({ error: "要求の ID（UUID）の形が誤り" }, { status: 400 });
     await requirePermission(session, "study.delete", { action: "delete", studyInstanceUid: uid, detail: { requestId } });
     const db = await getDb();
-    const rows = await rowsOfRequest(db, "delete", requestId);
+    const rows = await rowsOfRequest(db, "delete", requestId, uid);
     const o = requestOutcome(rows);
     if (o.phase === "none") return Response.json({ requestId, outcome: "none" });
     // 求めた本人のほか、照らし合わせの役割（pacs.reconcile。管理者）なら、ほかの人の要求も照らせる（止まった削除を片付けるため）

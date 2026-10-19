@@ -173,6 +173,27 @@ describe("書き出し（ZIP）", () => {
     expect(await lastAudit("export")).toMatchObject({ outcome: "failed" });
   });
 
+  it("結果の行を書き終えてから本文を閉じる。結果を記録できなくても流れは止めず、BFF のログに残す", async () => {
+    state.role = "admin";
+    // 本文を読み終えた時点で、もう「流し終えた」の行がある（待たずに）
+    const res = await exportZip();
+    const size = (await res.arrayBuffer()).byteLength;
+    expect(detailOf(await lastAudit("export"))).toMatchObject({ phase: "result", bytes: size });
+    // 結果の行を書けない：本文は最後まで渡り、ログに残す
+    const session = await import("@/lib/auth/session");
+    const real = session.audit;
+    let calls = 0;
+    vi.spyOn(session, "audit").mockImplementation(async (...args: Parameters<typeof real>) => {
+      calls += 1;
+      if (calls === 2) throw new Error("記録の失敗");
+      return real(...args);
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const again = await exportZip();
+    expect((await again.arrayBuffer()).byteLength).toBe(size);
+    expect(log.mock.calls.some((c) => String(c[0]).includes("export_result_not_recorded"))).toBe(true);
+  });
+
   it("ブラウザの側で切ったら、切られたと記録する", async () => {
     state.role = "admin";
     const res = await exportZip();
@@ -229,8 +250,10 @@ describe("削除", () => {
     expect(await res.json()).toEqual({ requestId, outcome: "deleted" });
     expect(await listed()).toBe(false);
     const rows = await rowsOf(requestId);
+    // 求めた → DELETE を送る直前の「送る」の行 → 結果
     expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
+      ["dispatch", "success"],
       ["result", "success"],
     ]);
     expect(rows[0]).toMatchObject({ actorRole: "admin", patientId: "JP-TEST-0004", studyInstanceUid: STUDY });
@@ -301,6 +324,7 @@ describe("削除", () => {
     const rows = await rowsOf(requestId);
     expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
+      ["dispatch", "success"],
       ["result", "unknown"],
       ["reconcile", "success"],
     ]);
@@ -342,6 +366,107 @@ describe("削除", () => {
     // 解いた後は、もう一度は解けず、新しい削除を求められる
     expect((await resolveDelete({ requestId, note: "試験" })).status).toBe(409);
     expect((await del({ requestId: crypto.randomUUID(), reason: "試験" })).status).toBe(200);
+  });
+
+  it("解いていない結果不明の削除は、8 日たっても止めになり、照会と手で解く道から見える", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const { BackendUnknownError } = await import("@/lib/backend/types");
+    vi.spyOn(getBackend(), "deleteStudy").mockRejectedValueOnce(new BackendUnknownError());
+    const requestId = crypto.randomUUID();
+    expect((await del({ requestId, reason: "試験" })).status).toBe(202);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 8 * 24 * 60 * 60_000);
+      const blocked = await del({ requestId: crypto.randomUUID(), reason: "試験" });
+      expect(blocked.status).toBe(409);
+      expect((await blocked.json()).pendingRequestIds).toEqual([requestId]);
+      expect(await (await delStatus(requestId)).json()).toMatchObject({ requestId, outcome: "unknown", studyPresent: true });
+      expect(await (await resolveDelete({ requestId, note: "試験" })).json()).toEqual({ requestId, outcome: "not_deleted" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** 消す直前の読み直し（2 回目の引き当て）で止めておき、その間にほかの操作を挟む */
+  async function pausedDelete(confirmToken: string) {
+    const { getBackend } = await import("@/lib/backend");
+    const backend = getBackend();
+    const real = backend.lookupStudyIds.bind(backend);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const atGate = new Promise<void>((r) => (reached = r));
+    let calls = 0;
+    vi.spyOn(backend, "lookupStudyIds").mockImplementation(async (uid) => {
+      calls += 1;
+      if (calls === 2) {
+        reached();
+        await gate;
+      }
+      return real(uid);
+    });
+    const requestId = crypto.randomUUID();
+    const answer = del({ requestId, reason: "試験", confirmToken });
+    await atGate;
+    return { requestId, answer, release };
+  }
+
+  it("並べて走らせる：DELETE を送る前の「求めた」のままの要求は、手で解けない（409）。元の処理はそのまま消す", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const confirmToken = await confirmTokenOf();
+    const spy = vi.spyOn(getBackend(), "deleteStudy");
+    const { requestId, answer, release } = await pausedDelete(confirmToken);
+    const res = await resolveDelete({ requestId, note: "試験" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("まだ動いている");
+    release();
+    expect((await answer).status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("並べて走らせる：送る前に決めた時間を過ぎた要求は手で解ける。解かれた要求は、元の処理が DELETE を送らない", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const confirmToken = await confirmTokenOf();
+    const spy = vi.spyOn(getBackend(), "deleteStudy");
+    const { requestId, answer, release } = await pausedDelete(confirmToken);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 3 * 60_000);
+      expect(await (await resolveDelete({ requestId, note: "試験：止まった処理を片付ける" })).json()).toEqual({ requestId, outcome: "not_deleted" });
+      release();
+      const res = await answer;
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain("ほかで片付けられた");
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect(await listed()).toBe(true);
+    expect((await rowsOf(requestId)).map((r) => detailOf(r).phase)).toEqual(["request", "reconcile"]);
+  });
+
+  it("送る直前の確かめで、求めてから決めた時間を過ぎていれば、DELETE を送らずに失敗として記録する", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const confirmToken = await confirmTokenOf();
+    const spy = vi.spyOn(getBackend(), "deleteStudy");
+    const { requestId, answer, release } = await pausedDelete(confirmToken);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 3 * 60_000);
+      release();
+      expect((await answer).status).toBe(409);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect((await rowsOf(requestId)).map((r) => [detailOf(r).phase, r.outcome, detailOf(r).refused])).toEqual([
+      ["request", "success", undefined],
+      ["result", "failed", "stale"],
+    ]);
   });
 
   it("Orthanc が断れば（受けなかったと分かる答え）、消えていないと返し、答えの要点を記録する", async () => {

@@ -5,7 +5,14 @@ import { studyUidParam } from "@/lib/api/study-param";
 import { auditIf, requirePermission } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { getDb } from "@/lib/db";
-import { deletedStudyStillPresent, isRequestId, requestOutcome, rowsOfRequest } from "@/lib/pacs-ops";
+import {
+  DELETE_DISPATCH_DEADLINE_MS,
+  deletedStudyStillPresent,
+  isRequestId,
+  isUnresolved,
+  requestOutcome,
+  rowsOfRequest,
+} from "@/lib/pacs-ops";
 
 // 結果の分からない削除を、管理者が手で解く（docs/spec.md の 3.5。段 5）。管理者だけ（pacs.reconcile）。
 // 検査が Orthanc にまだあるだけでは、先の DELETE が止まった・終わったとは言えない（遅れて消えることがある）ので、
@@ -29,16 +36,20 @@ export async function POST(request: Request, { params }: Context) {
     const { requestId, note } = await readJson(request, Body, 4096);
     await requirePermission(session, "pacs.reconcile", { action: "delete", studyInstanceUid: uid, detail: { requestId, via: "resolve" } });
     const db = await getDb();
-    const before = await rowsOfRequest(db, "delete", requestId);
+    const before = await rowsOfRequest(db, "delete", requestId, uid);
     const o = requestOutcome(before);
     if (o.phase === "none" || o.studyInstanceUid !== uid) return Response.json({ error: "この検査の、その要求の ID の削除が無い" }, { status: 404 });
     const still = await deletedStudyStillPresent(getBackend(), before, uid);
-    const result = await auditIf(session, async (tx) => {
-      const rows = await rowsOfRequest(tx, "delete", requestId);
+    type Resolve = "resolved" | "settled" | "running";
+    const result = await auditIf<Resolve>(session, async (tx) => {
+      const rows = await rowsOfRequest(tx, "delete", requestId, uid);
       const now = requestOutcome(rows);
-      if (!(now.phase === "requested" || (now.phase === "result" && now.outcome === "unknown"))) {
-        return { value: "settled" as const, fields: null };
-      }
+      if (!isUnresolved(now)) return { value: "settled", fields: null };
+      // 解けるのは、元の処理が DELETE を送り終えた後（結果不明・「送る」の行がある）か、送る前に決めた時間を過ぎて、
+      // もう送られないと言えるとき（送る直前の確かめで断る）だけ。「求めた」のまま動いている要求は解かない
+      const age = now.requestedAt ? Date.now() - now.requestedAt.getTime() : 0;
+      const sentOrAbandoned = now.phase === "result" || now.dispatched || age > DELETE_DISPATCH_DEADLINE_MS;
+      if (!sentOrAbandoned) return { value: "running", fields: null };
       return {
         value: "resolved" as const,
         fields: {
@@ -51,6 +62,9 @@ export async function POST(request: Request, { params }: Context) {
       };
     });
     if (result === "settled") return Response.json({ error: "この削除の結果は、もう分かっている" }, { status: 409 });
+    if (result === "running") {
+      return Response.json({ error: "この削除の要求は、まだ動いている途中（DELETE を送る前）。終わってから確かめる" }, { status: 409 });
+    }
     return Response.json({ requestId, outcome: still ? "not_deleted" : "deleted" });
   } catch (error) {
     return errorResponse(error);

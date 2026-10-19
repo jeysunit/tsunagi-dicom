@@ -11,7 +11,8 @@ import type { Db } from "@/lib/db";
 // PACS の書き込みの操作の共通の部品（docs/spec.md の 3.5「書き込みの操作の共通の決まり」）。
 // - 画面が付けた要求の ID（UUID）を、記録の行（求めた・結果・終わり）に入れて結ぶ。
 // - 同じ要求の ID の「求めた」の行があれば、Orthanc を呼び直さない（二度押し・送り直しで重ねない）。
-//   探すのは、同じ操作の、決めた期間（REQUEST_WINDOW_DAYS）の中の行だけ（索引 action・occurredAt を使う）。
+//   同じ検査の行は期間で切らずに探し（索引 action・studyInstanceUid）、ほかの検査での使い回しは決めた期間
+//   （REQUEST_WINDOW_DAYS）の中だけを探す（索引 action・occurredAt）。解いていない結果不明の要求は、何日たっても止めになる。
 // - 検証モード（AUTH_MODE=dev。モックだけ）では、DEV_ALLOW_WRITE=true のときだけ書き込みの操作を通す。
 // - Orthanc の仕事（job）の ID は、BFF が暗号化した token にして画面へ渡す（中身を読ませず、替えさせない。期限つき）。
 
@@ -21,53 +22,68 @@ export const isRequestId = (v: unknown): v is string => typeof v === "string" &&
 /** 要求の ID を探す期間（日）。これより古い要求の ID は、新しい要求として扱う */
 export const REQUEST_WINDOW_DAYS = 7;
 
-/** 同じ要求の ID の記録の行（古い順） */
-export async function rowsOfRequest(db: Db | Tx, action: AuditAction, requestId: string, now = new Date()) {
+/**
+ * 同じ要求の ID の記録の行（古い順）。同じ操作・同じ検査の行は、期間で切らずに探す（索引 action・studyInstanceUid）。
+ * ほかの検査に同じ要求の ID が使われていないかは、決めた期間（REQUEST_WINDOW_DAYS）の中だけを探す（索引 action・occurredAt）
+ */
+export async function rowsOfRequest(db: Db | Tx, action: AuditAction, requestId: string, studyInstanceUid: string, now = new Date()) {
   if (!isRequestId(requestId)) return [];
-  return db.auditLog.findMany({
-    where: {
-      action,
-      occurredAt: { gte: new Date(now.getTime() - REQUEST_WINDOW_DAYS * 86_400_000) },
-      detail: { contains: `"requestId":"${requestId}"` },
-    },
+  const contains = `"requestId":"${requestId}"`;
+  const scoped = await db.auditLog.findMany({ where: { action, studyInstanceUid, detail: { contains } }, orderBy: { seq: "asc" } });
+  const recent = await db.auditLog.findMany({
+    where: { action, occurredAt: { gte: new Date(now.getTime() - REQUEST_WINDOW_DAYS * 86_400_000) }, detail: { contains } },
     orderBy: { seq: "asc" },
   });
+  const bySeq = new Map([...scoped, ...recent].map((r) => [r.seq, r]));
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
 }
+
+/** 結果が分からないままか（「求めた」の後に結果の行が無い、または結果が unknown）。管理者が解くまで、期限なしでこのまま */
+export const isUnresolved = (o: RequestOutcome) => o.phase === "requested" || (o.phase === "result" && o.outcome === "unknown");
 
 /**
  * 同じ検査の、まだ結果の分からない要求（「求めた」はあるが、結果が unknown か、結果の行がまだ無いもの）。
- * same は、同じ要求とみなす条件（送るなら同じ送り先）。照らし合わせが済むまで、同じ操作の新しい要求を断るために使う
+ * same は、同じ要求とみなす条件（送るなら同じ送り先）。照らし合わせが済むまで、同じ操作の新しい要求を断るために使う。
+ * 期間で切らない（解いていない要求は、何日たっても止めになる）。行の数を増やしすぎないよう、同じ操作・同じ検査の行のうち、
+ * 「求めた」の行と結果不明の行だけを索引（action・studyInstanceUid）で引いて要求の ID を集め、その要求の行だけを読む
  */
 export async function unresolvedRequests(
   db: Db | Tx,
   action: AuditAction,
   studyInstanceUid: string,
   same: (outcome: RequestOutcome) => boolean,
-  now = new Date(),
 ): Promise<string[]> {
-  const rows = await db.auditLog.findMany({
-    where: { action, studyInstanceUid, occurredAt: { gte: new Date(now.getTime() - REQUEST_WINDOW_DAYS * 86_400_000) } },
+  const candidates = await db.auditLog.findMany({
+    where: { action, studyInstanceUid, OR: [{ outcome: "unknown" }, { detail: { contains: `"phase":"request"` } }] },
+    select: { detail: true },
     orderBy: { seq: "asc" },
   });
-  const byRequest = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const id = parseDetail(row.detail).requestId;
-    if (isRequestId(id)) byRequest.set(id, [...(byRequest.get(id) ?? []), row]);
-  }
+  const ids = [...new Set(candidates.map((r) => parseDetail(r.detail).requestId).filter(isRequestId))];
   const out: string[] = [];
-  for (const [id, group] of byRequest) {
+  for (const id of ids) {
+    const group = await db.auditLog.findMany({
+      where: { action, studyInstanceUid, detail: { contains: `"requestId":"${id}"` } },
+      orderBy: { seq: "asc" },
+    });
     const o = requestOutcome(group);
     if (o.phase === "none" || !same(o)) continue;
-    if (o.phase === "requested" || (o.phase === "result" && o.outcome === "unknown")) out.push(id);
+    if (isUnresolved(o)) out.push(id);
   }
   return out;
 }
+
+/**
+ * 削除：「求めた」を記録してから DELETE を送るまでの上限の時間。その間の手順（引き当てと読み直し）は時間切れで止まるので、
+ * これを過ぎて「送る」の行（dispatch）が無い要求は、もう送られない（送る直前の確かめで断る）
+ */
+export const DELETE_DISPATCH_DEADLINE_MS = 2 * 60_000;
 
 export interface RequestRow {
   actorId: string;
   outcome: string;
   studyInstanceUid?: string | null;
   detail: string | null;
+  occurredAt?: Date;
 }
 
 export interface RequestOutcome {
@@ -79,11 +95,24 @@ export interface RequestOutcome {
   actorId: string | null;
   studyInstanceUid: string | null;
   modality: string | null;
+  /** 「求めた」の行の時刻 */
+  requestedAt: Date | null;
+  /** 削除：Orthanc へ DELETE を送る直前に足す行（dispatch）があるか。あれば DELETE は送られた（かもしれない） */
+  dispatched: boolean;
 }
 
 /** 要求の記録の行から、いまの結果を読む（result・done・reconcile の行のうち、いちばん新しいもの） */
 export function requestOutcome(rows: readonly RequestRow[]): RequestOutcome {
-  const out: RequestOutcome = { phase: "none", outcome: null, jobId: null, actorId: null, studyInstanceUid: null, modality: null };
+  const out: RequestOutcome = {
+    phase: "none",
+    outcome: null,
+    jobId: null,
+    actorId: null,
+    studyInstanceUid: null,
+    modality: null,
+    requestedAt: null,
+    dispatched: false,
+  };
   for (const row of rows) {
     const d = parseDetail(row.detail);
     if (d.phase === "request") {
@@ -92,7 +121,10 @@ export function requestOutcome(rows: readonly RequestRow[]): RequestOutcome {
         out.actorId = row.actorId;
         out.studyInstanceUid = row.studyInstanceUid ?? null;
         out.modality = typeof d.modality === "string" ? d.modality : null;
+        out.requestedAt = row.occurredAt ?? null;
       }
+    } else if (out.phase !== "none" && d.phase === "dispatch") {
+      out.dispatched = true;
     } else if (out.phase !== "none" && (d.phase === "result" || d.phase === "reconcile")) {
       out.phase = out.phase === "done" ? "done" : "result";
       out.outcome = row.outcome;
