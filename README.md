@@ -2,7 +2,7 @@
 
 [English](README.en.md)
 
-病院・研究室の画像サーバー（Orthanc など、DICOMweb に対応したもの）の前に置く、日常の閲覧の画面。画像サーバーは**改造せずに**そのまま使い、日本の医療機関の画像の見方に合わせた検査の一覧とビューアの選び分けを足す。独立した Web の画面と BFF（Backend For Frontend）として動く。
+病院・研究室の画像サーバー（Orthanc など、DICOMweb に対応したもの）の前に置く、日常の閲覧の画面。画像サーバーは**改造せずに**そのまま使い、日本の医療機関の画像の見方に合わせた検査の一覧とビューアの選び分けを足す。独立した Web の画面と、その裏の中継のサーバー（BFF）として動く。中継のサーバーは、ブラウザと画像サーバーの間に立ち、ログイン・役割の確かめ・記録をしてから画像サーバーに問い合わせる部分。
 
 > **いまは試す段階で、本番（診療の現場・実の患者のデータ）には使わない。** 使うときの注意は、下の「注意」にまとめた。
 
@@ -10,35 +10,39 @@
 
 ### 図1　全体
 
-画像サーバーは**改造せずに**そのまま使い、tsunagi-dicom はその前に置く画面と BFF になる。ビューアは画像サーバーへ直接つながず、BFF の中継から画像を取る。点線の部分は予定（「これからの予定」）。
+この図で分かること：画像サーバーの前に tsunagi-dicom を置くと、検査装置・ビューア・利用者がどうつながるか。
+
+画像サーバー（DICOMweb に対応したもの）は**改造せずに**そのまま使い、tsunagi-dicom はその前に置く画面と中継のサーバーになる。ビューアは画像サーバーへ直接つながず、中継のサーバーを通して画像を取る。点線の部分は予定（「これからの予定」）。tsunagi-dicom の画面の中は、図2で拡大している。
 
 ```mermaid
 flowchart LR
   classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
   classDef plan fill:#ffffff,stroke:#8c959f,stroke-dasharray:5 4,color:#57606a
 
-  MOD["モダリティ<br/>CT・MR・一般撮影など"]:::box
-  PACS[("画像サーバー<br/>Orthanc など DICOMweb 対応<br/>改造しない")]:::box
-  subgraph TSUNAGI["tsunagi-dicom"]
-    BFF["画面と BFF<br/>検査の一覧・詳細<br/>ビューアの選び分け<br/>監査・役割・ログイン"]:::box
+  MOD["検査装置（モダリティ）<br/>CT・MR・一般撮影など"]:::box
+  PACS[("画像サーバー<br/>Orthanc など<br/>改造しない")]:::box
+  subgraph TSUNAGI["tsunagi-dicom（画面の中は図2）"]
+    BFF["画面と中継のサーバー<br/>検査の一覧・詳細<br/>ビューアの選び分け<br/>記録・役割・ログイン"]:::box
   end
   VIEWER["ビューア<br/>OHIF・Stone など"]:::box
   subgraph USERS["利用者のブラウザ"]
     USER["技師・医師・管理者・閲覧"]:::box
   end
   OIDC["外部のログイン（OIDC）<br/>予定"]:::plan
-  WL["ワークリスト<br/>予定"]:::plan
+  WL["ワークリスト（検査の予約の一覧）<br/>予定"]:::plan
 
-  MOD -->|"DICOM で送る"| PACS
-  BFF -->|"DICOMweb で検索・取得"| PACS
+  MOD -->|"DICOM で画像を送る"| PACS
+  BFF -->|"検査を検索し、画像を取る"| PACS
   USER -->|"画面を開く"| BFF
   USER -->|"検査から開く"| VIEWER
-  VIEWER -->|"BFF の中継から画像を取る"| BFF
+  VIEWER -->|"中継を通して画像を取る"| BFF
   BFF -.-> OIDC
   BFF -.-> WL
 ```
 
-### 図2　役割と画面
+### 図2　図1の tsunagi-dicom の画面の中
+
+この図で分かること：画面の中の流れ。ブラウザから検査の一覧、詳細、ビューアへ進む。
 
 ```mermaid
 flowchart LR
@@ -59,20 +63,22 @@ flowchart LR
 
 役割ごとにできる操作と見える項目は決まっていて、操作は監査の記録に残る。通信と安全の細かい図は [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の 2 にある。
 
-### 試しに使う組み合わせ
+### 図3　開発・試験のときの構成（本物の患者のデータを使わずに試す）
 
-モダリティのダミー（[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator)）で合成の検査を画像サーバーへ送り、tsunagi-dicom で見る。実の患者のデータは使わない。
+この図で分かること：試験のときに、検査装置のふりをするソフトと組み合わせる構成。
+
+[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator) は、CT などの検査装置のふりをして、試験用に作った架空の患者の画像を画像サーバーへ送るソフト。その画像を tsunagi-dicom で見る。本物の患者のデータは使わない。
 
 ```mermaid
 flowchart LR
   classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
 
-  DTG["dicom-test-generator<br/>モダリティのダミー<br/>合成の検査を作る"]:::box
+  DTG["dicom-test-generator<br/>検査装置のふりをする試験用のソフト<br/>架空の患者の画像を作る"]:::box
   PACS[("画像サーバー<br/>Orthanc など（試験用）")]:::box
-  TD["tsunagi-dicom<br/>画面と BFF"]:::box
+  TD["tsunagi-dicom<br/>画面と中継のサーバー"]:::box
 
-  DTG -->|"C-STORE で送る"| PACS
-  TD -->|"DICOMweb で検索・取得"| PACS
+  DTG -->|"DICOM で画像を送る"| PACS
+  TD -->|"検査を検索し、画像を取る"| PACS
 ```
 
 ## できること
@@ -106,7 +112,7 @@ flowchart LR
 
 ## 試しに動かす（モック）
 
-画像サーバー無しで、合成の見本（`tests/fixtures/orthanc`）を返すモックのバックエンドと、開発用の認証（`AUTH_MODE=dev`、書き込みは止める）で動かす。
+画像サーバー無しで、架空の患者の見本（`tests/fixtures/orthanc`）を返すモックのバックエンドと、開発用の認証（`AUTH_MODE=dev`、書き込みは止める）で動かす。
 
 ```sh
 mkdir -p secrets && openssl rand -base64 48 > secrets/session_secret.txt   # SESSION_SECRET_FILE で渡す（secrets/ はリポジトリに入れない）
@@ -179,7 +185,7 @@ cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
 | [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | セキュリティと保守の方針（システム構成図・通信の一覧・秘密の置き場・記録・版と支える期間・使い終えるときの片付け） |
 | [`SECURITY.md`](SECURITY.md) | 脆弱性の報告の窓口と支える版 |
 | [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | 氏名の形の試験の一覧（機械で読める写しは `tests/fixtures/patient-names.json`） |
-| [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、合成の患者の応答の見本と、その置き換えの規則 |
+| [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、架空の患者の応答の見本と、その置き換えの規則 |
 | [`AGENTS.md`](AGENTS.md) | 開発の決まり（人にも、コーディングの支援の道具にも同じ） |
 | [`.env.example`](.env.example) | 設定の例 |
 

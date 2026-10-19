@@ -2,7 +2,7 @@
 
 [日本語](README.md)
 
-A web screen for everyday study viewing, placed in front of a hospital's or lab's image server (a DICOMweb-capable one such as Orthanc). The image server is used **unmodified**; tsunagi-dicom adds a study list and viewer selection designed around how images are reviewed in Japanese medical institutions. It runs as a standalone web front end and BFF (Backend For Frontend).
+A web screen for everyday study viewing, placed in front of a hospital's or lab's image server (a DICOMweb-capable one such as Orthanc). The image server is used **unmodified**; tsunagi-dicom adds a study list and viewer selection designed around how images are reviewed in Japanese medical institutions. It runs as a standalone web screen plus a relay server (a BFF, Backend For Frontend) that sits between the browser and the image server, and checks login and roles and keeps records before it queries the image server.
 
 > **This is at the trial stage. Do not use it in production (clinical settings or real patient data).** See "Notes" below for what to keep in mind.
 
@@ -10,35 +10,39 @@ A web screen for everyday study viewing, placed in front of a hospital's or lab'
 
 ### Figure 1: Overall
 
-The image server is used **unmodified**; tsunagi-dicom sits in front of it as the screens and the BFF. Viewers do not connect to the image server directly: they fetch images through the BFF relay. Dotted items are planned (see "Planned work").
+What this figure shows: how imaging equipment, viewers, and users connect once tsunagi-dicom is placed in front of the image server.
+
+The image server (a DICOMweb-capable one) is used **unmodified**; tsunagi-dicom sits in front of it as the screens and a relay server. Viewers do not connect to the image server directly: they fetch images through the relay server. Dotted items are planned (see "Planned work"). Figure 2 zooms into the screens inside tsunagi-dicom.
 
 ```mermaid
 flowchart LR
   classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
   classDef plan fill:#ffffff,stroke:#8c959f,stroke-dasharray:5 4,color:#57606a
 
-  MOD["Modalities<br/>CT, MR, radiography, etc."]:::box
-  PACS[("Image server<br/>DICOMweb-capable, e.g. Orthanc<br/>unmodified")]:::box
-  subgraph TSUNAGI["tsunagi-dicom"]
-    BFF["Screens and BFF<br/>study list and detail<br/>viewer selection<br/>audit, roles, login"]:::box
+  MOD["Imaging equipment (modalities)<br/>CT, MR, radiography, etc."]:::box
+  PACS[("Image server<br/>e.g. Orthanc<br/>unmodified")]:::box
+  subgraph TSUNAGI["tsunagi-dicom (screens: Figure 2)"]
+    BFF["Screens and relay server<br/>study list and detail<br/>viewer selection<br/>records, roles, login"]:::box
   end
   VIEWER["Viewers<br/>OHIF, Stone, etc."]:::box
   subgraph USERS["Users' browsers"]
     USER["Technologist, physician,<br/>administrator, read-only"]:::box
   end
   OIDC["External login (OIDC)<br/>planned"]:::plan
-  WL["Worklist<br/>planned"]:::plan
+  WL["Worklist (list of scheduled exams)<br/>planned"]:::plan
 
-  MOD -->|"send via DICOM"| PACS
-  BFF -->|"search and retrieve via DICOMweb"| PACS
+  MOD -->|"send images via DICOM"| PACS
+  BFF -->|"search studies, fetch images"| PACS
   USER -->|"open the screens"| BFF
   USER -->|"open from a study"| VIEWER
-  VIEWER -->|"fetch images via the BFF relay"| BFF
+  VIEWER -->|"fetch images through the relay"| BFF
   BFF -.-> OIDC
   BFF -.-> WL
 ```
 
-### Figure 2: Roles and screens
+### Figure 2: Inside the tsunagi-dicom screens of Figure 1
+
+What this figure shows: the flow inside the screens, from the browser to the study list, the detail, and the viewer.
 
 ```mermaid
 flowchart LR
@@ -59,20 +63,22 @@ flowchart LR
 
 What each role can do and see is fixed per role, and operations are recorded in the audit trail. A more detailed diagram of communications and safety is in section 2 of [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) (in Japanese).
 
-### Trying it out together
+### Figure 3: Setup for development and testing (trying it without real patient data)
 
-The modality dummy ([dicom-test-generator](https://github.com/jeysunit/dicom-test-generator)) sends synthetic studies to an image server, and tsunagi-dicom views them. No real patient data is used.
+What this figure shows: a setup for testing, combined with software that stands in for imaging equipment.
+
+[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator) pretends to be imaging equipment such as a CT scanner and sends images of made-up patients, created for testing, to an image server. tsunagi-dicom then shows those images. No real patient data is used.
 
 ```mermaid
 flowchart LR
   classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
 
-  DTG["dicom-test-generator<br/>modality dummy<br/>creates synthetic studies"]:::box
+  DTG["dicom-test-generator<br/>test software that pretends to be imaging equipment<br/>creates images of made-up patients"]:::box
   PACS[("Image server<br/>e.g. Orthanc (test use)")]:::box
-  TD["tsunagi-dicom<br/>screens and BFF"]:::box
+  TD["tsunagi-dicom<br/>screens and relay server"]:::box
 
-  DTG -->|"send via C-STORE"| PACS
-  TD -->|"search and retrieve via DICOMweb"| PACS
+  DTG -->|"send images via DICOM"| PACS
+  TD -->|"search studies, fetch images"| PACS
 ```
 
 ## What it can do
@@ -106,7 +112,7 @@ Roughly in the order we plan to build them, and subject to change. This tool is 
 
 ## Trying it out (mock backend)
 
-Without an image server, run it against the mock backend (synthetic samples in `tests/fixtures/orthanc`) and development authentication (`AUTH_MODE=dev`; writes are blocked):
+Without an image server, run it against the mock backend (samples of made-up patients in `tests/fixtures/orthanc`) and development authentication (`AUTH_MODE=dev`; writes are blocked):
 
 ```sh
 mkdir -p secrets && openssl rand -base64 48 > secrets/session_secret.txt   # passed as SESSION_SECRET_FILE (secrets/ is not committed)
@@ -179,7 +185,7 @@ The development stages and the completion criteria of each stage are in "6. 段�
 | [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | Security and maintenance policy (system diagram, connection list, where secrets live, audit records, versioning and support period, decommissioning). In Japanese |
 | [`SECURITY.md`](SECURITY.md) | How to report a vulnerability, and supported versions |
 | [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | Patient name test cases (machine-readable copy: `tests/fixtures/patient-names.json`) |
-| [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | Sample responses for synthetic patients used by the mock backend, and the redaction rules |
+| [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | Sample responses for made-up patients used by the mock backend, and the redaction rules |
 | [`AGENTS.md`](AGENTS.md) | Development rules (the same for people and for coding assistants) |
 | [`.env.example`](.env.example) | Example configuration |
 
