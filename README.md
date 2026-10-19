@@ -186,6 +186,7 @@ cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
 | [`docs/guideline-mapping.md`](docs/guideline-mapping.md) | 第7.0版 システム運用編の節ごとの対応表と、電子保存の三原則ごとの対応 |
 | [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | セキュリティと保守の方針（システム構成図・通信の一覧・秘密の置き場・記録・版と支える期間・使い終えるときの片付け） |
 | [`docs/round-trip-test.md`](docs/round-trip-test.md) | 実の Orthanc と検査装置の試験用のソフトでの往復の試験の手順 |
+| [`docs/integration-test.md`](docs/integration-test.md) | 本物の Orthanc と DCMTK のコンテナでの結合の試験（CI で毎回流す。手元での流し方） |
 | [`SECURITY.md`](SECURITY.md) | 脆弱性の報告の窓口と支える版 |
 | [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | 氏名の形の試験の一覧（機械で読める写しは `tests/fixtures/patient-names.json`） |
 | [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、架空の患者の応答の見本と、その置き換えの規則 |

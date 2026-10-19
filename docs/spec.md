@@ -47,7 +47,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 | 見た目 | Tailwind CSS・shadcn/ui（Radix UI）・Lucide | 商用の素材を使わない |
 | データの取得 | TanStack Query | 段 2（一覧を作り込む段）から。段 1a の頁はサーバーの側で描く |
 | BFF のデータベース | SQLite（WAL）＋ Prisma。PostgreSQL に切り替えられる | 小さく始め、件数が増えたら替える |
-| 試験 | Vitest（単体）・Playwright（画面。モックのバックエンドに対して流す） | CI でもクラウドの開発環境でも、社内の画像サーバー無しで流せる |
+| 試験 | Vitest（単体）・Playwright（画面。モックのバックエンドに対して流す）。結合の試験は Playwright で、試験の中で立てた Orthanc と DCMTK のコンテナに対して流す（[`integration-test.md`](integration-test.md)） | CI でもクラウドの開発環境でも、社内の画像サーバー無しで流せる |
 | 配布 | コンテナのイメージ（GHCR）。版の番号のタグと digest で配る | 前の版にすぐ戻せる |
 | ライセンス | MIT | Orthanc とは REST・DICOMweb でやり取りするだけで、そのコードを取り込まない。Orthanc Explorer 2（AGPL-3.0）のコードも写さない |
 
@@ -471,13 +471,13 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 
 ## 5. 公開と配布
 - リポジトリは公開。**社内の名前・秘密・実の患者のデータを入れない。** 見本のデータ（`tests/fixtures`）は合成の患者だけで、公開の前に中身を人が確かめる。
-- CI（GitHub Actions）：PR で lint・型・Vitest・Playwright（モック）。`main` への merge と版のタグで、イメージを作って GHCR へ。週に1回、`main` を作り直して出す（イメージの中の包みの更新を取り込む）。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付け、`id-token: write`（署名）はイメージを作る仕事にだけ付ける（リポジトリ全体を読み書きにしない）。
+- CI（GitHub Actions）：PR で lint・型・Vitest・Playwright（モック）と、結合の試験（試験の中で立てた Orthanc と DCMTK のコンテナ。`.github/workflows/integration.yml`。必須のチェックにはまだしていない）。`main` への merge と版のタグで、イメージを作って GHCR へ。週に1回、`main` を作り直して出す（イメージの中の包みの更新を取り込む）。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付け、`id-token: write`（署名）はイメージを作る仕事にだけ付ける（リポジトリ全体を読み書きにしない）。
 - イメージのタグ：`vX.Y.Z` と `sha-<短い hash>`、作り直しには `rebuild-YYYYMMDD` も付ける。作り直しは版のタグを付けない・上書きしない。`latest` は付けてもよいが、配備は版のタグか digest を指定する。イメージは CI（lint・型・Vitest・Playwright・イメージの試しの起動）が通ってから出す。
 - イメージの署名：出したイメージの digest に、cosign の鍵の要らない署名（GitHub Actions の OIDC）を付ける。確かめ方は README。
 - イメージの片付け：版のタグの付いたイメージは消さない。ほかのタグのイメージは新しい順に 10 個と、2 日より新しいものを残し、残りとタグの無いイメージを週に1回消す（署名などの子は親と一緒）。いまは dry-run で、消す候補を記録に出すだけ（記録を確かめてから消す形にする）。範囲は README と `.github/workflows/image-cleanup.yml`。
 - **仕様の外で足した道**（アプリの機能ではないもの）：`/api/health`（コンテナの生死の確かめ。認証なし・画像サーバーにつながない）、`/api/audit/verify`（監査の記録のつなぎの確かめ。管理者だけ）。3.6 を参照。
-- **アプリの設定の外の変数**（`.env.example` に入れない。アプリは読まない）：`TSUNAGI_IMAGE`（`compose.yaml` で使うイメージ。既定は手元で作る `tsunagi-dicom:local`）、`PLAYWRIGHT_CHROMIUM_EXECUTABLE`（試験だけ。入っている Chromium を使うとき）、`E2E_INITIAL_ADMIN_PASSWORD`・`E2E_SKIP_PREPARE`（試験だけ。`scripts/e2e-server.mjs` が `AUTH_MODE=local` の試験のサーバーを起こすとき）。
-- 文書：README（日本語）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`docs/security-and-maintenance.md`（セキュリティと保守の方針）、`docs/round-trip-test.md`（実の Orthanc と検査装置の試験用のソフトでの往復の試験の手順。段 4）、`SECURITY.md`（脆弱性の報告の窓口）、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
+- **アプリの設定の外の変数**（`.env.example` に入れない。アプリは読まない）：`TSUNAGI_IMAGE`（`compose.yaml` で使うイメージ。既定は手元で作る `tsunagi-dicom:local`）、`PLAYWRIGHT_CHROMIUM_EXECUTABLE`（試験だけ。入っている Chromium を使うとき）、`E2E_INITIAL_ADMIN_PASSWORD`・`E2E_SKIP_PREPARE`（試験だけ。`scripts/e2e-server.mjs` が `AUTH_MODE=local` の試験のサーバーを起こすとき）、`ITEST_*`（結合の試験だけ。`tests/integration/run.mjs` が作って渡す）。
+- 文書：README（日本語）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`docs/security-and-maintenance.md`（セキュリティと保守の方針）、`docs/round-trip-test.md`（実の Orthanc と検査装置の試験用のソフトでの往復の試験の手順。段 4）、`docs/integration-test.md`（本物の Orthanc と DCMTK のコンテナでの結合の試験）、`SECURITY.md`（脆弱性の報告の窓口）、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
 - 「DICOM® は NEMA の登録商標」の一文を README に書く。
 
 ## 6. 段階（PR の単位）

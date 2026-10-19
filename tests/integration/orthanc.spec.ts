@@ -69,6 +69,15 @@ const receivedOf = async (study: SyntheticStudy) =>
 
 const storeJobs = async () => (await listJobs()).filter((j) => j.Type === "DicomModalityStore");
 
+/** Orthanc の時刻（`YYYYMMDDTHHMMSS`。時間帯の印なし）を UTC と読んだとき、いまの時刻から何時間ずれるか。読めなければ null */
+function hoursFromUtcNow(value: string): number | null {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(value);
+  if (!m) return null;
+  const at = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!);
+  // -0 を 0 にそろえる
+  return Math.round((at - Date.now()) / 3_600_000) || 0;
+}
+
 /** 仕事の JSON のうち、記録してよい値（名前・状態・誤り。中身の Content は名前だけ） */
 const jobShape = (j: OrthancJob) => ({
   keys: Object.keys(j).sort(),
@@ -146,8 +155,7 @@ test("1 受信一覧：storescu から Orthanc へ送った検査が、時刻・
   // BFF の receivedAt は UTC の時刻（印なしか Z つき）で、いまの時刻から 10 分の内
   const containerZone = (await compose(["exec", "-T", "orthanc", "date", "+%z"])).trim();
   const lastChange = await orthancJson<{ Changes: { Date: string }[] }>("changes?last");
-  const raw = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(lastChange.Changes[0]!.Date)!;
-  const rawOffsetHours = Math.round((Date.UTC(+raw[1]!, +raw[2]! - 1, +raw[3]!, +raw[4]!, +raw[5]!, +raw[6]!) - Date.now()) / 3_600_000);
+  const rawOffsetHours = hoursFromUtcNow(lastChange.Changes[0]!.Date);
   observe("changes.dateClock", { containerZone, offsetFromUtcHours: rawOffsetHours });
   expect(rawOffsetHours).toBe(0);
   const receivedAt = body.items.find((i) => i.study.studyInstanceUid === A.studyInstanceUid)!.receivedAt;
@@ -171,11 +179,7 @@ test("1 受信一覧：storescu から Orthanc へ送った検査が、時刻・
     CalledAET: metadata.CalledAET,
     ReceptionDateForm: metadata.ReceptionDate?.replace(/\d/g, "9"),
   });
-  const rd = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(metadata.ReceptionDate ?? "");
-  if (rd) {
-    const hoursFromUtc = Math.round((Date.UTC(+rd[1]!, +rd[2]! - 1, +rd[3]!, +rd[4]!, +rd[5]!, +rd[6]!) - Date.now()) / 3_600_000);
-    observe("instanceMetadata.receptionDateOffsetFromUtcHours", hoursFromUtc);
-  }
+  observe("instanceMetadata.receptionDateOffsetFromUtcHours", hoursFromUtcNow(metadata.ReceptionDate ?? ""));
   expect(metadata).toMatchObject({ Origin: "DicomProtocol", RemoteAET: ITEST.scuAet, CalledAET: ITEST.orthancAet });
 
   // 実測：/changes?last と、1 回に返す数の上限
