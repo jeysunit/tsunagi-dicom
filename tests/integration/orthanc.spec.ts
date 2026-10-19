@@ -240,6 +240,18 @@ test("3 検査の一覧・詳細：本物のデータ（DICOMweb の QIDO-RS と
   expect(await metadata.json()).toHaveLength(A.sopInstanceUids.length);
   expect((await page.request.get("/api/dicom-web/studies")).status()).toBe(404);
 
+  // サムネイル：一覧と詳細の <img> は、ブラウザの画像の Accept（Chromium の既定）のまま中継を通る。
+  // 実測として、JPEG を名指ししたときの答えも残す（直すときの手がかり）
+  const thumbnail = `/api/dicom-web/studies/${A.studyInstanceUid}/thumbnail`;
+  const asImg = await page.request.get(thumbnail, { headers: { accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" } });
+  const asJpeg = await page.request.get(thumbnail, { headers: { accept: "image/jpeg" } });
+  observe("relay.thumbnail", {
+    browserAccept: { status: asImg.status(), contentType: asImg.headers()["content-type"] ?? null },
+    jpegAccept: { status: asJpeg.status(), contentType: asJpeg.headers()["content-type"] ?? null },
+  });
+  expect.soft(asImg.status(), "ブラウザの Accept のままのサムネイルが画像で返らない").toBe(200);
+  expect.soft(asImg.headers()["content-type"] ?? "").toMatch(/^image\//);
+
   // 画像サーバーのパスワードは、頁にも API の答えにも出ない（失敗したときの文言に値を出さないよう、真偽だけを比べる）
   const { password } = orthancUser();
   const leaked = [await page.content(), await list.text(), await detail.text()].some((text) => text.includes(password));
@@ -439,7 +451,8 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
   // 削除 B：求めた → 送る直前（dispatch）→ 結果
   expect(trailsOf("delete", B)).toEqual([["request:success", "dispatch:success", "result:success"]]);
   // 書き出し A：求めた → 流し終えた
-  expect(trailsOf("export", A)).toEqual([["request:success", "result:success"]]);
+  observe("audit.exportTrail", trailsOf("export", A));
+  expect.soft(trailsOf("export", A), "書き出しの結果の行が記録されていない").toEqual([["request:success", "result:success"]]);
   // C-ECHO：つながった・つながらないの両方が、送り先の名前つきで残る
   const echoes = rows.filter((r) => r.action === "echo" && r.detail.modality === ITEST.scp.id).map((r) => r.detail.connected);
   expect(echoes).toEqual(expect.arrayContaining([true, false]));
