@@ -11,9 +11,9 @@ const Body = z.object({ reason: z.enum(["client_idle", "manual"]) });
 export async function POST(request: Request) {
   try {
     const state = await checkedState(request);
-    if (state.kind === "pending") throw new AuthError(401, "ログインしていない");
+    if (state.kind === "pending") throw new AuthError(401, "ログインしていません。再度ログインしてください");
     const local = state.kind === "anonymous" ? undefined : state.session.local;
-    if (!local) throw new AuthError(401, "ログインしていない");
+    if (!local) throw new AuthError(401, "ログインしていません。再度ログインしてください");
     const { reason } = await readJson(request, Body);
     await lockScreen(await authContext(), local.row, local.user, reason);
     return Response.json({ locked: true });

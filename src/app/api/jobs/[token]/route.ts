@@ -30,10 +30,10 @@ export async function GET(_request: Request, { params }: Context) {
       detail: { via: "job_status", ...(payload ? { requestId: payload.requestId } : {}) },
     });
     if (!payload || payload.actorId !== session.actorId) {
-      return Response.json({ error: "この仕事は読めない" }, { status: 404 });
+      return Response.json({ error: "このジョブは参照できません" }, { status: 404 });
     }
     const job = await getBackend().jobStatus(payload.jobId);
-    if (!job) return Response.json({ error: "仕事が見つからない（Orthanc の仕事の記録から消えたことがある）" }, { status: 404 });
+    if (!job) return Response.json({ error: "ジョブが見つかりません（Orthanc のジョブ履歴から消えた可能性があります）" }, { status: 404 });
 
     if (jobFinished(job.state)) {
       await auditIf(session, async (tx) => {

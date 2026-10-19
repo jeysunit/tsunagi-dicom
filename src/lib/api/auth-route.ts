@@ -39,11 +39,11 @@ export function isSameOrigin(request: Request): boolean {
 
 /** AUTH_MODE=local でなければ 404（検証モードには、この道は無い） */
 export function assertLocalMode(): void {
-  if (getConfig().auth.mode !== "local") throw new RequestError(404, "AUTH_MODE=local のときだけの道");
+  if (getConfig().auth.mode !== "local") throw new RequestError(404, "この機能は AUTH_MODE=local のときだけ使えます");
 }
 
 export function assertSameOrigin(request: Request): void {
-  if (!isSameOrigin(request)) throw new RequestError(403, "別の場所からの要求は受けない（Origin が合わない）");
+  if (!isSameOrigin(request)) throw new RequestError(403, "別の画面からの要求は受け付けません（Origin が一致しません）");
 }
 
 /** Origin と CSRF の token を確かめ、いまの認証の状態を返す */
@@ -52,9 +52,9 @@ export async function checkedState(request: Request): Promise<AuthState> {
   assertSameOrigin(request);
   const state = await getAuthState();
   const row = state.kind === "pending" ? state.row : state.kind === "anonymous" ? null : state.session.local?.row;
-  if (!row) throw new AuthError(401, "ログインしていない");
+  if (!row) throw new AuthError(401, "ログインしていません。再度ログインしてください");
   if (!csrfMatches(row.csrfToken, request.headers.get("x-csrf-token"))) {
-    throw new RequestError(403, "要求の確かめの token（x-csrf-token）が合わない。頁を開き直す");
+    throw new RequestError(403, "画面の確認用の token（x-csrf-token）が一致しません。頁を開き直してください");
   }
   return state;
 }
@@ -73,18 +73,18 @@ export async function checkedScreenWrite(request: Request, permission?: Permissi
 /** 本文の JSON を、決めた大きさまで読み、形を確かめる */
 export async function readJson<T>(request: Request, schema: z.ZodType<T>, maxBytes = 4096): Promise<T> {
   const text = await readLimitedText(request, maxBytes);
-  if (text === null) throw new RequestError(413, "本文が大きすぎる");
+  if (text === null) throw new RequestError(413, "送信内容が大きすぎます");
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
-    throw new RequestError(400, "本文が JSON でない");
+    throw new RequestError(400, "送信内容が JSON ではありません");
   }
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw new RequestError(
       400,
-      "本文の形が誤り",
+      "送信内容の形式が正しくありません",
       parsed.error.issues.map((i) => `${i.path.join(".") || "(本文)"}: ${i.message}`),
     );
   }

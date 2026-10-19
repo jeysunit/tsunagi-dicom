@@ -106,10 +106,10 @@ export const getAuthState = cache(async (): Promise<AuthState> => {
  */
 export async function requireSession(permission?: Permission): Promise<Session> {
   const state = await getAuthState();
-  if (state.kind === "anonymous" || state.kind === "pending") throw new AuthError(401, "ログインしていない");
-  if (state.kind === "locked") throw new AuthError(423, "画面をロックしている。パスワードで解く");
+  if (state.kind === "anonymous" || state.kind === "pending") throw new AuthError(401, "ログインしていません。再度ログインしてください");
+  if (state.kind === "locked") throw new AuthError(423, "画面ロック中です。パスワードでロックを解除してください");
   if (permission && !can(state.session.role, permission)) {
-    throw new AuthError(403, "この役割ではできない操作");
+    throw new AuthError(403, "この操作を行う権限がありません");
   }
   return state.session;
 }
@@ -193,5 +193,5 @@ export async function requirePermission(
     outcome: "denied",
     detail: { ...(denied.detail ?? {}), reason: "forbidden", permission },
   });
-  throw new AuthError(403, "この役割ではできない操作");
+  throw new AuthError(403, "この操作を行う権限がありません");
 }

@@ -12,7 +12,7 @@ const Body = z.object({ code: z.string().max(16) });
 export async function POST(request: Request) {
   try {
     const state = await checkedState(request);
-    if (state.kind !== "pending") throw new AuthError(401, "ログインの途中ではない");
+    if (state.kind !== "pending") throw new AuthError(401, "ログインの途中ではありません");
     const { code } = await readJson(request, Body);
     try {
       const result = await submitTotp(await authContext(), state.row, state.user, code);

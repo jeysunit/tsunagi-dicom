@@ -80,7 +80,7 @@ export function ViewerMenu({
       screen.csrfToken,
     );
     if (result.status === 409) {
-      setMessage("ほかの利用者が先に変えたので、読み直した。もう一度選ぶ");
+      setMessage("ほかのユーザーが先に変更しました。最新の状態を読み込みました");
       onChanged();
       return;
     }
@@ -93,9 +93,9 @@ export function ViewerMenu({
     try {
       const { url } = await getJson<{ url: string }>(openUrl(studyUid, "dicomweb"));
       await navigator.clipboard.writeText(url);
-      setMessage("DICOMweb の URL をコピーした（このアプリの監査の外）");
+      setMessage("DICOMweb URL をコピーしました（操作ログの対象外）");
     } catch {
-      setMessage("コピーできなかった");
+      setMessage("コピーできませんでした");
     }
   }
 
@@ -112,7 +112,7 @@ export function ViewerMenu({
           size={compact ? "xs" : "sm"}
           className="rounded-r-none"
           disabled={!defaultViewer}
-          title={defaultViewer ? undefined : "ビューアが設定されていない"}
+          title={defaultViewer ? undefined : "ビューア未設定"}
           aria-label={`${seriesLabel ?? ""}${label ?? "既定のビューア"}で開く`}
           data-testid="open-default"
           onClick={() => openInViewer(studyUid, defaultViewer)}
@@ -124,7 +124,7 @@ export function ViewerMenu({
           type="button"
           size={compact ? "xs" : "sm"}
           className="rounded-l-none border-l border-primary-foreground/30 px-1.5"
-          aria-label="ビューアを選ぶ"
+          aria-label="ビューアを選択"
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls={menuId}
@@ -137,7 +137,7 @@ export function ViewerMenu({
       </div>
       {rememberedViewer && isViewerId(rememberedViewer) && (
         <span className="min-w-0 truncate text-xs text-label" data-testid="remembered-viewer">
-          既定: {VIEWER_LABELS[rememberedViewer]}
+          この検査: {VIEWER_LABELS[rememberedViewer]}
         </span>
       )}
       {open && (
@@ -174,7 +174,7 @@ export function ViewerMenu({
                   className={MENU_ITEM}
                   onClick={() => void remember(v.id)}
                 >
-                  この検査は次から {v.label}
+                  この検査は {v.label} で開く
                 </button>
               ))}
               {rememberedViewer && (
@@ -184,7 +184,7 @@ export function ViewerMenu({
                   className={MENU_ITEM}
                   onClick={() => void remember(null)}
                 >
-                  覚えを消す（モダリティの既定で開く）
+                  記憶を解除（モダリティ別の設定に戻す）
                 </button>
               )}
             </>
@@ -198,8 +198,8 @@ export function ViewerMenu({
                 className={MENU_ITEM}
                 onClick={() => void copyDicomweb()}
               >
-                DICOMweb の URL をコピー
-                <span className="block text-xs text-label">このアプリの監査の外（研究の道具に渡す）</span>
+                DICOMweb URL をコピー
+                <span className="block text-xs text-label">操作ログの対象外です</span>
               </button>
             </>
           )}

@@ -45,12 +45,13 @@ export function SiteHeader({
         {nav && (
           <NavLinks
             items={[
-              { href: "/", label: "検査" },
-              ...(nav.canViewReceived ? [{ href: "/received", label: "受け取り" }] : []),
-              ...(nav.canCheckModalities ? [{ href: "/modalities", label: "機器" }] : []),
-              ...(nav.canEditViewerDefaults ? [{ href: "/admin/viewers", label: "ビューアの既定" }] : []),
-              ...(nav.canManageUsers ? [{ href: "/admin/users", label: "利用者" }] : []),
-              ...(nav.account ? [{ href: "/account", label: "自分の設定" }] : []),
+              // 頁の名前は docs/spec.md の 2.2 の用語集（タブの題名と同じ）
+              { href: "/", label: "検査一覧" },
+              ...(nav.canViewReceived ? [{ href: "/received", label: "受信一覧" }] : []),
+              ...(nav.canCheckModalities ? [{ href: "/modalities", label: "接続先" }] : []),
+              ...(nav.canEditViewerDefaults ? [{ href: "/admin/viewers", label: "ビューア設定" }] : []),
+              ...(nav.canManageUsers ? [{ href: "/admin/users", label: "ユーザー管理" }] : []),
+              ...(nav.account ? [{ href: "/account", label: "個人設定" }] : []),
             ]}
           />
         )}
@@ -61,7 +62,7 @@ export function SiteHeader({
           <div className="flex items-center gap-2" data-testid="current-user">
             <span className="text-value">{user.displayName}</span>
             <span className="text-label">
-              （{user.username}・{user.roleLabel}）
+              {user.username}（{user.roleLabel}）
             </span>
             <LockNowButton />
             <LogoutButton csrfToken={user.csrfToken} />

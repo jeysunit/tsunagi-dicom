@@ -22,7 +22,7 @@ export async function POST(request: Request) {
         : state.kind === "active"
           ? state.session.local
           : undefined;
-    if (!target) throw new AuthError(state.kind === "locked" ? 423 : 401, "TOTP を登録できる状態ではない");
+    if (!target) throw new AuthError(state.kind === "locked" ? 423 : 401, "二要素認証を設定できる状態ではありません");
     const { code, currentPassword } = await readJson(request, Body);
     const result = await confirmEnrollment(await authContext(), target.row, target.user, code, currentPassword);
     if (result.rotated) await setSessionCookie(result.rotated.token, result.rotated.expiresAt);

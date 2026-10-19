@@ -15,8 +15,8 @@ export default async function EnrollPage() {
   const enrollment = await startEnrollment(await authContext(), state.row, state.user);
   return (
     <section className="mx-auto max-w-md space-y-4 pt-8">
-      <h1 className="text-lg font-bold text-value">二要素の認証（TOTP）の登録</h1>
-      <p className="text-label">この施設では、ログインに二要素の認証が要る。続けるには、認証のアプリを登録する。</p>
+      <h1 className="text-lg font-bold text-value">二要素認証の設定</h1>
+      <p className="text-label">二要素認証の設定が必要です。認証アプリを登録してください</p>
       <TotpEnrollment secret={enrollment.secret} uri={enrollment.uri} csrfToken={state.row.csrfToken} />
     </section>
   );

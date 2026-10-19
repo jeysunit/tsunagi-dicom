@@ -420,7 +420,8 @@ describe("削除", () => {
     const { requestId, answer, release } = await pausedDelete(confirmToken);
     const res = await resolveDelete({ requestId, note: "試験" });
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toContain("まだ動いている");
+    // 文言は 2026-10-20 に画面の用語集（docs/spec.md の 2.2）に合わせた。確かめる中身（処理中の要求は解かない）は同じ
+    expect((await res.json()).error).toContain("まだ処理中");
     release();
     expect((await answer).status).toBe(200);
     expect(spy).toHaveBeenCalledTimes(1);
@@ -439,7 +440,7 @@ describe("削除", () => {
       release();
       const res = await answer;
       expect(res.status).toBe(409);
-      expect((await res.json()).error).toContain("ほかで片付けられた");
+      expect((await res.json()).error).toContain("ほかで解除された");
     } finally {
       vi.useRealTimers();
     }
@@ -683,7 +684,7 @@ describe("削除：違う検査を消さない", () => {
     const requestId = crypto.randomUUID();
     const res = await del({ requestId, reason: "試験", confirmToken });
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toContain("検査が変わった");
+    expect((await res.json()).error).toContain("検査が更新されました");
     expect(detailOf((await rowsOf(requestId))[0])).toMatchObject({ reason: "changed", changed: ["version"] });
     expect(spy).not.toHaveBeenCalled();
     expect(await listed()).toBe(true);

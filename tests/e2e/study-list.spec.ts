@@ -77,7 +77,10 @@ test("すぐ絞れる見出し：期間の指定・モダリティ・横断の�
   await expect(page.getByTestId("study-count")).toHaveText("2");
 
   await page.getByTestId("study-search").fill("該当しない語");
-  await expect(page.getByText("合う検査が無い")).toBeVisible();
+  // 文言は docs/spec.md の 2.2（合う検査が無い→該当する検査はありません）。条件をクリアで、すべての検査に戻る
+  await expect(page.getByText("該当する検査はありません")).toBeVisible();
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
 });
 
 // 期待の変更（1 件）：一覧の行のサムネイル（写しのある検査は画像・無い検査は印）の確かめを外した。
@@ -149,7 +152,7 @@ test("詳細のシリーズ：写しのある検査はサムネイルの画像�
   const other = page.locator(`tr[data-study-uid]:not([data-study-uid="${STUDY}"])`).last();
   await other.click();
   await expect(page.getByTestId("study-detail")).not.toHaveAttribute("data-study-uid", STUDY);
-  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   await expect(page.getByTestId("series-strip").getByTestId("thumbnail-missing").first()).toBeVisible();
   await expect(page.getByTestId("series-strip").getByTestId("thumbnail")).toHaveCount(0);
 });
@@ -177,8 +180,9 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   await expect(detail.getByTestId("uid-line")).toHaveCount(0);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  await expect(detail).toContainText("患者の情報");
-  await expect(detail).toContainText("検査の情報");
+  // 小見出しの文言は docs/spec.md の 2.2（患者の情報→患者情報・検査の情報→検査情報）
+  await expect(detail).toContainText("患者情報");
+  await expect(detail).toContainText("検査情報");
   await expect(detail).toContainText("JP-TEST-0004");
   await expect(detail).toContainText("試験 医師");
   await expect(detail.getByTestId("uid-line").first()).toContainText(STUDY);
@@ -189,8 +193,8 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   await expect(strip.getByTestId("series-item")).toHaveCount(1);
   await expect(strip).toContainText("Chest Axial 5mm");
   await expect(strip).toHaveCSS("background-color", "rgb(18, 20, 23)");
-  // 医師には「すべての DICOM の値」が無い
-  await expect(detail.getByRole("button", { name: "すべての DICOM の値" })).toHaveCount(0);
+  // 医師には「DICOM タグ」（前は「すべての DICOM の値」）が無い
+  await expect(detail.getByRole("button", { name: "DICOM タグ" })).toHaveCount(0);
 
   // もう一度押しても閉じない（下の詳細は選んだ行のものを出し続ける）。Escape で選びを外すと案内に戻る
   // （期待の変更：行の下に開く形をやめ、もう一度押して閉じる動きを、Escape に替えた。docs/spec.md の 3.1）
@@ -431,7 +435,7 @@ test("詳細を見せるときは必ず記録が残る：A→B→A と戻って�
   await first;
   const k = (await recorded()) - base;
   expect(k).toBeGreaterThan(0);
-  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
 
   // A→B→A を 300ms より短く：戻った A の中身は出ない（キャッシュも残さない）。記録も増えない
   const gets: string[] = [];
@@ -443,12 +447,15 @@ test("詳細を見せるときは必ず記録が残る：A→B→A と戻って�
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowUp");
   await expect(rows(page).first()).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("series-strip")).toContainText("読んでいる");
+  // 期待の変更：読み込みの文字（前は「読んでいる」）は、0.3 秒たってから出す決まりにした（docs/spec.md の 2.3）ので、
+  // 文字の有無ではなく、シリーズの中身を出していないこと（読み込み済みでないこと）で確かめる。確かめる中身は同じ
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "false");
+  await expect(page.getByTestId("series-strip").getByTestId("series-item")).toHaveCount(0);
   expect(gets).toEqual([]);
 
   // 止まれば取り直し、そのとき記録が1件分（k）増える。B は一度も取っていない
   await again;
-  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   expect(await recorded()).toBe(base + 2 * k);
   await page.waitForTimeout(600);
   expect(await recorded()).toBe(base + 2 * k);
@@ -463,17 +470,17 @@ test("ビューアの覚えを変えても、詳細は取り直さず、「詳�
     if (req.method() === "GET" && /\/api\/studies\/[0-9.]+$/.test(new URL(req.url()).pathname)) gets.push(req.url());
   });
   await row(page).click();
-  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   expect(gets).toHaveLength(1);
   const menu = page.getByTestId("study-detail").getByTestId("open-menu");
   await menu.click();
-  await page.getByRole("menuitem", { name: "この検査は次から Stone" }).click();
-  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("既定: Stone");
+  await page.getByRole("menuitem", { name: "この検査は Stone で開く" }).click();
+  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("この検査: Stone");
   await page.waitForTimeout(500);
   expect(gets).toHaveLength(1);
   // 戻す
   await menu.click();
-  await page.getByRole("menuitem", { name: /覚えを消す/ }).click();
+  await page.getByRole("menuitem", { name: /記憶を解除/ }).click();
   await expect(row(page).getByTestId("remembered-viewer")).toHaveCount(0);
   expect(gets).toHaveLength(1);
 });
@@ -493,7 +500,7 @@ test("応答の順が逆になっても、古い応答が新しい選びを上�
   await rows(page).first().click();
   await rows(page).nth(1).click();
   await expectDetail(page, uids[1]!);
-  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   release();
   await page.waitForTimeout(500);
   await expectDetail(page, uids[1]!);
@@ -507,7 +514,7 @@ test("応答の順が逆になっても、古い応答が新しい選びを上�
 test("技師はすべての DICOM の値を見られる。どの役割にも検査の状態の印は無い（段 3 で外した）", async ({ page }) => {
   await asRole(page, "技師");
   await row(page).click();
-  await page.getByRole("button", { name: "すべての DICOM の値" }).click();
+  await page.getByRole("button", { name: "DICOM タグ" }).click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
 
   for (const role of ["管理者", "医師", "技師", "閲覧"] as const) {
@@ -540,8 +547,8 @@ test("ビューア：▶ と、ダブルクリックで既定のビューアを�
 test("ビューア：▾ から「この検査は次から Stone」と覚え、行に既定を出し、覚えを消せる", async ({ page }) => {
   await asRole(page, "医師");
   await row(page).getByTestId("open-menu").click();
-  await page.getByRole("menuitem", { name: "この検査は次から Stone" }).click();
-  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("既定: Stone");
+  await page.getByRole("menuitem", { name: "この検査は Stone で開く" }).click();
+  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("この検査: Stone");
 
   await expectOpened(
     page,
@@ -550,29 +557,29 @@ test("ビューア：▾ から「この検査は次から Stone」と覚え、�
   );
 
   await row(page).getByTestId("open-menu").click();
-  await page.getByRole("menuitem", { name: /覚えを消す/ }).click();
+  await page.getByRole("menuitem", { name: /記憶を解除/ }).click();
   await expect(row(page).getByTestId("remembered-viewer")).toHaveCount(0);
 
   // 閲覧には覚えさせる項目が無い
   await asRole(page, "閲覧");
   await page.goto("/");
   await row(page).getByTestId("open-menu").click();
-  await expect(page.getByRole("menuitem", { name: /この検査は次から/ })).toHaveCount(0);
-  await expect(page.getByRole("menuitem", { name: /DICOMweb の URL をコピー/ })).toContainText("このアプリの監査の外");
+  await expect(page.getByRole("menuitem", { name: /この検査は .+ で開く/ })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: /DICOMweb URL をコピー/ })).toContainText("操作ログの対象外");
 });
 
 test("モダリティごとの既定のビューア：管理者が管理の画面で変え、ほかの役割は開けない", async ({ page }) => {
   await asRole(page, "医師");
   await page.goto("/admin/viewers");
-  await expect(page.getByText("管理者だけが開ける")).toBeVisible();
+  await expect(page.getByText("管理者のみ利用できます")).toBeVisible();
 
   await asRole(page, "管理者");
-  await page.getByRole("navigation", { name: "頁" }).getByRole("link", { name: "ビューアの既定" }).click();
+  await page.getByRole("navigation", { name: "頁" }).getByRole("link", { name: "ビューア設定" }).click();
   await expect(page).toHaveURL(/\/admin\/viewers$/);
   const ct = page.getByLabel("CT の既定のビューア");
   await expect(ct).toHaveValue("ohif");
   await ct.selectOption("stone");
-  await expect(page.getByText("CT の既定を変えた")).toBeVisible();
+  await expect(page.getByText("CT の既定ビューアを保存しました")).toBeVisible();
 
   await page.goto("/");
   await expectOpened(page, () => row(page).getByTestId("open-default").click(), /viewer\.example\.org\/stone\//);
@@ -580,7 +587,7 @@ test("モダリティごとの既定のビューア：管理者が管理の画�
   // 戻す
   await page.goto("/admin/viewers");
   await page.getByLabel("CT の既定のビューア").selectOption("ohif");
-  await expect(page.getByText("CT の既定を変えた")).toBeVisible();
+  await expect(page.getByText("CT の既定ビューアを保存しました")).toBeVisible();
 });
 
 // ---- 1 行の一覧・件数つきの絞り込み・詰めた詳細（docs/spec.md の 3.1） ----
@@ -609,7 +616,8 @@ test("1 行の一覧：行の高さは 28px（14px の文字）、氏名の漢�
   expect(kb.x).toBeGreaterThan(nb.x + nb.width - 1);
   expect(Math.abs(kb.y + kb.height / 2 - (nb.y + nb.height / 2))).toBeLessThan(8);
   // 見出しの行にも別の列
-  await expect(page.getByRole("columnheader", { name: "かな" })).toBeVisible();
+  // 列名は docs/spec.md の 2.2（かな→カナ）
+  await expect(page.getByRole("columnheader", { name: "カナ" })).toBeVisible();
 });
 
 test("1 行の一覧：1280×720 の画面で、見える行が前（2 行）より多い。ビューアの部品も 1 行に収まり、押せる大きさは 24px 以上", async ({ page }) => {
@@ -634,11 +642,11 @@ test("1 行の一覧：1280×720 の画面で、見える行が前（2 行）よ
   expect((await row(page).boundingBox())!.height).toBeLessThanOrEqual(30);
   // 覚えたビューアの印が付いても、行は 28px のまま
   await row(page).getByTestId("open-menu").click();
-  await page.getByRole("menuitem", { name: "この検査は次から Stone" }).click();
-  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("既定: Stone");
+  await page.getByRole("menuitem", { name: "この検査は Stone で開く" }).click();
+  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("この検査: Stone");
   expect((await row(page).boundingBox())!.height).toBeLessThanOrEqual(30);
   await row(page).getByTestId("open-menu").click();
-  await page.getByRole("menuitem", { name: /覚えを消す/ }).click();
+  await page.getByRole("menuitem", { name: /記憶を解除/ }).click();
   await expect(row(page).getByTestId("remembered-viewer")).toHaveCount(0);
 });
 
@@ -678,7 +686,8 @@ test("絞り込みは 1 行の並び：検査日・モダリティに件数を�
   for (const id of ["date-today", "modality-CT", "filter-more"]) {
     expect((await page.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(24);
   }
-  await expect(page.getByTestId("date-all")).toHaveText("全期間 (8)");
+  // 見出しの名前は docs/spec.md の 2.2（全期間→すべて）
+  await expect(page.getByTestId("date-all")).toHaveText("すべて (8)");
   await expect(page.getByTestId("modality-all")).toHaveText("すべて (8)");
   await expect(page.getByTestId("modality-CT")).toHaveText("CT (6)");
   await expect(page.getByTestId("modality-MR")).toHaveText("MR (2)");
@@ -688,7 +697,7 @@ test("絞り込みは 1 行の並び：検査日・モダリティに件数を�
     await page.getByTestId(id).click();
     await expect(page.getByTestId(id)).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => headCount(page)).toBe(n);
-    if (n === 0) await expect(page.getByText("合う検査が無い")).toBeVisible();
+    if (n === 0) await expect(page.getByText("該当する検査はありません")).toBeVisible();
     else await expect(rows(page)).toHaveCount(n);
     await page.getByTestId(id.startsWith("date-") ? "date-all" : "modality-all").click();
     await expect.poll(() => headCount(page)).toBe(8);
@@ -742,7 +751,7 @@ test("許されない項目の件数は出ない：画面の API の応答から
   await asRole(page, "医師");
   await page.getByTestId("date-week").click();
   await expect(page.getByTestId("date-week")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("date-all")).toHaveText(/全期間 \(\d+\)/);
+  await expect(page.getByTestId("date-all")).toHaveText(/すべて \(\d+\)/);
   await expect(page.getByTestId("modality-CT")).toHaveText("CT");
   await expect(page.getByTestId("modality-all")).toHaveText("すべて");
   // 見出しの文字に、件数の括弧が出ていない
@@ -762,7 +771,7 @@ test("上限に届いて数えきれない件数は「以上」と出す（確�
   await asRole(page, "医師");
   await page.getByTestId("date-week").click();
   await expect(page.getByTestId("date-week")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("date-all")).toHaveText(/全期間 \(\d+ 以上\)/);
+  await expect(page.getByTestId("date-all")).toHaveText(/すべて \(\d+ 以上\)/);
   await expect(page.getByTestId("date-today")).toHaveText(/今日 \(\d+\)/);
   await expect(page.getByTestId("modality-CT")).toHaveText(/CT \(\d+ 以上\)/);
 });
@@ -778,9 +787,10 @@ test("「詳しく」：期間の指定は、押したときだけ出る。開�
   await expect(page.getByTestId("filter-more-panel")).toBeVisible();
   await page.getByTestId("date-range").click();
   await expect(page).toHaveURL(/date=range/);
-  await expect(page.getByLabel("期間の始まり")).toBeVisible();
-  await page.getByLabel("期間の始まり").fill("2026-10-17");
-  await page.getByLabel("期間の終わり").fill("2026-10-17");
+  // 欄の名前は docs/spec.md の 2.2（期間の始まり・終わり→開始日・終了日）
+  await expect(page.getByLabel("開始日")).toBeVisible();
+  await page.getByLabel("開始日").fill("2026-10-17");
+  await page.getByLabel("終了日").fill("2026-10-17");
   await expect(page.getByTestId("study-count")).toHaveText("4");
   await more.click();
   await expect(page.getByTestId("filter-more-panel")).toHaveCount(0);
@@ -810,15 +820,15 @@ test("詳細の「すべての項目」：初めは閉じ、押すと検査と�
   await expect(detail.getByTestId("detail-all-items")).toHaveCount(0);
   // 閉じているうちも、見出しとシリーズは出ている
   await expect(detail.getByTestId("detail-head")).toBeVisible();
-  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(24);
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const all = detail.getByTestId("detail-all-items");
-  await expect(all).toContainText("検査の情報");
-  await expect(all).toContainText("患者の情報");
-  await expect(all).toContainText("氏名（英字）");
+  await expect(all).toContainText("検査情報");
+  await expect(all).toContainText("患者情報");
+  await expect(all).toContainText("英字氏名");
   await expect(all.getByTestId("uid-line").first().locator("code")).toHaveCSS("font-size", "12px");
   // シリーズの UID も、この中に 0.75rem・等幅で出て、コピーのボタンがある
   // 1 行目の検査（シリーズが 2 つ）：StudyInstanceUID の 1 行と、SeriesInstanceUID の 2 行

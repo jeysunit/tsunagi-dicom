@@ -15,7 +15,7 @@ export default async function ChangePasswordStagePage() {
   return (
     <section className="mx-auto max-w-sm space-y-4 pt-8">
       <h1 className="text-lg font-bold text-value">パスワードの変更</h1>
-      <p className="text-label">続けるには、自分だけが知るパスワードに変える。</p>
+      <p className="text-label">ログインを続けるには、パスワードを変更してください</p>
       <PasswordForm
         csrfToken={state.row.csrfToken}
         askCurrent={false}

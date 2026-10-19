@@ -20,7 +20,7 @@ export async function GET(_request: Request, { params }: Context) {
       detail: { allValues: true },
     });
     const dataset = await getBackend().studyDataset(uid);
-    if (!dataset) return Response.json({ error: "検査が見つからない" }, { status: 404 });
+    if (!dataset) return Response.json({ error: "検査が見つかりません" }, { status: 404 });
     await audit(session, {
       action: "view_study",
       patientId: stringValue(dataset, TAG.PatientID),

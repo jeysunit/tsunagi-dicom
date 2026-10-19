@@ -6,6 +6,8 @@ export interface ScreenInfo {
   csrfToken?: string;
   /** 設定されたビューア（URL は渡さない。開く時に BFF が作る） */
   viewers: ViewerInfo[];
+  /** サーバーの時間帯（TZ）。画面の時刻（送信の時刻など）は、この時間帯で出す（docs/spec.md の 2.2） */
+  timeZone: string;
   /** いまの役割でできること（src/lib/auth/roles.ts） */
   can: {
     rememberViewer: boolean;

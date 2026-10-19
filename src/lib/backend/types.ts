@@ -156,7 +156,7 @@ export interface JobStatus {
 
 /** 書き込みの要求の答えが分からなかった（時間切れ・通信の切れ。docs/spec.md の 3.5 の結果不明） */
 export class BackendUnknownError extends Error {
-  constructor(message = "画像サーバーの答えが分からない") {
+  constructor(message = "画像サーバーの応答を確認できません") {
     super(message);
     this.name = "BackendUnknownError";
   }

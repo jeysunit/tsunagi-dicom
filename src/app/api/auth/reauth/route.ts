@@ -17,9 +17,9 @@ const Body = z.object({
 export async function POST(request: Request) {
   try {
     const state = await checkedState(request);
-    if (state.kind === "locked") throw new AuthError(423, "画面をロックしている。パスワードで解く");
+    if (state.kind === "locked") throw new AuthError(423, "画面ロック中です。パスワードでロックを解除してください");
     const local = state.kind === "active" ? state.session.local : undefined;
-    if (!local) throw new AuthError(401, "ログインしていない");
+    if (!local) throw new AuthError(401, "ログインしていません。再度ログインしてください");
     const body = await readJson(request, Body);
     const ctx = await authContext();
     await reauthenticate(ctx, local.row, local.user, body);

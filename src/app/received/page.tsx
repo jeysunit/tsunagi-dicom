@@ -7,6 +7,7 @@ import type { ReceivedView } from "@/lib/fields";
 import { getConfig } from "@/lib/config";
 import { formatDateTimeIn, formatSlashDate } from "@/lib/format/japanese-date";
 import { RECEIVE_LIMIT, receiveLogView } from "@/lib/receive-log";
+import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
 import { cn } from "@/lib/utils";
 
 // 受け取りの記録の頁（docs/spec.md の 3.3。段 4）。Orthanc が受け取った検査を、新しい順に 1 件 1 行で出す。
@@ -18,10 +19,10 @@ export const metadata = { title: "受信一覧" };
 
 const CELL = "h-7 px-2 py-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
-/** 入った道。DICOM の C-STORE 以外（REST で入れたなど）は「取り込み」と分かるようにする */
+/** 入った道。DICOM の C-STORE 以外（REST で入れたなど）は「インポート」と分かるようにする（画面の言葉は docs/spec.md の 2.2） */
 function originText(origin: string | null | undefined): string {
   if (origin === "DicomProtocol") return "";
-  if (origin === "RestApi") return "取り込み";
+  if (origin === "RestApi") return "インポート";
   return origin ?? "";
 }
 
@@ -31,7 +32,7 @@ export default async function ReceivedPage() {
   if (access.kind === "forbidden") {
     return (
       <p role="alert" className="text-label">
-        この役割では受け取りの記録を開けない
+        {FORBIDDEN_PAGE}
       </p>
     );
   }
@@ -59,7 +60,7 @@ export default async function ReceivedPage() {
     if (!(error instanceof BackendError)) console.error(error);
     return (
       <p role="alert" className="text-label">
-        {error instanceof BackendError ? error.message : "受け取りの記録を読めなかった"}
+        {error instanceof BackendError ? error.message : loadFailed("受信一覧")}
       </p>
     );
   }
@@ -67,18 +68,19 @@ export default async function ReceivedPage() {
   return (
     <section className="space-y-2" data-testid="received-page">
       <div className="flex flex-wrap items-baseline gap-x-4">
-        <h1 className="text-lg font-bold text-value">受け取りの記録</h1>
-        <p className="text-xs text-label">
-          Orthanc の変更の記録から読める範囲の、新しい {RECEIVE_LIMIT} 件まで。古い記録は Orthanc に残らないことがある。
+        <h1 className="text-lg font-bold text-value">受信一覧</h1>
+        {/* 読める範囲の説明（Orthanc の変更の記録の数に限りがある）は title に回す（画面に説明の文を置かない。docs/spec.md の 2.2） */}
+        <p className="text-xs text-label" title="Orthanc の変更の記録から読める範囲です。古い記録は Orthanc に残らないことがあります">
+          直近 {RECEIVE_LIMIT} 件
         </p>
       </div>
       {!complete && (
         <p role="status" className="text-xs text-danger" data-testid="received-incomplete">
-          ここまでしか読めていない（変更の記録を、読む範囲の終わりまで読み切れなかった）。抜けた受け取りは、Orthanc で確かめる。
+          一部の履歴を読み込めませんでした。抜けがないか Orthanc で確認してください
         </p>
       )}
       {items.length === 0 ? (
-        <p className="text-label">受け取った検査が無い</p>
+        <p className="text-label">受信履歴はありません</p>
       ) : (
         <div className="overflow-auto rounded-md border border-border">
           <table className="w-full min-w-[960px] table-fixed border-collapse" data-testid="received-table">
@@ -95,15 +97,15 @@ export default async function ReceivedPage() {
             </colgroup>
             <thead className="bg-surface text-left text-xs text-label">
               <tr className="border-b border-border">
-                <th className="px-2 py-1 font-normal">受け取った時刻</th>
-                <th className="px-2 py-1 font-normal">送ってきた機器（AE）</th>
-                <th className="px-2 py-1 text-right font-normal">画像</th>
-                <th className="px-2 py-1 font-normal">患者 ID</th>
+                <th className="px-2 py-1 font-normal">受信日時</th>
+                <th className="px-2 py-1 font-normal">送信元 AE</th>
+                <th className="px-2 py-1 text-right font-normal">画像数</th>
+                <th className="px-2 py-1 font-normal">患者ID</th>
                 <th className="px-2 py-1 font-normal">氏名</th>
                 <th className="px-2 py-1 font-normal">検査日</th>
-                <th className="px-2 py-1 font-normal">モダリティ・検査の記述</th>
+                <th className="px-2 py-1 font-normal">モダリティ／検査名</th>
                 <th className="px-2 py-1 font-normal">
-                  <span className="sr-only">開く</span>
+                  <span className="sr-only">表示</span>
                 </th>
               </tr>
             </thead>
@@ -138,7 +140,7 @@ export default async function ReceivedPage() {
                     <td className={CELL}>
                       {r.study.patientId && (
                         <Link href={`/?${new URLSearchParams({ q: r.study.patientId })}`} className="text-link underline underline-offset-2 hover:decoration-2">
-                          一覧で開く
+                          検査一覧で表示
                         </Link>
                       )}
                     </td>

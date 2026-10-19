@@ -189,7 +189,7 @@ export function studyIdsFromLookup(json: unknown): string[] {
 /** 引き当ての答えがちょうど1件ならその ID、無ければ null、2件以上なら選ばずに 409（取り違えて書かない） */
 export function singleStudyId(ids: readonly string[]): string | null {
   if (ids.length === 0) return null;
-  if (ids.length > 1) throw new BackendError("同じ StudyInstanceUID の検査が Orthanc に2つ以上ある（患者違いなど）。どれかを選んで書かない", 409);
+  if (ids.length > 1) throw new BackendError("同じ StudyInstanceUID の検査が複数あるため実行できません（患者違いなど）", 409);
   return ids[0]!;
 }
 

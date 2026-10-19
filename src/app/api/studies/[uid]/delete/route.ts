@@ -42,8 +42,8 @@ type Context = { params: Promise<{ uid: string }> };
 const DELETE_REASON_MAX = 500;
 
 const Body = z.object({
-  requestId: z.string().refine(isRequestId, "要求の ID（UUID）の形が誤り"),
-  reason: z.string().trim().min(1, "理由を書く").max(DELETE_REASON_MAX, `理由は ${DELETE_REASON_MAX} 文字まで`),
+  requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
+  reason: z.string().trim().min(1, "削除理由を入力してください").max(DELETE_REASON_MAX, `削除理由は ${DELETE_REASON_MAX} 文字までです`),
   /** 確かめの画面（GET）が返した token。見せた検査と、いまの検査が全部同じときだけ消す */
   confirmToken: z.string().min(1).max(2048),
 });
@@ -78,11 +78,12 @@ function differences(shown: DeleteConfirmPayload, now: OrthancStudyInfo): string
 }
 
 const REFUSALS = {
-  not_found: { status: 404, error: "検査が見つからない" },
-  ambiguous: { status: 409, error: "同じ StudyInstanceUID の検査が Orthanc に2つ以上ある。どれかを選んで消さない" },
-  mismatch: { status: 409, error: "Orthanc で引いた検査の StudyInstanceUID が、求めた UID と合わない。消さない" },
-  changed: { status: 409, error: "確かめの画面を出した後に、検査が変わった。もう一度確かめてから消す" },
-  confirm_invalid: { status: 409, error: "確かめの画面が古い（期限が過ぎた・別の検査や利用者のもの）。もう一度確かめてから消す" },
+  // 画面に出す文言（docs/spec.md の 2.2）
+  not_found: { status: 404, error: "検査が見つかりません" },
+  ambiguous: { status: 409, error: "同じ StudyInstanceUID の検査が複数あるため削除できません" },
+  mismatch: { status: 409, error: "検査の StudyInstanceUID が一致しないため削除できません" },
+  changed: { status: 409, error: "確認の後に検査が更新されました。もう一度確認してください" },
+  confirm_invalid: { status: 409, error: "確認画面の有効期限が切れました。もう一度確認してから削除してください" },
 } as const;
 
 export async function POST(request: Request, { params }: Context) {
@@ -149,7 +150,7 @@ export async function POST(request: Request, { params }: Context) {
     if (begin.kind === "repeated") return priorResponse(session, uid, requestId, await rowsOfRequest(db, "delete", requestId, uid));
     if (begin.kind === "pending") {
       return Response.json(
-        { error: "この検査を消した結果が、まだ分からない。消し直さずに、先にその結果を確かめる", pendingRequestIds: begin.pending },
+        { error: "前回の削除結果が未確認です。先に状態を確認してください", pendingRequestIds: begin.pending },
         { status: 409 },
       );
     }
@@ -191,10 +192,10 @@ export async function POST(request: Request, { params }: Context) {
       };
     });
     if (dispatch === "settled") {
-      return Response.json({ requestId, error: "この削除の要求は、送る前にほかで片付けられた（管理者が解いたなど）。消さない" }, { status: 409 });
+      return Response.json({ requestId, error: "この削除は実行前にほかで解除されたため、中止しました（管理者が解除したなど）" }, { status: 409 });
     }
     if (dispatch === "stale") {
-      return Response.json({ requestId, error: "求めてから時間がたちすぎた。消さずに止めた。もう一度確かめてから消す" }, { status: 409 });
+      return Response.json({ requestId, error: "時間切れのため削除を中止しました。もう一度確認してください" }, { status: 409 });
     }
 
     try {
@@ -207,7 +208,7 @@ export async function POST(request: Request, { params }: Context) {
       // Orthanc が断った（受けなかったと分かる答え）。答えの要点を残し、画面には「消えていない」と返す
       const message = error instanceof Error ? error.message.slice(0, 200) : "";
       await result("failed", { status: error instanceof BackendError ? error.status : 502, message });
-      return Response.json({ requestId, outcome: "failed", error: `消せなかった（${message}）` }, { status: 502 });
+      return Response.json({ requestId, outcome: "failed", error: `削除できませんでした（${message}）` }, { status: 502 });
     }
     try {
       await result("success");
@@ -233,7 +234,7 @@ export async function GET(request: Request, { params }: Context) {
     const uid = studyUidParam((await params).uid);
     const requestId = new URL(request.url).searchParams.get("requestId");
     if (requestId === null) return await preview(session, uid);
-    if (!isRequestId(requestId)) return Response.json({ error: "要求の ID（UUID）の形が誤り" }, { status: 400 });
+    if (!isRequestId(requestId)) return Response.json({ error: "要求ID が正しくありません" }, { status: 400 });
     await requirePermission(session, "study.delete", { action: "delete", studyInstanceUid: uid, detail: { requestId } });
     const db = await getDb();
     const rows = await rowsOfRequest(db, "delete", requestId, uid);
@@ -241,14 +242,14 @@ export async function GET(request: Request, { params }: Context) {
     if (o.phase === "none") return Response.json({ requestId, outcome: "none" });
     // 求めた本人のほか、照らし合わせの役割（pacs.reconcile。管理者）なら、ほかの人の要求も照らせる（止まった削除を片付けるため）
     if ((o.actorId !== session.actorId && !can(session.role, "pacs.reconcile")) || o.studyInstanceUid !== uid) {
-      return Response.json({ error: "この要求の ID は、別の削除に使われている" }, { status: 409 });
+      return Response.json({ error: "この要求ID は別の削除に使われています" }, { status: 409 });
     }
     if (o.outcome === "success" || o.outcome === "failed") return priorResponse(session, uid, requestId, rows, true);
     const still = await deletedStudyStillPresent(getBackend(), rows, uid);
     if (still) {
       // 先の DELETE が止まった・終わったと言える証拠が無い（遅れて消えることがある）。確定させず、記録にも足さない
       return Response.json(
-        { requestId, outcome: "unknown", studyPresent: true, error: "検査は Orthanc にまだある。消えたとも、消えていないとも言えない" },
+        { requestId, outcome: "unknown", studyPresent: true, error: "検査はまだサーバーに残っています。前回の削除が完了したかは不明です" },
         { status: 202 },
       );
     }
@@ -292,7 +293,7 @@ async function preview(session: Session, uid: string): Promise<Response> {
 
 function unknownResponse(requestId: string): Response {
   return Response.json(
-    { requestId, outcome: "unknown", error: "結果が分からない。もう一度消さずに、状態を確かめる" },
+    { requestId, outcome: "unknown", error: "削除結果を確認できません。再実行せずに状態を確認してください" },
     { status: 202 },
   );
 }
@@ -301,7 +302,7 @@ function priorResponse(session: Session, uid: string, requestId: string, rows: r
   const o = requestOutcome(rows);
   const actorOk = o.actorId === session.actorId || (allowReconciler && can(session.role, "pacs.reconcile"));
   if (!actorOk || o.studyInstanceUid !== uid) {
-    return Response.json({ error: "この要求の ID は、別の削除に使われている" }, { status: 409 });
+    return Response.json({ error: "この要求ID は別の削除に使われています" }, { status: 409 });
   }
   if (o.outcome === "success") return Response.json({ requestId, outcome: "deleted", repeated: true });
   if (o.outcome === "failed") return Response.json({ requestId, outcome: "failed", repeated: true });

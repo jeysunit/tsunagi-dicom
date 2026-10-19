@@ -1,9 +1,11 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Search, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Search, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { StudyDetailPanel } from "@/components/studies/study-detail";
 import { openInViewer, ViewerMenu } from "@/components/studies/viewer-menu";
@@ -23,6 +25,7 @@ import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabe
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
 import {
   DATE_LABELS,
+  DEFAULT_FILTER,
   FACET_DATES,
   filterToSearchParams,
   MAX_QUERY_LENGTH,
@@ -45,6 +48,8 @@ export interface StudyListData {
 
 /** 矢印のキーで行を移したあと、詳細を読みに行くまでの待ち（ミリ秒）。通り過ぎた行を読まない */
 const DETAIL_DELAY_MS = 300;
+/** 削除が終わったことの知らせを出しておく時間（ミリ秒。docs/spec.md の 3.5） */
+const NOTICE_MS = 10_000;
 /** 一覧の最小の高さ（見出しと 7 行ほど。study-list-scroll の md:min-h-56 と同じ）と、絞り込みと一覧の間（gap-2） */
 const LIST_MIN_PX = 224;
 const TOP_GAP_PX = 8;
@@ -155,9 +160,9 @@ function FilterBar({
             value={text}
             maxLength={MAX_QUERY_LENGTH}
             onChange={(e) => setText(e.target.value)}
-            placeholder="患者 ID・氏名・受付番号など"
-            title="患者 ID・氏名（漢字・かな・英字）・受付番号・検査の記述で探す"
-            aria-label="横断の検索"
+            placeholder="患者ID・氏名・受付番号"
+            title="患者ID・氏名（漢字・カナ・英字）・受付番号・検査名"
+            aria-label="検査の検索"
             className="h-7 pl-8"
             data-testid="study-search"
           />
@@ -171,7 +176,7 @@ function FilterBar({
           className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-sm text-foreground hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
-          詳しく
+          詳細条件
         </button>
         {trailing}
       </div>
@@ -180,7 +185,7 @@ function FilterBar({
           id={moreId}
           className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5"
           role="group"
-          aria-label="詳しい条件"
+          aria-label="詳細条件"
           data-testid="filter-more-panel"
         >
           <span className="text-xs text-label">検査日</span>
@@ -193,7 +198,7 @@ function FilterBar({
             <span className="flex items-center gap-1">
               <Input
                 type="date"
-                aria-label="期間の始まり"
+                aria-label="開始日"
                 value={filter.from ?? ""}
                 onChange={(e) => onChange({ ...filter, from: e.target.value || undefined })}
                 className="h-7 w-40"
@@ -201,7 +206,7 @@ function FilterBar({
               <span className="text-label">〜</span>
               <Input
                 type="date"
-                aria-label="期間の終わり"
+                aria-label="終了日"
                 value={filter.to ?? ""}
                 onChange={(e) => onChange({ ...filter, to: e.target.value || undefined })}
                 className="h-7 w-40"
@@ -274,6 +279,7 @@ function StudyRows({
   selected,
   onSelect,
   onChanged,
+  dim = false,
 }: {
   studies: StudyView[];
   screen: ScreenInfo;
@@ -281,6 +287,8 @@ function StudyRows({
   /** how: click は詳細をすぐ読む、key（矢印）は少し待ってから読む */
   onSelect: (uid: string | null, how: "click" | "key") => void;
   onChanged: () => void;
+  /** 取り直しの待ちの間、古い行を薄くする（docs/spec.md の 2.3） */
+  dim?: boolean;
 }) {
   // 矢印で動く（ローヴィングの tabindex）：選んだ行、無ければ先頭の行だけが tab の止まり先
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
@@ -288,6 +296,14 @@ function StudyRows({
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
+      {/* 取り直しの待ちの細い帯は、一覧の上の縁に重ねる（場所を取らない。画面は覆わない） */}
+      {dim && (
+        <div className="sticky top-0 z-20 h-0">
+          <div className="absolute inset-x-0 top-0">
+            <ProgressBar />
+          </div>
+        </div>
+      )}
       <table className="w-full table-fixed border-collapse" style={{ minWidth }} data-testid="study-table">
         <colgroup>
           {columns.map((c) => (
@@ -297,22 +313,22 @@ function StudyRows({
         <thead className="sticky top-0 z-10 bg-surface text-left text-xs text-label shadow-[0_1px_0_var(--color-border)]">
           <tr className="border-b border-border">
             <th className={cn("px-2 py-1 font-normal", CUT)}>検査日時</th>
-            <th className={cn("px-2 py-1 font-normal", CUT)}>患者 ID</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>患者ID</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
-            <th className={cn("px-2 py-1 font-normal", CUT)}>かな</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>カナ</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>年齢</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>性別</th>
-            <th className={cn("px-2 py-1 font-normal", CUT)}>モダリティ・検査の記述</th>
-            <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数 / 画像数">
-              シリーズ・画像
+            <th className={cn("px-2 py-1 font-normal", CUT)}>モダリティ／検査名</th>
+            <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数／画像数">
+              Se/Im
             </th>
             <th className="px-2 py-1 font-normal">
               <span className="sr-only">ビューア</span>
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className={cn("transition-opacity", dim && "opacity-60")} data-dim={dim || undefined}>
           {studies.map((s, i) => {
             const uid = s.studyInstanceUid ?? "";
             const isOpen = selected !== null && uid === selected;
@@ -374,7 +390,7 @@ function StudyRows({
                         {s.patientName}
                       </span>
                     ) : (
-                      <span className="text-label">（氏名なし）</span>
+                      <span className="text-label">（氏名未登録）</span>
                     )}
                   </td>
                   <td className={cn(CELL, CUT, "text-label")} title={s.patientKana} data-testid="patient-kana">
@@ -479,6 +495,48 @@ function Browser({
 
   const changed = () => void queryClient.invalidateQueries({ queryKey: ["studies"] });
   const data = list.data;
+  // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」
+  const refetching = useDelayedPending(list.isFetching);
+
+  // 削除が終わったことの知らせ（docs/spec.md の 3.5「消した後」）。消すと行も詳細も消えるので、一覧の上に出す。
+  // 次の操作（絞り込み・行の選び直し）までか、10 秒で消す
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+  const changeFilter = (f: StudyFilter) => {
+    setNotice(null);
+    setFilter(f);
+  };
+  /** 条件をクリア：絞り込みを既定に戻す。検索の欄の打ちかけの字も消すため、絞り込みの部品を作り直す */
+  const [filterKey, setFilterKey] = useState(0);
+  const clearFilter = () => {
+    setFilterKey((k) => k + 1);
+    changeFilter(DEFAULT_FILTER);
+  };
+  const pick = (uid: string | null, how: "click" | "key") => {
+    setNotice(null);
+    select(uid, how);
+  };
+  /** 消したあと、フォーカスを移す行の位置（消した行の位置。一覧を読み直したら、その位置の行へ） */
+  const focusIndex = useRef<number | null>(null);
+  const deleted = (study: StudyView) => {
+    focusIndex.current = data?.studies.findIndex((s) => s.studyInstanceUid === study.studyInstanceUid) ?? null;
+    setNotice(
+      `検査を削除しました（${[study.patientId, formatSlashDate(study.studyDate), study.modalities?.join("・")].filter(Boolean).join("・")}）`,
+    );
+    select(null, "click");
+    changed();
+  };
+  useEffect(() => {
+    if (focusIndex.current === null || list.isFetching || !data) return;
+    const i = Math.min(focusIndex.current, data.studies.length - 1);
+    focusIndex.current = null;
+    if (i < 0) return;
+    box.current?.querySelectorAll<HTMLElement>("tbody > tr[data-study-uid]")[i]?.focus({ preventScroll: true });
+  }, [data, list.isFetching]);
   const selectedRow = selected ? data?.studies.find((s) => s.studyInstanceUid === selected) : undefined;
   const overlayOpen = narrow && !!selectedRow;
   useEffect(() => {
@@ -516,19 +574,26 @@ function Browser({
         style={{ "--split": `${split}%`, "--top-min": `${filtersH + TOP_GAP_PX + LIST_MIN_PX}px` } as React.CSSProperties}
       >
       <FilterBar
+        key={filterKey}
         filter={filter}
         facets={data?.facets}
-        onChange={setFilter}
+        onChange={changeFilter}
         trailing={
-          <div className="flex items-baseline gap-2" aria-live="polite">
-            <h1 className="flex items-baseline gap-2">
-              <span className="text-label">検査</span>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h1 className="flex items-baseline gap-1" aria-live="polite">
+              {/* 取り直しの待ちの印が出ている間は、件数を「—」にする（古い件数を新しいものに見せない） */}
               <span className="text-lg font-bold text-value" data-testid="study-count">
-                {data ? `${data.count.count}${data.count.exact ? "" : " 以上"}` : "—"}
+                {data && !refetching ? `${data.count.count}${data.count.exact ? "" : " 以上"}` : "—"}
               </span>
               <span className="text-label">件</span>
             </h1>
-            {list.isFetching && <span className="text-xs text-label">読んでいる</span>}
+            <PendingText pending={list.isFetching} />
+            {notice && (
+              <p role="status" className="flex items-center gap-1.5 rounded-md border border-success px-2 text-sm text-success" data-testid="list-notice">
+                <CheckCircle2 aria-hidden className="size-4" />
+                {notice}
+              </p>
+            )}
           </div>
         }
       />
@@ -538,9 +603,16 @@ function Browser({
           {list.error.message}
         </p>
       )}
-      {data && data.studies.length === 0 && <p className="text-label">合う検査が無い</p>}
+      {data && data.studies.length === 0 && (
+        <p className="flex items-center gap-3 text-label" data-testid="study-list-empty">
+          該当する検査はありません
+          <Button type="button" size="sm" variant="outline" onClick={clearFilter}>
+            条件をクリア
+          </Button>
+        </p>
+      )}
       {data && data.studies.length > 0 && (
-        <StudyRows studies={data.studies} screen={screen} selected={selected} onSelect={select} onChanged={changed} />
+        <StudyRows studies={data.studies} screen={screen} selected={selected} onSelect={pick} onChanged={changed} dim={refetching} />
       )}
       </div>
 
@@ -550,12 +622,12 @@ function Browser({
       <div
         role="separator"
         aria-orientation="horizontal"
-        aria-label="一覧と詳細の境目"
+        aria-label="一覧と詳細の境界"
         aria-controls={topId}
         aria-valuemin={SPLIT_MIN}
         aria-valuemax={SPLIT_MAX}
         aria-valuenow={split}
-        aria-valuetext={`一覧が ${split}%`}
+        aria-valuetext={`一覧 ${split}%`}
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         data-testid="split-handle"
@@ -610,12 +682,13 @@ function Browser({
               row={selectedRow}
               screen={screen}
               onChanged={changed}
+              onDeleted={deleted}
               fetchEnabled={loadedUid === selected}
             />
           </>
         ) : (
           <p className="p-4 text-label" data-testid="study-detail-empty">
-            一覧の行を選ぶと、検査の詳細をここに出す。矢印の上下で行を移し、Enter かダブルクリックでビューアを開く。
+            検査を選択してください
           </p>
         )}
       </div>

@@ -35,8 +35,11 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
   });
 
   test("暗い地に切り替えると、利用者ごとに覚えて、開き直しても暗い地のまま", async ({ page }) => {
+    // 期待の変更：切り替えは「表示」のライト・ダークの2つのボタンの並びにした（1つのボタンでは今の状態か切り替え先かが分からないため。
+    // docs/spec.md の 2）。押している側が今の地であることを確かめる
     await page.goto("/");
-    const toggle = page.getByTestId("theme-toggle");
+    await expect(page.getByTestId("theme-light")).toHaveAttribute("aria-pressed", "true");
+    const toggle = page.getByTestId("theme-dark");
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const saved = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
@@ -48,11 +51,11 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
 
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expect(page.getByTestId("theme-toggle")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("theme-dark")).toHaveAttribute("aria-pressed", "true");
 
     // 次の試験のために明るい地へ戻す
     const back = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
-    await page.getByTestId("theme-toggle").click();
+    await page.getByTestId("theme-light").click();
     await back;
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -124,7 +127,8 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
     await page.goto("/");
     const band = page.getByTestId("dev-mode-band");
     await expect(band).toContainText("検証モード");
-    await expect(band).toContainText("書き込みは止めている");
+    // 文言は docs/spec.md の 2.2 の用語集（書き込みは止めている→書き込み：無効）
+    await expect(band).toContainText("書き込み：無効");
     for (const label of ["管理者", "医師", "技師", "閲覧"]) {
       await expect(band.getByRole("button", { name: label })).toBeVisible();
     }

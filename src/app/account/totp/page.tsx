@@ -18,7 +18,7 @@ export default async function AccountTotpPage() {
   const enrollment = await startEnrollment(await authContext(), row, user);
   return (
     <section className="max-w-md space-y-4">
-      <h1 className="text-lg font-bold text-value">二要素の認証（TOTP）の登録</h1>
+      <h1 className="text-lg font-bold text-value">二要素認証の設定</h1>
       <TotpEnrollment secret={enrollment.secret} uri={enrollment.uri} csrfToken={row.csrfToken} askPassword />
     </section>
   );

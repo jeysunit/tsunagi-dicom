@@ -16,7 +16,7 @@ export function DevModeBand({ role, allowWrite = false }: { role: Role; allowWri
         検証モード
       </span>
       <RoleSwitcher current={role} />
-      <span className="text-xs">{allowWrite ? "書き込みも試す（モックの中だけ）" : "書き込みは止めている"}</span>
+      <span className="text-xs">{allowWrite ? "書き込み：有効（モックのみ）" : "書き込み：無効"}</span>
     </div>
   );
 }

@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         : state.kind === "active"
           ? state.session.local
           : undefined;
-    if (!target) throw new AuthError(state.kind === "locked" ? 423 : 401, "パスワードを変えられる状態ではない");
+    if (!target) throw new AuthError(state.kind === "locked" ? 423 : 401, "パスワードを変更できる状態ではありません");
     const body = await readJson(request, Body);
     const result = await changePassword(await authContext(), target.row, target.user, body);
     if (result.rotated) await setSessionCookie(result.rotated.token, result.rotated.expiresAt);

@@ -94,6 +94,128 @@ test("選んだ行：主の色の薄い地と左の縦線。hover の行の地�
   expect(await head.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("3px");
 });
 
+test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に細い帯、古い行を薄く、件数は「—」。すぐ終われば出さない", async ({ page }) => {
+  await asAdmin(page);
+  await expect(rows(page)).toHaveCount(8);
+  // すぐ終わる取り直し：印を出さない（ちらつかない）
+  const quick = page.waitForResponse((r) => r.url().includes("/api/studies?") && r.ok());
+  await page.getByTestId("modality-CT").click();
+  await quick;
+  await expect(page.getByTestId("study-count")).toHaveText("6");
+  await expect(page.getByTestId("progress-bar")).toHaveCount(0);
+
+  // 遅い取り直し：一覧の API の答えを 1.5 秒遅らせる
+  await page.route("**/api/studies?*", async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await page.getByTestId("modality-MR").click();
+  await expect(page.getByTestId("progress-bar")).toBeVisible();
+  await expect(page.getByTestId("study-count")).toHaveText("—");
+  await expect(page.getByTestId("study-table").locator("tbody")).toHaveAttribute("data-dim", "true");
+  await expect(page.getByTestId("pending-text")).toContainText("読み込み中");
+  // 終われば消える（画面全体を覆う幕は出さない）
+  await expect(page.getByTestId("study-count")).toHaveText("2", { timeout: 10_000 });
+  await expect(page.getByTestId("progress-bar")).toHaveCount(0);
+  await page.unroute("**/api/studies?*");
+});
+
+// 画面の言葉は docs/spec.md の 2.2 の用語集から選ぶ。用語集で「使わない言い方」とした言葉が、画面に出ていないことを確かめる。
+// 役割の名前（医師・技師・閲覧）と「すべての項目」は、役割と詳細のパネルを直す次の PR で外すので、ここでは見ない
+const RETIRED_WORDS = [
+  "受け取り",
+  "機器",
+  "ビューアの既定",
+  "自分の設定",
+  "暗い地",
+  "地の色",
+  "読んでいる",
+  "合う検査が無い",
+  "読めなかった",
+  "つながらな",
+  "つながった",
+  "この役割では",
+  "管理者だけ",
+  "一覧で開く",
+  "ビューアを選ぶ",
+  "次から",
+  "覚えを消す",
+  "送る",
+  "送り先",
+  "送った",
+  "やめる",
+  "書き出し",
+  "取り込み",
+  "確かめ",
+  "つながるか",
+  "住所",
+  "結果が分からない",
+  "読み直す",
+  "要求の ID",
+  "届いていた",
+  "利用者名",
+  "表示の名前",
+  "止めている",
+  "一時停止を解く",
+  "登録あり",
+  "最後のログイン",
+  "作った日",
+  "確認の番号",
+  "いまのパスワード",
+  "1週間",
+  "全期間",
+  "期間の指定",
+  "詳しく",
+  "詳しい条件",
+  "横断の検索",
+  "検査の記述",
+  "すべての DICOM の値",
+  "患者 ID",
+  "監査の外",
+];
+
+test("画面の言葉：用語集で外した言葉が、検証モードのどの頁にも出ない", async ({ page }) => {
+  await asAdmin(page);
+  const seen: string[] = [];
+  const collect = async (where: string) => {
+    // 見える文字・読み上げの名前（aria-label）・title の全部
+    const text = await page.evaluate(() => {
+      const parts = [document.body.innerText, document.title];
+      for (const el of document.querySelectorAll("[aria-label], [title], [placeholder]")) {
+        parts.push(el.getAttribute("aria-label") ?? "", el.getAttribute("title") ?? "", el.getAttribute("placeholder") ?? "");
+      }
+      return parts.join("\n");
+    });
+    for (const w of RETIRED_WORDS) if (text.includes(w)) seen.push(`${where}: ${w}`);
+  };
+  await expect(rows(page)).toHaveCount(8);
+  await page.getByTestId("filter-more").click();
+  await page.getByTestId("date-range").click();
+  await collect("検査一覧");
+  await page.goto("/");
+  await rows(page).first().click();
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  await page.getByTestId("study-detail").getByTestId("open-menu").click();
+  await collect("詳細とビューアのメニュー");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("detail-all-items-toggle").click();
+  await page.getByRole("button", { name: "DICOM タグ" }).click();
+  await expect(page.getByTestId("all-values")).toContainText("0010,0020");
+  await collect("詳細の項目");
+  await page.getByTestId("detail-all-items-toggle").click();
+  for (const path of ["/received", "/modalities", "/admin/viewers"]) {
+    await page.goto(path);
+    if (path === "/modalities") {
+      await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
+      await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toBeVisible();
+      await page.locator('[data-modality="offline"]').getByTestId("echo").click();
+      await expect(page.locator('[data-modality="offline"]').getByTestId("echo-result")).toBeVisible();
+    }
+    await collect(path);
+  }
+  expect(seen).toEqual([]);
+});
+
 test("一覧の列：患者 ID・生年月日・年齢・性別は切らない（1280px と 1024px）", async ({ page }) => {
   for (const width of [1280, 1024]) {
     await page.setViewportSize({ width, height: 720 });

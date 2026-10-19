@@ -95,7 +95,7 @@ describe("実の画像サーバーへの接続", () => {
 
   it("自前の CA を渡さなければ、確かめに失敗してつながらない（確かめを切らない）", async () => {
     await expect(backend().searchStudies()).rejects.toThrow(BackendError);
-    await expect(backend().searchStudies()).rejects.toThrow("画像サーバーにつながらない");
+    await expect(backend().searchStudies()).rejects.toThrow("画像サーバーに接続できません");
   });
 
   it("検索の件数を上限の 1000 に収めて求める", async () => {
