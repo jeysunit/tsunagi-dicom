@@ -50,8 +50,10 @@ import type { AppConfig } from "@/lib/config";
 const TIMEOUT_MS = 15_000;
 /** 書き込みの操作の答えを待つ時間。過ぎたら結果不明（docs/spec.md の 3.5） */
 const POST_TIMEOUT_MS = 30_000;
-/** 書き出し（ZIP）の答えが始まるまでを待つ時間 */
+/** 書き出し（ZIP）の答えが始まるまでを待つ時間（Orthanc は ZIP を作ってから答えを始めることがある） */
 const EXPORT_TIMEOUT_MS = 10 * 60_000;
+/** 書き出しの本文を流す間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
+const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
 /**
  * 書き込みの操作の答えのうち、Orthanc が受けなかったと確かめられないもの（docs/spec.md の 3.5 の結果不明）：
@@ -100,6 +102,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       write?: boolean;
       /** どの資格情報で求めるか。既定は GET・HEAD が読む資格情報、POST が書く資格情報 */
       credential?: "read" | "write";
+      /** 時間切れを呼ぶ側で決める（本文を流す間は別の時間切れにする書き出しなど）。あれば timeoutMs は使わない */
+      signal?: AbortSignal;
     } = {},
   ) {
     const method = init.method ?? "GET";
@@ -114,7 +118,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         body: init.body,
         dispatcher,
         redirect: "manual",
-        signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS),
+        signal: init.signal ?? AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS),
       });
     } catch {
       // 原因の文言に URL や資格情報が入りうるので、ブラウザへは渡さない
@@ -350,20 +354,41 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
 
     async exportStudy(orthancStudyId: string) {
       if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
-      // ZIP は大きくなりうるので、答えを待つ時間を長くとる（本文は流しながら渡す）
-      const res = await call(orthancUrl, `studies/${orthancStudyId}/archive`, { headers: { accept: "application/zip" }, timeoutMs: EXPORT_TIMEOUT_MS });
+      // ZIP は大きくなりうる。答えが始まるまでは EXPORT_TIMEOUT_MS を待ち、本文を流す間は、塊と塊の間が
+      // EXPORT_IDLE_MS を超えたときだけ切る（全体の長さの時間切れで、大きな検査の ZIP を途中で切らない）
+      const abort = new AbortController();
+      let timer = setTimeout(() => abort.abort(), EXPORT_TIMEOUT_MS);
+      let res: Awaited<ReturnType<typeof call>>;
+      try {
+        res = await call(orthancUrl, `studies/${orthancStudyId}/archive`, { headers: { accept: "application/zip" }, signal: abort.signal });
+      } finally {
+        clearTimeout(timer);
+      }
       if (res.status === 404) {
         await res.body?.cancel();
         throw new BackendError("検査が見つからない", 404);
       }
-      if (!res.ok || res.status >= 300) {
+      if (!res.ok || res.status >= 300 || !res.body) {
         await res.body?.cancel();
         throw new BackendError(`画像サーバーの応答が ${res.status}`);
       }
-      return new Response(res.body as ReadableStream<Uint8Array> | null, {
-        status: 200,
-        headers: { "content-type": "application/zip" },
-      });
+      const idle = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => abort.abort(), EXPORT_IDLE_MS);
+      };
+      idle();
+      const body = (res.body as ReadableStream<Uint8Array>).pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            idle();
+            controller.enqueue(chunk);
+          },
+          flush() {
+            clearTimeout(timer);
+          },
+        }),
+      );
+      return new Response(body, { status: 200, headers: { "content-type": "application/zip" } });
     },
 
     async deleteStudy(orthancStudyId: string) {

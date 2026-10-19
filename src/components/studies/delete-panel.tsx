@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -28,7 +28,7 @@ type Phase =
   | { kind: "busy" }
   | { kind: "reauth"; requestId: string; error?: string }
   | { kind: "deleted" }
-  | { kind: "unknown"; requestId: string }
+  | { kind: "unknown"; requestId: string; note?: string }
   | { kind: "error"; text: string };
 
 export function DeletePanel({
@@ -51,9 +51,16 @@ export function DeletePanel({
   // 確かめの画面に出すのは、BFF が Orthanc から読み直した、消す検査の要点と版（一覧の行の値ではない）。消すときに版を添える
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  useEffect(() => {
+  const fetchPreview = useCallback(() => {
     getJson<Preview>(`/api/studies/${encodeURIComponent(uid)}/delete`).then(setPreview, (e: Error) => setPreviewError(e.message));
   }, [uid]);
+  useEffect(() => fetchPreview(), [fetchPreview]);
+  /** 確かめの画面を読み直す（検査が変わった・消えていなかったと分かったとき。古い版のまま押し直させない） */
+  function loadPreview() {
+    setPreview(null);
+    setPreviewError(null);
+    fetchPreview();
+  }
 
   function settle(result: PostResult, requestId: string) {
     if (result.status === 403 && result.data.problems?.includes("reauth_required")) {
@@ -63,9 +70,14 @@ export function DeletePanel({
     if (result.data.outcome === "deleted") {
       setPhase({ kind: "deleted" });
       onDeleted();
+    } else if (result.data.outcome === "failed") {
+      // Orthanc が断った（受けなかったと分かる答え）。消えていない
+      setPhase({ kind: "error", text: errorText(result) });
     } else if (result.data.outcome === "unknown" || result.status === 0 || result.status >= 500) {
       setPhase({ kind: "unknown", requestId });
     } else {
+      // 409（確かめの後に検査が変わった・同じ UID の検査が2つある・結果の分からない削除がある）は、確かめの画面を読み直す
+      if (result.status === 409) loadPreview();
       setPhase({ kind: "error", text: errorText(result) });
     }
   }
@@ -105,14 +117,25 @@ export function DeletePanel({
 
   async function check(requestId: string) {
     try {
-      const r = await getJson<{ outcome: string }>(`/api/studies/${encodeURIComponent(uid)}/delete?${new URLSearchParams({ requestId })}`);
+      const r = await getJson<{ outcome: string; studyPresent?: boolean }>(
+        `/api/studies/${encodeURIComponent(uid)}/delete?${new URLSearchParams({ requestId })}`,
+      );
       if (r.outcome === "deleted") {
         setPhase({ kind: "deleted" });
         onDeleted();
-      } else if (r.outcome === "not_deleted" || r.outcome === "failed") setPhase({ kind: "error", text: "消えていない（Orthanc に検査が残っている）" });
-      else setPhase({ kind: "unknown", requestId });
+      } else if (r.outcome === "not_deleted" || r.outcome === "failed") {
+        setPhase({ kind: "error", text: "消えていない（Orthanc に検査が残っている）" });
+        loadPreview();
+      } else {
+        setPhase({
+          kind: "unknown",
+          requestId,
+          note: r.studyPresent ? "検査は Orthanc にまだある。消している途中かもしれないので、少し待ってから確かめる。" : undefined,
+        });
+      }
     } catch (e) {
-      setPhase({ kind: "error", text: (e as Error).message });
+      // 確かめられなかったときも、結果不明のまま残す（消し直す道を出さない）
+      setPhase({ kind: "unknown", requestId, note: `確かめられなかった（${(e as Error).message}）` });
     }
   }
 
@@ -188,6 +211,7 @@ export function DeletePanel({
       {phase.kind === "unknown" && (
         <div role="alert" className="space-y-1" data-testid="delete-status">
           <p className="text-danger">結果が分からない。もう一度消さずに、状態を確かめる。</p>
+          {phase.note && <p className="text-sm text-label">{phase.note}</p>}
           <p className="font-mono text-xs text-label">要求の ID {phase.requestId}</p>
           <Button type="button" size="sm" variant="outline" onClick={() => void check(phase.requestId)}>
             確かめる

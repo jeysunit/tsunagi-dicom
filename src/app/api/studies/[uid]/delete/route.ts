@@ -8,7 +8,8 @@ import { getBackend } from "@/lib/backend";
 import { BackendError, BackendUnknownError, type Backend, type OrthancStudyInfo } from "@/lib/backend/types";
 import { parsePatientName } from "@/lib/format/patient-name";
 import { getDb } from "@/lib/db";
-import { assertWriteAllowed, isRequestId, requestOutcome, rowsOfRequest, type RequestRow } from "@/lib/pacs-ops";
+import { can } from "@/lib/auth/roles";
+import { assertWriteAllowed, isRequestId, requestOutcome, rowsOfRequest, unresolvedRequests, type RequestRow } from "@/lib/pacs-ops";
 
 // 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ（study.delete）、理由を必須、再認証の後（AUTH_MODE=local）。
 // 書き込みの操作の共通の決まり（3.5）を通す：CSRF・検証モードの止め・呼ぶ前の記録（記録できなければ消さない）・
@@ -24,6 +25,21 @@ type Context = { params: Promise<{ uid: string }> };
 
 /** 理由の長さの上限（文字） */
 const DELETE_REASON_MAX = 500;
+
+/**
+ * 結果不明の削除を「消えていない」と確定させるまでの猶予。BFF が DELETE を待つのは 30 秒（http.ts）だが、
+ * 時間切れの後も Orthanc は消し続けることがあるので、求めてからこの間は、検査がまだあっても確定させない
+ */
+const DELETE_SETTLE_MS = 10 * 60_000;
+
+function parseDetail(detail: string | null): Record<string, unknown> {
+  try {
+    const v: unknown = JSON.parse(detail ?? "{}");
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
 const Body = z.object({
   requestId: z.string().refine(isRequestId, "要求の ID（UUID）の形が誤り"),
@@ -89,27 +105,50 @@ export async function POST(request: Request, { params }: Context) {
       requestId,
       reason,
       version,
+      // 照らし合わせで、この検査そのものが Orthanc にまだあるかを読むため（Orthanc の中の ID。患者の情報ではない）
+      orthancId: info.orthancId,
       series: series.length,
       instances: series.reduce((n, s) => n + (s.instanceCount ?? 0), 0),
     };
 
-    // 消す前に「求めた」を記録する（記録できなければ消さない）。同じ要求の ID が並んだときは先の1つだけを通す
-    const first = await auditIf(session, async (tx) => {
-      const again = requestOutcome(await rowsOfRequest(tx, "delete", requestId)).phase !== "none";
+    // 消す前に「求めた」を記録する（記録できなければ消さない）。同じ要求の ID が並んだときは先の1つだけを通す。
+    // 同じ検査の削除で、まだ結果の分からない要求（処理中・結果不明）があれば、照らし合わせが済むまで断る
+    type Begin = { kind: "repeated" } | { kind: "pending"; pending: string[] } | { kind: "first" };
+    const begin = await auditIf<Begin>(session, async (tx) => {
+      if (requestOutcome(await rowsOfRequest(tx, "delete", requestId)).phase !== "none") {
+        return { value: { kind: "repeated" as const }, fields: null };
+      }
+      const pending = await unresolvedRequests(tx, "delete", uid, () => true);
+      if (pending.length > 0) {
+        return {
+          value: { kind: "pending" as const, pending },
+          fields: { action: "delete", outcome: "denied", patientId: info.patientId, studyInstanceUid: uid, detail: { requestId, reason: "unresolved", pending } },
+        };
+      }
       return {
-        value: !again,
-        fields: again
-          ? null
-          : { action: "delete", outcome: "success", patientId: info.patientId, studyInstanceUid: uid, detail: { ...detail, phase: "request" } },
+        value: { kind: "first" as const },
+        fields: { action: "delete", outcome: "success", patientId: info.patientId, studyInstanceUid: uid, detail: { ...detail, phase: "request" } },
       };
     });
-    if (!first) return priorResponse(session, uid, requestId, await rowsOfRequest(db, "delete", requestId));
+    if (begin.kind === "repeated") return priorResponse(session, uid, requestId, await rowsOfRequest(db, "delete", requestId));
+    if (begin.kind === "pending") {
+      return Response.json(
+        { error: "この検査を消した結果が、まだ分からない。消し直さずに、先にその結果を確かめる", pendingRequestIds: begin.pending },
+        { status: 409 },
+      );
+    }
 
     const result = (outcome: "success" | "failed" | "unknown", extra: Record<string, unknown> = {}) =>
       audit(session, { action: "delete", outcome, patientId: info.patientId, studyInstanceUid: uid, detail: { requestId, phase: "result", ...extra } });
 
-    // 消す直前に、もう一度 Orthanc から読み直して確かめる（記録の間に、検査が替わっていないこと）
-    const again = await resolveTarget(backend, uid);
+    // 消す直前に、もう一度 Orthanc から読み直して確かめる（記録の間に、検査が替わっていないこと）。読めなければ消さずに失敗として残す
+    let again: Target;
+    try {
+      again = await resolveTarget(backend, uid);
+    } catch (error) {
+      await result("failed", { refused: "reread_failed" });
+      throw error;
+    }
     if (again.kind !== "ok" || again.info.orthancId !== info.orthancId || again.info.version !== version) {
       const why = again.kind !== "ok" ? again.kind : "changed";
       await result("failed", { refused: why });
@@ -123,8 +162,10 @@ export async function POST(request: Request, { params }: Context) {
         await result("unknown").catch(() => console.error(JSON.stringify({ event: "delete_result_not_recorded", requestId })));
         return unknownResponse(requestId);
       }
-      await result("failed", { status: error instanceof BackendError ? error.status : 502 });
-      throw error;
+      // Orthanc が断った（受けなかったと分かる答え）。答えの要点を残し、画面には「消えていない」と返す
+      const message = error instanceof Error ? error.message.slice(0, 200) : "";
+      await result("failed", { status: error instanceof BackendError ? error.status : 502, message });
+      return Response.json({ requestId, outcome: "failed", error: `消せなかった（${message}）` }, { status: 502 });
     }
     try {
       await result("success");
@@ -155,12 +196,21 @@ export async function GET(request: Request, { params }: Context) {
     const rows = await rowsOfRequest(db, "delete", requestId);
     const o = requestOutcome(rows);
     if (o.phase === "none") return Response.json({ requestId, outcome: "none" });
-    if (o.actorId !== session.actorId || o.studyInstanceUid !== uid) {
+    // 求めた本人のほか、照らし合わせの役割（pacs.reconcile。管理者）なら、ほかの人の要求も照らせる（止まった削除を片付けるため）
+    if ((o.actorId !== session.actorId && !can(session.role, "pacs.reconcile")) || o.studyInstanceUid !== uid) {
       return Response.json({ error: "この要求の ID は、別の削除に使われている" }, { status: 409 });
     }
-    if (o.outcome === "success" || o.outcome === "failed") return priorResponse(session, uid, requestId, rows);
-    // 結果不明（呼んだ後の記録が無い・unknown）：Orthanc を読んで照らす（同じ UID の検査が1つでも残っていれば、消えていない）
-    const still = (await getBackend().lookupStudyIds(uid)).length > 0;
+    if (o.outcome === "success" || o.outcome === "failed") return priorResponse(session, uid, requestId, rows, true);
+    // 結果不明（呼んだ後の記録が無い・unknown）：Orthanc を読んで照らす。消したはずの検査（求めた行の Orthanc の ID）がまだあるか
+    const requestRow = rows.find((r) => parseDetail(r.detail).phase === "request");
+    const orthancId = requestRow ? parseDetail(requestRow.detail).orthancId : undefined;
+    const backend = getBackend();
+    const still = typeof orthancId === "string" ? (await backend.studyInfo(orthancId)) !== null : (await backend.lookupStudyIds(uid)).length > 0;
+    // まだあっても、Orthanc が消している途中かもしれない。求めてから DELETE_SETTLE_MS の間は確定させない（記録に足さない）
+    const age = requestRow ? Date.now() - requestRow.occurredAt.getTime() : Infinity;
+    if (still && age < DELETE_SETTLE_MS) {
+      return Response.json({ requestId, outcome: "unknown", studyPresent: true, retryAfterSeconds: Math.ceil((DELETE_SETTLE_MS - age) / 1000) }, { status: 202 });
+    }
     await audit(session, {
       action: "delete",
       outcome: still ? "failed" : "success",
@@ -202,9 +252,10 @@ function unknownResponse(requestId: string): Response {
   );
 }
 
-function priorResponse(session: Session, uid: string, requestId: string, rows: readonly RequestRow[]): Response {
+function priorResponse(session: Session, uid: string, requestId: string, rows: readonly RequestRow[], allowReconciler = false): Response {
   const o = requestOutcome(rows);
-  if (o.actorId !== session.actorId || o.studyInstanceUid !== uid) {
+  const actorOk = o.actorId === session.actorId || (allowReconciler && can(session.role, "pacs.reconcile"));
+  if (!actorOk || o.studyInstanceUid !== uid) {
     return Response.json({ error: "この要求の ID は、別の削除に使われている" }, { status: 409 });
   }
   if (o.outcome === "success") return Response.json({ requestId, outcome: "deleted", repeated: true });

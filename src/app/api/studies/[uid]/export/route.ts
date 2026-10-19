@@ -4,7 +4,6 @@ import { sameOriginRequest } from "@/lib/api/same-origin";
 import { studyUidParam } from "@/lib/api/study-param";
 import { audit, requirePermission, requireSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
-import { stringValue, TAG } from "@/lib/backend/dicom-json";
 import { BackendError } from "@/lib/backend/types";
 import { assertWriteAllowed } from "@/lib/pacs-ops";
 
@@ -33,10 +32,16 @@ export async function GET(request: Request, { params }: Context) {
     await requirePermission(session, "study.export", { action: "export", studyInstanceUid: uid });
     await assertWriteAllowed(session, { action: "export", studyInstanceUid: uid });
 
+    // 落とす検査は、URL の UID から Orthanc で引いたちょうど1件（2件以上は lookupStudy が 409）。その UID が求めたものと合うことも確かめる
     const backend = getBackend();
-    const [dataset, orthancId] = await Promise.all([backend.studyDataset(uid), backend.lookupStudy(uid)]);
-    if (!dataset || !orthancId) return Response.json({ error: "検査が見つからない" }, { status: 404 });
-    const patientId = stringValue(dataset, TAG.PatientID);
+    const orthancId = await backend.lookupStudy(uid);
+    const info = orthancId ? await backend.studyInfo(orthancId) : null;
+    if (!orthancId || !info) return Response.json({ error: "検査が見つからない" }, { status: 404 });
+    if (info.studyInstanceUid !== uid) {
+      await audit(session, { action: "export", outcome: "denied", patientId: info.patientId, studyInstanceUid: uid, detail: { reason: "mismatch" } });
+      return Response.json({ error: "Orthanc で引いた検査の StudyInstanceUID が、求めた UID と合わない" }, { status: 409 });
+    }
+    const patientId = info.patientId;
 
     // 落とす前に記録する（記録できなければ渡さない）
     await audit(session, { action: "export", outcome: "success", patientId, studyInstanceUid: uid, detail: { format: "zip" } });

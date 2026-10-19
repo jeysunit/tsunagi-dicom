@@ -468,9 +468,17 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
 });
 
 // 段 5（検査の件数が 8 であることを見るほかの試験の後に置く。モックの Orthanc の中で1件を消すため）
-test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と再認証つきで消す（確かめの画面は Orthanc から読み直した値）", async () => {
-  test.setTimeout(90_000);
-  const { page } = admin;
+test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と再認証つきで消す（確かめの画面は Orthanc から読み直した値）", async ({ browser }) => {
+  test.setTimeout(120_000);
+  // 新しくログインしたセッション（まだ再認証していない）で流し、削除の前に必ず再認証を求められることを見る
+  const fresh = await newPage(browser);
+  const { page } = fresh;
+  await submitLogin(page, E2E_ADMIN.username, ADMIN_PASSWORD);
+  await expect(page).toHaveURL(/\/login\/totp$/);
+  const totp = page.getByRole("form", { name: "確かめる" });
+  await totp.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
+  await totp.getByRole("button", { name: "確かめる" }).click();
+  await expect(page).toHaveURL(/\/$/);
   const target = "1.2.826.0.1.3680043.8.498.74370219478963110549339491256573063606";
   await page.goto("/");
   await expect(page.getByTestId("study-count")).toHaveText("8");
@@ -490,18 +498,18 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await expect(panel.getByTestId("delete-submit")).toBeDisabled();
   await panel.getByTestId("delete-reason").fill("取り違えた検査（試験）");
   await panel.getByTestId("delete-submit").click();
-  // 再認証の有効時間（REAUTH_MINUTES）の外なら、パスワードと確認の番号を求められる。前の試験の再認証の中なら、そのまま消える
+  // 再認証の前は消さない（パスワードと確認の番号を求め、検査はまだ一覧にある）
   const reauth = panel.getByTestId("delete-reauth");
-  await expect(reauth.or(page.getByTestId("study-count").filter({ hasText: "7" }))).toBeVisible();
-  if (await reauth.isVisible()) {
-    await reauth.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-    await reauth.getByLabel("確認の番号").fill(await nextCode(adminSecret));
-    await reauth.getByRole("button", { name: "確かめて消す" }).click();
-  }
+  await expect(reauth).toBeVisible();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await reauth.getByLabel("パスワード").fill(ADMIN_PASSWORD);
+  await reauth.getByLabel("確認の番号").fill(await nextCode(adminSecret));
+  await reauth.getByRole("button", { name: "確かめて消す" }).click();
   // 消えると一覧を読み直し、その行（と詳細）は消える
   await expect(page.getByTestId("study-count")).toHaveText("7");
   await expect(page.locator(`tr[data-study-uid="${target}"]`)).toHaveCount(0);
   expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
+  await fresh.context.close();
 });
 
 test("ログアウトすると、セッションは使えない", async () => {
