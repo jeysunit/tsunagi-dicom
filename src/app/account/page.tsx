@@ -6,6 +6,8 @@ import { minPasswordLength } from "@/lib/auth/password-policy";
 import { getConfig } from "@/lib/config";
 
 // 自分の設定：パスワードの変更と、二要素が任意（MFA_REQUIRED=false）のときの TOTP の登録。
+export const metadata = { title: "個人設定" };
+
 export default async function AccountPage() {
   const config = getConfig();
   if (config.auth.mode !== "local") redirect("/");

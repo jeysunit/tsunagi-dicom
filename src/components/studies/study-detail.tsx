@@ -82,7 +82,7 @@ function AllValues({ uid }: { uid: string }) {
   });
   return (
     <div className={open ? "w-full" : undefined}>
-      <Button type="button" size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <Button type="button" size="sm" variant="outline" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         すべての DICOM の値
       </Button>
       {open && (
@@ -161,7 +161,8 @@ export function StudyDetailPanel({
     <section aria-label="検査の詳細" className="space-y-2 px-3 py-2" data-testid="study-detail" data-study-uid={uid}>
       {/* 見出し：1〜2 行。左に患者と検査の要点、右にビューア */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-        <div className="min-w-0 flex-1 basis-96" data-testid="detail-head">
+        {/* 左の縦線は、一覧で選んだ行の縦線と同じ（どの行の詳細かを示す。docs/spec.md の 3.1） */}
+        <div className="min-w-0 flex-1 basis-96 border-l-[3px] border-primary pl-2" data-testid="detail-head">
           <p className="flex flex-wrap items-baseline gap-x-3">
             <span className="font-bold break-words text-value" data-testid="detail-name">
               <span className="sr-only">氏名 </span>

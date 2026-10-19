@@ -87,7 +87,11 @@ test("一覧の行：氏名（漢字・かな）・和暦と年齢・シリー�
   const r = row(page);
   await expect(r).toContainText("試験 髙子");
   await expect(r).toContainText("しけん たかこ");
-  await expect(r).toContainText("1960/07/15（昭和35年・65歳・女）");
+  // 生年月日・年齢・性別は3つの列（2026-10-20 に1つの列から分けた。docs/spec.md の 3.1）
+  await expect(r.getByTestId("patient-birth")).toHaveText("1960/07/15");
+  await expect(r.getByTestId("patient-birth")).toHaveAttribute("title", "1960/07/15（昭和35年）");
+  await expect(r.getByTestId("patient-age")).toHaveText("65歳");
+  await expect(r.getByTestId("patient-sex")).toHaveText("女");
   await expect(r).toContainText("1 / 4");
   // 一覧の行にはサムネイルを出さない
   await expect(r.getByTestId("thumbnail")).toHaveCount(0);
@@ -651,8 +655,8 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
   await page.getByTestId("date-all").click(); // 押し直しでは読み直さない
   await page.getByTestId("modality-CT").click();
   await expect(rows(page).first()).toBeVisible();
-  // モダリティと検査の記述のセル（段 3 で状態の列を外したので 6 番目）
-  const cell = rows(page).first().locator("td").nth(5);
+  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-20 に生年月日を3つの列に分けたので 8 番目）
+  const cell = rows(page).first().locator("td").nth(7);
   await expect(cell).toHaveAttribute("title", new RegExp(long));
   expect(await cell.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
   expect(await cell.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);

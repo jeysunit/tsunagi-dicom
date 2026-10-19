@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ageAt,
+  formatAge,
   formatBirthLine,
+  formatBirthWareki,
+  formatDateTimeIn,
   formatDicomTime,
   formatSlashDate,
   parseDicomDate,
@@ -107,5 +110,39 @@ describe("日付・時刻・性別の読み取り", () => {
       "",
       "",
     ]);
+  });
+});
+
+describe("一覧の生年月日・年齢・性別の3つの列（docs/spec.md の 3.1）", () => {
+  it("年齢は検査日の時点の満年齢。読めなければ空", () => {
+    expect(formatAge("19750510", "20261017")).toBe("51歳");
+    expect(formatAge("19750510", "20260509")).toBe("50歳");
+    expect(formatAge("19750510", "")).toBe("");
+    expect(formatAge("", "20261017")).toBe("");
+    expect(formatAge("20270101", "20261017")).toBe("");
+  });
+
+  it("生年月日と和暦（一覧の title と詳細）", () => {
+    expect(formatBirthWareki("19750510")).toBe("1975/05/10（昭和50年）");
+    expect(formatBirthWareki("20190501")).toBe("2019/05/01（令和元年）");
+    expect(formatBirthWareki("18000101")).toBe("1800/01/01");
+    expect(formatBirthWareki("x")).toBe("");
+  });
+});
+
+describe("画面の日時の書式（docs/spec.md の 2.2）", () => {
+  it("UTC の時刻を TZ の時刻にし、時を0で埋める", () => {
+    // Orthanc の変更の記録の時刻（UTC）。2026-10-20 に承認者が見た 21:00:23 は、日本時間の翌日 06:00:23
+    expect(formatDateTimeIn("2026-10-19T21:00:23Z", "Asia/Tokyo", { seconds: true })).toBe("2026/10/20 06:00:23");
+    expect(formatDateTimeIn("2026-10-19T20:49:00Z", "Asia/Tokyo")).toBe("2026/10/20 05:49");
+    expect(formatDateTimeIn("2026-10-19T20:49:00Z", "UTC")).toBe("2026/10/19 20:49");
+    expect(formatDateTimeIn("2026-10-19T15:00:00+00:00", "Asia/Tokyo")).toBe("2026/10/20 00:00");
+  });
+
+  it("時間帯の印の無い時刻と、読めない値は空（どの時間帯か分からない時刻を出さない）", () => {
+    expect(formatDateTimeIn("2026-10-19T21:00:23", "Asia/Tokyo")).toBe("");
+    expect(formatDateTimeIn("", "Asia/Tokyo")).toBe("");
+    expect(formatDateTimeIn(undefined, "Asia/Tokyo")).toBe("");
+    expect(formatDateTimeIn("2026-13-40T00:00:00Z", "Asia/Tokyo")).toBe("");
   });
 });

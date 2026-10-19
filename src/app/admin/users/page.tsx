@@ -5,9 +5,12 @@ import { pageAccess } from "@/lib/auth/page-session";
 import { minPasswordLength } from "@/lib/auth/password-policy";
 import { authContext } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
+import { formatDateTimeIn } from "@/lib/format/japanese-date";
 
 // 利用者の棚卸し（第7.0版 14 遵守事項⑧）と役割の設定（14.2）。管理者だけ。
 // 最後のログインを出し、使われていない利用者を見つけやすくする。要らない利用者は止める（消さない）。
+export const metadata = { title: "ユーザー管理" };
+
 export default async function UsersPage() {
   const config = getConfig();
   if (config.auth.mode !== "local") redirect("/");
@@ -21,7 +24,8 @@ export default async function UsersPage() {
     );
   }
   const users = await listUsers(await authContext());
-  const fmt = new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short", timeZone: config.timeZone });
+  // 日時の書式は画面で1つ（`2026/10/20 05:49`。docs/spec.md の 2.2）
+  const fmt = { format: (d: Date) => formatDateTimeIn(d.toISOString(), config.timeZone) };
   return (
     <UserAdmin
       csrfToken={access.session.local.row.csrfToken}

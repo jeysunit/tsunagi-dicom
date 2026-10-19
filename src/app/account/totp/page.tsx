@@ -6,6 +6,8 @@ import { authContext } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
 
 // 二要素が任意（MFA_REQUIRED=false）のときの、ログインした後の TOTP の登録。登録すると、次からログインで要る。
+export const metadata = { title: "二要素認証の設定" };
+
 export default async function AccountTotpPage() {
   const config = getConfig();
   if (config.auth.mode !== "local" || config.auth.mfaRequired) redirect("/account");

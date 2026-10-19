@@ -21,7 +21,8 @@ test("受け取りの記録：技師は、受け取った検査を新しい順�
   await expect(page).toHaveURL(/\/received$/);
   const rows = page.getByTestId("received-row");
   await expect(rows).toHaveCount(8);
-  await expect(rows.first()).toContainText("2026/10/17 13:32:00");
+  // 見本の変更の記録の時刻 20261017T133200 は UTC。TZ=Asia/Tokyo の時刻で出す（docs/spec.md の 3.3）
+  await expect(rows.first().getByTestId("received-at")).toHaveText("2026/10/17 22:32:00");
   await expect(rows.first()).toContainText("DTG_SCU");
   await expect(rows.first()).toContainText("JP-TEST-0004");
   await expect(page.getByTestId("received-origin")).toHaveText(["取り込み"]);

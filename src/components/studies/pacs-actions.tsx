@@ -2,7 +2,7 @@
 
 import { Download, Send, Trash2 } from "lucide-react";
 import { useId, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { DeletePanel } from "@/components/studies/delete-panel";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { SendPanel } from "@/components/studies/send-panel";
@@ -33,7 +33,7 @@ export function PacsActions({ study, screen, onChanged }: { study: StudyView; sc
           <a
             href={`/api/studies/${encodeURIComponent(uid)}/export`}
             download
-            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
             data-testid="export-zip"
           >
             <Download aria-hidden className="size-4" />

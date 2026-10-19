@@ -19,7 +19,7 @@ import {
 } from "@/lib/client/split-position";
 import { getNarrow, getServerNarrow, subscribeNarrow } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
-import { formatBirthLine, formatDicomTime, formatSlashDate } from "@/lib/format/japanese-date";
+import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
 import {
   DATE_LABELS,
@@ -95,7 +95,7 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
       onClick={onClick}
       className={cn(
         "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm transition-colors last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
-        pressed ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted",
+        pressed ? "bg-primary text-primary-foreground active:bg-primary-active" : "text-foreground hover:bg-hover active:bg-pressed",
       )}
     >
       {children}
@@ -168,7 +168,7 @@ function FilterBar({
           aria-controls={moreId}
           data-testid="filter-more"
           onClick={() => setMore((v) => !v)}
-          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm text-link hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-sm text-foreground hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
           詳しく
@@ -227,20 +227,41 @@ function revealRow(row: HTMLElement) {
   else if (r.bottom > bottom) list.scrollTop += r.bottom - bottom;
 }
 
+/** 14px の文字の、おおよその幅（px）。全角は 1 字 14px、半角は 0.62 字ぶん（等幅の字と太字を含めて、少し広めに見る） */
+function textWidth(text: string | undefined): number {
+  let w = 0;
+  for (const ch of text ?? "") w += /[⺀-￯]/.test(ch) && !/[｡-ﾟ]/.test(ch) ? 14 : 8.7;
+  return Math.ceil(w);
+}
+
+/** 列の左右の余白（px-2）と罫線 */
+const CELL_PAD = 18;
+/** モダリティ・検査の記述の列の最小の幅。一覧がこれより狭いときは、一覧の中で横にスクロールする */
+const DESC_MIN = 160;
+
 /**
- * 一覧の列（px）。モダリティ・検査の記述は残りの幅を取る（幅 1280px で約 130px、1920px で約 770px）。
- * 幅が合わない列は `…` で切れる（全文は title）。氏名の漢字とかなは別の列（かなは漢字の右）
+ * 一覧の列（px。docs/spec.md の 3.1）。患者 ID・生年月日・年齢・性別は切らない（患者 ID の列は、出している行のいちばん長い値に合わせる）。
+ * 氏名とかなも、いちばん長い値に合わせ、上限を超える値だけを `…` で切る（全文は title）。
+ * モダリティ・検査の記述は残りの幅を取る。氏名の漢字とかなは別の列（かなは漢字の右）
  */
-const COLUMNS = [
-  { key: "date", width: 148 },
-  { key: "id", width: 116 },
-  { key: "name", width: 104 },
-  { key: "kana", width: 108 },
-  { key: "birth", width: 236 },
-  { key: "desc", width: undefined },
-  { key: "count", width: 100 },
-  { key: "viewer", width: 142 },
-] as const;
+function columnsFor(studies: readonly StudyView[]) {
+  const widest = (pick: (s: StudyView) => string | undefined) => Math.max(0, ...studies.map((s) => textWidth(pick(s))));
+  const fit = (pick: (s: StudyView) => string | undefined, min: number, max: number) =>
+    Math.min(max, Math.max(min, widest(pick) + CELL_PAD));
+  return [
+    { key: "date", width: 148 },
+    // 患者 ID は DICOM の LO（64 字まで）。上限を置かずに値に合わせる（切らない）
+    { key: "id", width: Math.max(80, widest((s) => s.patientId) + CELL_PAD) },
+    { key: "name", width: fit((s) => s.patientName, 104, 240) },
+    { key: "kana", width: fit((s) => s.patientKana, 96, 200) },
+    { key: "birth", width: 104 },
+    { key: "age", width: 60 },
+    { key: "sex", width: 64 },
+    { key: "desc", width: undefined },
+    { key: "count", width: 100 },
+    { key: "viewer", width: 142 },
+  ] as const;
+}
 
 /** 一覧の 1 行の高さ（28px）。14px の文字（行の高さ 20px）に上下 4px */
 const CELL = "h-7 px-2 py-0";
@@ -263,12 +284,14 @@ function StudyRows({
 }) {
   // 矢印で動く（ローヴィングの tabindex）：選んだ行、無ければ先頭の行だけが tab の止まり先
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
+  const columns = columnsFor(studies);
+  const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
-      <table className="w-full min-w-[1048px] table-fixed border-collapse" data-testid="study-table">
+      <table className="w-full table-fixed border-collapse" style={{ minWidth }} data-testid="study-table">
         <colgroup>
-          {COLUMNS.map((c) => (
-            <col key={c.key} style={c.width ? { width: c.width } : undefined} />
+          {columns.map((c) => (
+            <col key={c.key} data-col={c.key} style={c.width ? { width: c.width } : undefined} />
           ))}
         </colgroup>
         <thead className="sticky top-0 z-10 bg-surface text-left text-xs text-label shadow-[0_1px_0_var(--color-border)]">
@@ -278,6 +301,8 @@ function StudyRows({
             <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>かな</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>年齢</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>性別</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>モダリティ・検査の記述</th>
             <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数 / 画像数">
               シリーズ・画像
@@ -292,7 +317,7 @@ function StudyRows({
             const uid = s.studyInstanceUid ?? "";
             const isOpen = selected !== null && uid === selected;
             const dateTime = `${formatSlashDate(s.studyDate)} ${formatDicomTime(s.studyTime)}`.trim();
-            const birth = formatBirthLine(s.patientBirthDate, s.patientSex, s.studyDate);
+            const birthTitle = formatBirthWareki(s.patientBirthDate);
             const desc = [s.modalities?.join("・"), s.studyDescription].filter(Boolean).join(" ");
             return (
               <tr
@@ -300,9 +325,11 @@ function StudyRows({
                   data-study-uid={uid}
                   aria-selected={isOpen}
                   tabIndex={uid === tabStop ? 0 : -1}
+                  // 選んだ行は主の色の薄い地と左の縦線（3px）。hover の地（muted）はそれより薄く、選んだ行には当てない（docs/spec.md の 3.1）
+                  data-selected={isOpen || undefined}
                   className={cn(
-                    "h-7 cursor-pointer border-b border-border align-middle hover:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-                    isOpen && "bg-muted",
+                    "h-7 cursor-pointer border-b border-border align-middle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+                    isOpen ? "bg-selected [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-primary)]" : "hover:bg-muted",
                   )}
                   onClick={(e) => {
                     // ビューアの部品の中の操作は、選ぶ操作にしない。行を選んでも一覧の行は動かない（詳細は下の場所に出る）
@@ -338,7 +365,7 @@ function StudyRows({
                     {formatSlashDate(s.studyDate)}
                     <span className="ml-1.5 text-label">{formatDicomTime(s.studyTime)}</span>
                   </td>
-                  <td className={cn(CELL, CUT, "font-mono")} title={s.patientId}>
+                  <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
                     {s.patientId}
                   </td>
                   <td className={cn(CELL, CUT)} title={s.patientName}>
@@ -353,8 +380,14 @@ function StudyRows({
                   <td className={cn(CELL, CUT, "text-label")} title={s.patientKana} data-testid="patient-kana">
                     {s.patientKana}
                   </td>
-                  <td className={cn(CELL, CUT)} title={birth}>
-                    {birth}
+                  <td className={cn(CELL, "whitespace-nowrap tabular-nums")} title={birthTitle || undefined} data-testid="patient-birth">
+                    {formatSlashDate(s.patientBirthDate)}
+                  </td>
+                  <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-age">
+                    {formatAge(s.patientBirthDate, s.studyDate)}
+                  </td>
+                  <td className={cn(CELL, "whitespace-nowrap")} data-testid="patient-sex">
+                    {sexLabel(s.patientSex)}
                   </td>
                   <td className={cn(CELL, CUT)} title={desc}>
                     <span className="mr-2 inline-flex gap-2 align-middle">
@@ -568,7 +601,7 @@ function Browser({
               type="button"
               aria-label="詳細を閉じる"
               onClick={closeDetail}
-              className="sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden"
+              className="sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden"
             >
               <X aria-hidden className="size-5" />
             </button>

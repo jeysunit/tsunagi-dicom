@@ -115,7 +115,7 @@ describe("受け取りの記録", () => {
     expect(res.status).toBe(200);
     const { items } = await res.json();
     expect(items).toHaveLength(8);
-    expect(items[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00", remoteAet: "DTG_SCU", receivedInstances: 6 });
+    expect(items[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00Z", remoteAet: "DTG_SCU", receivedInstances: 6 });
     expect(items[0].study).toMatchObject({ patientId: "JP-TEST-0004", modalities: ["MR"] });
     // REST で入った検査は、送ってきた機器が無く、入った道が分かる
     expect(items.find((i: { study: { patientId: string }; origin: string }) => i.origin === "RestApi")).toMatchObject({ remoteAet: null });

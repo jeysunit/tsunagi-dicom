@@ -6,6 +6,8 @@ import { STAGE_PATHS } from "@/lib/auth/stage-path";
 
 // 二要素が必須（MFA_REQUIRED=true）で、まだ TOTP を登録していない利用者の、ログインの途中の登録。
 // 頁を開くたびに新しい秘密を作る（前の秘密は使えなくなる）。
+export const metadata = { title: "二要素認証の設定" };
+
 export default async function EnrollPage() {
   const state = await getAuthState();
   if (state.kind !== "pending") redirect(state.kind === "anonymous" ? "/login" : "/");

@@ -29,7 +29,7 @@ export function ThemeToggle({ initial, csrfToken }: { initial: Theme; csrfToken?
     <span className="flex items-center gap-1">
       <Button
         type="button"
-        variant="ghost"
+        variant="outline"
         size="sm"
         aria-pressed={theme === "dark"}
         data-testid="theme-toggle"

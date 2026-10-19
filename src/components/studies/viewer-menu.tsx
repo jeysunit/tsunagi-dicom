@@ -13,6 +13,10 @@ import { cn } from "@/lib/utils";
 // 開くのは BFF の /api/viewers/open を通す（どの検査をどのビューアで開いたかを監査の記録に残してから移す）。
 // ▾ からは「この検査は次から○○」と覚えさせ、DICOMweb の URL（このアプリの監査の外）をコピーできる。
 
+/** メニューの項目。hover・押している間・フォーカスで地を変える（docs/spec.md の 2.3） */
+const MENU_ITEM =
+  "block w-full px-3 py-1.5 text-left hover:bg-hover active:bg-pressed focus-visible:bg-hover focus-visible:outline-none";
+
 export function openUrl(studyUid: string, viewer: string): string {
   return `/api/viewers/open?${new URLSearchParams({ study: studyUid, viewer })}`;
 }
@@ -150,7 +154,7 @@ export function ViewerMenu({
               key={v.id}
               type="button"
               role="menuitem"
-              className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+              className={MENU_ITEM}
               onClick={() => {
                 setOpen(false);
                 openInViewer(studyUid, v.id);
@@ -167,7 +171,7 @@ export function ViewerMenu({
                   key={`remember-${v.id}`}
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+                  className={MENU_ITEM}
                   onClick={() => void remember(v.id)}
                 >
                   この検査は次から {v.label}
@@ -177,7 +181,7 @@ export function ViewerMenu({
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+                  className={MENU_ITEM}
                   onClick={() => void remember(null)}
                 >
                   覚えを消す（モダリティの既定で開く）
@@ -191,7 +195,7 @@ export function ViewerMenu({
               <button
                 type="button"
                 role="menuitem"
-                className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+                className={MENU_ITEM}
                 onClick={() => void copyDicomweb()}
               >
                 DICOMweb の URL をコピー

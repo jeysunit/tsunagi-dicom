@@ -14,6 +14,9 @@ import { listStudies, type StudyListResult } from "@/lib/study-list";
 // 後の絞り込み・ビューアの覚えの変更は画面（TanStack Query）が画面の API から取る。
 // 項目は役割の許可の一覧で絞ったもの（src/lib/fields.ts）。
 
+// 根の頁は根の layout と同じ段なので、layout の title.template が当たらない。題名を全部書く
+export const metadata = { title: { absolute: "検査一覧 - tsunagi-dicom" } };
+
 export default async function HomePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const access = await pageAccess("study.search");
   // 画面のロック中は中身を描かない（ロックの画面は layout が出す）

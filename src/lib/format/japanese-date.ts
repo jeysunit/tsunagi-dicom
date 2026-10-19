@@ -92,3 +92,46 @@ export function formatBirthLine(birthDate: unknown, sex: unknown, studyDate: unk
   if (parts.length === 0) return head;
   return `${head}（${parts.join("・")}）`;
 }
+
+/** 検査日の時点の満年齢：`51歳`。生年月日か検査日が読めない・生まれる前なら空（一覧の年齢の列。docs/spec.md の 3.1） */
+export function formatAge(birthDate: unknown, studyDate: unknown): string {
+  const birth = parseDicomDate(birthDate);
+  const at = parseDicomDate(studyDate);
+  const age = birth && at ? ageAt(birth, at) : null;
+  return age === null ? "" : `${age}歳`;
+}
+
+/** 生年月日と和暦：`1975/05/10（昭和50年）`。和暦が無ければ日付だけ、読めなければ空 */
+export function formatBirthWareki(birthDate: unknown): string {
+  const birth = parseDicomDate(birthDate);
+  if (!birth) return "";
+  const wareki = toWareki(birth);
+  return wareki ? `${formatSlashDate(birthDate)}（${wareki}）` : formatSlashDate(birthDate);
+}
+
+/**
+ * 時刻（ISO 8601。時間帯の印が要る：`Z` か `+09:00`）を、時間帯 timeZone の `2026/10/20 05:49` の形にする
+ * （時は0で埋める。seconds で秒も出す）。画面の日時の書式は、この1つにまとめる（docs/spec.md の 2.2）。
+ * 時間帯の印の無い値は、どの時間帯の時刻か分からないので出さない（空）。読めなければ空。
+ */
+export function formatDateTimeIn(iso: unknown, timeZone: string, { seconds = false }: { seconds?: boolean } = {}): string {
+  if (typeof iso !== "string" || !/(Z|[+-]\d{2}:\d{2})$/.test(iso)) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(t))
+      .map((p) => [p.type, p.value]),
+  );
+  const time = `${parts.hour}:${parts.minute}${seconds ? `:${parts.second}` : ""}`;
+  return `${parts.year}/${parts.month}/${parts.day} ${time}`;
+}
