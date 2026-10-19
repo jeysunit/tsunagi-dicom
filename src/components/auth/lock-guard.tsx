@@ -344,7 +344,7 @@ export function LockGuard({
         data-testid="lockable-content"
         aria-hidden={locked || undefined}
         inert={locked || undefined}
-        className={cn(locked && "pointer-events-none min-h-[60vh] select-none bg-surface/40 blur-md")}
+        className={cn("flex min-h-0 flex-1 flex-col", locked && "pointer-events-none min-h-[60vh] select-none bg-surface/40 blur-md")}
       >
         {locked ? null : children}
       </div>

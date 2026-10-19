@@ -118,9 +118,156 @@ test("詳細のパネル：行のクリックで開き、検査と患者の情�
   // 医師には「すべての DICOM の値」が無い
   await expect(detail.getByRole("button", { name: "すべての DICOM の値" })).toHaveCount(0);
 
-  // もう一度押すと閉じる
+  // もう一度押しても閉じない（下の詳細は選んだ行のものを出し続ける）。Escape で選びを外すと案内に戻る
+  // （期待の変更：行の下に開く形をやめ、もう一度押して閉じる動きを、Escape に替えた。docs/spec.md の 3.1）
   await row(page).click();
+  await expect(detail).toBeVisible();
+  await row(page).focus();
+  await page.keyboard.press("Escape");
   await expect(detail).toHaveCount(0);
+  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+});
+
+const detailUid = (page: Page) => page.getByTestId("study-detail").getByTestId("uid-line").first().locator("code");
+
+test("上下に分ける：行を選ぶと下の詳細が替わり、一覧の行は動かない。頁全体はスクロールしない", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await asRole(page, "医師");
+  await expect(rows(page)).toHaveCount(8);
+  // 何も選んでいないときは、下に短い案内だけ
+  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+  await expect(page.getByTestId("study-detail")).toHaveCount(0);
+
+  const noPageScroll = () =>
+    page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight);
+  expect(await noPageScroll()).toBe(true);
+
+  const second = rows(page).nth(1);
+  const secondUid = (await second.getAttribute("data-study-uid"))!;
+  const before = await rows(page).nth(1).boundingBox();
+  await rows(page).first().click();
+  await expect(detailUid(page)).toHaveText((await rows(page).first().getAttribute("data-study-uid"))!);
+  await second.click();
+  await expect(detailUid(page)).toHaveText(secondUid);
+  // 行の位置は動かない（詳細は行の下に開かない。一覧は選んだだけではスクロールしない）
+  const after = await rows(page).nth(1).boundingBox();
+  expect(after).toEqual(before);
+  expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollTop)).toBe(0);
+  // 詳細が長くても頁は伸びない。一覧の中だけがスクロールする
+  expect(await noPageScroll()).toBe(true);
+  const list = page.getByTestId("study-list-scroll");
+  expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  // スクロールバーの出入りで画面が左右に寄らない
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollbarGutter)).toContain("stable");
+});
+
+test("上下に分ける：矢印の上下で行を移すと詳細が付いて替わり、Enter でビューアを開く。通り過ぎた行の詳細は読まない", async ({ page }) => {
+  await asRole(page, "医師");
+  const detailRequests: string[] = [];
+  page.on("request", (req) => {
+    const m = /\/api\/studies\/([0-9.]+)$/.exec(new URL(req.url()).pathname);
+    if (m) detailRequests.push(m[1]!);
+  });
+  const uids = await rows(page).evaluateAll((els) => els.map((el) => el.getAttribute("data-study-uid") ?? ""));
+
+  await rows(page).first().click();
+  await expect(detailUid(page)).toHaveText(uids[0]!);
+  await expect.poll(() => detailRequests.length).toBe(1);
+
+  // 続けて3回：選びは行に付いて動くが、詳細を読むのは止まった行（4 番目）だけ
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(rows(page).nth(3)).toHaveAttribute("aria-selected", "true");
+  await expect(rows(page).nth(3)).toBeFocused();
+  await expect(detailUid(page)).toHaveText(uids[3]!);
+  await expect(page.getByTestId("series-item").first()).toBeVisible();
+  expect(detailRequests).toEqual([uids[0], uids[3]]);
+
+  await page.keyboard.press("ArrowUp");
+  await expect(rows(page).nth(2)).toHaveAttribute("aria-selected", "true");
+  await expect(detailUid(page)).toHaveText(uids[2]!);
+
+  // 一覧の端から外へは出ない
+  await rows(page).first().focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(rows(page).first()).toBeFocused();
+
+  // Enter で既定のビューア（別のタブ）
+  await rows(page).first().focus();
+  await expectOpened(page, () => page.keyboard.press("Enter"), /viewer\.example\.org\/(ohif|stone)\//);
+});
+
+test("上下に分ける：矢印で移した行は、一覧の見える所にスクロールする", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await asRole(page, "医師");
+  await rows(page).first().click();
+  for (let i = 0; i < 7; i++) await page.keyboard.press("ArrowDown");
+  const last = rows(page).last();
+  await expect(last).toHaveAttribute("aria-selected", "true");
+  const inView = await last.evaluate((el) => {
+    const box = el.closest("[data-testid=study-list-scroll]")!.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return r.top >= box.top && r.bottom <= box.bottom + 1;
+  });
+  expect(inView).toBe(true);
+});
+
+test("上下に分ける：境目をキーボードで動かせ、位置を覚える", async ({ page }) => {
+  await asRole(page, "医師");
+  const handle = page.getByTestId("split-handle");
+  await expect(handle).toHaveAttribute("role", "separator");
+  await expect(handle).toHaveAttribute("aria-orientation", "horizontal");
+  await expect(handle).toHaveAttribute("aria-valuenow", "60");
+  const topHeight = () => page.locator("[data-split-root] > div").first().evaluate((el) => el.getBoundingClientRect().height);
+  const h0 = await topHeight();
+
+  await handle.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(handle).toHaveAttribute("aria-valuenow", "65");
+  expect(await topHeight()).toBeGreaterThan(h0);
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(handle).toHaveAttribute("aria-valuenow", "55");
+  expect(await topHeight()).toBeLessThan(h0);
+  await page.keyboard.press("Home");
+  await expect(handle).toHaveAttribute("aria-valuenow", "20");
+  await page.keyboard.press("ArrowUp");
+  await expect(handle).toHaveAttribute("aria-valuenow", "20");
+  await page.keyboard.press("End");
+  await expect(handle).toHaveAttribute("aria-valuenow", "80");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("ArrowDown");
+  await expect(handle).toHaveAttribute("aria-valuenow", "25");
+
+  // 開き直しても同じ位置
+  await page.reload();
+  await expect(page.getByTestId("split-handle")).toHaveAttribute("aria-valuenow", "25");
+
+  // ドラッグでも動く
+  const box = (await page.getByTestId("split-handle").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 120, { steps: 5 });
+  await page.mouse.up();
+  expect(Number(await page.getByTestId("split-handle").getAttribute("aria-valuenow"))).toBeGreaterThan(25);
+});
+
+test("上下に分ける：狭い画面では一覧だけを出し、行を選ぶと詳細を一覧の上に重ねる", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await asRole(page, "医師");
+  await expect(page.getByTestId("split-handle")).toBeHidden();
+  await expect(page.getByTestId("detail-pane")).toBeHidden();
+  const noPageScroll = () => page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight);
+  expect(await noPageScroll()).toBe(true);
+
+  // 表は幅が広く、行の中央は画面の外なので、見えている左の端を押す
+  await row(page).click({ position: { x: 100, y: 20 } });
+  await expect(page.getByTestId("study-detail")).toBeVisible();
+  await expect(detailUid(page)).toHaveText(STUDY);
+  expect(await noPageScroll()).toBe(true);
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
+  await expect(page.getByTestId("detail-pane")).toBeHidden();
 });
 
 test("状態：技師が検像し、一覧の状態の見出しで絞れる。閲覧には検像のボタンが無い", async ({ page }) => {

@@ -15,7 +15,7 @@ import { formatBirthLine, formatDicomTime, formatSlashDate, sexLabel } from "@/l
 import type { StateFlag } from "@/lib/study-state";
 import { cn } from "@/lib/utils";
 
-// 詳細のパネル（docs/spec.md の 3.1）。行のクリックで、動きの遅れ無しに開く（一覧の行の値ですぐ描き、
+// 詳細のパネル（docs/spec.md の 3.1）。一覧の下の場所に出す。行を選ぶと、動きの遅れ無しに替わる（一覧の行の値ですぐ描き、
 // シリーズの並びは画面の API から後で足す）。左が検査の情報（2列）、右が患者の情報（2列）、下にシリーズごとの
 // サムネイルの並び（まわりだけ暗い地）。値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
 
@@ -175,15 +175,18 @@ export function StudyDetailPanel({
   row,
   screen,
   onChanged,
+  fetchEnabled = true,
 }: {
   /** 一覧の行の値（すぐ描く） */
   row: StudyView;
   screen: ScreenInfo;
   onChanged: () => void;
+  /** false の間は詳細を取らない（矢印のキーで通り過ぎる行の「詳細を開いた」記録を量産しないため。一覧の行の値だけで描く） */
+  fetchEnabled?: boolean;
 }) {
   const uid = row.studyInstanceUid ?? "";
   const queryClient = useQueryClient();
-  const detail = useQuery({ queryKey: detailKey(uid), queryFn: () => fetchDetail(uid), enabled: uid !== "" });
+  const detail = useQuery({ queryKey: detailKey(uid), queryFn: () => fetchDetail(uid), enabled: uid !== "" && fetchEnabled });
   // 詳細が届くまでは一覧の行の値で描き、届いたら詳細の値にする（状態の変更は両方を読み直す）
   const study: StudyView = { ...row, ...detail.data?.study };
   const changed = () => {
@@ -192,7 +195,7 @@ export function StudyDetailPanel({
   };
 
   return (
-    <section aria-label="検査の詳細" className="space-y-4 border-t border-border bg-surface px-4 py-4" data-testid="study-detail">
+    <section aria-label="検査の詳細" className="space-y-4 px-4 py-4" data-testid="study-detail">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <StateControls study={study} screen={screen} onChanged={changed} />
         <ViewerMenu

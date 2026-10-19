@@ -49,6 +49,17 @@
   color-scheme: light;
 }
 
+/* 縦のスクロールバーが出入りしても、画面が左右に寄らない */
+html {
+  scrollbar-gutter: stable;
+}
+
+/* 検査の一覧の頁（上下に分ける形）は、頁全体を画面の高さに収め、頁そのものはスクロールさせない */
+body:has([data-split-root]) {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* 暗い地（利用者が選んだとき・画像のまわり） */
 [data-theme="dark"] {
   color-scheme: dark;
