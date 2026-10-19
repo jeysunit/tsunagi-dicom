@@ -2,29 +2,15 @@
 
 [日本語](README.md)
 
-A standalone web front end and BFF (Backend For Frontend) that uses a DICOMweb-capable image server (such as Orthanc) **as an unmodified backend**, and provides a study list, a per-patient timeline, and viewer selection designed around how images are reviewed in Japanese medical institutions.
+A web screen for everyday study viewing, placed in front of a hospital's or lab's image server (a DICOMweb-capable one such as Orthanc). The image server is used **unmodified**; tsunagi-dicom adds a study list and viewer selection designed around how images are reviewed in Japanese medical institutions. It runs as a standalone web front end and BFF (Backend For Frontend).
 
-> **Not for Diagnostic Use / 非医療機器 (not a medical device).**
-> This software is for research, education, and evaluation. It has not been approved or certified as a medical device.
-
-## Status
-
-> **Design stage — do not use in production (clinical settings or real patient data).** The specification and foundation are still being built.
-
-**Stage 2 (2026-10-19).** Stage 2 adds the study list (quick filters, patient names split into kanji and kana, Japanese-era birth dates with age, representative thumbnails, a detail panel, and study statuses such as 検像 and 読影), viewer selection with remembered defaults (per study and per modality), per-role field allowlists for the screen API, and switching between light and dark backgrounds. Some checks against a real image server (Orthanc) are listed in the stage 2 pull requests as still to be done.
-
-Stage 1b (2026-10-18): on top of the stage 1a foundation (the BFF with a screen API for search and a relay limited to WADO-RS reads so that viewers can retrieve images, the audit trail, development authentication `AUTH_MODE=dev`, the common screen, and CI with container images), application user login (`AUTH_MODE=local`) is in place: users and roles (administrator, physician, technologist, read-only), password rules (stored as argon2id hashes), two-factor authentication (TOTP), temporary login lockout, screen lock, a user inventory page, per-role permissions, and role checks on the relay.
-`AUTH_MODE=local` can also be used with a real image server (not yet verified against one). `AUTH_MODE=dev` still starts only with the mock backend (`BACKEND_MOCK=true`).
-The pages are: login, the study list with its detail panel, per-modality default viewers (administrators), user administration, and personal settings. Text-reading pages use a light background by default and can be switched to dark (remembered per user).
-Implementation proceeds stage by stage; each PR covers one cohesive change within a single stage (see "6. 段階" in [`docs/spec.md`](docs/spec.md)).
-
-The user interface will be Japanese only at first. The documents are written mainly in Japanese.
+> **This is at the trial stage. Do not use it in production (clinical settings or real patient data).** See "Notes" below for what to keep in mind.
 
 ## System overview
 
 ### Figure 1: Overall
 
-The image server is used **unmodified**; tsunagi-dicom sits in front of it as the screens and the BFF. Viewers do not connect to the image server directly: they fetch images through the BFF relay. Dotted items are planned for stage 4.
+The image server is used **unmodified**; tsunagi-dicom sits in front of it as the screens and the BFF. Viewers do not connect to the image server directly: they fetch images through the BFF relay. Dotted items are planned (see "Planned work").
 
 ```mermaid
 flowchart LR
@@ -40,8 +26,8 @@ flowchart LR
   subgraph USERS["Users' browsers"]
     USER["Technologist, physician,<br/>administrator, read-only"]:::box
   end
-  OIDC["External login (OIDC)<br/>planned, stage 4"]:::plan
-  WL["Worklist<br/>planned, stage 4"]:::plan
+  OIDC["External login (OIDC)<br/>planned"]:::plan
+  WL["Worklist<br/>planned"]:::plan
 
   MOD -->|"send via DICOM"| PACS
   BFF -->|"search and retrieve via DICOMweb"| PACS
@@ -89,19 +75,34 @@ flowchart LR
   TD -->|"search and retrieve via DICOMweb"| PACS
 ```
 
-## What it does
+## What it can do
 
-- **Study list**: quick filters by study date, modality, and status (the Japanese terms used in clinical practice: 未検像, 検像済, 未読, 既読, 緊急, bookmark). Patient names are shown split into the ideographic (kanji) name and the phonetic (kana) name; birth dates are shown with the Japanese era and age.
-- **Viewer selection**: open a study in one of the configured viewers (OHIF Viewer, Stone Web Viewer, VolView, ...). Defaults can be remembered per study and per modality.
-- **Per-patient timeline**, and side-by-side comparison of two studies.
-- **Simple reports (簡易レポート)** (stage 3). Document import and display (PDF, etc.) and importing, correcting, splitting, and merging other institutions' data are heavier, so they were moved later (after stage 4).
-- **Security and operations**: roles, two-factor authentication, audit trail, and so on (image-server monitoring and the read-only switch come after stage 4). [`docs/guideline-mapping.md`](docs/guideline-mapping.md) maps these features to the items of the Japanese Ministry of Health, Labour and Welfare guideline (version 7.0, System Operations volume). **Whether a deployment meets the guideline is for each institution to determine, including its operations; this software alone does not make a deployment compliant.**
+What works today.
 
-**Example uses**: as an everyday viewing front end in front of a hospital or lab image server; and in front of a research image archive for clinical studies, where readers must not see the original patient information (a blind-reading role, planned for stage 2b).
+- **Study list**: quick filters by study date, modality, and status. Search by patient ID, name, accession number, or study description. The filters show counts. Patient names are shown split into the ideographic (kanji) name and the phonetic (kana) name; birth dates are shown with the Japanese era and age. One study per row.
+- **Study detail**: below the list, the patient and study information of the selected study and its series thumbnails.
+- **Status marks**: 未検像, 検像済, 未読, 既読, 緊急, and bookmark are treated as marks you set inside this screen. The marks are kept in this application, and the DICOM values on the image server are not rewritten.
+- **Viewer selection**: open a study in one of the configured viewers (OHIF Viewer, Stone Web Viewer, VolView, ...). Defaults are remembered per study and per modality. Viewers fetch images through this application's relay, which allows reads only.
+- **Login and roles**: user login (password plus TOTP two-factor authentication), roles (administrator, physician, technologist, read-only), and per-role limits on what can be seen and done. Temporary login lockout, screen lock, and a user inventory page are included.
+- **Audit trail**: searches, detail views, opening a viewer, and status changes are recorded. The records are hash-chained so that tampering can be detected.
+- **Screen**: a light background by default, switchable to dark. The screen is Japanese only.
 
-This tool is for clinical trials, research, and system testing, and **features are cut rather than added**.
+Some checks against a real image server (Orthanc) are still to be done.
 
 The image server and viewers are not modified. Every endpoint is configured through environment variables. Search and retrieval use DICOMweb first; Orthanc-only features are kept in separate components that are enabled only with an Orthanc backend.
+
+**Example use**: as an everyday viewing screen in front of a hospital or lab image server.
+
+## Planned work
+
+Roughly in the order we plan to build them, and subject to change. This tool is for clinical trials, research, and system testing, and **features are cut rather than added**.
+
+1. Blind-reading role: placed in front of a research image archive for clinical studies, so that readers do not see the original patient information. Includes settings for running on a closed network.
+2. Per-patient timeline, and side-by-side comparison of two studies.
+3. Simple reports (簡易レポート).
+4. Worklist (with Orthanc), audit search and CSV export, emergency access, and a page for the safety features.
+5. External login (OIDC).
+6. To be decided later: document (PDF, etc.) import and display; importing, correcting, splitting, and merging other institutions' data; image-server monitoring and a read-only switch; Weasis; Passkey.
 
 ## Trying it out (mock backend)
 
@@ -161,7 +162,15 @@ To accept only a release image, replace `--certificate-identity-regexp` with `--
 - **Currently a dry run** (nothing is deleted; the candidates are listed in the run log). The dry run will be turned off after the log has been reviewed.
 - If you pin by digest, use the digest of a version-tagged image (other images are eventually deleted).
 
-## Where the rules live
+## Notes
+
+- **This software has not been approved or certified as a medical device.** It is a screen for viewing images in research, education, and system evaluation, and is not meant for diagnosis or clinical decisions. Do not use it in production (clinical settings or real patient data).
+- [`docs/guideline-mapping.md`](docs/guideline-mapping.md) maps its features to the items of the Japanese Ministry of Health, Labour and Welfare guideline (version 7.0, System Operations volume). **Whether a deployment fits the guideline is for each institution to determine, including its operations; this software alone does not settle it.**
+- `AUTH_MODE=dev` starts only with the mock backend (`BACKEND_MOCK=true`).
+
+## For contributors (where the rules live)
+
+The development stages and the completion criteria of each stage are in "6. 段階" of [`docs/spec.md`](docs/spec.md) (in Japanese).
 
 | Document | Contents |
 |---|---|
