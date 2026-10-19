@@ -47,6 +47,7 @@ flowchart LR
 | `orthancteam/orthanc` | 26.9.1 | `sha256:d2705f2c56547e55ce9bc2250fd22d05d326493b3f3d9fa191ecb7db8ca6b5a2` | Orthanc の作り手のチームが出す公式のイメージ。DICOMweb のプラグインが入っている。施設で動かす Orthanc と同じ系統 |
 | `debian`（DCMTK の土台） | trixie-20260918-slim | `sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a` | DCMTK を作っている側が出す公式のイメージは無い。知らない人が作ったイメージを使わず、Debian の公式のイメージに Debian の署名つきの包み `dcmtk`（3.6.9。Debian の安全の直しは受ける）を入れて作る |
 
+DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す（`.github/dependabot.yml`）。Orthanc のイメージは compose のファイルにあり Dependabot の外なので、手で上げる。
 版を上げるときは、この試験を流してから、[`round-trip-test.md`](round-trip-test.md) の「実測で決めること」の版と結果を書き直す。
 
 ## 試すこと
