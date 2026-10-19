@@ -23,6 +23,9 @@ import {
   parseChanges,
   readChanges,
   receivedStudyIds,
+  singleStudyId,
+  studyIdsFromLookup,
+  studyInfoFromRest,
   receptionFromMetadata,
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
@@ -291,18 +294,22 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       throw new BackendError(`画像サーバーの応答が ${res.status}`);
     },
 
-    async lookupStudy(studyInstanceUid: string) {
+    async lookupStudyIds(studyInstanceUid: string) {
       const res = await restPost("tools/lookup", checkedUid(studyInstanceUid), { contentType: "text/plain", credential: "read" });
       if (!res.ok) {
         await res.body?.cancel();
         throw new BackendError(`画像サーバーの応答が ${res.status}`);
       }
-      const rows: unknown = await res.json();
-      const hit = Array.isArray(rows)
-        ? rows.find((r) => r && typeof r === "object" && (r as { Type?: unknown }).Type === "Study")
-        : undefined;
-      const id = hit ? (hit as { ID?: unknown }).ID : undefined;
-      return isOrthancId(id) ? id : null;
+      return studyIdsFromLookup(await res.json());
+    },
+
+    async lookupStudy(studyInstanceUid: string) {
+      return singleStudyId(await this.lookupStudyIds(studyInstanceUid));
+    },
+
+    async studyInfo(orthancStudyId: string) {
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      return studyInfoFromRest(await restJsonOrNull(`studies/${orthancStudyId}`));
     },
 
     async sendStudy(modalityId: string, orthancStudyId: string) {
@@ -364,6 +371,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const res = await call(orthancUrl, `studies/${orthancStudyId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
       await res.body?.cancel();
       if (res.status === 404) throw new BackendError("検査が見つからない", 404);
+      // 受けなかったと確かめられない答えは結果不明（照らせば、消えたかが分かる）
+      if (!res.ok && isUncertainStatus(res.status)) throw new BackendUnknownError();
       if (!res.ok) throw new BackendError(`画像サーバーの応答が ${res.status}`);
     },
   };

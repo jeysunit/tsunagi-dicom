@@ -67,6 +67,8 @@ test("検証モードで書き込みを止めているときは、送るのボ�
   await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
   await expect(page.getByTestId("study-detail")).toBeVisible();
   await expect(page.getByTestId("send-open")).toHaveCount(0);
+  await expect(page.getByTestId("export-zip")).toHaveCount(0);
+  await expect(page.getByTestId("delete-open")).toHaveCount(0);
   const res = await page.request.post(`/api/studies/${STUDY}/send`, {
     data: { modality: "dtg", requestId: crypto.randomUUID() },
     headers: { origin: "http://127.0.0.1:3100" },

@@ -32,6 +32,8 @@ let server: Server;
 let baseUrl: string;
 const seen: { method: string; url: string; authorization?: string; body: string }[] = [];
 let storeMode: "ok" | "drop" | "missing-id" | number = "ok";
+let deleteMode: "ok" | number = "ok";
+const DUP_UID = "1.2.826.0.1.3680043.8.498.777";
 
 function body(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -50,7 +52,7 @@ beforeAll(async () => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(value));
     };
-    const m = /^\/studies\/([0-9a-f-]+)(\/series)?$/.exec(url);
+    const m = req.method === "GET" ? /^\/studies\/([0-9a-f-]+)(\/series)?$/.exec(url) : null;
     if (url === "/changes?last") return json(200, { Changes: allChanges.slice(-1), Done: true, Last: lastSeq() });
     if (url.startsWith("/changes?")) {
       const q = new URL(url, "http://x").searchParams;
@@ -71,8 +73,25 @@ beforeAll(async () => {
     if (req.method === "POST" && url === "/modalities/offline/echo") return json(500, { Message: "DICOM network error" });
     if (req.method === "POST" && url === "/modalities/locked/echo") return json(401, {});
     if (req.method === "POST" && url === "/tools/lookup") {
+      // 同じ UID の検査が患者違いで2つある形（DUP_UID）
+      if (text === DUP_UID) {
+        return json(200, [
+          { ID: "00000000-00000000-00000000-00000000-00000001", Type: "Study" },
+          { ID: "00000000-00000000-00000000-00000000-00000002", Type: "Study" },
+        ]);
+      }
       const study = studies.find((s) => s.MainDicomTags.StudyInstanceUID === text);
       return json(200, study ? [{ ID: study.ID, Path: `/studies/${study.ID}`, Type: "Study" }] : []);
+    }
+    const archive = /^\/studies\/([0-9a-f-]+)\/archive$/.exec(url);
+    if (archive) {
+      if (!studies.some((s) => s.ID === archive[1])) return json(404, {});
+      res.writeHead(200, { "content-type": "application/zip" });
+      return res.end(Buffer.from("PK\u0003\u0004zip-body"));
+    }
+    if (req.method === "DELETE" && url.startsWith("/studies/")) {
+      if (typeof deleteMode === "number") return json(deleteMode, {});
+      return json(200, {});
     }
     if (req.method === "POST" && url === "/modalities/dtg/store") {
       if (storeMode === "drop") return req.socket.destroy();
@@ -214,5 +233,52 @@ describe("実の Orthanc の REST（段 4）", () => {
     // 形の誤りは Orthanc へ送らずに断る（結果不明ではない）
     await expect(b.sendStudy("dtg", "../x")).rejects.toThrow(BackendError);
     await expect(b.sendStudy("a/b", "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919")).rejects.toThrow(BackendError);
+  });
+});
+
+describe("実の Orthanc の REST（段 5：引き当ての重なり・版・書き出し・削除）", () => {
+  const ID = "3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919";
+
+  it("同じ UID の検査が2つあれば、引き当ては全部を返し、1つを選ぶ引き当ては 409 で断る", async () => {
+    const b = backend();
+    expect(await b.lookupStudyIds(DUP_UID)).toHaveLength(2);
+    await expect(b.lookupStudy(DUP_UID)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("検査の要点と版（LastUpdate）を読む", async () => {
+    expect(await backend().studyInfo(ID)).toMatchObject({
+      orthancId: ID,
+      studyInstanceUid: "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012",
+      patientId: "JP-TEST-0004",
+      version: "20261017T231203",
+      seriesCount: 1,
+    });
+    expect(await backend().studyInfo("00000000-00000000-00000000-00000000-0000000f")).toBeNull();
+  });
+
+  it("書き出しは読む資格情報で ZIP を流し、無い検査は 404", async () => {
+    seen.length = 0;
+    const res = await backend().exportStudy(ID);
+    expect(res.headers.get("content-type")).toBe("application/zip");
+    expect(Buffer.from(await res.arrayBuffer()).subarray(0, 2).toString()).toBe("PK");
+    expect(seen.at(-1)!.authorization).toBe(basic("reader", "read-secret"));
+    await expect(backend().exportStudy("00000000-00000000-00000000-00000000-0000000f")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("削除は書く資格情報で DELETE を求める。502・503・504 は結果不明、500 は失敗", async () => {
+    seen.length = 0;
+    deleteMode = "ok";
+    await backend().deleteStudy(ID);
+    expect(seen.at(-1)).toMatchObject({ method: "DELETE", url: `/studies/${ID}`, authorization: basic("writer", "write-secret") });
+    for (const status of [502, 503, 504]) {
+      deleteMode = status;
+      await expect(backend().deleteStudy(ID)).rejects.toThrow(BackendUnknownError);
+    }
+    deleteMode = 500;
+    const error = await backend().deleteStudy(ID).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BackendError);
+    expect(error).not.toBeInstanceOf(BackendUnknownError);
+    deleteMode = "ok";
+    await expect(backend().deleteStudy("../x")).rejects.toMatchObject({ status: 400 });
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -12,6 +12,16 @@ import { formatSlashDate } from "@/lib/format/japanese-date";
 // 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確かめの画面：消す検査を並べ、「戻せない」ことを示し、
 // 理由を書いてから「削除」を押す。大事な操作なので、BFF が再認証を求めたら、パスワード（と確認の番号）を入れてから続ける。
 // 答えが分からなければ「結果不明」と要求の ID を出し、もう一度消さずに確かめる道（Orthanc にまだあるかを読む）だけを出す。
+
+interface Preview {
+  version: string;
+  patientId: string;
+  patientName: string;
+  patientKana: string;
+  studyDate: string;
+  seriesCount: number;
+  instanceCount: number;
+}
 
 type Phase =
   | { kind: "idle" }
@@ -38,6 +48,12 @@ export function DeletePanel({
   const [reason, setReason] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const uid = study.studyInstanceUid ?? "";
+  // 確かめの画面に出すのは、BFF が Orthanc から読み直した、消す検査の要点と版（一覧の行の値ではない）。消すときに版を添える
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  useEffect(() => {
+    getJson<Preview>(`/api/studies/${encodeURIComponent(uid)}/delete`).then(setPreview, (e: Error) => setPreviewError(e.message));
+  }, [uid]);
 
   function settle(result: PostResult, requestId: string) {
     if (result.status === 403 && result.data.problems?.includes("reauth_required")) {
@@ -55,7 +71,7 @@ export function DeletePanel({
   }
 
   const postDelete = (requestId: string) =>
-    postJson(`/api/studies/${encodeURIComponent(uid)}/delete`, { requestId, reason }, screen.csrfToken);
+    postJson(`/api/studies/${encodeURIComponent(uid)}/delete`, { requestId, reason, version: preview?.version ?? "" }, screen.csrfToken);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -103,13 +119,21 @@ export function DeletePanel({
   const busy = phase.kind === "busy";
   return (
     <div id={panelId} role="group" aria-label="検査の削除" className="mt-2 space-y-2 rounded-md border border-danger bg-surface p-3" data-testid="delete-panel">
-      <p className="text-sm" data-testid="delete-confirm">
-        <span className="font-bold text-value">{study.patientId}</span>
-        {study.patientName ? ` ${study.patientName}` : ""}・{formatSlashDate(study.studyDate)}・{study.modalities?.join("・")}・
-        {study.seriesCount ?? "—"} シリーズ・{study.instanceCount ?? "—"} 画像 を Orthanc から消す。
-        <span className="font-bold text-danger">戻せない。</span>戻すには、取り込み直すか、送り元から送り直す。
-      </p>
-      {phase.kind !== "deleted" && phase.kind !== "reauth" && phase.kind !== "unknown" && (
+      {previewError && (
+        <p role="alert" className="text-danger" data-testid="delete-preview-error">
+          {previewError}
+        </p>
+      )}
+      {!preview && !previewError && <p className="text-label">消す検査を Orthanc から読んでいる</p>}
+      {preview && (
+        <p className="text-sm" data-testid="delete-confirm">
+          <span className="font-bold text-value">{preview.patientId}</span>
+          {preview.patientName ? ` ${preview.patientName}` : ""}・{formatSlashDate(preview.studyDate)}・{study.modalities?.join("・")}・
+          {preview.seriesCount} シリーズ・{preview.instanceCount} 画像 を Orthanc から消す。
+          <span className="font-bold text-danger">戻せない。</span>戻すには、取り込み直すか、送り元から送り直す。
+        </p>
+      )}
+      {preview && phase.kind !== "deleted" && phase.kind !== "reauth" && phase.kind !== "unknown" && (
         <form onSubmit={(e) => void submit(e)} className="space-y-2">
           <label className="block space-y-1">
             <span className="text-xs text-label">理由（必須。監査の記録に残る）</span>

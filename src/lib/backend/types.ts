@@ -74,8 +74,15 @@ export interface Backend {
   listModalities(): Promise<ModalityEntry[]>;
   /** Orthanc から機器へ C-ECHO（/modalities/{id}/echo）。つながったら true。機器が無ければ BackendError(404) */
   echoModality(modalityId: string): Promise<boolean>;
-  /** StudyInstanceUID から Orthanc の中の検査の ID（/tools/lookup）。無ければ null */
+  /**
+   * StudyInstanceUID から Orthanc の中の検査の ID（/tools/lookup）。無ければ null。
+   * 同じ UID の検査が2つ以上ある（患者違いなど）ときは、どれか1つを選ばずに BackendError(409)
+   */
   lookupStudy(studyInstanceUid: string): Promise<string | null>;
+  /** StudyInstanceUID に当たる Orthanc の中の検査の ID の全部（/tools/lookup の Type が Study のもの） */
+  lookupStudyIds(studyInstanceUid: string): Promise<string[]>;
+  /** Orthanc の中の検査の要点と版（/studies/{id}。LastUpdate を版にする）。無ければ null */
+  studyInfo(orthancStudyId: string): Promise<OrthancStudyInfo | null>;
   /** 検査を機器へ送る（/modalities/{id}/store を非同期で）。書き込みの操作。Orthanc の仕事の ID を返す */
   sendStudy(modalityId: string, orthancStudyId: string): Promise<{ jobId: string }>;
   /** Orthanc の仕事の状態（/jobs/{id}）。無ければ null */
@@ -87,6 +94,18 @@ export interface Backend {
   exportStudy(orthancStudyId: string): Promise<Response>;
   /** 検査を消す（DELETE /studies/{id}）。書き込みの操作。無ければ BackendError(404)。答えが分からなければ BackendUnknownError */
   deleteStudy(orthancStudyId: string): Promise<void>;
+}
+
+/** 消す前の確かめに使う、Orthanc の中の検査の要点（docs/spec.md の 3.5 の削除） */
+export interface OrthancStudyInfo {
+  orthancId: string;
+  studyInstanceUid: string;
+  patientId: string;
+  patientName: string;
+  studyDate: string;
+  seriesCount: number;
+  /** 版（Orthanc の LastUpdate）。確かめの画面を出した後に検査が変われば、この値が変わる */
+  version: string;
 }
 
 export interface ReceivedStudies {

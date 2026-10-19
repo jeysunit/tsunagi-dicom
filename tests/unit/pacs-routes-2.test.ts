@@ -78,16 +78,29 @@ async function exportZip(headers: Record<string, string> = { "sec-fetch-site": "
   const { GET } = await import("@/app/api/studies/[uid]/export/route");
   return GET(new Request(`${ORIGIN}/api/studies/${uid}/export`, { headers }), uidParams(uid));
 }
-async function del(body: unknown, origin = ORIGIN, uid = STUDY) {
+/** いまの検査の版（確かめの画面で見せる版の代わり。Orthanc から直に読む） */
+async function versionOf(uid = STUDY): Promise<string> {
+  const { getBackend } = await import("@/lib/backend");
+  const ids = await getBackend().lookupStudyIds(uid);
+  const info = ids.length === 1 ? await getBackend().studyInfo(ids[0]!) : null;
+  return info?.version ?? "no-version";
+}
+/** 削除を求める。本文に version が無ければ、いまの版を添える（確かめの画面を通った形） */
+async function del(body: Record<string, unknown>, origin = ORIGIN, uid = STUDY) {
   const { POST } = await import("@/app/api/studies/[uid]/delete/route");
+  const withVersion = "version" in body ? body : { ...body, version: await versionOf(uid) };
   return POST(
     new Request(`${ORIGIN}/api/studies/${uid}/delete`, {
       method: "POST",
       headers: { "content-type": "application/json", origin, host: new URL(ORIGIN).host },
-      body: JSON.stringify(body),
+      body: JSON.stringify(withVersion),
     }),
     uidParams(uid),
   );
+}
+async function preview(uid = STUDY) {
+  const { GET } = await import("@/app/api/studies/[uid]/delete/route");
+  return GET(new Request(`${ORIGIN}/api/studies/${uid}/delete`), uidParams(uid));
 }
 async function delStatus(requestId: string, uid = STUDY) {
   const { GET } = await import("@/app/api/studies/[uid]/delete/route");
@@ -274,5 +287,103 @@ describe("削除", () => {
     state.config!.auth.devAllowWrite = true;
     expect((await del({ requestId: crypto.randomUUID(), reason: "試験" }, ORIGIN, "1.2.3")).status).toBe(404);
     expect(await listed()).toBe(true);
+  });
+});
+
+describe("削除：違う検査を消さない", () => {
+  it("確かめの画面は、Orthanc から読み直した要点と版を返し、開いたことを記録する", async () => {
+    state.role = "admin";
+    const res = await preview();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ patientId: "JP-TEST-0004", patientName: "試験 髙子", studyDate: "20260410", seriesCount: 1, instanceCount: 4 });
+    expect(body.version).toBe(await versionOf());
+    expect(detailOf(await lastAudit("view_study"))).toMatchObject({ via: "delete_preview" });
+    state.role = "technologist";
+    expect((await preview()).status).toBe(403);
+  });
+
+  it("同じ UID の検査が Orthanc に2つある（患者違いなど）ときは、どちらも消さずに断り、記録する", async () => {
+    state.role = "admin";
+    const { duplicateMockStudy } = await import("@/lib/backend/mock");
+    const { getBackend } = await import("@/lib/backend");
+    const spy = vi.spyOn(getBackend(), "deleteStudy");
+    duplicateMockStudy(STUDY);
+    expect((await preview()).status).toBe(409);
+    const requestId = crypto.randomUUID();
+    const res = await del({ requestId, reason: "試験", version: "anything" });
+    expect(res.status).toBe(409);
+    expect(spy).not.toHaveBeenCalled();
+    expect(await rowsOf(requestId)).toHaveLength(1);
+    expect(detailOf((await rowsOf(requestId))[0])).toMatchObject({ reason: "ambiguous", count: 2 });
+    // 送る・書き出しも、どれかを選んで書かない
+    expect((await exportZip()).status).toBe(409);
+  });
+
+  it("引いた検査の UID が求めた UID と合わなければ、消さずに断る", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const backend = getBackend();
+    const real = backend.studyInfo.bind(backend);
+    vi.spyOn(backend, "studyInfo").mockImplementation(async (id) => {
+      const info = await real(id);
+      return info && { ...info, studyInstanceUid: "1.2.826.0.1.3680043.8.498.999" };
+    });
+    const spy = vi.spyOn(backend, "deleteStudy");
+    const requestId = crypto.randomUUID();
+    expect((await del({ requestId, reason: "試験", version: "x" })).status).toBe(409);
+    expect(detailOf((await rowsOf(requestId))[0])).toMatchObject({ reason: "mismatch" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("確かめの画面を出した後に検査が変わったら（版が違えば）、消さずに 409", async () => {
+    state.role = "admin";
+    const shown = (await (await preview()).json()).version as string;
+    const { touchMockStudy } = await import("@/lib/backend/mock");
+    const { getBackend } = await import("@/lib/backend");
+    touchMockStudy((await getBackend().lookupStudy(STUDY))!);
+    const spy = vi.spyOn(getBackend(), "deleteStudy");
+    const requestId = crypto.randomUUID();
+    const res = await del({ requestId, reason: "試験", version: shown });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("検査が変わった");
+    expect(detailOf((await rowsOf(requestId))[0])).toMatchObject({ reason: "changed", shown });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await listed()).toBe(true);
+  });
+
+  it("「求めた」を記録した後、消す直前の読み直しで検査が替わっていれば、消さずに失敗として記録する", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const backend = getBackend();
+    const version = await versionOf();
+    const real = backend.studyInfo.bind(backend);
+    let calls = 0;
+    vi.spyOn(backend, "studyInfo").mockImplementation(async (id) => {
+      const info = await real(id);
+      calls += 1;
+      // 2 回目（消す直前の読み直し）だけ、版が替わった形
+      return info && (calls >= 2 ? { ...info, version: "changed-later" } : info);
+    });
+    const spy = vi.spyOn(backend, "deleteStudy");
+    const requestId = crypto.randomUUID();
+    expect((await del({ requestId, reason: "試験", version })).status).toBe(409);
+    expect(spy).not.toHaveBeenCalled();
+    expect((await rowsOf(requestId)).map((r) => [detailOf(r).phase, r.outcome, detailOf(r).refused])).toEqual([
+      ["request", "success", undefined],
+      ["result", "failed", "changed"],
+    ]);
+    expect(await listed()).toBe(true);
+  });
+
+  it("本文の Orthanc の ID・患者 ID は使わない（消すのは URL の UID から引いた検査だけ）", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const spy = vi.spyOn(getBackend(), "deleteStudy");
+    const other = "fd432ba4-73bbd221-afb64d63-c4822c63-b059de02";
+    const res = await del({ requestId: crypto.randomUUID(), reason: "試験", orthancId: other, patientId: "JP-TEST-0001" });
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledWith("3f9ca171-e0dafa89-36c0c97f-c69c8eca-178c4919");
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

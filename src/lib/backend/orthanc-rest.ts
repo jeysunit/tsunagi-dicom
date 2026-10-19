@@ -1,4 +1,4 @@
-import type { JobState, JobStatus, ModalityEntry, StudySummary } from "@/lib/backend/types";
+import { BackendError, type JobState, type JobStatus, type ModalityEntry, type OrthancStudyInfo, type StudySummary } from "@/lib/backend/types";
 
 // Orthanc の REST の応答の読み取り（docs/spec.md の 3.3・3.4）。実の Orthanc（http.ts）とモック（mock.ts）で同じものを使う。
 // 形は Orthanc Book（REST API の「Tracking changes」「Sending resources to remote modalities」「Performing C-Echo」、
@@ -166,6 +166,39 @@ export function jobFromRest(json: unknown): JobStatus | null {
     errorDescription: str(j.ErrorDescription),
     creationTime: orthancTime(str(j.CreationTime)),
     completionTime: orthancTime(str(j.CompletionTime)) || null,
+  };
+}
+
+/** /tools/lookup の答えのうち、検査（Type が Study）の ID の全部 */
+export function studyIdsFromLookup(json: unknown): string[] {
+  if (!Array.isArray(json)) return [];
+  return json.flatMap((r) => {
+    const x = obj(r);
+    return x.Type === "Study" && isOrthancId(x.ID) ? [x.ID] : [];
+  });
+}
+
+/** 引き当ての答えがちょうど1件ならその ID、無ければ null、2件以上なら選ばずに 409（取り違えて書かない） */
+export function singleStudyId(ids: readonly string[]): string | null {
+  if (ids.length === 0) return null;
+  if (ids.length > 1) throw new BackendError("同じ StudyInstanceUID の検査が Orthanc に2つ以上ある（患者違いなど）。どれかを選んで書かない", 409);
+  return ids[0]!;
+}
+
+/** /studies/{id} から、消す前の確かめに使う要点と版（LastUpdate） */
+export function studyInfoFromRest(json: unknown): OrthancStudyInfo | null {
+  const s = obj(json);
+  if (!isOrthancId(s.ID)) return null;
+  const main = obj(s.MainDicomTags);
+  const patient = obj(s.PatientMainDicomTags);
+  return {
+    orthancId: s.ID,
+    studyInstanceUid: str(main.StudyInstanceUID),
+    patientId: str(patient.PatientID),
+    patientName: str(patient.PatientName),
+    studyDate: str(main.StudyDate),
+    seriesCount: Array.isArray(s.Series) ? s.Series.length : 0,
+    version: str(s.LastUpdate),
   };
 }
 

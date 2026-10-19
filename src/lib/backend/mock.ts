@@ -11,6 +11,8 @@ import {
   parseChanges,
   readChanges,
   receivedStudyIds,
+  singleStudyId,
+  studyInfoFromRest,
   receptionFromMetadata,
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
@@ -69,9 +71,28 @@ const DELETED_KEY = Symbol.for("tsunagi-dicom.mock-deleted");
 const deletedHolder = globalThis as typeof globalThis & { [DELETED_KEY]?: Set<string> };
 const mockDeleted = (deletedHolder[DELETED_KEY] ??= new Set<string>());
 
-/** 試験のため：モックで消した検査を戻す */
+/** 試験のための、モックの Orthanc の中の変化（同じ UID の検査が2つある・確かめの後に検査が変わった） */
+const TEST_KEY = Symbol.for("tsunagi-dicom.mock-test");
+const testHolder = globalThis as typeof globalThis & {
+  [TEST_KEY]?: { extraIds: Map<string, string[]>; versions: Map<string, string> };
+};
+const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map() });
+
+/** 試験のため：モックで消した検査と、試験の変化を戻す */
 export function restoreMockStudies(): void {
   mockDeleted.clear();
+  mockTest.extraIds.clear();
+  mockTest.versions.clear();
+}
+
+/** 試験のため：同じ StudyInstanceUID の検査が、Orthanc にもう1つある形にする（患者違いの重なりなど） */
+export function duplicateMockStudy(studyInstanceUid: string): void {
+  mockTest.extraIds.set(studyInstanceUid, ["00000000-00000000-00000000-00000000-00000001"]);
+}
+
+/** 試験のため：検査の版（LastUpdate）を替える（確かめの画面を出した後に、検査が変わった形） */
+export function touchMockStudy(orthancStudyId: string): void {
+  mockTest.versions.set(orthancStudyId, orthancNow());
 }
 
 /** 書き出しの ZIP の中身（モック。画像の本体は入れず、検査の UID を書いた1つのテキストのファイル）を、圧縮しない ZIP にする */
@@ -282,9 +303,21 @@ export function createMockBackend(): Backend {
       return modalityId !== "offline";
     },
 
-    async lookupStudy(studyInstanceUid: string) {
+    async lookupStudyIds(studyInstanceUid: string) {
       const studies = await restStudies();
-      return studies.find((s) => s.MainDicomTags.StudyInstanceUID === studyInstanceUid)?.ID ?? null;
+      const ids = studies.filter((s) => s.MainDicomTags.StudyInstanceUID === studyInstanceUid).map((s) => s.ID);
+      return [...ids, ...(mockTest.extraIds.get(studyInstanceUid) ?? [])];
+    },
+
+    async lookupStudy(studyInstanceUid: string) {
+      return singleStudyId(await this.lookupStudyIds(studyInstanceUid));
+    },
+
+    async studyInfo(orthancStudyId: string) {
+      const study = (await restStudies<RestStudy & { LastUpdate?: string }>()).find((s) => s.ID === orthancStudyId);
+      if (!study) return null;
+      const info = studyInfoFromRest(study);
+      return info && { ...info, version: mockTest.versions.get(orthancStudyId) ?? info.version };
     },
 
     async sendStudy(modalityId: string, orthancStudyId: string) {
