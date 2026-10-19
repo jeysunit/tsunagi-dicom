@@ -43,6 +43,10 @@ export const PERMISSIONS = [
   "study.send",
   // 結果の分からない書き込みの操作を、管理者が確かめて記録に足す（照らし合わせ。docs/spec.md の 3.5）
   "pacs.reconcile",
+  // 段 5（推奨の案）：書き出し（ZIP。患者の情報を含んだまま持ち出せる形になる）
+  "study.export",
+  // 削除（管理者だけ。理由を必須・再認証の後）
+  "study.delete",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -61,8 +65,10 @@ export const ROLE_PERMISSIONS: PermissionMap = {
     "modality.check",
     "study.send",
     "pacs.reconcile",
+    "study.export",
+    "study.delete",
   ],
-  doctor: ["study.search", "image.retrieve", "viewer.remember"],
+  doctor: ["study.search", "image.retrieve", "viewer.remember", "study.export"],
   technologist: [
     "study.search",
     "image.retrieve",
@@ -71,6 +77,7 @@ export const ROLE_PERMISSIONS: PermissionMap = {
     "receive.view",
     "modality.check",
     "study.send",
+    "study.export",
   ],
   viewer: ["study.search", "image.retrieve"],
 };

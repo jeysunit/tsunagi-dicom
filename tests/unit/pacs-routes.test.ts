@@ -83,6 +83,10 @@ async function send(body: unknown, origin = ORIGIN) {
   const { POST } = await import("@/app/api/studies/[uid]/send/route");
   return POST(post(`/api/studies/${STUDY}/send`, body, origin), uidParams(STUDY));
 }
+async function sendStatus(requestId: string) {
+  const { GET } = await import("@/app/api/studies/[uid]/send/route");
+  return GET(new Request(`${ORIGIN}/api/studies/${STUDY}/send?requestId=${requestId}`), uidParams(STUDY));
+}
 async function readJob(token: string) {
   const { GET } = await import("@/app/api/jobs/[token]/route");
   return GET(new Request(`${ORIGIN}/api/jobs/${token}`), tokenParams(token));
@@ -420,6 +424,27 @@ describe("ほかの機器へ送る", () => {
     expect((await send({ modality: "dtg", requestId: crypto.randomUUID() })).status).toBe(202);
   });
 
+  it("解いていない結果不明の送信は、8 日たっても止めになり、確かめの道と照らし合わせから見える", async () => {
+    state.role = "technologist";
+    const { getBackend } = await import("@/lib/backend");
+    const { BackendUnknownError } = await import("@/lib/backend/types");
+    vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendUnknownError());
+    const first = crypto.randomUUID();
+    expect((await (await send({ modality: "dtg", requestId: first })).json()).outcome).toBe("unknown");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 8 * 24 * 60 * 60_000);
+      const blocked = await send({ modality: "dtg", requestId: crypto.randomUUID() });
+      expect(blocked.status).toBe(409);
+      expect((await blocked.json()).pendingRequestIds).toEqual([first]);
+      expect(await (await sendStatus(first)).json()).toMatchObject({ requestId: first, outcome: "unknown" });
+      state.role = "admin";
+      expect(await (await resolveSend(first, false)).json()).toEqual({ requestId: first, outcome: "not_delivered" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("照らし合わせで「届いていた」と記録した送信は、確かめの道で「届いた」を返す", async () => {
     state.role = "admin";
     const { getBackend } = await import("@/lib/backend");
@@ -442,7 +467,21 @@ describe("要求の記録の読み方（requestOutcome）", () => {
     const { requestOutcome } = await import("@/lib/pacs-ops");
     const job = "11111111-2222-4333-8444-555555555555";
     const row = (outcome: string, detail: Record<string, unknown>, actorId = "alice") => ({ actorId, outcome, detail: JSON.stringify(detail) });
-    expect(requestOutcome([])).toEqual({ phase: "none", outcome: null, jobId: null, actorId: null, studyInstanceUid: null, modality: null });
+    expect(requestOutcome([])).toEqual({
+      phase: "none",
+      outcome: null,
+      jobId: null,
+      actorId: null,
+      studyInstanceUid: null,
+      modality: null,
+      requestedAt: null,
+      dispatched: false,
+    });
+    // 削除の「送る」の行（dispatch）は、結果ではない（結果不明のまま、送ったことだけが分かる）
+    expect(requestOutcome([row("success", { phase: "request" }), row("success", { phase: "dispatch" })])).toMatchObject({
+      phase: "requested",
+      dispatched: true,
+    });
     // 断った行だけなら「求めた」は無い
     expect(requestOutcome([row("denied", { requestId: "x", reason: "forbidden" })]).phase).toBe("none");
     expect(requestOutcome([row("success", { phase: "request" })])).toMatchObject({ phase: "requested", actorId: "alice" });

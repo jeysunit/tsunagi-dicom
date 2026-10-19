@@ -47,7 +47,7 @@ export async function POST(request: Request, { params }: Context) {
     const db = await getDb();
     const backend = getBackend();
     // 同じ要求の ID がもう流れていれば、Orthanc を呼び直さず、その記録を返す
-    const prior = await rowsOfRequest(db, "send", requestId);
+    const prior = await rowsOfRequest(db, "send", requestId, uid);
     if (requestOutcome(prior).phase !== "none") return priorResponse(session, requestId, uid, modality, prior);
 
     const [dataset, orthancId, modalities] = await Promise.all([
@@ -66,7 +66,7 @@ export async function POST(request: Request, { params }: Context) {
     // - 同じ検査を同じ送り先へ送った要求で、結果の分からないもの（照らし合わせの前）があれば、新しい要求でも断る（重ねて送らない）
     type Begin = { kind: "repeated" } | { kind: "pending"; pending: string[] } | { kind: "first" };
     const begin = await auditIf<Begin>(session, async (tx) => {
-      if (requestOutcome(await rowsOfRequest(tx, "send", requestId)).phase !== "none") {
+      if (requestOutcome(await rowsOfRequest(tx, "send", requestId, uid)).phase !== "none") {
         return { value: { kind: "repeated" as const }, fields: null };
       }
       const pending = await unresolvedRequests(tx, "send", uid, (o) => o.modality === modality);
@@ -81,7 +81,7 @@ export async function POST(request: Request, { params }: Context) {
         fields: { action: "send", outcome: "success", patientId, studyInstanceUid: uid, detail: { ...detail, phase: "request" } },
       };
     });
-    if (begin.kind === "repeated") return priorResponse(session, requestId, uid, modality, await rowsOfRequest(db, "send", requestId));
+    if (begin.kind === "repeated") return priorResponse(session, requestId, uid, modality, await rowsOfRequest(db, "send", requestId, uid));
     if (begin.kind === "pending") {
       return Response.json(
         {
@@ -134,7 +134,7 @@ export async function GET(request: Request, { params }: Context) {
     const requestId = new URL(request.url).searchParams.get("requestId") ?? "";
     if (!isRequestId(requestId)) return Response.json({ error: "要求の ID（UUID）の形が誤り" }, { status: 400 });
     await requirePermission(session, "study.send", { action: "send", studyInstanceUid: uid, detail: { requestId } });
-    const rows = await rowsOfRequest(await getDb(), "send", requestId);
+    const rows = await rowsOfRequest(await getDb(), "send", requestId, uid);
     if (requestOutcome(rows).phase === "none") return Response.json({ requestId, outcome: "none" });
     return priorResponse(session, requestId, uid, null, rows);
   } catch (error) {

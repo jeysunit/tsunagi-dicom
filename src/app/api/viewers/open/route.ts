@@ -1,5 +1,6 @@
 import { RequestError } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
+import { sameOriginRequest } from "@/lib/api/same-origin";
 import { studyUidParam } from "@/lib/api/study-param";
 import { audit, requirePermission, requireSession } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
@@ -11,13 +12,6 @@ import { availableViewers, isViewerId, viewerUrl } from "@/lib/viewers";
 // このアプリの画面（同じ origin）から開いた要求だけを受ける。同じサイトの別の origin・別のサイトからの要求
 // （Sec-Fetch-Site が same-origin でない、Origin が違う）は、開いた記録を作らずに 403（利用者が分かれば断ったことを記録する）。
 
-/** 同じ origin の要求か。Sec-Fetch-Site を送らない古いブラウザ・道具は Origin だけで見る */
-function sameOriginRequest(request: Request): boolean {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin") return false;
-  const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
-}
 
 export async function GET(request: Request) {
   try {

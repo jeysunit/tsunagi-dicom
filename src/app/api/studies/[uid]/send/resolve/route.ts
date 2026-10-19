@@ -27,7 +27,7 @@ export async function POST(request: Request, { params }: Context) {
     const { requestId, delivered, note } = await readJson(request, Body, 4096);
     await requirePermission(session, "pacs.reconcile", { action: "send", studyInstanceUid: uid, detail: { requestId, via: "resolve" } });
     const result = await auditIf(session, async (tx) => {
-      const rows = await rowsOfRequest(tx, "send", requestId);
+      const rows = await rowsOfRequest(tx, "send", requestId, uid);
       const o = requestOutcome(rows);
       if (o.phase === "none" || o.studyInstanceUid !== uid) return { value: "missing" as const, fields: null };
       if (!(o.phase === "requested" || (o.phase === "result" && o.outcome === "unknown"))) {

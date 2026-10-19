@@ -45,6 +45,8 @@ model AuditLog {
   @@index([studyInstanceUid])
   // 書き込みの操作の要求の ID を、決めた期間の中の同じ操作の行だけから探すため（src/lib/pacs-ops.ts。段 4）
   @@index([action, occurredAt])
+  // 書き込みの操作の、同じ検査の要求（解いていない結果不明の要求）を、期間で切らずに探すため（src/lib/pacs-ops.ts。段 5）
+  @@index([action, studyInstanceUid])
 }
 
 // アプリの利用者（AUTH_MODE=local。docs/spec.md の 3.6、第7.0版 14 遵守事項①②⑤⑥⑧・14.2）。

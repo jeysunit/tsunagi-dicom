@@ -37,7 +37,7 @@ export async function GET(_request: Request, { params }: Context) {
 
     if (jobFinished(job.state)) {
       await auditIf(session, async (tx) => {
-        const rows = await rowsOfRequest(tx, "send", payload.requestId);
+        const rows = await rowsOfRequest(tx, "send", payload.requestId, payload.studyInstanceUid);
         if (requestOutcome(rows).phase === "done") return { value: null, fields: null };
         return {
           value: null,

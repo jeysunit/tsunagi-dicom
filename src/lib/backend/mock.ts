@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { crc32 } from "node:zlib";
 import {
   firstInstanceId,
   isOrthancId,
@@ -10,6 +11,8 @@ import {
   parseChanges,
   readChanges,
   receivedStudyIds,
+  singleStudyId,
+  studyInfoFromRest,
   receptionFromMetadata,
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
@@ -43,6 +46,8 @@ import {
 // - 段 4：受け取りの記録・機器・C-ECHO・送るは、Orthanc Book の形に合わせて手で作った見本（tests/fixtures/orthanc/made）と、
 //   このプロセスの記憶の中の仕事（job）で返す。送ると、仕事は読むたびに Pending → Running → Success（機器 offline へは Failure）と進む。
 //   機器 offline は C-ECHO に答えない。
+// - 段 5：書き出しは、画像の本体を入れない小さな ZIP を返す。削除は、このプロセスの記憶の中で検査を隠す（見本のファイルは変えない。
+//   消した検査は、検索・詳細・受け取りの記録・引き当て・中継のどれにも出さない）。
 
 /** モックの仕事（このプロセスの記憶の中だけ。Next.js が部品を分けて組んでも1つにする） */
 interface MockJob {
@@ -60,6 +65,70 @@ const mockJobs = (jobsHolder[JOBS_KEY] ??= new Map<string, MockJob>());
 const MOCK_CHANGES_MAX = 5;
 
 const orthancNow = (d = new Date()) => d.toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
+
+/** モックで消した検査（StudyInstanceUID。段 5）。このプロセスの記憶の中だけで、見本のファイルは変えない */
+const DELETED_KEY = Symbol.for("tsunagi-dicom.mock-deleted");
+const deletedHolder = globalThis as typeof globalThis & { [DELETED_KEY]?: Set<string> };
+const mockDeleted = (deletedHolder[DELETED_KEY] ??= new Set<string>());
+
+/** 試験のための、モックの Orthanc の中の変化（同じ UID の検査が2つある・確かめの後に検査が変わった） */
+const TEST_KEY = Symbol.for("tsunagi-dicom.mock-test");
+const testHolder = globalThis as typeof globalThis & {
+  [TEST_KEY]?: { extraIds: Map<string, string[]>; versions: Map<string, string> };
+};
+const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map() });
+
+/** 試験のため：モックで消した検査と、試験の変化を戻す */
+export function restoreMockStudies(): void {
+  mockDeleted.clear();
+  mockTest.extraIds.clear();
+  mockTest.versions.clear();
+}
+
+/** 試験のため：同じ StudyInstanceUID の検査が、Orthanc にもう1つある形にする（患者違いの重なりなど） */
+export function duplicateMockStudy(studyInstanceUid: string): void {
+  mockTest.extraIds.set(studyInstanceUid, ["00000000-00000000-00000000-00000000-00000001"]);
+}
+
+/** 試験のため：検査の版（LastUpdate）を替える（確かめの画面を出した後に、検査が変わった形） */
+export function touchMockStudy(orthancStudyId: string): void {
+  mockTest.versions.set(orthancStudyId, orthancNow());
+}
+
+/** 書き出しの ZIP の中身（モック。画像の本体は入れず、検査の UID を書いた1つのテキストのファイル）を、圧縮しない ZIP にする */
+function mockZip(name: string, text: string): Uint8Array<ArrayBuffer> {
+  const data = Buffer.from(text, "utf8");
+  const file = Buffer.from(name, "utf8");
+  const crc = crc32(data);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0x0800, 6); // 名前は UTF-8
+  local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(file.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0x0800, 8);
+  central.writeUInt32LE(crc, 16);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(file.length, 28);
+  const localSize = local.length + file.length + data.length;
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + file.length, 12);
+  end.writeUInt32LE(localSize, 16);
+  const all = Buffer.concat([local, file, data, central, file, end]);
+  const out = new Uint8Array(new ArrayBuffer(all.length));
+  out.set(all);
+  return out;
+}
 
 export function fixturesDir(): string {
   return path.join(process.cwd(), "tests", "fixtures", "orthanc");
@@ -99,10 +168,16 @@ interface PreviewImage {
 }
 
 export function createMockBackend(): Backend {
-  const qidoStudies = () => readJson<DicomJsonDataset[]>("dicom-web", "studies.json");
+  // 消した検査は、どの読み取りにも出さない
+  const qidoStudies = async () =>
+    (await readJson<DicomJsonDataset[]>("dicom-web", "studies.json")).filter(
+      (ds) => !mockDeleted.has(stringValue(ds, TAG.StudyInstanceUID)),
+    );
+  const restStudies = async <T extends RestStudy>() =>
+    (await readAll<T>("studies")).filter((s) => !mockDeleted.has(s.MainDicomTags.StudyInstanceUID ?? ""));
 
   async function restSeriesByStudy(): Promise<Map<string, RestSeries[]>> {
-    const [studies, series] = await Promise.all([readAll<RestStudy>("studies"), readAll<RestSeries>("series")]);
+    const [studies, series] = await Promise.all([restStudies(), readAll<RestSeries>("series")]);
     const uidById = new Map(studies.map((s) => [s.ID, s.MainDicomTags.StudyInstanceUID ?? ""]));
     const out = new Map<string, RestSeries[]>();
     for (const s of series) {
@@ -143,7 +218,7 @@ export function createMockBackend(): Backend {
 
     async countStudies() {
       const stats = await readJson<{ CountStudies: number }>("rest", "statistics.json");
-      return { count: stats.CountStudies, exact: true };
+      return { count: stats.CountStudies - mockDeleted.size, exact: true };
     },
 
     async searchSeries(studyInstanceUid: string) {
@@ -201,7 +276,7 @@ export function createMockBackend(): Backend {
         { limit: 100, maxCalls: 200 },
       );
       const [studies, series, metadata] = await Promise.all([
-        readAll<RestStudy & { Series?: string[] }>("studies"),
+        restStudies<RestStudy & { Series?: string[] }>(),
         readAll<RestSeries>("series"),
         readJson<Record<string, unknown>>("made", "instance-metadata.json"),
       ]);
@@ -228,9 +303,21 @@ export function createMockBackend(): Backend {
       return modalityId !== "offline";
     },
 
+    async lookupStudyIds(studyInstanceUid: string) {
+      const studies = await restStudies();
+      const ids = studies.filter((s) => s.MainDicomTags.StudyInstanceUID === studyInstanceUid).map((s) => s.ID);
+      return [...ids, ...(mockTest.extraIds.get(studyInstanceUid) ?? [])];
+    },
+
     async lookupStudy(studyInstanceUid: string) {
-      const studies = await readAll<RestStudy>("studies");
-      return studies.find((s) => s.MainDicomTags.StudyInstanceUID === studyInstanceUid)?.ID ?? null;
+      return singleStudyId(await this.lookupStudyIds(studyInstanceUid));
+    },
+
+    async studyInfo(orthancStudyId: string) {
+      const study = (await restStudies<RestStudy & { LastUpdate?: string }>()).find((s) => s.ID === orthancStudyId);
+      if (!study) return null;
+      const info = studyInfoFromRest(study);
+      return info && { ...info, version: mockTest.versions.get(orthancStudyId) ?? info.version };
     },
 
     async sendStudy(modalityId: string, orthancStudyId: string) {
@@ -259,6 +346,19 @@ export function createMockBackend(): Backend {
         CompletionTime: done ? orthancNow() : "",
         Type: "DicomModalityStore",
       });
+    },
+
+    async exportStudy(orthancStudyId: string) {
+      const study = (await restStudies()).find((s) => s.ID === orthancStudyId);
+      if (!study) throw new BackendError("検査が見つからない", 404);
+      const text = `モックの書き出し（画像の本体は入っていない）\nStudyInstanceUID: ${study.MainDicomTags.StudyInstanceUID ?? ""}\n`;
+      return new Response(mockZip("README.txt", text), { status: 200, headers: { "content-type": "application/zip" } });
+    },
+
+    async deleteStudy(orthancStudyId: string) {
+      const study = (await restStudies()).find((s) => s.ID === orthancStudyId);
+      if (!study) throw new BackendError("検査が見つからない", 404);
+      mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
     },
   };
 }

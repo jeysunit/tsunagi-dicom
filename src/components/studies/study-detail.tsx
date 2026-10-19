@@ -5,7 +5,7 @@ import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useId, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import type { ScreenInfo } from "@/components/studies/screen-info";
-import { SendPanel } from "@/components/studies/send-panel";
+import { PacsActions } from "@/components/studies/pacs-actions";
 import { Thumbnail } from "@/components/studies/thumbnail";
 import { ViewerMenu } from "@/components/studies/viewer-menu";
 import type { DicomValueRow } from "@/lib/all-values";
@@ -213,8 +213,8 @@ export function StudyDetailPanel({
         </div>
       </div>
 
-      {/* ほかの機器へ送る（段 4。役割に許されたときだけ）。行が替わったら作り直す */}
-      <SendPanel key={uid} study={study} screen={screen} />
+      {/* PACS の操作（送る・書き出し・削除。役割に許されたものだけ）。行が替わったら作り直す */}
+      <PacsActions key={uid} study={study} screen={screen} onChanged={changed} />
 
       {/* シリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地） */}
       <div data-theme="dark" className="rounded-md bg-background p-2 text-foreground" data-testid="series-strip">
