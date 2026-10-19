@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Bookmark, Check, Copy } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -171,6 +171,15 @@ function AllValues({ uid }: { uid: string }) {
   );
 }
 
+const STATE_KEYS = ["inspected", "read", "urgent", "bookmarked", "rememberedViewer", "defaultViewer", "stateVersion"] as const;
+
+/** 一覧の行の、状態の項目のうち、値があるものだけ */
+function definedStateOf(row: StudyView): Partial<StudyView> {
+  const out: Record<string, unknown> = {};
+  for (const k of STATE_KEYS) if (row[k] !== undefined) out[k] = row[k];
+  return out as Partial<StudyView>;
+}
+
 export function StudyDetailPanel({
   row,
   screen,
@@ -185,14 +194,22 @@ export function StudyDetailPanel({
   fetchEnabled?: boolean;
 }) {
   const uid = row.studyInstanceUid ?? "";
-  const queryClient = useQueryClient();
-  const detail = useQuery({ queryKey: detailKey(uid), queryFn: () => fetchDetail(uid), enabled: uid !== "" && fetchEnabled });
-  // 詳細が届くまでは一覧の行の値で描き、届いたら詳細の値にする（状態の変更は両方を読み直す）
-  const study: StudyView = { ...row, ...detail.data?.study };
-  const changed = () => {
-    void queryClient.invalidateQueries({ queryKey: detailKey(uid) });
-    onChanged();
-  };
+  // 詳細の取得が「詳細を開いた」の監査の記録（view_study）になる。だから、
+  // ・取っていない間（fetchEnabled=false）は、キャッシュに中身があっても出さない
+  // ・取った詳細は、行を離れたらキャッシュに残さない（gcTime: 0）。A→B→A と戻っても、出す前に必ず取り直して記録が残る
+  const detail = useQuery({
+    queryKey: detailKey(uid),
+    queryFn: () => fetchDetail(uid),
+    enabled: uid !== "" && fetchEnabled,
+    gcTime: 0,
+  });
+  const data = fetchEnabled ? detail.data : undefined;
+  const failed = fetchEnabled && detail.isError;
+  // 詳細が届くまでは一覧の行の値で描き、届いたら詳細の値にする。
+  // 状態の値（検像・読影・緊急・ブックマーク・覚えたビューア）は、状態を変えたあと読み直す一覧の行の値を優先する
+  const study: StudyView = { ...row, ...data?.study, ...definedStateOf(row) };
+  // 状態を変えたら一覧を読み直す（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
+  const changed = onChanged;
 
   return (
     <section aria-label="検査の詳細" className="space-y-4 px-4 py-4" data-testid="study-detail">
@@ -242,16 +259,16 @@ export function StudyDetailPanel({
       <div>
         <h3 className="mb-2 text-xs font-bold text-label">シリーズ</h3>
         <div data-theme="dark" className="rounded-md bg-background p-3 text-foreground" data-testid="series-strip">
-          {detail.isPending && <p className="text-label">読んでいる</p>}
-          {detail.isError && (
+          {!data && !failed && <p className="text-label">読んでいる</p>}
+          {failed && (
             <p role="alert" className="text-danger">
-              {detail.error.message}
+              {detail.error?.message}
             </p>
           )}
-          {detail.data && detail.data.series.length === 0 && <p className="text-label">シリーズが無い</p>}
-          {detail.data && detail.data.series.length > 0 && (
+          {data && data.series.length === 0 && <p className="text-label">シリーズが無い</p>}
+          {data && data.series.length > 0 && (
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {detail.data.series.map((s) => (
+              {data.series.map((s) => (
                 <li key={s.seriesInstanceUid} className="space-y-2 rounded border border-border bg-surface p-2" data-testid="series-item">
                   <div className="flex gap-3">
                     <Thumbnail studyUid={uid} seriesUid={s.seriesInstanceUid} size={72} />

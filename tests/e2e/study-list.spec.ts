@@ -214,6 +214,8 @@ test("上下に分ける：矢印で移した行は、一覧の見える所に�
 });
 
 test("上下に分ける：境目をキーボードで動かせ、位置を覚える", async ({ page }) => {
+  // 低い画面では、一覧の最小の高さのために境目の動く範囲が狭まる（別の試験で見る）。ここは高い画面で動きを見る
+  await page.setViewportSize({ width: 1280, height: 1000 });
   await asRole(page, "医師");
   const handle = page.getByTestId("split-handle");
   await expect(handle).toHaveAttribute("role", "separator");
@@ -266,8 +268,142 @@ test("上下に分ける：狭い画面では一覧だけを出し、行を選�
   await expect(page.getByTestId("study-detail")).toBeVisible();
   await expect(detailUid(page)).toHaveText(STUDY);
   expect(await noPageScroll()).toBe(true);
+  // 開いたら詳細へフォーカスが移り、背後の一覧は操作の対象から外れる（inert）。Tab を送っても一覧の行には出ない
+  const pane = page.getByTestId("detail-pane");
+  await expect(pane).toBeFocused();
+  await expect(page.locator("[data-split-root] > div[inert]")).toHaveCount(1);
+  for (let i = 0; i < 6; i++) await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => !!document.activeElement?.closest("tr[data-study-uid]"))).toBe(false);
+  expect(await pane.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+
+  // 詳細の中からの Escape で閉じ、フォーカスは元の行へ戻り、一覧が操作できるに戻る
+  await page.keyboard.press("Escape");
+  await expect(pane).toBeHidden();
+  await expect(row(page)).toBeFocused();
+  await expect(page.locator("[data-split-root] > div[inert]")).toHaveCount(0);
+
+  // 閉じるボタンでも同じ
+  await row(page).click({ position: { x: 100, y: 20 } });
+  await expect(pane).toBeFocused();
   await page.getByRole("button", { name: "詳細を閉じる" }).click();
-  await expect(page.getByTestId("detail-pane")).toBeHidden();
+  await expect(pane).toBeHidden();
+  await expect(row(page)).toBeFocused();
+});
+
+test("上下に分ける：境目を上へ寄せても、一覧が最小の高さを保ち、絞り込みがはみ出さない", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await asRole(page, "医師");
+  await row(page).click();
+  const handle = page.getByTestId("split-handle");
+  await handle.focus();
+  await page.keyboard.press("Home");
+  await expect(handle).toHaveAttribute("aria-valuenow", "20");
+  const g = await page.evaluate(() => {
+    const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+    const filters = r("[data-testid=study-filters]");
+    const list = r("[data-testid=study-list-scroll]");
+    const handleRect = r("[data-testid=split-handle]");
+    const detail = r("[data-testid=detail-pane]");
+    return { filtersBottom: filters.bottom, listTop: list.top, listHeight: list.height, listBottom: list.bottom, handleTop: handleRect.top, handleBottom: handleRect.bottom, detailTop: detail.top };
+  });
+  // 一覧は 3 行ほどの高さ（14rem＝224px）を保つ
+  expect(g.listHeight).toBeGreaterThanOrEqual(220);
+  // 絞り込みは一覧の上、一覧は境目の上、境目は詳細の上（重ならない）
+  expect(g.filtersBottom).toBeLessThanOrEqual(g.listTop + 1);
+  expect(g.listBottom).toBeLessThanOrEqual(g.handleTop + 1);
+  expect(g.handleBottom).toBeLessThanOrEqual(g.detailTop + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
+});
+
+test("詳細を見せるときは必ず記録が残る：A→B→A と戻っても、300ms 止まらない限り中身は出ず、止まれば取り直して記録する", async ({ page }) => {
+  // サムネイルの取得（中継）も監査の記録になるので、数に混ざらないよう止める
+  await page.route("**/api/dicom-web/**", (r) => r.abort());
+  await asRole(page, "管理者");
+  const uids = await rows(page).evaluateAll((els) => els.map((el) => el.getAttribute("data-study-uid") ?? ""));
+  // 記録の数（つなぎの確かめが数えた件数）。確かめの呼び出し自体が増やす分を、先に測って引く
+  let calls = 0;
+  const raw = async () => {
+    calls++;
+    return ((await (await page.request.get("/api/audit/verify")).json()) as { checked: number }).checked;
+  };
+  const c0 = await raw();
+  const c1 = await raw();
+  const perCall = c1 - c0;
+  calls = 0;
+  const recorded = async () => (await raw()) - calls * perCall;
+  const detailGet = (uid: string) => page.waitForResponse((r) => r.url().endsWith(`/api/studies/${uid}`) && r.request().method() === "GET");
+
+  const base = await recorded();
+  const first = detailGet(uids[0]!);
+  await rows(page).first().click();
+  await first;
+  const k = (await recorded()) - base;
+  expect(k).toBeGreaterThan(0);
+  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+
+  // A→B→A を 300ms より短く：戻った A の中身は出ない（キャッシュも残さない）。記録も増えない
+  const gets: string[] = [];
+  page.on("request", (req) => {
+    const m = /\/api\/studies\/([0-9.]+)$/.exec(new URL(req.url()).pathname);
+    if (m && req.method() === "GET") gets.push(m[1]!);
+  });
+  const again = detailGet(uids[0]!);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await expect(rows(page).first()).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("series-strip")).toContainText("読んでいる");
+  expect(gets).toEqual([]);
+
+  // 止まれば取り直し、そのとき記録が1件分（k）増える。B は一度も取っていない
+  await again;
+  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  expect(await recorded()).toBe(base + 2 * k);
+  await page.waitForTimeout(600);
+  expect(await recorded()).toBe(base + 2 * k);
+  expect(gets).toEqual([uids[0]]);
+});
+
+test("状態を変えても、詳細は取り直さず、「詳細を開いた」の記録は増えない", async ({ page }) => {
+  await asRole(page, "技師");
+  const gets: string[] = [];
+  page.on("request", (req) => {
+    if (req.method() === "GET" && /\/api\/studies\/[0-9.]+$/.test(new URL(req.url()).pathname)) gets.push(req.url());
+  });
+  await row(page).click();
+  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  expect(gets).toHaveLength(1);
+  const inspected = page.getByTestId("state-inspected");
+  const before = await inspected.getAttribute("aria-pressed");
+  await inspected.click();
+  await expect(inspected).not.toHaveAttribute("aria-pressed", before!);
+  await page.waitForTimeout(500);
+  expect(gets).toHaveLength(1);
+  // 戻す
+  await inspected.click();
+  await expect(inspected).toHaveAttribute("aria-pressed", before!);
+  expect(gets).toHaveLength(1);
+});
+
+test("応答の順が逆になっても、古い応答が新しい選びを上書きしない", async ({ page }) => {
+  await asRole(page, "医師");
+  const uids = await rows(page).evaluateAll((els) => els.map((el) => el.getAttribute("data-study-uid") ?? ""));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // 1 番目の検査の詳細の応答だけを、あとから返す
+  await page.route(`**/api/studies/${uids[0]}`, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await rows(page).first().click();
+  await rows(page).nth(1).click();
+  await expect(detailUid(page)).toHaveText(uids[1]!);
+  await expect(page.getByTestId("series-strip")).not.toContainText("読んでいる");
+  release();
+  await page.waitForTimeout(500);
+  await expect(detailUid(page)).toHaveText(uids[1]!);
+  await expect(page.getByTestId("detail-pane")).not.toContainText(uids[0]!);
 });
 
 test("状態：技師が検像し、一覧の状態の見出しで絞れる。閲覧には検像のボタンが無い", async ({ page }) => {

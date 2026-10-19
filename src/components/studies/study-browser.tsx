@@ -18,6 +18,7 @@ import {
   splitAfterKey,
   subscribeSplit,
 } from "@/lib/client/split-position";
+import { getNarrow, getServerNarrow, subscribeNarrow } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
 import { formatBirthLine, formatDicomTime, formatSlashDate } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
@@ -44,6 +45,9 @@ export interface StudyListData {
 
 /** 矢印のキーで行を移したあと、詳細を読みに行くまでの待ち（ミリ秒）。通り過ぎた行を読まない */
 const DETAIL_DELAY_MS = 300;
+/** 一覧の最小の高さ（見出しと 3 行ほど。study-list-scroll の md:min-h-56 と同じ）と、絞り込みと一覧の間（gap-3） */
+const LIST_MIN_PX = 224;
+const TOP_GAP_PX = 12;
 
 const listKey =(filter: StudyFilter) => ["studies", filterToSearchParams(filter).toString()] as const;
 
@@ -222,7 +226,7 @@ function StudyRows({
   // 矢印で動く（ローヴィングの tabindex）：選んだ行、無ければ先頭の行だけが tab の止まり先
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border" data-testid="study-list-scroll">
+    <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
       <table className="w-full border-collapse" data-testid="study-table">
         <thead className="sticky top-0 z-10 bg-surface text-left text-xs text-label shadow-[0_1px_0_var(--color-border)]">
           <tr className="border-b border-border">
@@ -359,8 +363,17 @@ function Browser({
     window.clearTimeout(timer.current);
     setSelected(uid);
     if (uid === null || how === "click") setLoadedUid(uid);
-    else timer.current = window.setTimeout(() => setLoadedUid(uid), DETAIL_DELAY_MS);
+    else {
+      // 矢印で移る間は、いまの詳細を取った印を外す（A→B→A と戻っても、止まってから取り直す）
+      setLoadedUid(null);
+      timer.current = window.setTimeout(() => setLoadedUid(uid), DETAIL_DELAY_MS);
+    }
   }, []);
+
+  // 狭い画面では、詳細が一覧の上に重なる。開いたら詳細へフォーカスを移し、背後の一覧は操作・読み上げの対象から外し、閉じたら元の行へ戻す
+  const narrow = useSyncExternalStore(subscribeNarrow, getNarrow, getServerNarrow);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const restoreUid = useRef<string | null>(null);
 
   const split = useSyncExternalStore(subscribeSplit, getSplit, getServerSplit);
   const box = useRef<HTMLElement>(null);
@@ -386,10 +399,41 @@ function Browser({
   const changed = () => void queryClient.invalidateQueries({ queryKey: ["studies"] });
   const data = list.data;
   const selectedRow = selected ? data?.studies.find((s) => s.studyInstanceUid === selected) : undefined;
+  const overlayOpen = narrow && !!selectedRow;
+  useEffect(() => {
+    if (overlayOpen) paneRef.current?.focus({ preventScroll: true });
+  }, [overlayOpen]);
+  useEffect(() => {
+    if (selectedRow || !restoreUid.current) return;
+    const uid = restoreUid.current;
+    restoreUid.current = null;
+    box.current?.querySelector<HTMLElement>(`tr[data-study-uid="${CSS.escape(uid)}"]`)?.focus({ preventScroll: true });
+  }, [selectedRow]);
+  // 絞り込みの高さ（折り返しで変わる）を測り、上の場所の最小の高さに使う
+  const topRef = useRef<HTMLDivElement>(null);
+  const [filtersH, setFiltersH] = useState(0);
+  useEffect(() => {
+    const el = topRef.current?.firstElementChild;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setFiltersH(Math.ceil(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const closeDetail = () => {
+    restoreUid.current = selected;
+    select(null, "click");
+  };
 
   return (
     <section ref={box} data-split-root className="relative flex min-h-0 flex-1 flex-col">
-      <div id={topId} className="flex min-h-0 flex-1 flex-col gap-3 md:flex-none md:basis-(--split)" style={{ "--split": `${split}%` } as React.CSSProperties}>
+      {/* 上の場所は、絞り込みの高さ＋一覧の最小の高さより縮まない。境目を上へ寄せても、一覧が消えず、絞り込みがはみ出さない */}
+      <div
+        id={topId}
+        ref={topRef}
+        inert={overlayOpen || undefined}
+        className="flex min-h-0 flex-1 flex-col gap-3 md:min-h-(--top-min) md:flex-none md:basis-(--split)"
+        style={{ "--split": `${split}%`, "--top-min": `${filtersH + TOP_GAP_PX + LIST_MIN_PX}px` } as React.CSSProperties}
+      >
       <FilterBar
         filter={filter}
         onChange={setFilter}
@@ -452,11 +496,20 @@ function Browser({
         <span aria-hidden className="h-1 w-16 rounded-full bg-border group-hover:bg-label group-focus-visible:bg-ring" />
       </div>
 
-      {/* 下：選んだ検査の詳細。狭い画面では、選んだときだけ一覧の上に重ねて出す */}
+      {/* 下：選んだ検査の詳細。狭い画面では、選んだときだけ一覧の上に重ねて出す。詳細の中の Escape で閉じる（メニューが開いているときはメニューが先） */}
+      {/* 枠そのものは操作の部品ではない（フォーカスを受けて Escape を拾うだけ）ので、この規則だけ外す */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
+        ref={paneRef}
+        tabIndex={-1}
         data-testid="detail-pane"
+        onKeyDown={(e) => {
+          if (e.key !== "Escape" || !selectedRow || e.defaultPrevented) return;
+          if (e.currentTarget.querySelector("[role=menu]")) return;
+          closeDetail();
+        }}
         className={cn(
-          "bg-surface max-md:absolute max-md:inset-0 max-md:z-30 max-md:overflow-auto md:min-h-0 md:flex-1 md:overflow-auto md:rounded-md md:border md:border-border",
+          "bg-surface focus-visible:outline-none max-md:absolute max-md:inset-0 max-md:z-30 max-md:overflow-auto md:min-h-0 md:flex-1 md:overflow-auto md:rounded-md md:border md:border-border",
           !selectedRow && "max-md:hidden",
         )}
       >
@@ -465,7 +518,7 @@ function Browser({
             <button
               type="button"
               aria-label="詳細を閉じる"
-              onClick={() => select(null, "click")}
+              onClick={closeDetail}
               className="sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden"
             >
               <X aria-hidden className="size-5" />
