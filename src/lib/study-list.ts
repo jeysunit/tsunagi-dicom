@@ -1,5 +1,5 @@
 import type { Role } from "@/lib/auth/roles";
-import { studyFromDicomJson } from "@/lib/backend/dicom-json";
+import { inDateRange, studyFromDicomJson } from "@/lib/backend/dicom-json";
 import type { Backend, SeriesSummary, StudySummary } from "@/lib/backend/types";
 import { STUDY_LIMIT } from "@/lib/backend/types";
 import type { Db } from "@/lib/db";
@@ -12,8 +12,20 @@ import {
   type SeriesView,
   type StudyView,
 } from "@/lib/fields";
-import { primaryGroup } from "@/lib/modalities";
-import { dateQuery, DEFAULT_FILTER, matchesFilter, todayIn, type StudyFilter } from "@/lib/study-filter";
+import type { SimpleDate } from "@/lib/format/japanese-date";
+import { MODALITY_GROUPS, primaryGroup, studyInGroup } from "@/lib/modalities";
+import {
+  dateQuery,
+  DEFAULT_FILTER,
+  FACET_DATES,
+  matchesFilter,
+  STATUS_FIELD,
+  STATUS_FILTERS,
+  statusMatches,
+  todayIn,
+  type StudyFacets,
+  type StudyFilter,
+} from "@/lib/study-filter";
 import { EMPTY_STATE, modalityDefaults, readStates } from "@/lib/study-state";
 import { resolveDefaultViewer, type ViewerInfo } from "@/lib/viewers";
 
@@ -37,6 +49,8 @@ export interface StudyListResult {
   count: { count: number; exact: boolean };
   /** ブラウザへ返す形（許可の一覧で絞ったもの） */
   studies: StudyView[];
+  /** 見出しごとの件数（許可の一覧に載っていない項目の見出しは含めない） */
+  facets: StudyFacets;
   /** 監査の記録に残す、返した検査（ブラウザへは返さない） */
   returned: StudySummary[];
   /** 画像サーバーへ求めた時刻（ミリ秒） */
@@ -57,16 +71,66 @@ async function decorate(deps: ListDeps, studies: StudySummary[]) {
   });
 }
 
+/**
+ * 見出しごとの件数。許可の一覧で絞った後の項目だけから数える（見えない項目の件数は、キーごと出さない）。
+ * 各見出しの件数は、それを押したあとの一覧の件数と同じ：モダリティの件数は状態と横断の検索を、
+ * 状態の件数はモダリティと横断の検索を、検査日の件数は両方と横断の検索を、いまの値のまま当てる。
+ * `dateViews` は検査日で絞らない一覧（検査日の件数の元。いまの一覧が全期間ならそれと同じ）
+ */
+export function computeFacets(
+  views: readonly StudyView[],
+  dateViews: readonly StudyView[],
+  filter: StudyFilter,
+  today: SimpleDate,
+  fields: readonly string[],
+): StudyFacets {
+  const facets: StudyFacets = {};
+  if (fields.includes("modalities")) {
+    const base = views.filter((v) => matchesFilter(v, { ...filter, modality: undefined }));
+    const modality: NonNullable<StudyFacets["modality"]> = { all: base.length };
+    for (const g of MODALITY_GROUPS) modality[g] = base.filter((v) => v.modalities && studyInGroup(v.modalities, g)).length;
+    facets.modality = modality;
+  }
+  const statusKinds = STATUS_FILTERS.filter((s) => fields.includes(STATUS_FIELD[s]));
+  if (statusKinds.length > 0) {
+    const base = views.filter((v) => matchesFilter(v, { ...filter, status: undefined }));
+    const status: NonNullable<StudyFacets["status"]> = { all: base.length };
+    for (const s of statusKinds) status[s] = base.filter((v) => statusMatches(v, s)).length;
+    facets.status = status;
+  }
+  if (fields.includes("studyDate")) {
+    const base = dateViews.filter((v) => matchesFilter(v, filter));
+    const date: NonNullable<StudyFacets["date"]> = {};
+    for (const d of FACET_DATES) {
+      const range = dateQuery({ date: d }, today);
+      date[d] = base.filter((v) => inDateRange(v.studyDate ?? "", range)).length;
+    }
+    facets.date = date;
+  }
+  return facets;
+}
+
 export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_FILTER): Promise<StudyListResult> {
   const today = todayIn(deps.timeZone ?? "Asia/Tokyo", deps.now);
+  const fields = allowlistFor(deps.role, deps.allowlists).study;
   // 検査日を許されていない役割には、検査日の絞り込みも効かせない（隠した項目で探せないように。原則 8）
-  const dateAllowed = allowlistFor(deps.role, deps.allowlists).study.includes("studyDate");
+  const dateAllowed = fields.includes("studyDate");
   const fetchedAt = Date.now();
   const studies = await deps.backend.searchStudies(STUDY_LIMIT, dateAllowed ? dateQuery(filter, today) : {});
-  const rows = (await decorate(deps, studies)).filter((r) => matchesFilter(r.view, filter));
+  const decorated = await decorate(deps, studies);
+  const rows = decorated.filter((r) => matchesFilter(r.view, filter));
+  // 検査日の件数の元：いまの一覧が全期間でなければ、全期間をもう一度読む（件数を数えるだけ。監査の記録の「返した検査」には入れない）
+  const dateRows = dateAllowed && filter.date !== "all" ? await decorate(deps, await deps.backend.searchStudies(STUDY_LIMIT, {})) : decorated;
   return {
     count: { count: rows.length, exact: studies.length < STUDY_LIMIT },
     studies: rows.map((r) => r.view),
+    facets: computeFacets(
+      decorated.map((r) => r.view),
+      dateRows.map((r) => r.view),
+      filter,
+      today,
+      fields,
+    ),
     returned: rows.map((r) => r.summary),
     fetchedAt,
   };

@@ -61,7 +61,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       {deps.backend.mock && <p className="mb-3 text-xs text-label">モックのバックエンド</p>}
       <StudyBrowser
         initialFilter={filter}
-        initialData={{ count: result.count, studies: result.studies }}
+        initialData={{ count: result.count, studies: result.studies, facets: result.facets }}
         initialDataAt={result.fetchedAt}
         screen={screen}
       />

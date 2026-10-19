@@ -1,12 +1,11 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bookmark, Search, Siren, X } from "lucide-react";
+import { Bookmark, ChevronDown, ChevronRight, Search, Siren, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { Input } from "@/components/ui/input";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { StudyDetailPanel } from "@/components/studies/study-detail";
-import { Thumbnail } from "@/components/studies/thumbnail";
 import { openInViewer, ViewerMenu } from "@/components/studies/viewer-menu";
 import { getJson } from "@/lib/client/api";
 import {
@@ -24,16 +23,17 @@ import { formatBirthLine, formatDicomTime, formatSlashDate } from "@/lib/format/
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
 import {
   DATE_LABELS,
-  DATE_PRESETS,
+  FACET_DATES,
   filterToSearchParams,
   MAX_QUERY_LENGTH,
   STATUS_FILTERS,
   STATUS_LABELS,
+  type StudyFacets,
   type StudyFilter,
 } from "@/lib/study-filter";
 import { cn } from "@/lib/utils";
 
-// 検査の一覧（docs/spec.md の 3.1）。すぐ絞れる見出し・読みやすい一覧（14px）・詳細のパネル・ビューアの選び分け。
+// 検査の一覧（docs/spec.md の 3.1）。すぐ絞れる見出し（1 行・件数つき）・1 件 1 行の一覧（14px）・詳細のパネル・ビューアの選び分け。
 // 上下に分ける：上＝絞り込みと一覧（この中だけでスクロール）、下＝選んだ検査の詳細。頁全体はスクロールさせない。
 // データは TanStack Query で画面の API（/api/studies）から取る。最初の描画はサーバーの側で取った値を使う。
 // 絞り込みの値は頁の URL に持つ（開き直し・戻るでも同じ絞り込み）。
@@ -41,13 +41,15 @@ import { cn } from "@/lib/utils";
 export interface StudyListData {
   count: { count: number; exact: boolean };
   studies: StudyView[];
+  /** 見出しごとの件数（BFF が数える。許可されていない項目の見出しは含まれない） */
+  facets: StudyFacets;
 }
 
 /** 矢印のキーで行を移したあと、詳細を読みに行くまでの待ち（ミリ秒）。通り過ぎた行を読まない */
 const DETAIL_DELAY_MS = 300;
-/** 一覧の最小の高さ（見出しと 3 行ほど。study-list-scroll の md:min-h-56 と同じ）と、絞り込みと一覧の間（gap-3） */
+/** 一覧の最小の高さ（見出しと 7 行ほど。study-list-scroll の md:min-h-56 と同じ）と、絞り込みと一覧の間（gap-2） */
 const LIST_MIN_PX = 224;
-const TOP_GAP_PX = 12;
+const TOP_GAP_PX = 8;
 
 const listKey =(filter: StudyFilter) => ["studies", filterToSearchParams(filter).toString()] as const;
 
@@ -72,6 +74,19 @@ function ModalityTag({ modality }: { modality: string }) {
   );
 }
 
+/** 見出しの名前に件数を添える（`未読 (12)`）。件数が無い（許可されていない項目）ときは名前だけ */
+const withCount = (label: string, n: number | undefined) => (n === undefined ? label : `${label} (${n})`);
+
+/** 1 つの並び（タブ・ボタン）。押せる大きさは 28px の高さ（24px 以上） */
+function Segmented({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    // 見える名前は付けない（幅のため）。読み上げにはグループの名前、マウスには title で知らせる
+    <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label={label} title={label}>
+      {children}
+    </div>
+  );
+}
+
 function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClick: () => void; children: React.ReactNode; testId?: string }) {
   return (
     <button
@@ -80,8 +95,8 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
       data-testid={testId}
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-0.5 text-sm whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        pressed ? "border-primary bg-primary text-primary-foreground" : "border-border text-foreground hover:bg-muted",
+        "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm transition-colors last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
+        pressed ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted",
       )}
     >
       {children}
@@ -89,8 +104,21 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
   );
 }
 
-function FilterBar({ filter, onChange, trailing }: { filter: StudyFilter; onChange: (f: StudyFilter) => void; trailing?: React.ReactNode }) {
+function FilterBar({
+  filter,
+  facets,
+  onChange,
+  trailing,
+}: {
+  filter: StudyFilter;
+  facets: StudyFacets | undefined;
+  onChange: (f: StudyFilter) => void;
+  trailing?: React.ReactNode;
+}) {
   const [text, setText] = useState(filter.q ?? "");
+  // 使うことの少ない条件（期間の指定）は「詳しく」の中。期間で絞っているときは最初から開く
+  const [more, setMore] = useState(filter.date === "range");
+  const moreId = useId();
   // 打つたびに要求を送らない（止まってから 300 ミリ秒）
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -101,97 +129,122 @@ function FilterBar({ filter, onChange, trailing }: { filter: StudyFilter; onChan
   }, [text, filter, onChange]);
 
   return (
-    <div className="shrink-0 space-y-2" data-testid="study-filters">
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-        <div className="relative w-full max-w-xl">
+    <div className="shrink-0 space-y-1.5" data-testid="study-filters">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <Segmented label="検査日">
+          {FACET_DATES.map((d) => (
+            <Chip key={d} pressed={filter.date === d} onClick={() => onChange({ ...filter, date: d })} testId={`date-${d}`}>
+              {withCount(DATE_LABELS[d], facets?.date?.[d])}
+            </Chip>
+          ))}
+        </Segmented>
+        <Segmented label="モダリティ">
+          <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all">
+            {withCount("すべて", facets?.modality?.all)}
+          </Chip>
+          {MODALITY_GROUPS.map((m) => (
+            <Chip key={m} pressed={filter.modality === m} onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })} testId={`modality-${m}`}>
+              <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
+              {withCount(m, facets?.modality?.[m])}
+            </Chip>
+          ))}
+        </Segmented>
+        <Segmented label="状態">
+          <Chip pressed={!filter.status} onClick={() => onChange({ ...filter, status: undefined })} testId="status-all">
+            {withCount("すべて", facets?.status?.all)}
+          </Chip>
+          {STATUS_FILTERS.map((s) => (
+            <Chip key={s} pressed={filter.status === s} onClick={() => onChange({ ...filter, status: filter.status === s ? undefined : s })} testId={`status-${s}`}>
+              {withCount(STATUS_LABELS[s], facets?.status?.[s])}
+            </Chip>
+          ))}
+        </Segmented>
+        <div className="relative w-56 max-w-full">
           <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-label" />
           <Input
             type="search"
             value={text}
             maxLength={MAX_QUERY_LENGTH}
             onChange={(e) => setText(e.target.value)}
-            placeholder="患者 ID・氏名（漢字・かな・英字）・受付番号・検査の記述"
+            placeholder="患者 ID・氏名・受付番号など"
+            title="患者 ID・氏名（漢字・かな・英字）・受付番号・検査の記述で探す"
             aria-label="横断の検索"
-            className="h-9 pl-8"
+            className="h-7 pl-8"
             data-testid="study-search"
           />
         </div>
+        <button
+          type="button"
+          aria-expanded={more}
+          aria-controls={moreId}
+          data-testid="filter-more"
+          onClick={() => setMore((v) => !v)}
+          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm text-link hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
+          詳しく
+        </button>
         {trailing}
       </div>
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="検査日">
-        <span className="w-20 text-xs text-label">検査日</span>
-        {DATE_PRESETS.map((d) => (
-          <Chip key={d} pressed={filter.date === d} onClick={() => onChange({ ...filter, date: d })} testId={`date-${d}`}>
-            {DATE_LABELS[d]}
-          </Chip>
-        ))}
-        {filter.date === "range" && (
-          <span className="flex items-center gap-1">
-            <Input
-              type="date"
-              aria-label="期間の始まり"
-              value={filter.from ?? ""}
-              onChange={(e) => onChange({ ...filter, from: e.target.value || undefined })}
-              className="h-8 w-40"
-            />
-            <span className="text-label">〜</span>
-            <Input
-              type="date"
-              aria-label="期間の終わり"
-              value={filter.to ?? ""}
-              onChange={(e) => onChange({ ...filter, to: e.target.value || undefined })}
-              className="h-8 w-40"
-            />
-          </span>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="モダリティ">
-        <span className="w-20 text-xs text-label">モダリティ</span>
-        <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all">
-          すべて
-        </Chip>
-        {MODALITY_GROUPS.map((m) => (
-          <Chip key={m} pressed={filter.modality === m} onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })} testId={`modality-${m}`}>
-            <span aria-hidden className={cn("mr-1.5 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
-            {m}
-          </Chip>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="状態">
-        <span className="w-20 text-xs text-label">状態</span>
-        <Chip pressed={!filter.status} onClick={() => onChange({ ...filter, status: undefined })} testId="status-all">
-          すべて
-        </Chip>
-        {STATUS_FILTERS.map((s) => (
-          <Chip key={s} pressed={filter.status === s} onClick={() => onChange({ ...filter, status: filter.status === s ? undefined : s })} testId={`status-${s}`}>
-            {STATUS_LABELS[s]}
-          </Chip>
-        ))}
-      </div>
+      {more && (
+        <div
+          id={moreId}
+          className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5"
+          role="group"
+          aria-label="詳しい条件"
+          data-testid="filter-more-panel"
+        >
+          <span className="text-xs text-label">検査日</span>
+          <div className="inline-flex overflow-hidden rounded-md border border-border">
+            <Chip pressed={filter.date === "range"} onClick={() => onChange({ ...filter, date: "range" })} testId="date-range">
+              {DATE_LABELS.range}
+            </Chip>
+          </div>
+          {filter.date === "range" && (
+            <span className="flex items-center gap-1">
+              <Input
+                type="date"
+                aria-label="期間の始まり"
+                value={filter.from ?? ""}
+                onChange={(e) => onChange({ ...filter, from: e.target.value || undefined })}
+                className="h-7 w-40"
+              />
+              <span className="text-label">〜</span>
+              <Input
+                type="date"
+                aria-label="期間の終わり"
+                value={filter.to ?? ""}
+                onChange={(e) => onChange({ ...filter, to: e.target.value || undefined })}
+                className="h-7 w-40"
+              />
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 function StateBadges({ s }: { s: StudyView }) {
   return (
-    <span className="flex flex-wrap items-center gap-1 text-xs">
+    <span className="flex flex-nowrap items-center gap-1 text-xs">
       {s.urgent && (
-        <span className="inline-flex items-center gap-0.5 rounded bg-danger px-1.5 py-0.5 font-bold text-background" data-testid="badge-urgent">
+        <span className="inline-flex items-center gap-0.5 rounded bg-danger px-1 py-0.5 font-bold text-background" data-testid="badge-urgent">
           <Siren aria-hidden className="size-3" />
           緊急
         </span>
       )}
       {typeof s.inspected === "boolean" && (
-        <span className={cn("rounded border border-border px-1.5 py-0.5", s.inspected ? "text-foreground" : "text-label")}>
+        <span className={cn("rounded border border-border px-1 py-0.5 whitespace-nowrap", s.inspected ? "text-foreground" : "text-label")}>
           {s.inspected ? "検像済" : "未検像"}
         </span>
       )}
       {typeof s.read === "boolean" && (
-        <span className={cn("rounded border border-border px-1.5 py-0.5", s.read ? "text-foreground" : "text-label")}>
+        <span className={cn("rounded border border-border px-1 py-0.5 whitespace-nowrap", s.read ? "text-foreground" : "text-label")}>
           {s.read ? "既読" : "未読"}
         </span>
       )}
-      {s.bookmarked && <Bookmark aria-label="ブックマーク" className="size-3.5 fill-current text-link" />}
+      {s.bookmarked && <Bookmark aria-label="ブックマーク" className="size-3.5 shrink-0 fill-current text-link" />}
     </span>
   );
 }
@@ -208,6 +261,27 @@ function revealRow(row: HTMLElement) {
   if (r.top < top) list.scrollTop -= top - r.top;
   else if (r.bottom > bottom) list.scrollTop += r.bottom - bottom;
 }
+
+/**
+ * 一覧の列（px）。モダリティ・検査の記述は残りの幅を取る（幅 1280px で約 130px、1920px で約 770px）。
+ * 幅が合わない列は `…` で切れる（全文は title）。氏名の漢字とかなは別の列（かなは漢字の右）
+ */
+const COLUMNS = [
+  { key: "state", width: 132 },
+  { key: "date", width: 148 },
+  { key: "id", width: 116 },
+  { key: "name", width: 104 },
+  { key: "kana", width: 108 },
+  { key: "birth", width: 236 },
+  { key: "desc", width: undefined },
+  { key: "count", width: 100 },
+  { key: "viewer", width: 142 },
+] as const;
+
+/** 一覧の 1 行の高さ（28px）。14px の文字（行の高さ 20px）に上下 4px */
+const CELL = "h-7 px-2 py-0";
+/** 値が 1 行に収まらないときは `…` で切る（全文は title）。一覧の行だけ。詳細のパネルでは切らない */
+const CUT = "overflow-hidden text-ellipsis whitespace-nowrap";
 
 function StudyRows({
   studies,
@@ -227,20 +301,25 @@ function StudyRows({
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
-      <table className="w-full border-collapse" data-testid="study-table">
+      <table className="w-full min-w-[1180px] table-fixed border-collapse" data-testid="study-table">
+        <colgroup>
+          {COLUMNS.map((c) => (
+            <col key={c.key} style={c.width ? { width: c.width } : undefined} />
+          ))}
+        </colgroup>
         <thead className="sticky top-0 z-10 bg-surface text-left text-xs text-label shadow-[0_1px_0_var(--color-border)]">
           <tr className="border-b border-border">
-            <th className="px-3 py-2 font-normal">状態</th>
-            <th className="px-3 py-2 font-normal">
-              <span className="sr-only">サムネイル</span>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>状態</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>検査日時</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>患者 ID</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>かな</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>
+            <th className={cn("px-2 py-1 font-normal", CUT)}>モダリティ・検査の記述</th>
+            <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数 / 画像数">
+              シリーズ・画像
             </th>
-            <th className="px-3 py-2 font-normal">検査日時</th>
-            <th className="px-3 py-2 font-normal">患者 ID</th>
-            <th className="px-3 py-2 font-normal">氏名</th>
-            <th className="px-3 py-2 font-normal">生年月日</th>
-            <th className="px-3 py-2 font-normal">モダリティ・検査の記述</th>
-            <th className="px-3 py-2 text-right font-normal">シリーズ・画像</th>
-            <th className="px-3 py-2 font-normal">
+            <th className="px-2 py-1 font-normal">
               <span className="sr-only">ビューア</span>
             </th>
           </tr>
@@ -249,6 +328,9 @@ function StudyRows({
           {studies.map((s, i) => {
             const uid = s.studyInstanceUid ?? "";
             const isOpen = selected !== null && uid === selected;
+            const dateTime = `${formatSlashDate(s.studyDate)} ${formatDicomTime(s.studyTime)}`.trim();
+            const birth = formatBirthLine(s.patientBirthDate, s.patientSex, s.studyDate);
+            const desc = [s.modalities?.join("・"), s.studyDescription].filter(Boolean).join(" ");
             return (
               <tr
                   key={uid || `row-${i}`}
@@ -256,7 +338,7 @@ function StudyRows({
                   aria-selected={isOpen}
                   tabIndex={uid === tabStop ? 0 : -1}
                   className={cn(
-                    "cursor-pointer border-b border-border align-top hover:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+                    "h-7 cursor-pointer border-b border-border align-middle hover:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                     isOpen && "bg-muted",
                   )}
                   onClick={(e) => {
@@ -289,40 +371,46 @@ function StudyRows({
                     }
                   }}
                 >
-                  <td className="px-3 py-2.5">
+                  <td className={cn(CELL, "overflow-hidden")}>
                     <StateBadges s={s} />
                   </td>
-                  <td className="px-3 py-2">{uid && <Thumbnail studyUid={uid} />}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
+                  <td className={cn(CELL, CUT)} title={dateTime}>
                     {formatSlashDate(s.studyDate)}
                     <span className="ml-1.5 text-label">{formatDicomTime(s.studyTime)}</span>
                   </td>
-                  <td className="px-3 py-2.5 font-mono">{s.patientId}</td>
-                  <td className="px-3 py-2.5">
+                  <td className={cn(CELL, CUT, "font-mono")} title={s.patientId}>
+                    {s.patientId}
+                  </td>
+                  <td className={cn(CELL, CUT)} title={s.patientName}>
                     {s.patientName ? (
-                      <span className="block font-bold text-value" data-testid="patient-name">
+                      <span className="font-bold text-value" data-testid="patient-name">
                         {s.patientName}
                       </span>
                     ) : (
-                      <span className="block text-label">（氏名なし）</span>
+                      <span className="text-label">（氏名なし）</span>
                     )}
-                    {s.patientKana && <span className="block text-xs text-label">{s.patientKana}</span>}
                   </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">{formatBirthLine(s.patientBirthDate, s.patientSex, s.studyDate)}</td>
-                  <td className="px-3 py-2.5">
-                    <span className="flex flex-wrap gap-2">
+                  <td className={cn(CELL, CUT, "text-label")} title={s.patientKana} data-testid="patient-kana">
+                    {s.patientKana}
+                  </td>
+                  <td className={cn(CELL, CUT)} title={birth}>
+                    {birth}
+                  </td>
+                  <td className={cn(CELL, CUT)} title={desc}>
+                    <span className="mr-2 inline-flex gap-2 align-middle">
                       {s.modalities?.map((m) => <ModalityTag key={m} modality={m} />)}
                     </span>
-                    {s.studyDescription && <span className="block text-xs text-label">{s.studyDescription}</span>}
+                    {s.studyDescription && <span className="text-label">{s.studyDescription}</span>}
                   </td>
-                  <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                  <td className={cn(CELL, CUT, "text-right")}>
                     {s.seriesCount ?? "—"}
                     <span className="text-label"> / </span>
                     {s.instanceCount ?? "—"}
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className={cn(CELL, "text-right")}>
                     {uid && (
                       <ViewerMenu
+                        compact
                         studyUid={uid}
                         defaultViewer={s.defaultViewer}
                         rememberedViewer={s.rememberedViewer}
@@ -431,11 +519,12 @@ function Browser({
         id={topId}
         ref={topRef}
         inert={overlayOpen || undefined}
-        className="flex min-h-0 flex-1 flex-col gap-3 md:min-h-(--top-min) md:flex-none md:basis-(--split)"
+        className="flex min-h-0 flex-1 flex-col gap-2 md:min-h-(--top-min) md:flex-none md:basis-(--split)"
         style={{ "--split": `${split}%`, "--top-min": `${filtersH + TOP_GAP_PX + LIST_MIN_PX}px` } as React.CSSProperties}
       >
       <FilterBar
         filter={filter}
+        facets={data?.facets}
         onChange={setFilter}
         trailing={
           <div className="flex items-baseline gap-2" aria-live="polite">

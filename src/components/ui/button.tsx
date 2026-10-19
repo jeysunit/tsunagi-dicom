@@ -15,6 +15,8 @@ const buttonVariants = cva(
       size: {
         default: "h-8 px-3",
         sm: "h-7 px-2 text-xs",
+        // 一覧の 1 行（28px）に収める大きさ。押せる大きさの下限（24px。WCAG 2.2 の 2.5.8）ちょうど
+        xs: "h-6 px-2 text-xs",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

@@ -60,7 +60,7 @@ beforeEach(() => {
 async function getStudies() {
   const { GET } = await import("@/app/api/studies/route");
   const res = await GET(new Request("http://127.0.0.1/api/studies"));
-  return { status: res.status, body: (await res.json()) as { studies: Record<string, unknown>[] } };
+  return { status: res.status, body: (await res.json()) as { studies: Record<string, unknown>[]; facets: Record<string, Record<string, number>> } };
 }
 
 describe("検査の一覧の画面の API と、役割の許可の一覧", () => {
@@ -72,6 +72,23 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
     for (const s of body.studies) expect(Object.keys(s).sort()).toEqual(["studyDate", "studyInstanceUid"]);
     const text = JSON.stringify(body);
     for (const leaked of ["JP-TEST-", "山田", "やまだ", "Yamada", "ACC-"]) expect(text).not.toContain(leaked);
+  });
+
+  it("見出しの件数は、許可の一覧に載っていない項目の分を返さない（閲覧は検査日の件数だけ）", async () => {
+    state.role = "viewer";
+    const { body } = await getStudies();
+    expect(Object.keys(body.facets)).toEqual(["date"]);
+    expect(body.facets.date).toMatchObject({ all: 8 });
+    expect(JSON.stringify(body.facets)).not.toMatch(/CT|MR|unread|inspected/);
+  });
+
+  it("ほかの役割には、検査日・モダリティ・状態の件数がある", async () => {
+    state.role = "doctor";
+    const { body } = await getStudies();
+    expect(Object.keys(body.facets).sort()).toEqual(["date", "modality", "status"]);
+    expect(body.facets.date!.all).toBe(8);
+    expect(body.facets.modality).toMatchObject({ all: 8, CT: 6, MR: 2 });
+    expect(body.facets.status!.all).toBe(8);
   });
 
   it("ほかの役割の見え方は変わらない", async () => {
