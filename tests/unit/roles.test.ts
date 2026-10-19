@@ -16,6 +16,8 @@ const EXPECTED: Record<Role, Permission[]> = {
     "viewer.remember",
     "viewer.defaults",
     ...PACS_OPS,
+    // 結果の分からない送信の照らし合わせは管理者だけ
+    "pacs.reconcile",
     "study.export",
     "study.delete",
   ],

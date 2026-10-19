@@ -22,7 +22,10 @@ type Phase =
   | { kind: "idle" }
   | { kind: "sending" }
   | { kind: "job"; requestId: string; token: string; job: JobView | null; readError?: string }
-  | { kind: "unknown"; requestId: string }
+  /** 結果不明。照らし合わせが済むまで、この画面からは送り直させない（BFF の側でも断る） */
+  | { kind: "unknown"; requestId: string; checkError?: string }
+  /** 照らし合わせで結果が分かった（管理者が確かめた・確かめの道で分かった） */
+  | { kind: "settled"; text: string }
   | { kind: "error"; text: string };
 
 const POLL_MS = 1500;
@@ -91,8 +94,12 @@ export function SendPanel({
     setPhase({ kind: "sending" });
     const result = await postJson(`/api/studies/${encodeURIComponent(uid)}/send`, { modality: target, requestId }, screen.csrfToken);
     const outcome = result.data.outcome;
+    const pending = result.data.pendingRequestIds;
     if (outcome === "accepted" && typeof result.data.job === "string") {
       setPhase({ kind: "job", requestId, token: result.data.job, job: null });
+    } else if (result.status === 409 && Array.isArray(pending) && typeof pending[0] === "string") {
+      // 同じ検査を同じ送り先へ送った、結果の分からない要求がある：そちらを確かめる
+      setPhase({ kind: "unknown", requestId: pending[0] });
     } else if (outcome === "unknown" || result.status === 0 || result.status >= 500 || (outcome === undefined && result.ok)) {
       // 答えが届かない・中で失敗した（BFF や手前の入口の 5xx）・答えを読めない：Orthanc は送ったかもしれないので結果不明
       setPhase({ kind: "unknown", requestId });
@@ -107,15 +114,28 @@ export function SendPanel({
         `/api/studies/${encodeURIComponent(uid)}/send?${new URLSearchParams({ requestId })}`,
       );
       if (r.outcome === "accepted" && r.job) setPhase({ kind: "job", requestId, token: r.job, job: null });
-      else if (r.outcome === "failed") setPhase({ kind: "error", text: "送れなかった（Orthanc が断った）" });
+      else if (r.outcome === "failed") setPhase({ kind: "settled", text: "送れていなかった。送り直せる" });
+      else if (r.outcome === "delivered") setPhase({ kind: "settled", text: "届いていた（管理者が確かめた）" });
       else setPhase({ kind: "unknown", requestId });
     } catch (e) {
-      setPhase({ kind: "error", text: (e as Error).message });
+      // 確かめの通信が失敗しても、結果不明のまま要求の ID と確かめの道を残す
+      setPhase({ kind: "unknown", requestId, checkError: (e as Error).message });
     }
   }
 
+  /** 管理者が送り先で確かめた結果を、記録に足す（照らし合わせ） */
+  async function resolve(requestId: string, delivered: boolean, note: string) {
+    const result = await postJson(`/api/studies/${encodeURIComponent(uid)}/send/resolve`, { requestId, delivered, note }, screen.csrfToken);
+    if (result.ok) setPhase({ kind: "settled", text: delivered ? "届いていたと記録した" : "届いていなかったと記録した。送り直せる" });
+    else setPhase({ kind: "unknown", requestId, checkError: errorText(result) });
+  }
+
   const chosen = modalities?.find((m) => m.id === target);
-  const busy = phase.kind === "sending" || (phase.kind === "job" && !(phase.job?.state === "Success" || phase.job?.state === "Failure"));
+  // 結果不明の間は送れない（新しい要求の ID で重ねて送らない）。照らし合わせで分かったら、また送れる
+  const busy =
+    phase.kind === "sending" ||
+    phase.kind === "unknown" ||
+    (phase.kind === "job" && !(phase.job?.state === "Success" || phase.job?.state === "Failure"));
 
   return (
     <>
@@ -171,6 +191,7 @@ export function SendPanel({
             phase={phase}
             onCheck={(id) => void check(id)}
             onReread={() => setPhase((p) => (p.kind === "job" ? { ...p, readError: undefined } : p))}
+            onResolve={screen.can.reconcile ? (id, delivered, note) => void resolve(id, delivered, note) : undefined}
           />
         </div>
       )}
@@ -178,7 +199,18 @@ export function SendPanel({
   );
 }
 
-function SendStatus({ phase, onCheck, onReread }: { phase: Phase; onCheck: (requestId: string) => void; onReread: () => void }) {
+function SendStatus({
+  phase,
+  onCheck,
+  onReread,
+  onResolve,
+}: {
+  phase: Phase;
+  onCheck: (requestId: string) => void;
+  onReread: () => void;
+  /** 管理者だけ：送り先で確かめた結果を記録に足す */
+  onResolve?: (requestId: string, delivered: boolean, note: string) => void;
+}) {
   if (phase.kind === "idle") return null;
   if (phase.kind === "sending") return <p role="status" data-testid="send-status">送る準備をしている</p>;
   if (phase.kind === "error") {
@@ -188,16 +220,15 @@ function SendStatus({ phase, onCheck, onReread }: { phase: Phase; onCheck: (requ
       </p>
     );
   }
-  if (phase.kind === "unknown") {
+  if (phase.kind === "settled") {
     return (
-      <div role="alert" className="space-y-1" data-testid="send-status">
-        <p className="text-danger">結果が分からない。送り直さずに、状態を確かめる。</p>
-        <p className="font-mono text-xs text-label">要求の ID {phase.requestId}</p>
-        <Button type="button" size="sm" variant="outline" onClick={() => onCheck(phase.requestId)}>
-          確かめる
-        </Button>
-      </div>
+      <p role="status" data-testid="send-status" data-state="Settled">
+        {phase.text}
+      </p>
     );
+  }
+  if (phase.kind === "unknown") {
+    return <UnknownStatus requestId={phase.requestId} checkError={phase.checkError} onCheck={onCheck} onResolve={onResolve} />;
   }
   const job = phase.job;
   if (phase.readError) {
@@ -218,5 +249,52 @@ function SendStatus({ phase, onCheck, onReread }: { phase: Phase; onCheck: (requ
       {job?.state === "Running" ? `（${job.progress}%）` : ""}
       {job?.state === "Failure" && job.errorDescription ? `：${job.errorDescription}` : ""}
     </p>
+  );
+}
+
+/** 結果不明：要求の ID と確かめの道を出し続ける。管理者には、送り先で確かめた結果を記録に足す道も出す */
+function UnknownStatus({
+  requestId,
+  checkError,
+  onCheck,
+  onResolve,
+}: {
+  requestId: string;
+  checkError?: string;
+  onCheck: (requestId: string) => void;
+  onResolve?: (requestId: string, delivered: boolean, note: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  return (
+    <div role="alert" className="space-y-1" data-testid="send-status" data-state="Unknown">
+      <p className="text-danger">結果が分からない。送り直さずに、状態を確かめる（確かめるまで、同じ検査を同じ機器へは送れない）。</p>
+      <p className="font-mono text-xs text-label">要求の ID {requestId}</p>
+      {checkError && <p className="text-xs text-danger">確かめられなかった：{checkError}</p>}
+      <Button type="button" size="sm" variant="outline" onClick={() => onCheck(requestId)} data-testid="send-check">
+        確かめる
+      </Button>
+      {onResolve && (
+        <div className="space-y-1 pt-1" data-testid="send-resolve">
+          <label className="block">
+            <span className="text-xs text-label">送り先で確かめた内容（管理者。記録に残る）</span>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={500}
+              className="h-7 w-full rounded-md border border-border bg-background px-2 text-sm text-value"
+              data-testid="send-resolve-note"
+            />
+          </label>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={note.trim() === ""} onClick={() => onResolve(requestId, true, note)}>
+              届いていた
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled={note.trim() === ""} onClick={() => onResolve(requestId, false, note)}>
+              届いていなかった
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -213,13 +213,15 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
 describe("モックのバックエンド（段 4：受け取りの記録・機器・C-ECHO・送る）", () => {
   it("受け取った検査を、新しい順に上限まで返す（見本の 8 件。REST で入った1件は送ってきた機器が無い）", async () => {
     const backend = createMockBackend();
-    const all = await backend.receivedStudies(100);
+    // モックの /changes は 1 回に 5 件までしか返さない（実の Orthanc の切り詰めの形）。Last から続けて読み切る
+    const { studies: all, complete } = await backend.receivedStudies(100);
+    expect(complete).toBe(true);
     expect(all).toHaveLength(8);
     expect(all.map((r) => r.receivedAt)).toEqual([...all.map((r) => r.receivedAt)].sort().reverse());
     expect(all[0]).toMatchObject({ remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6 });
     expect(all.filter((r) => r.origin === "RestApi").map((r) => r.remoteAet)).toEqual([null]);
     expect(all.find((r) => r.summary.studyInstanceUid === STUDY)).toMatchObject({ remoteAet: "CT_EXAMPLE", instanceCount: 4 });
-    expect(await backend.receivedStudies(2)).toHaveLength(2);
+    expect((await backend.receivedStudies(2)).studies).toHaveLength(2);
   });
 
   it("機器の一覧・C-ECHO（offline だけ答えない）・登録の無い機器は 404", async () => {

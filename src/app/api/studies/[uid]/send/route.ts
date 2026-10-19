@@ -9,7 +9,16 @@ import { isModalityName } from "@/lib/backend/orthanc-rest";
 import { BackendError, BackendUnknownError } from "@/lib/backend/types";
 import { getConfig } from "@/lib/config";
 import { getDb } from "@/lib/db";
-import { assertWriteAllowed, clip, isRequestId, requestOutcome, rowsOfRequest, signJobToken, type RequestRow } from "@/lib/pacs-ops";
+import {
+  assertWriteAllowed,
+  clip,
+  isRequestId,
+  requestOutcome,
+  rowsOfRequest,
+  signJobToken,
+  unresolvedRequests,
+  type RequestRow,
+} from "@/lib/pacs-ops";
 
 // ほかの機器へ送る（docs/spec.md の 3.4。段 4）。書き込みの操作の共通の決まり（3.5）を通す：
 // 役割（study.send）・CSRF・検証モードの書き込みの止め・呼ぶ前の記録（記録できなければ呼ばない）・呼んだ後の記録・
@@ -52,17 +61,36 @@ export async function POST(request: Request, { params }: Context) {
     const patientId = stringValue(dataset, TAG.PatientID);
     const detail = { requestId, modality, aet: target.aet };
 
-    // 呼ぶ前に「求めた」を記録する。同じ要求の ID が並んで届いたときは、記録の並びの中で先の1つだけを通す
-    const first = await auditIf(session, async (tx) => {
-      const again = requestOutcome(await rowsOfRequest(tx, "send", requestId)).phase !== "none";
+    // 呼ぶ前に「求めた」を記録する。記録の並びの中で、次の2つを確かめてから書く：
+    // - 同じ要求の ID が並んで届いたときは、先の1つだけを通す
+    // - 同じ検査を同じ送り先へ送った要求で、結果の分からないもの（照らし合わせの前）があれば、新しい要求でも断る（重ねて送らない）
+    type Begin = { kind: "repeated" } | { kind: "pending"; pending: string[] } | { kind: "first" };
+    const begin = await auditIf<Begin>(session, async (tx) => {
+      if (requestOutcome(await rowsOfRequest(tx, "send", requestId)).phase !== "none") {
+        return { value: { kind: "repeated" as const }, fields: null };
+      }
+      const pending = await unresolvedRequests(tx, "send", uid, (o) => o.modality === modality);
+      if (pending.length > 0) {
+        return {
+          value: { kind: "pending" as const, pending },
+          fields: { action: "send", outcome: "denied", patientId, studyInstanceUid: uid, detail: { ...detail, reason: "unresolved", pending } },
+        };
+      }
       return {
-        value: !again,
-        fields: again
-          ? null
-          : { action: "send", outcome: "success", patientId, studyInstanceUid: uid, detail: { ...detail, phase: "request" } },
+        value: { kind: "first" as const },
+        fields: { action: "send", outcome: "success", patientId, studyInstanceUid: uid, detail: { ...detail, phase: "request" } },
       };
     });
-    if (!first) return priorResponse(session, requestId, uid, modality, await rowsOfRequest(db, "send", requestId));
+    if (begin.kind === "repeated") return priorResponse(session, requestId, uid, modality, await rowsOfRequest(db, "send", requestId));
+    if (begin.kind === "pending") {
+      return Response.json(
+        {
+          error: "同じ検査を同じ機器へ送った結果が、まだ分からない。送り直さずに、先にその結果を確かめる",
+          pendingRequestIds: begin.pending,
+        },
+        { status: 409 },
+      );
+    }
 
     const result = (outcome: "success" | "failed" | "unknown", extra: Record<string, unknown> = {}) =>
       audit(session, { action: "send", outcome, patientId, studyInstanceUid: uid, detail: { ...detail, phase: "result", ...extra } });
@@ -145,5 +173,7 @@ function priorResponse(session: Session, requestId: string, uid: string, modalit
     return Response.json({ requestId, outcome: "accepted", job, repeated: true }, { status: 202 });
   }
   if (o.outcome === "failed") return Response.json({ requestId, outcome: "failed", repeated: true });
+  // 仕事の ID は無いが、管理者の照らし合わせで届いたと分かった
+  if (o.outcome === "success") return Response.json({ requestId, outcome: "delivered", repeated: true });
   return Response.json({ requestId, outcome: "unknown", repeated: true }, { status: 202 });
 }

@@ -65,8 +65,11 @@ export interface Backend {
 
   // ── 段 4：受け取ったものを見る・機器・送る（docs/spec.md の 3.3・3.4）。Orthanc の REST を使う ──
 
-  /** 受け取った検査（Orthanc の変更の記録 /changes から、新しい順に limit 件まで） */
-  receivedStudies(limit: number): Promise<ReceivedStudy[]>;
+  /**
+   * 受け取った検査（Orthanc の変更の記録 /changes から、新しい順に limit 件まで）。
+   * complete=false は、読む範囲（直近の変更の数・読む回数）の上限で止まり、もっと古い受け取りを読めていないこと
+   */
+  receivedStudies(limit: number): Promise<ReceivedStudies>;
   /** Orthanc に登録された機器（/modalities?expand） */
   listModalities(): Promise<ModalityEntry[]>;
   /** Orthanc から機器へ C-ECHO（/modalities/{id}/echo）。つながったら true。機器が無ければ BackendError(404) */
@@ -84,6 +87,12 @@ export interface Backend {
   exportStudy(orthancStudyId: string): Promise<Response>;
   /** 検査を消す（DELETE /studies/{id}）。書き込みの操作。無ければ BackendError(404)。答えが分からなければ BackendUnknownError */
   deleteStudy(orthancStudyId: string): Promise<void>;
+}
+
+export interface ReceivedStudies {
+  studies: ReceivedStudy[];
+  /** 読むと決めた範囲を読み切ったうえで、それより古い変更の記録が無い（false なら「ここまでしか読めていない」） */
+  complete: boolean;
 }
 
 /** 受け取った検査（docs/spec.md の 3.3） */

@@ -54,6 +54,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       rememberViewer: can(role, "viewer.remember"),
       allValues: can(role, "dicom.all_values"),
       send: can(role, "study.send") && writes,
+      reconcile: can(role, "pacs.reconcile"),
       export: can(role, "study.export") && writes,
       delete: can(role, "study.delete") && writes,
     },

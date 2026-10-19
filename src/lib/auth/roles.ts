@@ -41,6 +41,8 @@ export const PERMISSIONS = [
   "modality.check",
   // ほかの機器へ送る（書き込みの操作。docs/spec.md の 3.5 の共通の決まりを通す）
   "study.send",
+  // 結果の分からない書き込みの操作を、管理者が確かめて記録に足す（照らし合わせ。docs/spec.md の 3.5）
+  "pacs.reconcile",
   // 段 5（推奨の案）：書き出し（ZIP。患者の情報を含んだまま持ち出せる形になる）
   "study.export",
   // 削除（管理者だけ。理由を必須・再認証の後）
@@ -62,6 +64,7 @@ export const ROLE_PERMISSIONS: PermissionMap = {
     "receive.view",
     "modality.check",
     "study.send",
+    "pacs.reconcile",
     "study.export",
     "study.delete",
   ],

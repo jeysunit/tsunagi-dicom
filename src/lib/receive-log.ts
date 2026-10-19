@@ -11,17 +11,19 @@ export async function receiveLogView(
   backend: Pick<Backend, "receivedStudies">,
   role: Role,
   allowlists?: FieldAllowlistMap,
-): Promise<{ items: ReceivedView[]; returned: StudySummary[] }> {
+): Promise<{ items: ReceivedView[]; returned: StudySummary[]; complete: boolean }> {
   const allowlist = allowlistFor(role, allowlists);
-  const received = await backend.receivedStudies(RECEIVE_LIMIT);
+  const { studies, complete } = await backend.receivedStudies(RECEIVE_LIMIT);
   return {
-    items: received.map((r) =>
+    items: studies.map((r) =>
       receivedView(
         { receivedAt: r.receivedAt, remoteAet: r.remoteAet, origin: r.origin, receivedInstances: r.instanceCount },
         studyRecord(r.summary),
         allowlist,
       ),
     ),
-    returned: received.map((r) => r.summary),
+    returned: studies.map((r) => r.summary),
+    // false なら、読む範囲の上限で止まった（もっと古い受け取りを、ここでは読めていない）
+    complete,
   };
 }

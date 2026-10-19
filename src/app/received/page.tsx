@@ -39,6 +39,7 @@ export default async function ReceivedPage() {
   }
   const { session } = access;
   let items: ReceivedView[];
+  let complete: boolean;
   try {
     const result = await receiveLogView(getBackend(), session.role);
     const patients = new Set(result.returned.map((r) => r.patientId));
@@ -46,9 +47,15 @@ export default async function ReceivedPage() {
       action: "receive_log",
       patientId: patients.size === 1 ? [...patients][0]! : null,
       studyInstanceUid: result.returned.length === 1 ? result.returned[0]!.studyInstanceUid : null,
-      detail: { via: "page", results: result.returned.length, returned: result.returned.map((s) => [s.patientId, s.studyInstanceUid]) },
+      detail: {
+        via: "page",
+        results: result.returned.length,
+        complete: result.complete,
+        returned: result.returned.map((s) => [s.patientId, s.studyInstanceUid]),
+      },
     });
     items = result.items;
+    complete = result.complete;
   } catch (error) {
     if (!(error instanceof BackendError)) console.error(error);
     return (
@@ -66,6 +73,11 @@ export default async function ReceivedPage() {
           Orthanc の変更の記録から読める範囲の、新しい {RECEIVE_LIMIT} 件まで。古い記録は Orthanc に残らないことがある。
         </p>
       </div>
+      {!complete && (
+        <p role="status" className="text-xs text-danger" data-testid="received-incomplete">
+          ここまでしか読めていない（直近の変更の記録の読む範囲の上限に届いた）。もっと古い受け取りは、Orthanc で確かめる。
+        </p>
+      )}
       {items.length === 0 ? (
         <p className="text-label">受け取った検査が無い</p>
       ) : (
