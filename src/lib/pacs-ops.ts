@@ -4,6 +4,7 @@ import { RequestError } from "@/lib/api/auth-route";
 import type { AuditAction, Tx } from "@/lib/audit";
 import { audit, type Session } from "@/lib/auth/session";
 import { isJobId } from "@/lib/backend/orthanc-rest";
+import type { Backend } from "@/lib/backend/types";
 import { getConfig } from "@/lib/config";
 import type { Db } from "@/lib/db";
 
@@ -128,20 +129,90 @@ export async function assertWriteAllowed(
   throw new RequestError(403, "検証モードでは書き込みの操作を止めている（試すときは DEV_ALLOW_WRITE=true）");
 }
 
+/**
+ * 削除の照らし合わせ：消したはずの検査（「求めた」の行に残した Orthanc の中の ID）が、Orthanc にまだあるか。
+ * 古い行で ID が無ければ、同じ UID の検査が1つでもあれば「まだある」
+ */
+export async function deletedStudyStillPresent(backend: Backend, rows: readonly { detail: string | null }[], uid: string): Promise<boolean> {
+  const requestRow = rows.find((r) => parseDetail(r.detail).phase === "request");
+  const orthancId = requestRow ? parseDetail(requestRow.detail).orthancId : undefined;
+  return typeof orthancId === "string" ? (await backend.studyInfo(orthancId)) !== null : (await backend.lookupStudyIds(uid)).length > 0;
+}
+
 /** 形を確かめる前の値を記録に入れるときは、短く切る（記録を大きくさせない） */
 export const clip = (value: string, max = 64) => (value.length > max ? `${value.slice(0, max)}…` : value);
 
-// ── 仕事の ID の token（AES-256-GCM。鍵は SESSION_SECRET から HKDF で、用途の名前で分けて導く） ──
+// ── 画面へ渡す token（AES-256-GCM。鍵は SESSION_SECRET から HKDF で、用途の名前で分けて導く） ──
+// 仕事の ID の token（送る）と、削除の確かめの token（削除）。用途ごとに、頭の字・鍵・AAD を分ける（取り違えて開けない）
 
-const TOKEN_VERSION = "j1";
-const TOKEN_INFO = "tsunagi-dicom/job-token/v1";
 const TOKEN_SALT = Buffer.from("tsunagi-dicom", "utf8");
-const TOKEN_AAD = Buffer.from("tsunagi-dicom/job-token", "utf8");
+const TOKEN_KINDS = {
+  job: { version: "j1", info: "tsunagi-dicom/job-token/v1", aad: Buffer.from("tsunagi-dicom/job-token", "utf8") },
+  deleteConfirm: { version: "d1", info: "tsunagi-dicom/delete-confirm/v1", aad: Buffer.from("tsunagi-dicom/delete-confirm", "utf8") },
+} as const;
+type TokenKind = keyof typeof TOKEN_KINDS;
 /** token が使える時間（ミリ秒） */
 export const JOB_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+/** 削除の確かめの token が使える時間。確かめの画面を出してから、これより後には消せない（もう一度確かめる） */
+export const DELETE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 
-function tokenKey(sessionSecret: string): Buffer {
-  return Buffer.from(hkdfSync("sha256", Buffer.from(sessionSecret, "utf8"), TOKEN_SALT, TOKEN_INFO, 32));
+function tokenKey(kind: TokenKind, sessionSecret: string): Buffer {
+  return Buffer.from(hkdfSync("sha256", Buffer.from(sessionSecret, "utf8"), TOKEN_SALT, TOKEN_KINDS[kind].info, 32));
+}
+
+function sealToken(kind: TokenKind, payload: object, sessionSecret: string, ttlMs: number, now: number): string {
+  const { version, aad } = TOKEN_KINDS[kind];
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", tokenKey(kind, sessionSecret), iv, { authTagLength: 16 });
+  cipher.setAAD(aad);
+  const body = Buffer.concat([cipher.update(JSON.stringify({ ...payload, exp: now + ttlMs }), "utf8"), cipher.final()]);
+  return [version, iv.toString("base64url"), body.toString("base64url"), cipher.getAuthTag().toString("base64url")].join(".");
+}
+
+/** 鍵が違う・書き換えた・期限が過ぎた・用途が違う・形が崩れているときは null */
+function openToken(kind: TokenKind, token: string, sessionSecret: string, now: number): Record<string, unknown> | null {
+  const { version, aad } = TOKEN_KINDS[kind];
+  if (token.length > 2048) return null;
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== version) return null;
+  try {
+    const [, ivText, bodyText, tagText] = parts as [string, string, string, string];
+    const iv = Buffer.from(ivText, "base64url");
+    const tag = Buffer.from(tagText, "base64url");
+    if (iv.length !== 12 || tag.length !== 16) return null;
+    const decipher = createDecipheriv("aes-256-gcm", tokenKey(kind, sessionSecret), iv, { authTagLength: 16 });
+    decipher.setAAD(aad);
+    decipher.setAuthTag(tag);
+    const plain = Buffer.concat([decipher.update(Buffer.from(bodyText, "base64url")), decipher.final()]).toString("utf8");
+    const p: unknown = JSON.parse(plain);
+    if (!p || typeof p !== "object") return null;
+    const o = p as Record<string, unknown>;
+    if (typeof o.exp !== "number" || o.exp < now) return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+
+/** 削除の確かめの画面で見せた検査（Orthanc の中の ID・UID・患者 ID・版）と、見せた利用者。消す直前まで、全部が合うときだけ消す */
+export interface DeleteConfirmPayload {
+  orthancId: string;
+  studyInstanceUid: string;
+  patientId: string;
+  version: string;
+  actorId: string;
+}
+
+export function signDeleteConfirm(payload: DeleteConfirmPayload, sessionSecret: string, now = Date.now()): string {
+  return sealToken("deleteConfirm", payload, sessionSecret, DELETE_CONFIRM_TTL_MS, now);
+}
+
+export function openDeleteConfirm(token: string, sessionSecret: string, now = Date.now()): DeleteConfirmPayload | null {
+  const p = openToken("deleteConfirm", token, sessionSecret, now);
+  if (!p) return null;
+  const { orthancId, studyInstanceUid, patientId, version, actorId } = p;
+  if (![orthancId, studyInstanceUid, patientId, version, actorId].every((v) => typeof v === "string")) return null;
+  return { orthancId, studyInstanceUid, patientId, version, actorId } as DeleteConfirmPayload;
 }
 
 export interface JobTokenPayload {
@@ -154,33 +225,14 @@ export interface JobTokenPayload {
 }
 
 export function signJobToken(payload: JobTokenPayload, sessionSecret: string, now = Date.now()): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", tokenKey(sessionSecret), iv, { authTagLength: 16 });
-  cipher.setAAD(TOKEN_AAD);
-  const body = Buffer.concat([cipher.update(JSON.stringify({ ...payload, exp: now + JOB_TOKEN_TTL_MS }), "utf8"), cipher.final()]);
-  return [TOKEN_VERSION, iv.toString("base64url"), body.toString("base64url"), cipher.getAuthTag().toString("base64url")].join(".");
+  return sealToken("job", payload, sessionSecret, JOB_TOKEN_TTL_MS, now);
 }
 
 /** 鍵が違う・書き換えた・期限が過ぎた・形が崩れているときは null */
 export function openJobToken(token: string, sessionSecret: string, now = Date.now()): JobTokenPayload | null {
-  if (token.length > 2048) return null;
-  const parts = token.split(".");
-  if (parts.length !== 4 || parts[0] !== TOKEN_VERSION) return null;
-  try {
-    const [, ivText, bodyText, tagText] = parts as [string, string, string, string];
-    const iv = Buffer.from(ivText, "base64url");
-    const tag = Buffer.from(tagText, "base64url");
-    if (iv.length !== 12 || tag.length !== 16) return null;
-    const decipher = createDecipheriv("aes-256-gcm", tokenKey(sessionSecret), iv, { authTagLength: 16 });
-    decipher.setAAD(TOKEN_AAD);
-    decipher.setAuthTag(tag);
-    const plain = Buffer.concat([decipher.update(Buffer.from(bodyText, "base64url")), decipher.final()]).toString("utf8");
-    const p = JSON.parse(plain) as Partial<JobTokenPayload> & { exp?: unknown };
-    if (typeof p.exp !== "number" || p.exp < now) return null;
-    if (!isJobId(p.jobId) || !isRequestId(p.requestId) || typeof p.studyInstanceUid !== "string") return null;
-    if (typeof p.modality !== "string" || typeof p.actorId !== "string") return null;
-    return { jobId: p.jobId, requestId: p.requestId, studyInstanceUid: p.studyInstanceUid, modality: p.modality, actorId: p.actorId };
-  } catch {
-    return null;
-  }
+  const p = openToken("job", token, sessionSecret, now);
+  if (!p) return null;
+  if (!isJobId(p.jobId) || !isRequestId(p.requestId) || typeof p.studyInstanceUid !== "string") return null;
+  if (typeof p.modality !== "string" || typeof p.actorId !== "string") return null;
+  return { jobId: p.jobId, requestId: p.requestId, studyInstanceUid: p.studyInstanceUid, modality: p.modality, actorId: p.actorId };
 }

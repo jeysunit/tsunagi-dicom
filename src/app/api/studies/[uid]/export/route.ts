@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { RequestError } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { sameOriginRequest } from "@/lib/api/same-origin";
@@ -43,22 +44,23 @@ export async function GET(request: Request, { params }: Context) {
     }
     const patientId = info.patientId;
 
-    // 落とす前に記録する（記録できなければ渡さない）
-    await audit(session, { action: "export", outcome: "success", patientId, studyInstanceUid: uid, detail: { format: "zip" } });
+    // 取る前に「求めた」を記録する（記録できなければ渡さない）。結果（流し終えた・途中で切れた）は別の行に残し、要求の ID で結ぶ
+    const requestId = randomUUID();
+    const record = (outcome: "success" | "failed", phase: "request" | "result", extra: Record<string, unknown> = {}) =>
+      audit(session, { action: "export", outcome, patientId, studyInstanceUid: uid, detail: { format: "zip", requestId, phase, ...extra } });
+    await record("success", "request");
     let zip: Response;
     try {
       zip = await backend.exportStudy(orthancId);
     } catch (error) {
-      await audit(session, {
-        action: "export",
-        outcome: "failed",
-        patientId,
-        studyInstanceUid: uid,
-        detail: { format: "zip", status: error instanceof BackendError ? error.status : 502 },
-      });
+      await record("failed", "result", { status: error instanceof BackendError ? error.status : 502 });
       throw error;
     }
-    return new Response(zip.body, {
+    if (!zip.body) {
+      await record("failed", "result", { status: 502 });
+      return Response.json({ error: "画像サーバーの答えに中身が無い" }, { status: 502 });
+    }
+    return new Response(watchedBody(zip.body, record), {
       status: 200,
       headers: {
         "content-type": "application/zip",
@@ -70,4 +72,42 @@ export async function GET(request: Request, { params }: Context) {
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+type ExportRecorder = (outcome: "success" | "failed", phase: "result", extra?: Record<string, unknown>) => Promise<unknown>;
+
+/**
+ * 本文を流しながら、終わり方を記録する：流し終えた（success・bytes）、Orthanc の側で切れた・時間切れ（failed・interrupted）、
+ * ブラウザの側で切った（failed・cancelled）。もう流し始めているので、記録できなくても流れは止めない（ログに残す）
+ */
+function watchedBody(source: ReadableStream<Uint8Array>, record: ExportRecorder): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  let bytes = 0;
+  let settled = false;
+  const settle = (outcome: "success" | "failed", extra: Record<string, unknown>) => {
+    if (settled) return;
+    settled = true;
+    void record(outcome, "result", { bytes, ...extra }).catch(() => console.error(JSON.stringify({ event: "export_result_not_recorded" })));
+  };
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          settle("success", {});
+          controller.close();
+          return;
+        }
+        bytes += value.byteLength;
+        controller.enqueue(value);
+      } catch (error) {
+        settle("failed", { interrupted: true });
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      settle("failed", { cancelled: true });
+      await reader.cancel(reason).catch(() => undefined);
+    },
+  });
 }

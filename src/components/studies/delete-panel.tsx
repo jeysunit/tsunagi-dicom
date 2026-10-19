@@ -12,9 +12,12 @@ import { formatSlashDate } from "@/lib/format/japanese-date";
 // 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確かめの画面：消す検査を並べ、「戻せない」ことを示し、
 // 理由を書いてから「削除」を押す。大事な操作なので、BFF が再認証を求めたら、パスワード（と確認の番号）を入れてから続ける。
 // 答えが分からなければ「結果不明」と要求の ID を出し、もう一度消さずに確かめる道（Orthanc にまだあるかを読む）だけを出す。
+// 検査がまだあっても「消えていない」とは確定しない。管理者（照らし合わせの役割）は、Orthanc の側で先の削除が終わっていることを
+// 確かめてから、確かめた内容を書いて手で解ける。
 
 interface Preview {
-  version: string;
+  /** 確かめの画面で見せた検査（Orthanc の中の ID・UID・患者 ID・版）を結んだ token。消すときに添える */
+  confirmToken: string;
   patientId: string;
   patientName: string;
   patientKana: string;
@@ -48,14 +51,14 @@ export function DeletePanel({
   const [reason, setReason] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const uid = study.studyInstanceUid ?? "";
-  // 確かめの画面に出すのは、BFF が Orthanc から読み直した、消す検査の要点と版（一覧の行の値ではない）。消すときに版を添える
+  // 確かめの画面に出すのは、BFF が Orthanc から読み直した、消す検査の要点（一覧の行の値ではない）。消すときに確かめの token を添える
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const fetchPreview = useCallback(() => {
     getJson<Preview>(`/api/studies/${encodeURIComponent(uid)}/delete`).then(setPreview, (e: Error) => setPreviewError(e.message));
   }, [uid]);
   useEffect(() => fetchPreview(), [fetchPreview]);
-  /** 確かめの画面を読み直す（検査が変わった・消えていなかったと分かったとき。古い版のまま押し直させない） */
+  /** 確かめの画面を読み直す（検査が変わった・消えていなかったと分かったとき。古い token のまま押し直させない） */
   function loadPreview() {
     setPreview(null);
     setPreviewError(null);
@@ -75,6 +78,9 @@ export function DeletePanel({
       setPhase({ kind: "error", text: errorText(result) });
     } else if (result.data.outcome === "unknown" || result.status === 0 || result.status >= 500) {
       setPhase({ kind: "unknown", requestId });
+    } else if (result.status === 409 && Array.isArray(result.data.pendingRequestIds) && typeof result.data.pendingRequestIds[0] === "string") {
+      // この検査に、結果の分からない先の削除がある：その要求を確かめる道を出す（新しく消し直させない）
+      setPhase({ kind: "unknown", requestId: result.data.pendingRequestIds[0], note: "この検査に、結果の分からない先の削除がある。" });
     } else {
       // 409（確かめの後に検査が変わった・同じ UID の検査が2つある・結果の分からない削除がある）は、確かめの画面を読み直す
       if (result.status === 409) loadPreview();
@@ -83,7 +89,7 @@ export function DeletePanel({
   }
 
   const postDelete = (requestId: string) =>
-    postJson(`/api/studies/${encodeURIComponent(uid)}/delete`, { requestId, reason, version: preview?.version ?? "" }, screen.csrfToken);
+    postJson(`/api/studies/${encodeURIComponent(uid)}/delete`, { requestId, reason, confirmToken: preview?.confirmToken ?? "" }, screen.csrfToken);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -130,12 +136,29 @@ export function DeletePanel({
         setPhase({
           kind: "unknown",
           requestId,
-          note: r.studyPresent ? "検査は Orthanc にまだある。消している途中かもしれないので、少し待ってから確かめる。" : undefined,
+          note: r.studyPresent
+            ? "検査は Orthanc にまだある。先の削除が止まったとも、遅れて消えるとも言えないので、結果不明のまま残す。"
+            : undefined,
         });
       }
     } catch (e) {
       // 確かめられなかったときも、結果不明のまま残す（消し直す道を出さない）
       setPhase({ kind: "unknown", requestId, note: `確かめられなかった（${(e as Error).message}）` });
+    }
+  }
+
+  async function resolve(event: React.FormEvent<HTMLFormElement>, requestId: string) {
+    event.preventDefault();
+    const note = String(new FormData(event.currentTarget).get("note") ?? "");
+    const res = await postJson(`/api/studies/${encodeURIComponent(uid)}/delete/resolve`, { requestId, note }, screen.csrfToken);
+    if (res.data.outcome === "deleted") {
+      setPhase({ kind: "deleted" });
+      onDeleted();
+    } else if (res.data.outcome === "not_deleted") {
+      setPhase({ kind: "error", text: "解いた：消えていない（Orthanc に検査が残っている）。消すなら、もう一度確かめてから" });
+      loadPreview();
+    } else {
+      setPhase({ kind: "unknown", requestId, note: errorText(res) });
     }
   }
 
@@ -216,6 +239,24 @@ export function DeletePanel({
           <Button type="button" size="sm" variant="outline" onClick={() => void check(phase.requestId)}>
             確かめる
           </Button>
+          {screen.can.reconcile && (
+            <form onSubmit={(e) => void resolve(e, phase.requestId)} aria-label="結果不明の削除を解く" className="space-y-1 pt-2" data-testid="delete-resolve">
+              <p className="text-xs text-label">
+                管理者：Orthanc の側（ログ・再起動の有無など）で、先の削除の処理が終わっていることを確かめてから解く。解くと、同じ検査をまた消せる。
+              </p>
+              <textarea
+                name="note"
+                required
+                maxLength={500}
+                rows={2}
+                aria-label="確かめた内容"
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-value"
+              />
+              <Button type="submit" size="sm" variant="outline">
+                確かめて解く
+              </Button>
+            </form>
+          )}
         </div>
       )}
       {phase.kind === "error" && (
