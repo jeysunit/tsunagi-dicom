@@ -75,7 +75,7 @@ export default async function ReceivedPage() {
       </div>
       {!complete && (
         <p role="status" className="text-xs text-danger" data-testid="received-incomplete">
-          ここまでしか読めていない（直近の変更の記録の読む範囲の上限に届いた）。もっと古い受け取りは、Orthanc で確かめる。
+          ここまでしか読めていない（変更の記録を、読む範囲の終わりまで読み切れなかった）。抜けた受け取りは、Orthanc で確かめる。
         </p>
       )}
       {items.length === 0 ? (

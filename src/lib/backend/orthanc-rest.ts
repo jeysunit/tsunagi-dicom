@@ -50,7 +50,8 @@ export function parseChanges(json: unknown): OrthancChanges {
 /**
  * 変更の記録を、Orthanc Book の追い方（since・limit・Last・Done）どおりに読む：`from` の番号の後から、
  * 答えの Last を次の since にして、Done になるまで読み切る。Orthanc が 1 回に返す数を切り詰めても、区間の中は抜けない。
- * 読む回数が上限（maxCalls）に届いたら、そこで止めて complete=false を返す
+ * 読み切った（complete=true）とするのは、答えが Done=true のときだけ。読む回数が上限（maxCalls）に届いたとき、
+ * Done でないのに空の頁か Last が進まない答えが来たときは、そこで止めて complete=false を返す
  */
 export async function readChanges(
   fetchPage: (since: number, limit: number) => Promise<OrthancChanges>,
@@ -62,7 +63,10 @@ export async function readChanges(
   for (let call = 0; call < options.maxCalls; call++) {
     const page = await fetchPage(since, options.limit);
     changes.push(...page.changes.filter((c) => c.seq > since));
-    if (page.done || page.changes.length === 0 || page.last <= since) return { changes, complete: true };
+    // 読み切ったと言えるのは、Orthanc が Done と答えたときだけ
+    if (page.done) return { changes, complete: true };
+    // Done でないのに、空の頁か Last が進まない答え：続きを読めないので、ここで止めて未完了にする（同じ所を読み続けない）
+    if (page.changes.length === 0 || page.last <= since) return { changes, complete: false };
     since = page.last;
   }
   return { changes, complete: false };
