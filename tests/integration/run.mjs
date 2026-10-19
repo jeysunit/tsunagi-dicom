@@ -37,7 +37,10 @@ const adminInitial = `Itest-Init-${secret(12)}-7q`;
 const adminChanged = `Itest-Own-${secret(12)}-4z`;
 
 rmSync(workDir, { recursive: true, force: true });
-mkdirSync(path.join(workDir, "dumps"), { recursive: true, mode: 0o700 });
+mkdirSync(workDir, { recursive: true, mode: 0o700 });
+// dump（架空の患者の画像の元。秘密は無い）は、DCMTK のコンテナの中の利用者（uid 10001）が読めるようにする
+mkdirSync(path.join(workDir, "dumps"), { mode: 0o755 });
+chmodSync(path.join(workDir, "dumps"), 0o755);
 const usersFile = path.join(workDir, "orthanc-users.json");
 writeFileSync(usersFile, `${JSON.stringify({ RegisteredUsers: { [orthancUsername]: orthancPassword } })}\n`);
 // Orthanc のコンテナの中の利用者が読めるようにする（このフォルダは手元の利用者だけが開ける）
