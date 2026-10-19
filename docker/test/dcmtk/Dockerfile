@@ -13,9 +13,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends 'dcmtk=3.6.9-*' \
   && rm -rf /var/lib/apt/lists/* \
   && dpkg-query -W dcmtk \
-  && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin dcmtk \
+  && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin itest \
   && mkdir /received \
-  && chown dcmtk /received
+  && chown itest /received
 
 COPY send-dumps.sh /usr/local/bin/send-dumps
 RUN chmod 0755 /usr/local/bin/send-dumps
