@@ -39,7 +39,7 @@ async function newContext(browser: Browser) {
 async function submitLogin(page: Page, username: string, password: string) {
   await page.goto("/login");
   const form = page.getByRole("form", { name: "ログイン" });
-  await form.getByLabel("利用者名").fill(username);
+  await form.getByLabel("ユーザーID").fill(username);
   await form.getByLabel("パスワード").fill(password);
   await form.getByRole("button", { name: "ログイン" }).click();
 }
@@ -120,7 +120,7 @@ test.beforeAll(async ({ browser }) => {
   const form = page.getByRole("form", { name: "パスワードの変更" });
   await form.locator('input[name="newPassword"]').fill(user.changed);
   await form.locator('input[name="confirm"]').fill(user.changed);
-  await form.getByRole("button", { name: "パスワードを変える" }).click();
+  await form.getByRole("button", { name: "変更" }).click();
   await expect(page).toHaveURL(`${bffUrl}/`);
   const verify = await (await page.request.get("/api/audit/verify")).json();
   expect(verify.ok).toBe(true);
@@ -349,7 +349,7 @@ test("7 削除：管理者が理由と再認証（パスワード）を通して
     // 再認証の前は消えていない
     expect(await lookupStudy(B.studyInstanceUid)).toHaveLength(1);
     await reauth.getByLabel("パスワード").fill(user.changed);
-    await reauth.getByRole("button", { name: "確かめて消す" }).click();
+    await reauth.getByRole("button", { name: "認証して削除" }).click();
     await expect(page.locator(`tr[data-study-uid="${B.studyInstanceUid}"]`)).toHaveCount(0, { timeout: 30_000 });
 
     expect(await lookupStudy(B.studyInstanceUid)).toEqual([]);
