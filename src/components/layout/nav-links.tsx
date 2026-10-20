@@ -29,7 +29,12 @@ export function isCurrent(pathname: string, href: string): boolean {
 export function NavLinks({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname() ?? "";
   return (
-    <nav aria-label="頁" className="flex items-end gap-1 self-stretch" data-testid="site-nav">
+    // 狭い画面（md 未満）では、項目を折り返さず 1 行のまま横に送る（1 字ずつの折り返しにしない。UX のレビューの M8）
+    <nav
+      aria-label="頁"
+      className="flex min-w-0 items-end gap-1 self-stretch max-md:overflow-x-auto max-md:[scrollbar-width:thin]"
+      data-testid="site-nav"
+    >
       {items.map((item) => {
         const current = isCurrent(pathname, item.href);
         return (
@@ -38,7 +43,7 @@ export function NavLinks({ items }: { items: readonly NavItem[] }) {
             href={item.href}
             aria-current={current ? "page" : undefined}
             className={cn(
-              "-mb-2.5 rounded-t-md border-b-2 px-3 pt-1.5 pb-2 whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              "-mb-2.5 shrink-0 rounded-t-md border-b-2 px-3 pt-1.5 pb-2 whitespace-nowrap transition-colors max-md:mb-0 max-md:px-2 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
               current
                 ? "border-primary bg-background font-bold text-value"
                 : "border-transparent text-label hover:bg-hover hover:text-value active:bg-pressed",

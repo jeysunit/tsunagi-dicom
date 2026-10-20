@@ -18,6 +18,9 @@
   /* 値（太字で出す） */
   --color-value: #1f2328;
   --color-border: #d1d9e0;
+  /* 部品（入力欄・選択欄・枠のボタン・絞り込みの枠）の枠の線。枠の線だけで部品と分かる形なので、地と 3:1 以上にする
+     （WCAG 2.2 の 1.4.11。表の罫線などの飾りの線は border のまま） */
+  --color-control: #818b98;
   /* 一覧の行の hover などの、地との差の小さい色（選んだ行の地より薄く） */
   --color-muted: #eff2f5;
   /* 押せる物（枠のボタン・枠の無いボタン・絞り込み）の hover の地。白い地・控えめな地と見分けられる差にする（docs/spec.md の 2.3） */
@@ -79,6 +82,7 @@ body:has([data-split-root]) {
   --color-label: #8a949e;
   --color-value: #ffffff;
   --color-border: #2a2f36;
+  --color-control: #6e7681;
   --color-muted: #23272d;
   --color-hover: #272c33;
   --color-pressed: #30363d;

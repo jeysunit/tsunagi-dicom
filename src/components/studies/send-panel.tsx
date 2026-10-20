@@ -176,7 +176,7 @@ export function SendPanel({
               <label className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-label">送信先</span>
                 <select
-                  className="h-7 rounded-md border border-border bg-background px-2 text-value"
+                  className="h-7 rounded-md border border-control bg-background px-2 text-value"
                   value={target}
                   disabled={inFlight}
                   onChange={(e) => {
@@ -342,7 +342,7 @@ function UnknownStatus({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               maxLength={500}
-              className="h-7 w-full rounded-md border border-border bg-background px-2 text-sm text-value"
+              className="h-7 w-full rounded-md border border-control bg-background px-2 text-sm text-value"
               data-testid="send-resolve-note"
             />
           </label>

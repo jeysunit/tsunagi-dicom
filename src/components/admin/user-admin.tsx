@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -50,6 +51,8 @@ export function UserAdmin({
   /** 再認証・ユーザーの追加の要求を送っている間（押したボタンに待ちの印を出す） */
   const [authing, setAuthing] = useState(false);
   const [creating, setCreating] = useState(false);
+  /** 役割の変更・無効にする前の確かめ（UX のレビューの M7。選んだ・押した瞬間には送らない） */
+  const [confirming, setConfirming] = useState<{ title: string; text: string; action: string; run: () => void } | null>(null);
 
   /** 送って、再認証を求められたら、その画面を出して待つ */
   async function send(run: () => Promise<PostResult>, done: (res: PostResult) => void) {
@@ -134,15 +137,35 @@ export function UserAdmin({
   return (
     <section className="space-y-6">
       <h1 className="text-lg font-bold text-value">ユーザー管理</h1>
-      {reauth && (
-        <form
-          onSubmit={(e) => void onReauth(e)}
-          aria-label="再認証"
-          className="max-w-sm space-y-3 rounded-md border border-border bg-surface p-3"
-        >
+      <Dialog open={confirming !== null} label={confirming?.title ?? "確認"} onClose={() => setConfirming(null)}>
+        {confirming && (
+          <div className="space-y-3" data-testid="user-confirm">
+            <h2 className="font-bold text-value">{confirming.title}</h2>
+            <p>{confirming.text}</p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  const run = confirming.run;
+                  setConfirming(null);
+                  run();
+                }}
+              >
+                {confirming.action}
+              </Button>
+              {/* 開いたときは、取りやめのほうにフォーカスを置く（Enter の押し違いで変えない） */}
+              <Button type="button" variant="outline" data-autofocus onClick={() => setConfirming(null)}>
+                キャンセル
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+      <Dialog open={reauth !== null} label="再認証" onClose={() => (authing ? undefined : setReauth(null))}>
+        <form onSubmit={(e) => void onReauth(e)} aria-label="再認証" className="space-y-3">
           <p className="text-label">{needsTotp ? "この操作にはパスワードと認証コードの再入力が必要です" : "この操作にはパスワードの再入力が必要です"}</p>
           <Field label="パスワード">
-            <Input name="password" type="password" autoComplete="current-password" required />
+            <Input name="password" type="password" autoComplete="current-password" required data-autofocus />
           </Field>
           {needsTotp && (
             <Field label="認証コード（6 桁）">
@@ -163,7 +186,7 @@ export function UserAdmin({
             </Button>
           </div>
         </form>
-      )}
+      </Dialog>
       {message && (
         <p role={message.ok ? "status" : "alert"} className={message.ok ? "text-sm" : "text-sm text-danger"}>
           {message.text}
@@ -195,10 +218,18 @@ export function UserAdmin({
                   value={u.role}
                   disabled={pending}
                   onChange={(e) => {
+                    // 選んだだけでは送らない。確かめの画面で「変更する」を押したら送る（選択欄は今の役割のまま）
                     const role = e.target.value;
-                    if (isRole(role)) void change(u.id, { role }, `${u.username} の役割を「${ROLE_LABELS[role]}」に変更しました`);
+                    if (!isRole(role) || role === u.role) return;
+                    const from = isRole(u.role) ? ROLE_LABELS[u.role] : u.role;
+                    setConfirming({
+                      title: "役割の変更",
+                      text: `${u.username} の役割を「${from}」から「${ROLE_LABELS[role]}」に変更します`,
+                      action: "変更する",
+                      run: () => void change(u.id, { role }, `${u.username} の役割を「${ROLE_LABELS[role]}」に変更しました`),
+                    });
                   }}
-                  className="h-7 rounded-md border border-border bg-background px-1"
+                  className="h-7 rounded-md border border-control bg-background px-1"
                 >
                   {ROLES.map((r) => (
                     <option key={r} value={r}>
@@ -225,13 +256,19 @@ export function UserAdmin({
                     size="sm"
                     variant="outline"
                     disabled={pending}
-                    onClick={() =>
-                      void change(
-                        u.id,
-                        { status: u.status === "active" ? "disabled" : "active" },
-                        u.status === "active" ? `${u.username} を無効にしました` : `${u.username} を有効にしました`,
-                      )
-                    }
+                    onClick={() => {
+                      if (u.status !== "active") {
+                        void change(u.id, { status: "active" }, `${u.username} を有効にしました`);
+                        return;
+                      }
+                      // 無効にすると、その利用者のログイン中のセッションも終わるので、確かめてから送る
+                      setConfirming({
+                        title: "ユーザーの無効化",
+                        text: `${u.username} を無効にします。ログイン中のセッションも終了します`,
+                        action: "無効にする",
+                        run: () => void change(u.id, { status: "disabled" }, `${u.username} を無効にしました`),
+                      });
+                    }}
                   >
                     {u.status === "active" ? "無効にする" : "有効にする"}
                   </Button>
@@ -272,7 +309,7 @@ export function UserAdmin({
           <Input name="displayName" required autoComplete="off" />
         </Field>
         <Field label="役割">
-          <select name="role" defaultValue="general" className="h-8 w-full rounded-md border border-border bg-background px-2">
+          <select name="role" defaultValue="general" className="h-8 w-full rounded-md border border-control bg-background px-2">
             {ROLES.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABELS[r]}

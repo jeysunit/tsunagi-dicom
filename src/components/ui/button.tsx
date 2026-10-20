@@ -12,7 +12,7 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground not-disabled:hover:bg-primary-hover not-disabled:active:bg-primary-active",
         outline:
-          "border border-border bg-transparent not-disabled:hover:border-label not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
+          "border border-control bg-transparent not-disabled:hover:border-label not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
         ghost: "not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
         // 取り消せない操作の実行のボタン（削除する）。hover と押している間は地を暗くする
         danger: "bg-danger text-background not-disabled:hover:brightness-90 not-disabled:active:brightness-75",

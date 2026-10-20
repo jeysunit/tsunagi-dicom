@@ -37,9 +37,9 @@ export function SiteHeader({
   theme?: { current: Theme; csrfToken?: string };
 }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-border bg-surface px-6 py-2.5">
-      <div className="flex items-center gap-4 self-stretch">
-        <Link href="/" className="font-bold text-value">
+    <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-border bg-surface px-4 py-2.5 md:px-6">
+      <div className="flex min-w-0 max-w-full items-center gap-4 self-stretch">
+        <Link href="/" className="shrink-0 font-bold text-value">
           tsunagi-dicom
         </Link>
         {nav && (
