@@ -331,17 +331,21 @@ test("送信の手応え：押した直後から状態の枠、送っている�
     await route.continue();
   });
   await panel.getByTestId("send-submit").click();
-  // 押した直後から（答えが来る前に）、状態の枠と進みの帯。送っている間は、閉じても続くことを出す
+  // 押した直後から（答えが来る前に）、状態の枠と進みの帯
   // （前は、答えが来るまで状態の文字が空で、0.3 秒たってから「読み込み中」の印だけが出ていた）
   const status = panel.getByTestId("send-status");
   await expect(status).toHaveAttribute("data-state", "Starting");
   await expect(status).toContainText("送信を開始しています");
   await expect(status.getByRole("progressbar")).toBeVisible();
-  await expect(panel.getByTestId("send-continues")).toHaveText("閉じても送信は続きます");
+  // 受け付けの前は閉じられない（断られたときの知らせを見せるため）。「閉じても送信は続きます」は、受け付けた後だけ
+  await expect(panel.getByTestId("send-close")).toBeDisabled();
+  await expect(panel.getByTestId("send-continues")).toHaveCount(0);
   await expect(panel.getByTestId("send-again")).toHaveCount(0);
   release();
   await expect(status).toHaveAttribute("data-state", /^(Accepted|Pending|Running)$/);
   await page.unroute("**/api/studies/*/send");
+  await expect(panel.getByTestId("send-close")).toBeEnabled();
+  await expect(panel.getByTestId("send-continues")).toHaveText("閉じても送信は続きます");
 
   // 送っている間に閉じる：「送信」の横に送信中を出し、終わると送信完了に変わる（閉じていても状態を読み続ける）
   await panel.getByTestId("send-close").click();
@@ -379,6 +383,16 @@ test("送信の手応え：押した直後から状態の枠、送っている�
   await page.getByTestId("send-open").click();
   await panel.getByRole("button", { name: "再読み込み" }).click();
   await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 15_000 });
+
+  // 受け付けの前に断られた送信（403 など）は、閉じる前に画面に出る（受け付けの前は閉じられない）
+  await panel.getByTestId("send-again").click();
+  await page.route("**/api/studies/*/send", (route) =>
+    route.request().method() === "POST" ? route.fulfill({ status: 403, json: { error: "この操作の権限がありません" } }) : route.continue(),
+  );
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Error");
+  await expect(panel.getByTestId("send-status")).toContainText("権限");
+  await page.unroute("**/api/studies/*/send");
   await panel.getByTestId("send-close").click();
 });
 

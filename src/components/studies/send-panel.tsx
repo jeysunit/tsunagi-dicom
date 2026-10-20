@@ -186,8 +186,9 @@ export function SendPanel({
   const sent = phase.kind !== "idle" && phase.kind !== "error";
   // 終わった後は「再送信…」で確かめの画面に戻せる（送信完了・送信失敗・再送できると分かったとき）
   const canResend = (phase.kind === "job" && isDone(phase.job)) || (phase.kind === "settled" && phase.resend);
-  // 送っている間に閉じても、Orthanc の送信は続く（結果不明のときは、その知らせの中に次にすることを出す）
-  const continuesNote = phase.kind === "sending" || (phase.kind === "job" && !isDone(phase.job));
+  // Orthanc が送信を受け付けた後（ジョブの段）は、閉じても送信は続く（結果不明のときは、その知らせの中に次にすることを出す）。
+  // 受け付けの前（送信を開始している間）は閉じさせない：断られた（400・403・409 など）ときに、その知らせを見せるため
+  const continuesNote = phase.kind === "job" && !isDone(phase.job);
 
   /** 閉じる：送り終えた・断られた画面は片付ける（開き直すと新しい送信の確かめの画面）。送っている間・結果不明の間は残す */
   function close() {
@@ -264,7 +265,7 @@ export function SendPanel({
                   再送信…
                 </Button>
               )}
-              <Button type="button" size="sm" variant="outline" onClick={close} data-testid="send-close">
+              <Button type="button" size="sm" variant="outline" disabled={phase.kind === "sending"} onClick={close} data-testid="send-close">
                 {sent ? "閉じる" : "キャンセル"}
               </Button>
               {continuesNote && (
