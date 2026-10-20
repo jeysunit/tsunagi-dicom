@@ -44,8 +44,8 @@ type Phase =
   | { kind: "settled"; text: string; resend: boolean }
   | { kind: "error"; text: string };
 
-/** 閉じた後に「送信」のボタンの横に出す、送信の状態（docs/spec.md の 3.4） */
-export type SendActivity = "sending" | "success" | "failure" | "unknown";
+/** 閉じた後に「送信」のボタンの横に出す、送信の状態（docs/spec.md の 3.4）。stalled は状態を読めずに止まったとき */
+export type SendActivity = "sending" | "success" | "failure" | "unknown" | "stalled";
 
 const POLL_MS = 1500;
 
@@ -66,6 +66,8 @@ function activityOf(phase: Phase): SendActivity | null {
   if (phase.kind === "sending") return "sending";
   if (phase.kind === "unknown") return "unknown";
   if (phase.kind !== "job") return null;
+  // 状態を読めずに止まっている（「再読み込み」を押すまで読まない）：送信中と見せない
+  if (phase.readError) return "stalled";
   if (phase.job?.state === "Success") return "success";
   if (phase.job?.state === "Failure") return "failure";
   return "sending";

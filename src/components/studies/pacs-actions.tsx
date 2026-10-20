@@ -70,6 +70,7 @@ function SendBadge({ activity }: { activity: SendActivity }) {
     success: { icon: <CheckCircle2 aria-hidden className="size-3.5" />, text: "送信完了", tone: "text-success" },
     failure: { icon: <XCircle aria-hidden className="size-3.5" />, text: "送信失敗", tone: "text-danger" },
     unknown: { icon: <XCircle aria-hidden className="size-3.5" />, text: "結果不明", tone: "text-danger" },
+    stalled: { icon: <XCircle aria-hidden className="size-3.5" />, text: "状態を取得できません", tone: "text-danger" },
   }[activity];
   return (
     <span role="status" className={cn("inline-flex items-center gap-1 text-xs", view.tone)} data-testid="send-badge" data-activity={activity}>

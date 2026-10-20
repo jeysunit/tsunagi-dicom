@@ -323,14 +323,25 @@ test("送信の手応え：押した直後から状態の枠、送っている�
   await page.getByTestId("send-open").click();
   const panel = page.getByTestId("send-panel");
   await panel.getByTestId("send-modality").selectOption("dtg");
+  // 送信の要求の答えを止めておき、答えが来る前（押した直後）の画面を見る
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/studies/*/send", async (route) => {
+    await held;
+    await route.continue();
+  });
   await panel.getByTestId("send-submit").click();
-  // 押した直後から、状態の枠と進みの帯（0.3 秒を待たない）。送っている間は、閉じても続くことを出す
+  // 押した直後から（答えが来る前に）、状態の枠と進みの帯。送っている間は、閉じても続くことを出す
+  // （前は、答えが来るまで状態の文字が空で、0.3 秒たってから「読み込み中」の印だけが出ていた）
   const status = panel.getByTestId("send-status");
-  await expect(status).toBeVisible({ timeout: 1_000 });
-  await expect(status).toHaveAttribute("data-state", /^(Starting|Accepted|Pending|Running)$/);
+  await expect(status).toHaveAttribute("data-state", "Starting");
+  await expect(status).toContainText("送信を開始しています");
   await expect(status.getByRole("progressbar")).toBeVisible();
   await expect(panel.getByTestId("send-continues")).toHaveText("閉じても送信は続きます");
   await expect(panel.getByTestId("send-again")).toHaveCount(0);
+  release();
+  await expect(status).toHaveAttribute("data-state", /^(Accepted|Pending|Running)$/);
+  await page.unroute("**/api/studies/*/send");
 
   // 送っている間に閉じる：「送信」の横に送信中を出し、終わると送信完了に変わる（閉じていても状態を読み続ける）
   await panel.getByTestId("send-close").click();
@@ -355,6 +366,19 @@ test("送信の手応え：押した直後から状態の枠、送っている�
   await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Failure", { timeout: 15_000 });
   await expect(panel.getByTestId("send-status")).toContainText("送信失敗");
   await expect(panel.getByTestId("send-again")).toBeVisible();
+
+  // ジョブの状態を読めずに止まったときは、閉じた後も「送信中」と見せない。開いて「再読み込み」で続きを読む
+  await panel.getByTestId("send-again").click();
+  await panel.getByTestId("send-modality").selectOption("dtg");
+  await page.route("**/api/jobs/**", (route) => route.fulfill({ status: 502, json: { error: "画像サーバーに接続できません" } }));
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toContainText("状態を取得できませんでした");
+  await panel.getByTestId("send-close").click();
+  await expect(page.getByTestId("send-badge")).toHaveText("状態を取得できません");
+  await page.unroute("**/api/jobs/**");
+  await page.getByTestId("send-open").click();
+  await panel.getByRole("button", { name: "再読み込み" }).click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 15_000 });
   await panel.getByTestId("send-close").click();
 });
 
