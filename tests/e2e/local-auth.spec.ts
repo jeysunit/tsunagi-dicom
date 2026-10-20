@@ -210,6 +210,23 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
   expect(JSON.stringify(list)).not.toMatch(/argon2id|passwordHash|totpSecret/);
 });
 
+test("検査一覧の自動更新を止める（STUDY_LIST_REFRESH_SECONDS=0）：印を出さず、一覧の版を読まない", async () => {
+  const { page } = admin;
+  const versionReads: string[] = [];
+  const onRequest = (req: { url: () => string }) => {
+    if (req.url().endsWith("/api/studies/version")) versionReads.push(req.url());
+  };
+  page.on("request", onRequest);
+  await page.goto("/");
+  await expect(page.getByTestId("study-table")).toBeVisible();
+  await expect(page.getByTestId("list-refresh")).toHaveCount(0);
+  // 開いた直後とタブに戻ったときにも読まない
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(1_500);
+  expect(versionReads).toEqual([]);
+  page.off("request", onRequest);
+});
+
 test("役割ごとにできる操作：一般は検査と画像を見られ、利用者の管理と監査の確かめはできない", async ({ browser }) => {
   test.setTimeout(90_000);
   const { context, page } = await newPage(browser);

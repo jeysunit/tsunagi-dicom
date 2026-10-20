@@ -55,6 +55,8 @@ export const localEnv = {
   PORT: String(LOCAL_PORT),
   // standalone の .next/static は、検証モードのサーバーの方で写す（同時に写さない）
   E2E_SKIP_PREPARE: "true",
+  // 検査一覧の自動更新を止める形は、こちらのサーバーで確かめる（検証モードのサーバーは既定の 30 秒）
+  STUDY_LIST_REFRESH_SECONDS: "0",
 };
 
 export default defineConfig({

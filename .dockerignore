@@ -13,5 +13,11 @@ docker/prisma-cli/node_modules
 .env*
 !.env.example
 secrets
+# Orthanc とセットの compose（deploy/）と開発用の compose（docker/dev/）の secret と施設の設定（.gitignore と同じ）
+deploy/secrets
+deploy/.env*
+deploy/tsunagi.env
+deploy/orthanc/site.local.json
+docker/dev/secrets
 *.db
 *.db-*
