@@ -29,7 +29,7 @@ import {
   receptionFromMetadata,
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
-import { isDicomUid, wadoRsTarget } from "@/lib/backend/relay-path";
+import { isDicomUid, relayAccept, wadoRsTarget } from "@/lib/backend/relay-path";
 import {
   BackendError,
   BackendUnknownError,
@@ -247,7 +247,9 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       }
 
       const headers: Record<string, string> = {};
-      if (req.accept) headers.accept = req.accept;
+      // thumbnail・rendered は BFF が Accept を決める（ブラウザの <img> の Accept は Orthanc が 400 で断る）。ビューアの取得はそのまま渡す
+      const accept = relayAccept(target.path, req.accept);
+      if (accept) headers.accept = accept;
       const res = await call(dicomwebUrl!, `${target.path}${req.search}`, { method: req.method, headers });
       // 画像サーバーの中の URL へ飛ばす応答は、ブラウザへそのまま渡さない
       if (res.status >= 300 && res.status < 400) {

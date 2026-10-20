@@ -25,7 +25,7 @@ import {
   TAG,
   type DicomJsonDataset,
 } from "@/lib/backend/dicom-json";
-import { wadoRsTarget } from "@/lib/backend/relay-path";
+import { isAcceptableImageAccept, wadoRsTarget } from "@/lib/backend/relay-path";
 import {
   BackendError,
   clampStudyLimit,
@@ -249,6 +249,11 @@ export function createMockBackend(): Backend {
 
       const last = target.path.split("/").at(-1);
       if (last === "thumbnail" || last === "rendered") {
+        // 実の Orthanc と同じく、受け付けない Accept（ブラウザの <img> の Accept など）には 400 を返す。
+        // BFF が Accept を決める前の値が来たら、ここで見つかる（画面の経路は withRelayAccept を通す）
+        if (!isAcceptableImageAccept(req.accept)) {
+          return Response.json({ error: "Unsupported MIME type" }, { status: 400 });
+        }
         const image = (await previews()).find(
           (p) =>
             p.studyInstanceUid === target.studyInstanceUid &&
