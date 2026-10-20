@@ -1,0 +1,15 @@
+{
+  "Name": "Orthanc",
+  "DicomPort": 4242,
+  "HttpPort": 8042,
+  "AuthenticationEnabled": true,
+  "RemoteAccessAllowed": true,
+  "DicomCheckCalledAet": false,
+  "DicomAlwaysAllowStore": false,
+  "DicomAlwaysAllowEcho": true,
+  "DicomModalitiesInDatabase": false,
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/"
+  }
+}

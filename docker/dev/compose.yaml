@@ -1,0 +1,78 @@
+# 開発・試験用の一式：配る compose（deploy/compose.yaml の tsunagi-dicom と Orthanc）に、
+# dicom-test-generator（検査装置のふりをして架空の患者の画像を送る）と、DCMTK の storescp（送信の相手）を足す。
+# 架空の患者だけで使う。施設の画像サーバーにはつながない。
+#
+#   docker/dev/up.sh        # secret を作り、tsunagi-dicom のイメージを作り、一式を立てる（docs/round-trip-test.md）
+#
+# 流れ：dicom-test-generator →（C-STORE）→ Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の「送信」→ Orthanc →（C-STORE）→ storescp
+#
+# - deploy/compose.yaml の変数は dev.env で与える（相対のパスは deploy/ から数える）。シェルの環境変数があれば、そちらが先に効く。
+# - dicom-test-generator と storescp は、Orthanc の DICOM のネットワーク（dicom）に入る。tsunagi-dicom と Orthanc だけの
+#   内部ネットワーク（backend）には入らない。
+# - dicom-test-generator の Web 画面は 127.0.0.1:${DEV_TDG_WEB_PORT:-18080} に公開する（利用者 dtg、HTTP Basic）。
+
+name: tsunagi-dev
+
+include:
+  - path: ../../deploy/compose.yaml
+    env_file: ./dev.env
+
+services:
+  tdg:
+    # dicom-test-generator の Dockerfile から作る。版は commit で固定する（TDG_GIT_REF で替えられる）
+    image: tsunagi-dev-tdg:local
+    build:
+      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-a4a55b60fe07a6561ea68242b502bd6905070e41}
+    environment:
+      DTG_WEB_PASSWORD_FILE: /run/secrets/tdg_web_password
+    volumes:
+      # 送信先は Orthanc（orthanc:4242）。Web 画面はコンテナの中で 0.0.0.0 に bind する
+      - ./tdg/app_config.yaml:/app/config/app_config.yaml:ro
+      - tdg-state:/app/modality_state
+      - tdg-output:/app/output
+    secrets:
+      - tdg_web_password
+    ports:
+      - "127.0.0.1:${DEV_TDG_WEB_PORT:-18080}:8080"
+    networks:
+      - dicom
+    depends_on:
+      - orthanc
+    init: true
+    security_opt:
+      - no-new-privileges:true
+
+  storescp:
+    # 結合の試験と同じ DCMTK のイメージ（docker/test/dcmtk）。受けたファイルを検査の UID ごとのフォルダに置く
+    image: tsunagi-itest-dcmtk:local
+    build: ../test/dcmtk
+    init: true
+    command:
+      - storescp
+      - --aetitle
+      - DEV_SCP
+      - --output-directory
+      - /received
+      - --sort-on-study-uid
+      - study
+      - "11112"
+    volumes:
+      - storescp-received:/received
+    networks:
+      - dicom
+    healthcheck:
+      test: ["CMD", "echoscu", "--aetitle", "DEV_HEALTH", "--call", "DEV_SCP", "127.0.0.1", "11112"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  tdg_web_password:
+    file: ./secrets/tdg_web_password.txt
+
+volumes:
+  tdg-state:
+  tdg-output:
+  storescp-received:
