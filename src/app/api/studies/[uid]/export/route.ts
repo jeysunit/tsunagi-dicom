@@ -3,7 +3,7 @@ import { RequestError } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { sameOriginRequest } from "@/lib/api/same-origin";
 import { studyUidParam } from "@/lib/api/study-param";
-import { audit, requirePermission, requireSession } from "@/lib/auth/session";
+import { audit, auditSource, requirePermission, requireSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { BackendError } from "@/lib/backend/types";
 import { assertWriteAllowed } from "@/lib/pacs-ops";
@@ -46,8 +46,15 @@ export async function GET(request: Request, { params }: Context) {
 
     // 取る前に「求めた」を記録する（記録できなければ渡さない）。結果（流し終えた・途中で切れた）は別の行に残し、要求の ID で結ぶ
     const requestId = randomUUID();
+    // 結果の行は、答えを返した後（流し終えた・切られたとき）に書く。そのときは要求の headers() を読めないので、
+    // 送り元は要求の間に取っておき、どの行にも同じ値を渡す
+    const source = await auditSource();
     const record = (outcome: "success" | "failed", phase: "request" | "result", extra: Record<string, unknown> = {}) =>
-      audit(session, { action: "export", outcome, patientId, studyInstanceUid: uid, detail: { format: "zip", requestId, phase, ...extra } });
+      audit(
+        session,
+        { action: "export", outcome, patientId, studyInstanceUid: uid, detail: { format: "zip", requestId, phase, ...extra } },
+        source,
+      );
     await record("success", "request");
     let zip: Response;
     try {

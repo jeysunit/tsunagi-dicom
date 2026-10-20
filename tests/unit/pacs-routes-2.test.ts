@@ -10,6 +10,9 @@ import { testDatabases } from "./helpers/test-db";
 const state = vi.hoisted(() => ({
   role: undefined as string | undefined,
   config: undefined as AppConfig | undefined,
+  /** true のときは、Next.js と同じく、要求の外（答えを返した後）で headers() を読むと失敗させる */
+  scoped: false,
+  inRequest: false,
 }));
 
 vi.mock("next/headers", async () => {
@@ -22,7 +25,10 @@ vi.mock("next/headers", async () => {
           : undefined,
       set: () => undefined,
     }),
-    headers: async () => new Headers(),
+    headers: async () => {
+      if (state.scoped && !state.inRequest) throw new Error("`headers` was called outside a request scope");
+      return new Headers({ "x-forwarded-for": "192.0.2.10" });
+    },
   };
 });
 
@@ -53,6 +59,8 @@ afterAll(async () => {
 });
 beforeEach(() => {
   state.role = undefined;
+  state.scoped = false;
+  state.inRequest = false;
   state.config!.auth.devAllowWrite = true;
   vi.restoreAllMocks();
 });
@@ -192,6 +200,31 @@ describe("書き出し（ZIP）", () => {
     const again = await exportZip();
     expect((await again.arrayBuffer()).byteLength).toBe(size);
     expect(log.mock.calls.some((c) => String(c[0]).includes("export_result_not_recorded"))).toBe(true);
+  });
+
+  // 結合の試験（実の Orthanc。#30）で、流し終えたときの結果の行が残らないと分かった（BFF のログに export_result_not_recorded）。
+  // 結果は答えを返した後に書くので、その時には要求の headers() を読めない。要求の間に送り元を取っておき、結果の記録に渡す
+  it("流し終えた・切られたときの結果の行は、答えを返した後（要求の外）でも残り、送り元も要求の時のもの", async () => {
+    state.role = "admin";
+    state.scoped = true;
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (const end of ["read", "cancel"] as const) {
+      state.inRequest = true;
+      const res = await exportZip();
+      state.inRequest = false;
+      expect(res.status).toBe(200);
+      const requestId = detailOf(await lastAudit("export")).requestId as string;
+      if (end === "read") await res.arrayBuffer();
+      else await res.body!.cancel();
+      await vi.waitFor(async () => expect((await exportRows(requestId)).length).toBe(2));
+      const rows = await exportRows(requestId);
+      expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
+        ["request", "success"],
+        ["result", end === "read" ? "success" : "failed"],
+      ]);
+      expect(rows[1]).toMatchObject({ sourceAddressUnverified: "192.0.2.10", actorRole: "admin", studyInstanceUid: STUDY });
+    }
+    expect(log.mock.calls.some((c) => String(c[0]).includes("export_result_not_recorded"))).toBe(false);
   });
 
   it("ブラウザの側で切ったら、切られたと記録する", async () => {
