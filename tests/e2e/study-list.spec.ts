@@ -1027,7 +1027,10 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   await expect.poll(() => versionReads).toBeGreaterThan(hiddenFrom);
 
   // 利用者が絞り込みを替えた読み直しには、refresh=auto を付けない
+  // 答えが返るまで待つ（差し替えの途中で試験を終えない）
+  const ct = page.waitForResponse((r) => r.url().includes("/api/studies?") && r.url().includes("modality=CT"));
   await page.getByTestId("modality-CT").click();
-  await expect.poll(() => listUrls.length).toBeGreaterThan(1);
-  expect(new URL(listUrls.at(-1)!).searchParams.get("refresh")).toBeNull();
+  const res = await ct;
+  expect(new URL(res.url()).searchParams.get("refresh")).toBeNull();
+  await expect(page.getByTestId("modality-CT")).toHaveAttribute("aria-pressed", "true");
 });
