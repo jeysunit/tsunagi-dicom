@@ -23,3 +23,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: docker
+    # 結合の試験だけで使う DCMTK のイメージの土台（Debian）。Orthanc のイメージ（docker/test/compose.yaml）は手で上げる（docs/integration-test.md）
+    directory: /docker/test/dcmtk
+    schedule:
+      interval: weekly
