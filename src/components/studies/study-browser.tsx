@@ -580,7 +580,7 @@ function Browser({
         onChange={changeFilter}
         trailing={
           <div className="flex flex-wrap items-baseline gap-2">
-            <h1 className="flex items-baseline gap-1" aria-live="polite">
+            <h1 className="flex items-baseline gap-1" aria-live="polite" data-fetching={list.isFetching || undefined}>
               {/* 取り直しの待ちの印が出ている間は、件数を「—」にする（古い件数を新しいものに見せない） */}
               <span className="text-lg font-bold text-value" data-testid="study-count">
                 {data && !refetching ? `${data.count.count}${data.count.exact ? "" : " 以上"}` : "—"}

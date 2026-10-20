@@ -590,6 +590,12 @@ test("モダリティごとの既定のビューア：管理者が管理の画�
 
 const count = async (loc: ReturnType<Page["getByTestId"]>) => Number(/\((\d+)\)/.exec(await loc.innerText())![1]);
 const headCount = async (page: Page) => Number(await page.getByTestId("study-count").innerText());
+/**
+ * 見出しを押したあとの一覧の取り直しが終わるまで待つ。件数と見出しの件数は同じ応答で替わる。
+ * 待たないと、押す前の応答の値がたまたま期待と同じで通り抜け、古い見出しの件数を読んでしまう
+ * （待ちの印は 0.3 秒たつまで出ないので、件数の表示だけでは新旧を見分けられない）
+ */
+const listSettled = (page: Page) => expect(page.getByRole("heading", { level: 1 }).and(page.locator("[data-fetching]"))).toHaveCount(0);
 
 test("1 行の一覧：行の高さは 28px（14px の文字）、氏名の漢字とかなは別の列（かなは右）", async ({ page }) => {
   await asRole(page, "一般");
@@ -708,15 +714,19 @@ test("件数は、ほかの見出しと検索を当てたあとの数になる�
   // 検査日を押したあとの件数は、押す前の見出しの件数と同じ
   const n = await count(page.getByTestId("date-week"));
   await page.getByTestId("date-week").click();
+  await listSettled(page);
   await expect.poll(() => headCount(page)).toBe(n);
   // モダリティの見出しは、検査日を当てた数
   const ct = await count(page.getByTestId("modality-CT"));
   await page.getByTestId("modality-CT").click();
+  await listSettled(page);
   await expect.poll(() => headCount(page)).toBe(ct);
   // 横断の検索を当てると、全部の見出しの件数が絞られる
   await page.getByTestId("modality-all").click();
   await page.getByTestId("date-all").click();
   await page.getByTestId("study-search").fill("JP-TEST-0004");
+  await expect(page).toHaveURL(/q=JP-TEST-0004/);
+  await listSettled(page);
   await expect(page.getByTestId("study-count")).toHaveText("2");
   await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
   await expect.poll(() => count(page.getByTestId("modality-all"))).toBe(2);
