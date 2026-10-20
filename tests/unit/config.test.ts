@@ -82,6 +82,16 @@ describe("設定の読み込み", () => {
     expect(variablesOf({ ...base, PASSWORD_HASH_QUEUE: "1025" })).toEqual(["PASSWORD_HASH_QUEUE"]);
   });
 
+  it("検査の一覧の自動更新の間隔（既定 30 秒。0 で止める。1〜4 秒と 3600 秒より長い値・数でない値は起動しない）", () => {
+    expect(loadConfig(base).screen).toEqual({ studyListRefreshSeconds: 30 });
+    expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "0" }).screen.studyListRefreshSeconds).toBe(0);
+    expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "5" }).screen.studyListRefreshSeconds).toBe(5);
+    expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "3600" }).screen.studyListRefreshSeconds).toBe(3600);
+    for (const bad of ["1", "4", "3601", "-1", "30s", "1.5"]) {
+      expect(variablesOf({ ...base, STUDY_LIST_REFRESH_SECONDS: bad })).toEqual(["STUDY_LIST_REFRESH_SECONDS"]);
+    }
+  });
+
   it("セッションの長さと再認証の時間（既定 10 分・12 時間・5 分。範囲の外は起動しない）", () => {
     expect(loadConfig(base).auth).toMatchObject({ pendingSessionMinutes: 10, sessionMaxHours: 12, reauthMinutes: 5 });
     expect(

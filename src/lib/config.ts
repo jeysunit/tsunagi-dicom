@@ -61,6 +61,11 @@ export interface AppConfig {
     /** AUTH_MODE=dev（モックだけ）で、書き込みの操作も通すか（DEV_ALLOW_WRITE。既定は止める。docs/spec.md の 4） */
     devAllowWrite?: boolean;
   };
+  /** 画面の振る舞い */
+  screen: {
+    /** 検査の一覧の自動更新の間隔（秒。0 で止める。docs/spec.md の 3.1） */
+    studyListRefreshSeconds: number;
+  };
   databaseUrl: string;
   sessionSecret: string;
   timeZone: string;
@@ -138,6 +143,8 @@ const envSchema = z.object({
   LOGIN_PENDING_MINUTES: int(10, 1, 60),
   SESSION_MAX_HOURS: int(12, 1, 24),
   REAUTH_MINUTES: int(5, 1, 60),
+  // 検査の一覧の自動更新（既定 30 秒。2026-10-21 に承認者が決めた）。0 で止める。画像サーバーへ問い合わせすぎないよう 5 秒より短くしない
+  STUDY_LIST_REFRESH_SECONDS: int(30, 0, 3600).refine((v) => v === 0 || v >= 5, "0（止める）か 5〜3600 の整数にする"),
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
@@ -337,6 +344,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       initialAdmin,
       devAllowWrite: e.DEV_ALLOW_WRITE,
     },
+    screen: { studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS },
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている
     sessionSecret: sessionSecret!,

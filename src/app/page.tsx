@@ -32,9 +32,15 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const { session } = access;
   const filter = parseFilter(await searchParams);
   const deps = await screenDeps(session);
+  const config = getConfig();
+  const refreshSeconds = config.screen.studyListRefreshSeconds;
 
   let result: StudyListResult;
+  let version: string | undefined;
   try {
+    // 自動更新の基準の版は、一覧を取る前に読む（間に入った検査は、次の版の読み取りで拾う）。
+    // 版を読めなくても一覧は出す（画面が最初に読んだ版を基準にする）
+    version = refreshSeconds > 0 ? await deps.backend.studyListVersion().catch(() => undefined) : undefined;
     result = await listStudies(deps, filter);
   } catch (error) {
     const message = error instanceof BackendError ? error.message : loadFailed("検査");
@@ -48,13 +54,13 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   await audit(session, searchAuditFields("page", result.returned, result.facetAudit));
 
   const role = session.role;
-  const config = getConfig();
   // 検証モードで書き込みを止めているときは、書き込みの操作のボタンを出さない（BFF の側でも断る）
   const writes = config.auth.mode !== "dev" || !!config.auth.devAllowWrite;
   const screen: ScreenInfo = {
     csrfToken: session.local?.row.csrfToken,
     viewers: deps.viewers,
     timeZone: config.timeZone,
+    refreshSeconds,
     can: {
       rememberViewer: can(role, "viewer.remember"),
       allValues: can(role, "dicom.all_values"),
@@ -73,6 +79,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         initialFilter={filter}
         initialData={{ count: result.count, studies: result.studies, facets: result.facets }}
         initialDataAt={result.fetchedAt}
+        initialVersion={version}
         screen={screen}
       />
     </>

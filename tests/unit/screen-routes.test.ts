@@ -137,6 +137,31 @@ describe("すべての DICOM の値（別の権限）", () => {
   });
 });
 
+describe("一覧の版（自動更新。docs/spec.md の 3.1）", () => {
+  it("変更の記録の番号だけを返し、患者の情報を返さないので監査の記録を増やさない。消すと版が進む", async () => {
+    state.role = "general";
+    const { GET } = await import("@/app/api/studies/version/route");
+    const { getDb } = await import("@/lib/db");
+    const before = await (await getDb()).auditLog.count();
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body)).toEqual(["version"]);
+    expect(body.version).toMatch(/^\d+$/);
+    expect(await (await getDb()).auditLog.count()).toBe(before);
+
+    const { createMockBackend, restoreMockStudies } = await import("@/lib/backend/mock");
+    const backend = createMockBackend();
+    const id = await backend.lookupStudy(STUDY);
+    await backend.deleteStudy(id!);
+    try {
+      expect((await (await GET()).json()).version).toBe(String(Number(body.version) + 1));
+    } finally {
+      restoreMockStudies();
+    }
+  });
+});
+
 describe("段 3：検査の状態の印は返さない", () => {
   it("詳細の検査に、状態の印の項目（検像・読影・緊急・ブックマーク）が無い", async () => {
     state.role = "admin";

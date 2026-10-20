@@ -1,8 +1,8 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, ChevronRight, Search, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Search, X } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
@@ -268,6 +268,39 @@ function columnsFor(studies: readonly StudyView[]) {
   ] as const;
 }
 
+/**
+ * 一覧を読み直しても、見ていた行の位置を保つ（docs/spec.md の 3.1 の自動更新）。スクロールしているときは、見えている先頭の行を
+ * 印にし、読み直した後に同じ行が同じ高さに来るように戻す（新しい検査が上に足されても、見ていた行が動かない）。
+ * いちばん上にいるときは保たない（新しい検査が上に出て、目に入る）
+ */
+function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: readonly StudyView[]) {
+  const anchor = useRef<{ uid: string; offset: number } | null>(null);
+  const measure = useCallback(() => {
+    const box = ref.current;
+    anchor.current = null;
+    if (!box || box.scrollTop === 0) return;
+    const top = box.getBoundingClientRect().top + (box.querySelector("thead")?.getBoundingClientRect().height ?? 0);
+    for (const row of box.querySelectorAll<HTMLElement>("tbody > tr[data-study-uid]")) {
+      const r = row.getBoundingClientRect();
+      if (r.bottom > top && row.dataset.studyUid) {
+        anchor.current = { uid: row.dataset.studyUid, offset: r.top - top };
+        return;
+      }
+    }
+  }, [ref]);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    const a = anchor.current;
+    if (box && a) {
+      const row = box.querySelector<HTMLElement>(`tbody > tr[data-study-uid="${CSS.escape(a.uid)}"]`);
+      const top = box.getBoundingClientRect().top + (box.querySelector("thead")?.getBoundingClientRect().height ?? 0);
+      if (row) box.scrollTop += row.getBoundingClientRect().top - top - a.offset;
+    }
+    measure();
+  }, [ref, studies, measure]);
+  return measure;
+}
+
 /** 一覧の 1 行の高さ（28px）。14px の文字（行の高さ 20px）に上下 4px */
 const CELL = "h-7 px-2 py-0";
 /** 値が 1 行に収まらないときは `…` で切る（全文は title）。一覧の行だけ。詳細のパネルでは切らない */
@@ -294,8 +327,16 @@ function StudyRows({
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
   const columns = columnsFor(studies);
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const onScroll = useScrollAnchor(scrollRef, studies);
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      // 行の位置は useScrollAnchor が保つ（ブラウザのスクロールの寄せと二重に動かさない）
+      className="min-h-0 flex-1 overflow-auto [overflow-anchor:none] rounded-md border border-border md:min-h-56"
+      data-testid="study-list-scroll"
+    >
       {/* 取り直しの待ちの細い帯は、一覧の上の縁に重ねる（場所を取らない。画面は覆わない） */}
       {dim && (
         <div className="sticky top-0 z-20 h-0">
@@ -438,16 +479,59 @@ function StudyRows({
   );
 }
 
+/**
+ * 一覧の自動更新（docs/spec.md の 3.1）。seconds ごとに一覧の版（/api/studies/version。Orthanc の変更の記録の番号）を読み、
+ * 版が変わったときだけ一覧を読み直す（変わらなければ検査の検索をしない）。選んだ行・スクロール・開いている詳細はそのまま
+ * （詳細は読み直さない。「詳細を開いた」の記録を増やさない）。この読み直しの間は待ちの印を出さない（quiet）。
+ * タブを隠している間は読まず、戻ったらすぐ読む。seconds が 0 なら何もしない
+ */
+function useListRefresh(seconds: number, initialVersion: string | undefined) {
+  const queryClient = useQueryClient();
+  const [quiet, setQuiet] = useState(false);
+  // 基準の版。サーバーが一覧を取る前に読んだ版。無ければ、最初に読んだ版を基準にする
+  const base = useRef(initialVersion);
+  const version = useQuery({
+    queryKey: ["studies-version"],
+    queryFn: async ({ signal }) => {
+      const { version: next } = await getJson<{ version: string }>("/api/studies/version", signal);
+      if (base.current === undefined || base.current === next) {
+        base.current = next;
+        return next;
+      }
+      setQuiet(true);
+      try {
+        // 開いていない絞り込みの一覧は古い印だけを付け、いま出している一覧を読み直す
+        await queryClient.invalidateQueries({ queryKey: ["studies"], refetchType: "none" });
+        await queryClient.refetchQueries({ queryKey: ["studies"], type: "active" }, { throwOnError: true });
+        base.current = next;
+      } catch {
+        // 一覧を読めなかったときは、誤りを一覧の上に出し、版を進めない（次の間隔で読み直す）
+      } finally {
+        setQuiet(false);
+      }
+      return next;
+    },
+    enabled: seconds > 0,
+    refetchInterval: seconds > 0 ? seconds * 1000 : false,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  });
+  return { quiet, failed: version.isError };
+}
+
 function Browser({
   initialFilter,
   initialData,
   initialDataAt,
+  initialVersion,
   screen,
 }: {
   initialFilter: StudyFilter;
   initialData: StudyListData;
   /** サーバーの側で一覧を取った時刻（ミリ秒）。古くなった最初の値を新しいものとして使わない */
   initialDataAt: number;
+  /** サーバーの側で一覧を取る前に読んだ、一覧の版（自動更新の基準） */
+  initialVersion?: string;
   screen: ScreenInfo;
 }) {
   const [filter, setFilter] = useState<StudyFilter>(initialFilter);
@@ -495,8 +579,12 @@ function Browser({
 
   const changed = () => void queryClient.invalidateQueries({ queryKey: ["studies"] });
   const data = list.data;
-  // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」
-  const refetching = useDelayedPending(list.isFetching);
+  const refreshSeconds = screen.refreshSeconds ?? 0;
+  const refresh = useListRefresh(refreshSeconds, initialVersion);
+  // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」。
+  // 自動更新の読み直しには出さない（30 秒ごとに一覧がちらつかないように）
+  const fetching = list.isFetching && !refresh.quiet;
+  const refetching = useDelayedPending(fetching);
 
   // 削除が終わったことの知らせ（docs/spec.md の 3.5「消した後」）。消すと行も詳細も消えるので、一覧の上に出す。
   // 次の操作（絞り込み・行の選び直し）までか、10 秒で消す
@@ -587,7 +675,17 @@ function Browser({
               </span>
               <span className="text-label">件</span>
             </h1>
-            <PendingText pending={list.isFetching} />
+            <PendingText pending={fetching} />
+            {refreshSeconds > 0 && (
+              <span
+                className={cn("inline-flex items-center gap-1 text-xs", refresh.failed ? "text-danger" : "text-label")}
+                data-testid="list-refresh"
+                data-failed={refresh.failed || undefined}
+              >
+                <RefreshCw aria-hidden className="size-3.5" />
+                {refresh.failed ? "自動更新：接続できません" : `自動更新（${refreshSeconds}秒）`}
+              </span>
+            )}
             {notice && (
               <p role="status" className="flex items-center gap-1.5 rounded-md border border-success px-2 text-sm text-success" data-testid="list-notice">
                 <CheckCircle2 aria-hidden className="size-4" />
@@ -696,7 +794,13 @@ function Browser({
   );
 }
 
-export function StudyBrowser(props: { initialFilter: StudyFilter; initialData: StudyListData; initialDataAt: number; screen: ScreenInfo }) {
+export function StudyBrowser(props: {
+  initialFilter: StudyFilter;
+  initialData: StudyListData;
+  initialDataAt: number;
+  initialVersion?: string;
+  screen: ScreenInfo;
+}) {
   const [client] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: false } } }),
   );

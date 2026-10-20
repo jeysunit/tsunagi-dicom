@@ -876,7 +876,8 @@ test("詳細の見出しに、毎回見る値を常に出す：受付番号・�
 
 test("詳細の見出し：受付番号が無いときも「受付番号 —」を出す（無いこと自体が照合の手がかり）", async ({ page }) => {
   await page.route("**/api/studies/*", async (route) => {
-    if (route.request().method() !== "GET") return route.continue();
+    // 一覧の版（自動更新の /api/studies/version）は検査の詳細ではないので、そのまま通す
+    if (route.request().method() !== "GET" || route.request().url().endsWith("/api/studies/version")) return route.continue();
     const res = await route.fetch();
     const body = (await res.json()) as { study: Record<string, unknown> };
     body.study.accessionNumber = "";
@@ -916,4 +917,81 @@ test("詳細の見出しは 1〜2 行：氏名・かな・患者 ID・生年月�
   const pane = (await page.getByTestId("detail-pane").boundingBox())!;
   const strip = (await page.getByTestId("series-strip").boundingBox())!;
   expect(strip.y + Math.min(strip.height, 80)).toBeLessThanOrEqual(pane.y + pane.height);
+});
+
+test("自動更新：30 秒ごとに一覧の版を読み、変わったときだけ一覧を読み直す。選んだ行・スクロール・開いている詳細は残る", async ({ page }) => {
+  // 一覧がスクロールする高さにする
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await asRole(page, "一般");
+  const real = (await (await page.request.get("/api/studies/version")).json()) as { version: string };
+  let version = Number(real.version);
+  let versionStatus = 200;
+  let versionReads = 0;
+  await page.route("**/api/studies/version", (route) => {
+    versionReads += 1;
+    return versionStatus === 200
+      ? route.fulfill({ json: { version: String(version) } })
+      : route.fulfill({ status: versionStatus, json: { error: "画像サーバーに接続できません" } });
+  });
+  // 版が変わった後の一覧には、新しく届いた検査（合成）を先頭に足す
+  const NEW_UID = "1.2.826.0.1.3680043.8.498.999999999";
+  let arrived = false;
+  let listReads = 0;
+  await page.route(/\/api\/studies(\?[^/]*)?$/, async (route) => {
+    listReads += 1;
+    const res = await route.fetch();
+    const body = await res.json();
+    if (arrived) {
+      body.studies.unshift({ ...body.studies[0], studyInstanceUid: NEW_UID, patientId: "JP-TEST-NEW", studyDate: "20261021" });
+      body.count.count += 1;
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.clock.install();
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
+  // 開いたときに版を 1 回読む（サーバーが一覧を取る前に読んだ版と同じなので、一覧は読み直さない）
+  await expect.poll(() => versionReads).toBe(1);
+  expect(listReads).toBe(0);
+
+  // 一覧をいちばん下までスクロールし、最後の行を選んで詳細を開く
+  const list = page.getByTestId("study-list-scroll");
+  await list.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  const target = rows(page).last();
+  const uid = (await target.getAttribute("data-study-uid"))!;
+  await target.click();
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  const scrolled = await list.evaluate((el) => el.scrollTop);
+  expect(scrolled).toBeGreaterThan(0);
+  const rowTop = (await target.boundingBox())!.y;
+
+  // 30 秒たつと版を読む。版が変わらなければ、一覧は読み直さない（検索も監査の記録も増やさない）
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => versionReads).toBe(2);
+  expect(listReads).toBe(0);
+
+  // 版が変わると一覧を読み直し、新しい検査が先頭に出る。選んだ行・詳細・見ていた行の位置はそのまま
+  version += 1;
+  arrived = true;
+  await page.clock.fastForward(30_000);
+  await expect(rows(page)).toHaveCount(9);
+  expect(listReads).toBe(1);
+  await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEW_UID);
+  await expect(page.getByTestId("study-count")).toHaveText("9");
+  await expect(page.locator(`tr[data-study-uid="${uid}"]`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  expect(Math.abs((await page.locator(`tr[data-study-uid="${uid}"]`).boundingBox())!.y - rowTop)).toBeLessThanOrEqual(2);
+  // 自動更新の読み直しでは、古い行を薄くしない
+  await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
+
+  // 版を読めなければ、自動更新が止まっていることを出す。読めるようになれば戻る
+  versionStatus = 502;
+  await page.clock.fastForward(30_000);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新：接続できません");
+  versionStatus = 200;
+  await page.clock.fastForward(30_000);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
 });

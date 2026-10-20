@@ -8,6 +8,8 @@ export interface ScreenInfo {
   viewers: ViewerInfo[];
   /** サーバーの時間帯（TZ）。画面の時刻（送信の時刻など）は、この時間帯で出す（docs/spec.md の 2.2） */
   timeZone: string;
+  /** 検査の一覧の自動更新の間隔（秒。無い・0 なら止める。STUDY_LIST_REFRESH_SECONDS。docs/spec.md の 3.1） */
+  refreshSeconds?: number;
   /** いまの役割でできること（src/lib/auth/roles.ts） */
   can: {
     rememberViewer: boolean;
