@@ -10,9 +10,10 @@ import type { FacetAudit } from "@/lib/study-list";
 /**
  * `facets`：見出しの件数を数えたときの条件・範囲・件数・上限に届いたか（src/lib/study-list.ts の FacetAudit）。
  * 件数から知れること（例：「今日＋患者 ID」で一覧は 0 件でも、全期間の件数から過去の検査の有無が分かる）を、後から追えるようにする。
- * 患者の値は入れない（検索の語は有無だけ）
+ * 患者の値は入れない（検索の語は有無だけ）。
+ * `trigger: "auto"`：検査一覧の自動更新（一覧の版が進んだとき）の読み直し。利用者が絞り込み・開き直しで求めた検索と分けて追えるようにする
  */
-export function searchAuditFields(via: "page" | "api", studies: StudySummary[], facets?: FacetAudit): AuditFields {
+export function searchAuditFields(via: "page" | "api", studies: StudySummary[], facets?: FacetAudit, trigger?: "auto"): AuditFields {
   const patients = new Set(studies.map((s) => s.patientId));
   return {
     action: "search",
@@ -21,6 +22,7 @@ export function searchAuditFields(via: "page" | "api", studies: StudySummary[], 
     studyInstanceUid: studies.length === 1 ? studies[0]!.studyInstanceUid : null,
     detail: {
       via,
+      ...(trigger ? { trigger } : {}),
       results: studies.length,
       returned: studies.map((s) => [s.patientId, s.studyInstanceUid]),
       ...(facets ? { facets } : {}),
