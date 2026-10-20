@@ -93,9 +93,13 @@ services:
     networks:
       - backend
       - dicom
-    # イメージの既定の確かめは認証の無い REST を前提にするので使わない
+    # 起動の確かめ：HTTP（8042）と DICOM（4242）が待ち受けているか（資格情報を使わない。イメージの既定の確かめは使わない）
     healthcheck:
-      disable: true
+      test: ["CMD", "python3", "-c", "import socket; [socket.create_connection(('127.0.0.1', p), 3).close() for p in (8042, 4242)]"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
