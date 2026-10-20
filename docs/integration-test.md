@@ -63,7 +63,7 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 | 7 | 削除 | 管理者が理由と再認証（パスワード）を通して消すと、Orthanc から消える（再認証の前は消えない） |
 | 8 | 答えが失われたとき（[`round-trip-test.md`](round-trip-test.md) の 7） | 入口（gate）が送る要求の答えを捨てて 504 を返すと、Orthanc は送るが画面は「送信結果を確認できません」と要求の ID を出す。同じ検査・同じ送り先へは重ねて送れない。管理者が「送信済みとして記録」すると、開き直してまた送れる |
 | 9 | 監査のつなぎ | `/api/audit/verify` が `ok`。送る・削除・照らし合わせの要求ごとに「求めた」「結果」「終わり」の行が要求の ID で結ばれ、結果不明の間に重ねた要求は断った行だけが残る。C-ECHO の成功と失敗が残る |
-| 10 | 見つけた食い違い | 書き出しの「結果」の行が残る。サムネイルがブラウザの Accept のまま画像で返る。どちらも 2026-10-20 の時点で BFF が満たしていないので赤（[`round-trip-test.md`](round-trip-test.md) の「結合の試験で見つけた、BFF の食い違い」）。直したら緑になる |
+| 10 | 見つけて直した食い違い | 書き出しの「結果」の行が残る。サムネイルがブラウザの Accept のまま画像で返る。2026-10-20 に見つけ、PR #33 で直した（[`round-trip-test.md`](round-trip-test.md) の「結合の試験で見つけて直した、BFF の食い違い」） |
 
 試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報と住所は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」に写す。
 
@@ -88,3 +88,17 @@ node tests/integration/run.mjs
 - trace と HTML の報告は作らない。入力した値（試験だけの管理者のパスワード）と通信の中身が残り、CI の成果物として外に出るため。
 - 監査の記録は、`/api/audit/verify` のつなぎに加えて、試験の BFF のデータベース（`.e2e/itest/itest.db`）を読むだけで開き、送る・削除・書き出しの要求ごとに「求めた」「結果」「終わり」の行が要求の ID で結ばれていることを照らす（`tests/integration/support/audit-db.ts`）。
 - 残したコンテナは `docker compose -f docker/test/compose.yaml down --volumes` で片付ける（compose の変数が要るので、`ITEST_DUMP_DIR` と `ITEST_ORTHANC_USERS_FILE` に `.e2e/itest/` の中の場所を渡す）。
+
+## 開発用の compose の流れ（`tests/flow`）
+
+同じ workflow の、もう1つの仕事（`開発用の compose の流れ（TDG → Orthanc → tsunagi-dicom → storescp）`）。この試験と違い、BFF もコンテナ（このリポジトリから作るイメージ）で動かし、配る compose（`deploy/compose.yaml`）の形のまま確かめる。手順は [`round-trip-test.md`](round-trip-test.md)。
+
+- `tests/flow/run.mjs` が `docker/dev/up.sh` で一式を立て、`tests/flow/flow.spec.ts` を流し、片付ける（`FLOW_KEEP=1` なら残す）。compose のプロジェクトは `tsunagi-flow`、ポートは画面 13000・DICOM 14242・dicom-test-generator の Web 画面 18081 で、手元で使っている開発用の一式（`tsunagi-dev`）とは volume もポートも分ける。
+- 確かめること：Orthanc の REST（8042）がホストに公開されていない。内部ネットワーク `backend` が `internal: true` で、tsunagi-dicom と Orthanc だけが入る。ホストに公開した DICOM（4242）に C-ECHO が通る。dicom-test-generator の CLI で送った架空の患者が受信一覧に出て、tsunagi-dicom から storescp へ送信すると、同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。
+- CI の記録に `[flow]` の行で、各段の画像の数を出す。
+
+```sh
+npm ci
+npx playwright install chromium
+node tests/flow/run.mjs
+```
