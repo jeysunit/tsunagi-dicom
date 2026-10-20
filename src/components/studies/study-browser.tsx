@@ -442,18 +442,32 @@ function Browser({
   initialFilter,
   initialData,
   initialDataAt,
+  initialSelected,
   screen,
 }: {
   initialFilter: StudyFilter;
   initialData: StudyListData;
   /** サーバーの側で一覧を取った時刻（ミリ秒）。古くなった最初の値を新しいものとして使わない */
   initialDataAt: number;
+  /** 開いたときに選んでおく検査（受信一覧の「検査一覧で表示」から。最初の一覧にある検査だけ） */
+  initialSelected?: string;
   screen: ScreenInfo;
 }) {
   const [filter, setFilter] = useState<StudyFilter>(initialFilter);
-  const [selected, setSelected] = useState<string | null>(null);
-  // 詳細を実際に取る検査。クリックならすぐ、矢印で移るときは止まってから（通り過ぎた行の「詳細を開いた」を記録しない）
-  const [loadedUid, setLoadedUid] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
+  // 詳細を実際に取る検査。クリックならすぐ、矢印で移るときは止まってから（通り過ぎた行の「詳細を開いた」を記録しない）。
+  // 開いたときに選んだ検査は、クリックと同じくすぐ取る（「詳細を開いた」を記録する）
+  const [loadedUid, setLoadedUid] = useState<string | null>(initialSelected ?? null);
+  // 開いたときに選んだ検査の行を、一覧の見える所に入れ、フォーカスを置く（矢印のキーでそのまま続けて動ける）
+  const openedWith = useRef(initialSelected);
+  useEffect(() => {
+    const uid = openedWith.current;
+    if (!uid) return;
+    const row = document.querySelector<HTMLElement>(`[data-testid=study-table] tr[data-study-uid="${CSS.escape(uid)}"]`);
+    if (!row) return;
+    revealRow(row);
+    row.focus({ preventScroll: true });
+  }, []);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const select = useCallback((uid: string | null, how: "click" | "key") => {
@@ -696,7 +710,13 @@ function Browser({
   );
 }
 
-export function StudyBrowser(props: { initialFilter: StudyFilter; initialData: StudyListData; initialDataAt: number; screen: ScreenInfo }) {
+export function StudyBrowser(props: {
+  initialFilter: StudyFilter;
+  initialData: StudyListData;
+  initialDataAt: number;
+  initialSelected?: string;
+  screen: ScreenInfo;
+}) {
   const [client] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: false } } }),
   );

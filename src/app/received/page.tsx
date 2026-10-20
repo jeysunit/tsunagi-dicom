@@ -1,30 +1,20 @@
-import Link from "next/link";
+import { ReceivedList } from "@/components/pacs/received-list";
 import { pageAccess } from "@/lib/auth/page-session";
 import { audit } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { BackendError } from "@/lib/backend/types";
 import type { ReceivedView } from "@/lib/fields";
 import { getConfig } from "@/lib/config";
-import { formatDateTimeIn, formatSlashDate } from "@/lib/format/japanese-date";
 import { RECEIVE_LIMIT, receiveLogView } from "@/lib/receive-log";
 import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
-import { cn } from "@/lib/utils";
 
 // 受け取りの記録の頁（docs/spec.md の 3.3。段 4）。Orthanc が受け取った検査を、新しい順に 1 件 1 行で出す。
 // いつ（受け取った時刻）・どの機器から（呼んできた AE タイトル）・何件（画像の数）・どの検査か。
 // 返した検査は、画面の API と同じく記録してから描く（記録に失敗したら描かない）。
 // 時刻は Orthanc から UTC で来るので、サーバーの時間帯（TZ）に直して `2026/10/17 18:01:00` の形で出す。
+// 絞り込み・新着の印・再読み込みは表の部品（src/components/pacs/received-list.tsx）。
 
 export const metadata = { title: "受信一覧" };
-
-const CELL = "h-7 px-2 py-0 overflow-hidden text-ellipsis whitespace-nowrap";
-
-/** 入った道。DICOM の C-STORE 以外（REST で入れたなど）は「インポート」と分かるようにする（画面の言葉は docs/spec.md の 2.2） */
-function originText(origin: string | null | undefined): string {
-  if (origin === "DicomProtocol") return "";
-  if (origin === "RestApi") return "インポート";
-  return origin ?? "";
-}
 
 export default async function ReceivedPage() {
   const access = await pageAccess("receive.view");
@@ -67,90 +57,8 @@ export default async function ReceivedPage() {
 
   return (
     <section className="space-y-2" data-testid="received-page">
-      <div className="flex flex-wrap items-baseline gap-x-4">
-        <h1 className="text-lg font-bold text-value">受信一覧</h1>
-        {/* 読める範囲の説明（Orthanc の変更の記録の数に限りがある）は title に回す（画面に説明の文を置かない。docs/spec.md の 2.2） */}
-        <p className="text-xs text-label" title="Orthanc の変更の記録から読める範囲です。古い記録は Orthanc に残らないことがあります">
-          直近 {RECEIVE_LIMIT} 件
-        </p>
-      </div>
-      {!complete && (
-        <p role="status" className="text-xs text-danger" data-testid="received-incomplete">
-          一部の履歴を読み込めませんでした。抜けがないか Orthanc で確認してください
-        </p>
-      )}
-      {items.length === 0 ? (
-        <p className="text-label">受信履歴はありません</p>
-      ) : (
-        <div className="overflow-auto rounded-md border border-border">
-          <table className="w-full min-w-[960px] table-fixed border-collapse" data-testid="received-table">
-            <colgroup>
-              {/* 受信日時（秒まで）とリンクの列は、値が切れない幅にする */}
-              <col style={{ width: 176 }} />
-              <col style={{ width: 140 }} />
-              <col style={{ width: 80 }} />
-              <col style={{ width: 120 }} />
-              <col style={{ width: 120 }} />
-              <col style={{ width: 100 }} />
-              <col />
-              <col style={{ width: 132 }} />
-            </colgroup>
-            <thead className="bg-surface text-left text-xs text-label">
-              <tr className="border-b border-border">
-                <th className="px-2 py-1 font-normal">受信日時</th>
-                <th className="px-2 py-1 font-normal">送信元 AE</th>
-                <th className="px-2 py-1 text-right font-normal">画像数</th>
-                <th className="px-2 py-1 font-normal">患者ID</th>
-                <th className="px-2 py-1 font-normal">氏名</th>
-                <th className="px-2 py-1 font-normal">検査日</th>
-                <th className="px-2 py-1 font-normal">モダリティ／検査名</th>
-                <th className="px-2 py-1 font-normal">
-                  <span className="sr-only">表示</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((r, i) => {
-                const desc = [r.study.modalities?.join("・"), r.study.studyDescription].filter(Boolean).join(" ");
-                const origin = originText(r.origin);
-                return (
-                  <tr key={`${r.study.studyInstanceUid ?? "row"}-${i}`} className="border-b border-border last:border-0" data-testid="received-row">
-                    <td className={CELL} data-testid="received-at">
-                      {formatDateTimeIn(r.receivedAt, timeZone, { seconds: true })}
-                    </td>
-                    <td className={cn(CELL, "font-mono")} title={r.remoteAet ?? origin}>
-                      {r.remoteAet ?? <span className="text-label">{origin || "—"}</span>}
-                    </td>
-                    <td className={cn(CELL, "text-right")}>{r.receivedInstances ?? ""}</td>
-                    <td className={cn(CELL, "font-mono")} title={r.study.patientId}>
-                      {r.study.patientId}
-                    </td>
-                    <td className={CELL} title={r.study.patientName}>
-                      {r.study.patientName}
-                    </td>
-                    <td className={CELL}>{formatSlashDate(r.study.studyDate)}</td>
-                    <td className={CELL} title={desc}>
-                      {origin && (
-                        <span className="mr-1.5 rounded border border-border px-1 text-xs text-label" data-testid="received-origin">
-                          {origin}
-                        </span>
-                      )}
-                      {desc}
-                    </td>
-                    <td className={CELL}>
-                      {r.study.patientId && (
-                        <Link href={`/?${new URLSearchParams({ q: r.study.patientId })}`} className="text-link underline underline-offset-2 hover:decoration-2">
-                          検査一覧で表示
-                        </Link>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <h1 className="text-lg font-bold text-value">受信一覧</h1>
+      <ReceivedList initialItems={items} initialComplete={complete} timeZone={timeZone} limit={RECEIVE_LIMIT} />
     </section>
   );
 }
