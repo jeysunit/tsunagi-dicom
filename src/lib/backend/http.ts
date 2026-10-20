@@ -38,6 +38,7 @@ import {
   clampStudyLimit,
   STUDY_LIMIT,
   type Backend,
+  type InstanceSummary,
   type ReceivedStudy,
   type RelayRequest,
   type StudyQuery,
@@ -238,12 +239,19 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const query = new URLSearchParams();
       query.append("includefield", TAG.InstanceNumber);
       query.append("includefield", TAG.NumberOfFrames);
+      // 監査の記録の「どの患者」に使う
+      query.append("includefield", TAG.PatientID);
       const rows = await getJson<DicomJsonDataset[]>(
         dicomwebUrl!,
         `studies/${checkedUid(studyInstanceUid)}/series/${checkedUid(seriesInstanceUid)}/instances?${query}`,
       );
-      // UID の形でない行は落とす（画面で選び、次の要求の path に入るため）
-      return sortInstances(Array.isArray(rows) ? rows.map(instanceFromDicomJson).filter((i) => isDicomUid(i.sopInstanceUid)) : []);
+      // UID の形でない行は落とす（画面で選び、次の要求の path に入るため）。答えをそのまま信じず、
+      // 検査・シリーズの UID が求めたものと同じ行だけを返す（Orthanc 26.9.1 の画像の単位の QIDO-RS は、
+      // 検査・シリーズの UID と患者 ID を返すことを、2026-10-21 に結合の試験の 12 で測った）
+      const sameStudy = (i: InstanceSummary) => i.studyInstanceUid === studyInstanceUid && i.seriesInstanceUid === seriesInstanceUid;
+      return sortInstances(
+        Array.isArray(rows) ? rows.map(instanceFromDicomJson).filter((i) => isDicomUid(i.sopInstanceUid) && sameStudy(i)) : [],
+      );
     },
 
     async instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string) {

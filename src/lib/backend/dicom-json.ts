@@ -107,6 +107,9 @@ export function sortSeries(series: SeriesSummary[]): SeriesSummary[] {
 
 export function instanceFromDicomJson(ds: DicomJsonDataset): InstanceSummary {
   return {
+    studyInstanceUid: stringValue(ds, TAG.StudyInstanceUID),
+    seriesInstanceUid: stringValue(ds, TAG.SeriesInstanceUID),
+    patientId: stringValue(ds, TAG.PatientID),
     sopInstanceUid: stringValue(ds, TAG.SOPInstanceUID),
     sopClassUid: stringValue(ds, TAG.SOPClassUID),
     instanceNumber: stringValue(ds, TAG.InstanceNumber),

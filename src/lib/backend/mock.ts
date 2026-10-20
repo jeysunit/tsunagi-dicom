@@ -254,6 +254,8 @@ export function createMockBackend(): Backend {
       (s) => s.MainDicomTags.SeriesInstanceUID === seriesInstanceUid,
     );
     if (!series) return [];
+    const study = (await qidoStudies()).find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid);
+    const patientId = study ? stringValue(study, TAG.PatientID) : "";
     const copied = new Map((await readAll<RestInstance>("instances")).map((i) => [i.ID, i]));
     // 写しの無い画像の番号は、写しの画像の番号と重ならないように 1 から振る
     const used = new Set(series.Instances.map((id) => copied.get(id)?.MainDicomTags.InstanceNumber).filter(Boolean));
@@ -268,6 +270,9 @@ export function createMockBackend(): Backend {
         series,
         tags: tags ?? {},
         summary: {
+          studyInstanceUid,
+          seriesInstanceUid,
+          patientId,
           sopInstanceUid: tags?.SOPInstanceUID ?? syntheticUid(id),
           sopClassUid: SOP_CLASS[series.MainDicomTags.Modality ?? ""] ?? SOP_CLASS.OT!,
           instanceNumber: tags?.InstanceNumber ?? nextNumber(),

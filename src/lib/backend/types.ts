@@ -37,6 +37,11 @@ export interface SeriesSummary {
 
 /** シリーズの中の画像（BFF の側の QIDO-RS で引く。画像単位の DICOM タグの選び先。中継からは返さない） */
 export interface InstanceSummary {
+  /** 答えにあれば、求めた検査・シリーズのものかを確かめる（無ければ空）。画面へは返さない */
+  studyInstanceUid: string;
+  seriesInstanceUid: string;
+  /** 監査の記録の「どの患者」に使う（無ければ空）。画面へは返さない */
+  patientId: string;
   sopInstanceUid: string;
   sopClassUid: string;
   instanceNumber: string;

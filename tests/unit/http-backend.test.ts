@@ -87,6 +87,17 @@ beforeAll(async () => {
             },
           ]),
         );
+      } else if (req.url?.startsWith("/dicom-web/studies/1.2.3/series/4.5.6/instances?")) {
+        // 画像の並び：求めた検査・シリーズの行・検査が違う行・シリーズが違う行・UID の無い行
+        const row = (study: string | null, series: string | null, sop: string, n: number) => ({
+          ...(study ? { "0020000D": { vr: "UI", Value: [study] } } : {}),
+          ...(series ? { "0020000E": { vr: "UI", Value: [series] } } : {}),
+          "00080018": { vr: "UI", Value: [sop] },
+          "00100020": { vr: "LO", Value: ["JP-TEST-0001"] },
+          "00200013": { vr: "IS", Value: [n] },
+        });
+        res.writeHead(200, { "content-type": "application/dicom+json" });
+        res.end(JSON.stringify([row("1.2.3", "4.5.6", "7.8.9", 1), row("9.9.9", "4.5.6", "7.8.10", 2), row("1.2.3", "9.9.9", "7.8.11", 3), row(null, null, "7.8.12", 4)]));
       } else if (req.url?.startsWith("/dicom-web/studies/1.2.3/series/4.5.6/instances/0.0.0")) {
         res.writeHead(404).end();
       } else if (req.url?.startsWith("/dicom-web/studies")) {
@@ -257,10 +268,13 @@ describe("実の画像サーバーへの接続", () => {
   it("画像単位の DICOM タグ：画像の並びは QIDO-RS、値は WADO-RS の metadata。UID を確かめ、答えの UID が違えば返さない", async () => {
     seen.length = 0;
     const b = backend({ caPem });
-    await b.searchInstances("1.2.3", "4.5.6");
+    const found = await b.searchInstances("1.2.3", "4.5.6");
     const list = new URL(seen.at(-1)!.url, "https://x");
     expect(list.pathname).toBe("/dicom-web/studies/1.2.3/series/4.5.6/instances");
-    expect(list.searchParams.getAll("includefield")).toEqual(["00200013", "00280008"]);
+    expect(list.searchParams.getAll("includefield")).toEqual(["00200013", "00280008", "00100020"]);
+    // 答えの検査・シリーズの UID が求めたものと違う行・UID の無い行は返さない
+    expect(found.map((i) => i.sopInstanceUid)).toEqual(["7.8.9"]);
+    expect(found[0]).toMatchObject({ patientId: "JP-TEST-0001", instanceNumber: "1" });
 
     const ds = await b.instanceDataset("1.2.3", "4.5.6", "7.8.9");
     expect(seen.at(-1)).toMatchObject({ url: "/dicom-web/studies/1.2.3/series/4.5.6/instances/7.8.9/metadata", method: "GET", accept: "application/dicom+json" });

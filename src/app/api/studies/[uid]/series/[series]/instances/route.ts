@@ -19,7 +19,14 @@ export async function GET(_request: Request, { params }: Context) {
     const detail = { allValues: true, level: "instances", seriesInstanceUid: series };
     await requirePermission(session, "dicom.all_values", { action: "view_study", studyInstanceUid: uid, detail });
     const instances = await getBackend().searchInstances(uid, series);
-    await audit(session, { action: "view_study", studyInstanceUid: uid, detail: { ...detail, count: instances.length } });
+    // 1人の患者の画像だけなら、記録の「どの患者」にも入れる（患者で記録を探せるように）
+    const patients = new Set(instances.map((i) => i.patientId).filter(Boolean));
+    await audit(session, {
+      action: "view_study",
+      patientId: patients.size === 1 ? [...patients][0]! : null,
+      studyInstanceUid: uid,
+      detail: { ...detail, count: instances.length },
+    });
     return Response.json({
       instances: instances.map(({ sopInstanceUid, sopClassUid, instanceNumber, numberOfFrames }) => ({
         sopInstanceUid,
