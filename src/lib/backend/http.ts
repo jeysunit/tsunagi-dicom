@@ -123,7 +123,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     } catch {
       // 原因の文言に URL や資格情報が入りうるので、ブラウザへは渡さない
       if (init.write) throw new BackendUnknownError();
-      throw new BackendError("画像サーバーにつながらない");
+      throw new BackendError("画像サーバーに接続できません");
     }
   }
 
@@ -136,7 +136,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     }
     if (!res.ok) {
       await res.body?.cancel();
-      throw new BackendError(`画像サーバーの応答が ${res.status}`);
+      throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     }
     return res.json();
   }
@@ -180,7 +180,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
   async function getJson<T>(base: string, path: string): Promise<T> {
     const res = await call(base, path, { headers: { accept: "application/dicom+json, application/json" } });
     if (res.status === 204) return [] as T;
-    if (!res.ok) throw new BackendError(`画像サーバーの応答が ${res.status}`);
+    if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     return (await res.json()) as T;
   }
 
@@ -198,7 +198,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
 
   /** UID は字を確かめてから URL に入れる（画像サーバーの path の外へ出さない） */
   function checkedUid(uid: string): string {
-    if (!isDicomUid(uid)) throw new BackendError("StudyInstanceUID の形が誤り", 400);
+    if (!isDicomUid(uid)) throw new BackendError("StudyInstanceUID が正しくありません", 400);
     return uid;
   }
 
@@ -287,22 +287,22 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     },
 
     async echoModality(modalityId: string) {
-      if (!isModalityName(modalityId)) throw new BackendError("機器の名前の形が誤り", 400);
+      if (!isModalityName(modalityId)) throw new BackendError("接続先の名称が正しくありません", 400);
       // Orthanc 1.7.0 からは、本文に JSON が要る
       const res = await restPost(`modalities/${encodeURIComponent(modalityId)}/echo`, JSON.stringify({ Timeout: 10 }));
       await res.body?.cancel();
-      if (res.status === 404) throw new BackendError("機器が登録されていない", 404);
+      if (res.status === 404) throw new BackendError("接続先が登録されていません", 404);
       if (res.ok) return true;
       // Orthanc は C-ECHO が通らないとき 500 を返す。ほか（資格情報の誤り・入口の誤りなど）は「つながらない」としない
       if (res.status === 500) return false;
-      throw new BackendError(`画像サーバーの応答が ${res.status}`);
+      throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     },
 
     async lookupStudyIds(studyInstanceUid: string) {
       const res = await restPost("tools/lookup", checkedUid(studyInstanceUid), { contentType: "text/plain", credential: "read" });
       if (!res.ok) {
         await res.body?.cancel();
-        throw new BackendError(`画像サーバーの応答が ${res.status}`);
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
       }
       return studyIdsFromLookup(await res.json());
     },
@@ -312,13 +312,13 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     },
 
     async studyInfo(orthancStudyId: string) {
-      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
       return studyInfoFromRest(await restJsonOrNull(`studies/${orthancStudyId}`));
     },
 
     async sendStudy(modalityId: string, orthancStudyId: string) {
-      if (!isModalityName(modalityId)) throw new BackendError("機器の名前の形が誤り", 400);
-      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      if (!isModalityName(modalityId)) throw new BackendError("接続先の名称が正しくありません", 400);
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
       const res = await restPost(
         `modalities/${encodeURIComponent(modalityId)}/store`,
         JSON.stringify({ Resources: [orthancStudyId], Synchronous: false }),
@@ -326,13 +326,13 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       );
       if (res.status === 404) {
         await res.body?.cancel();
-        throw new BackendError("機器が登録されていない", 404);
+        throw new BackendError("接続先が登録されていません", 404);
       }
       if (!res.ok) {
         await res.body?.cancel();
         // 手前の入口の 502・503・504 と移す答え（3xx）は、Orthanc が受けなかったと確かめられない（受けた後に答えが失われたかもしれない）
         if (isUncertainStatus(res.status)) throw new BackendUnknownError();
-        throw new BackendError(`画像サーバーの応答が ${res.status}`);
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
       }
       let body: unknown;
       try {
@@ -353,7 +353,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     },
 
     async exportStudy(orthancStudyId: string) {
-      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
       // ZIP は大きくなりうる。答えが始まるまでは EXPORT_TIMEOUT_MS を待ち、本文を流す間は、塊と塊の間が
       // EXPORT_IDLE_MS を超えたときだけ切る（全体の長さの時間切れで、大きな検査の ZIP を途中で切らない）
       const abort = new AbortController();
@@ -366,11 +366,11 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       }
       if (res.status === 404) {
         await res.body?.cancel();
-        throw new BackendError("検査が見つからない", 404);
+        throw new BackendError("検査が見つかりません", 404);
       }
       if (!res.ok || res.status >= 300 || !res.body) {
         await res.body?.cancel();
-        throw new BackendError(`画像サーバーの応答が ${res.status}`);
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
       }
       const idle = () => {
         clearTimeout(timer);
@@ -392,13 +392,13 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     },
 
     async deleteStudy(orthancStudyId: string) {
-      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
       const res = await call(orthancUrl, `studies/${orthancStudyId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
       await res.body?.cancel();
-      if (res.status === 404) throw new BackendError("検査が見つからない", 404);
+      if (res.status === 404) throw new BackendError("検査が見つかりません", 404);
       // 受けなかったと確かめられない答えは結果不明（照らせば、消えたかが分かる）
       if (!res.ok && isUncertainStatus(res.status)) throw new BackendUnknownError();
-      if (!res.ok) throw new BackendError(`画像サーバーの応答が ${res.status}`);
+      if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     },
   };
 }

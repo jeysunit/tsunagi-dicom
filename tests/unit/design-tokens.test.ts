@@ -54,6 +54,9 @@ const PAIRS: [string, string][] = [
   ["foreground", "selected"],
   ["value", "selected"],
   ["label", "selected"],
+  // 終わったことの印の文字（送信完了・接続確認の成功）
+  ["success", "background"],
+  ["success", "surface"],
 ];
 
 describe("文字と地の対比（WCAG 2.2 の AA）", () => {

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { ActionButton } from "@/components/ui/pending";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ROLE_LABELS, ROLES, isRole } from "@/lib/auth/roles";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
@@ -21,7 +22,7 @@ export interface UserRowView {
   lockedUntil: string | null;
 }
 
-// 利用者の一覧（棚卸し）と、作る・役割を変える・止める／戻す・TOTP のやり直し・一時停止の解除。
+// 利用者の一覧（棚卸し）と、作る・役割を変える・止める／戻す・TOTP のやり直し・一時停止の解除。画面の言葉は docs/spec.md の 2.2。
 // これらは大事な操作なので、直前の本人の確かめ（再認証）が要る。BFF が求めたら、パスワードと確認の番号を入れてもらい、
 // 通ったら同じ操作をもう一度送る。
 export function UserAdmin({
@@ -44,6 +45,9 @@ export function UserAdmin({
     null,
   );
   const [reauthError, setReauthError] = useState<string | null>(null);
+  /** 再認証・ユーザーの追加の要求を送っている間（押したボタンに待ちの印を出す） */
+  const [authing, setAuthing] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   /** 送って、再認証を求められたら、その画面を出して待つ */
   async function send(run: () => Promise<PostResult>, done: (res: PostResult) => void) {
@@ -60,11 +64,13 @@ export function UserAdmin({
     event.preventDefault();
     if (!reauth) return;
     const form = new FormData(event.currentTarget);
+    setAuthing(true);
     const res = await postJson(
       "/api/auth/reauth",
       { password: form.get("password"), ...(needsTotp ? { code: form.get("code") } : {}) },
       csrfToken,
     );
+    setAuthing(false);
     if (res.data.next) {
       window.location.assign(res.data.next);
       return;
@@ -106,6 +112,7 @@ export function UserAdmin({
       role: form.get("role"),
       password: form.get("password"),
     };
+    setCreating(true);
     await send(
       () => postJson("/api/admin/users", body, csrfToken),
       (res) => {
@@ -114,27 +121,29 @@ export function UserAdmin({
           return;
         }
         formEl.reset();
-        setMessage({ ok: true, text: "利用者を作った。最初のログインで本人がパスワードを変える" });
+        setMessage({ ok: true, text: "ユーザーを追加しました。初回ログイン時にパスワードの変更を求めます" });
         startTransition(() => router.refresh());
       },
     );
+    // 再認証を求められたときも、ここで印を外す（再認証の画面の「認証して続行」に印が移る）
+    setCreating(false);
   }
 
   return (
     <section className="space-y-6">
-      <h1 className="text-lg font-bold text-value">利用者</h1>
+      <h1 className="text-lg font-bold text-value">ユーザー管理</h1>
       {reauth && (
         <form
           onSubmit={(e) => void onReauth(e)}
-          aria-label="本人の確かめ"
+          aria-label="再認証"
           className="max-w-sm space-y-3 rounded-md border border-border bg-surface p-3"
         >
-          <p className="text-label">利用者の管理は大事な操作なので、パスワード{needsTotp ? "と確認の番号" : ""}をもう一度入れる。</p>
+          <p className="text-label">{needsTotp ? "この操作にはパスワードと認証コードの再入力が必要です" : "この操作にはパスワードの再入力が必要です"}</p>
           <Field label="パスワード">
             <Input name="password" type="password" autoComplete="current-password" required />
           </Field>
           {needsTotp && (
-            <Field label="確認の番号（認証のアプリの 6 桁）">
+            <Field label="認証コード（6 桁）">
               <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} required />
             </Field>
           )}
@@ -144,9 +153,11 @@ export function UserAdmin({
             </p>
           )}
           <div className="flex gap-2">
-            <Button type="submit">確かめて続ける</Button>
-            <Button type="button" variant="outline" onClick={() => setReauth(null)}>
-              やめる
+            <ActionButton type="submit" pending={authing}>
+              認証して続行
+            </ActionButton>
+            <Button type="button" variant="outline" disabled={authing} onClick={() => setReauth(null)}>
+              キャンセル
             </Button>
           </div>
         </form>
@@ -158,16 +169,16 @@ export function UserAdmin({
       )}
 
       <Table data-testid="user-table">
-        <TableCaption>利用者 {users.length} 人。最後のログインが古い利用者・要らない利用者は止める</TableCaption>
+        <TableCaption>{users.length} 件</TableCaption>
         <TableHeader>
           <TableRow>
-            <TableHead>利用者名</TableHead>
-            <TableHead>表示の名前</TableHead>
+            <TableHead>ユーザーID</TableHead>
+            <TableHead>表示名</TableHead>
             <TableHead>役割</TableHead>
             <TableHead>状態</TableHead>
-            <TableHead>TOTP</TableHead>
-            <TableHead>最後のログイン</TableHead>
-            <TableHead>作った日</TableHead>
+            <TableHead>二要素認証</TableHead>
+            <TableHead>最終ログイン</TableHead>
+            <TableHead>作成日</TableHead>
             <TableHead>操作</TableHead>
           </TableRow>
         </TableHeader>
@@ -183,7 +194,7 @@ export function UserAdmin({
                   disabled={pending}
                   onChange={(e) => {
                     const role = e.target.value;
-                    if (isRole(role)) void change(u.id, { role }, `${u.username} の役割を${ROLE_LABELS[role]}にした`);
+                    if (isRole(role)) void change(u.id, { role }, `${u.username} の役割を「${ROLE_LABELS[role]}」に変更しました`);
                   }}
                   className="h-7 rounded-md border border-border bg-background px-1"
                 >
@@ -195,12 +206,12 @@ export function UserAdmin({
                 </select>
               </TableCell>
               <TableCell>
-                {u.status === "active" ? "有効" : "止めている"}
-                {u.lockedUntil && <span className="block text-xs text-label">一時停止（{u.lockedUntil} まで）</span>}
+                {u.status === "active" ? "有効" : "無効"}
+                {u.lockedUntil && <span className="block text-xs text-label">ロック中（{u.lockedUntil} まで）</span>}
               </TableCell>
-              <TableCell>{u.totpEnabled ? "登録あり" : "未登録"}</TableCell>
+              <TableCell>{u.totpEnabled ? "設定済み" : "未設定"}</TableCell>
               <TableCell data-testid="last-login">
-                {u.lastLogin ?? "まだ無い"}
+                {u.lastLogin ?? "—"}
                 {u.lastLoginDaysAgo !== null && u.lastLoginDaysAgo >= 90 && (
                   <span className="block text-xs text-label">{u.lastLoginDaysAgo} 日前</span>
                 )}
@@ -216,11 +227,11 @@ export function UserAdmin({
                       void change(
                         u.id,
                         { status: u.status === "active" ? "disabled" : "active" },
-                        u.status === "active" ? `${u.username} を止めた` : `${u.username} を戻した`,
+                        u.status === "active" ? `${u.username} を無効にしました` : `${u.username} を有効にしました`,
                       )
                     }
                   >
-                    {u.status === "active" ? "止める" : "戻す"}
+                    {u.status === "active" ? "無効にする" : "有効にする"}
                   </Button>
                 )}
                 {u.totpEnabled && (
@@ -228,9 +239,9 @@ export function UserAdmin({
                     size="sm"
                     variant="outline"
                     disabled={pending}
-                    onClick={() => void change(u.id, { resetTotp: true }, `${u.username} の TOTP をやり直す（次のログインで登録）`)}
+                    onClick={() => void change(u.id, { resetTotp: true }, `${u.username} の二要素認証をリセットしました（次回ログイン時に再設定）`)}
                   >
-                    TOTP をやり直す
+                    二要素認証をリセット
                   </Button>
                 )}
                 {u.lockedUntil && (
@@ -238,9 +249,9 @@ export function UserAdmin({
                     size="sm"
                     variant="outline"
                     disabled={pending}
-                    onClick={() => void change(u.id, { clearLoginLock: true }, `${u.username} の一時停止を解いた`)}
+                    onClick={() => void change(u.id, { clearLoginLock: true }, `${u.username} のロックを解除しました`)}
                   >
-                    一時停止を解く
+                    ロック解除
                   </Button>
                 )}
               </TableCell>
@@ -249,12 +260,12 @@ export function UserAdmin({
         </TableBody>
       </Table>
 
-      <form onSubmit={(e) => void create(e)} className="max-w-sm space-y-3" aria-label="利用者を作る">
-        <h2 className="font-bold text-value">利用者を作る</h2>
-        <Field label="利用者名" hint="英小文字・数字で始め、英小文字・数字・. _ - の 3〜64 文字。後から変えられない">
+      <form onSubmit={(e) => void create(e)} className="max-w-sm space-y-3" aria-label="ユーザーの追加">
+        <h2 className="font-bold text-value">ユーザーの追加</h2>
+        <Field label="ユーザーID" hint="英小文字・数字・. _ -（3〜64 文字、英小文字か数字で始める）。変更不可">
           <Input name="username" required autoComplete="off" />
         </Field>
-        <Field label="表示の名前">
+        <Field label="表示名">
           <Input name="displayName" required autoComplete="off" />
         </Field>
         <Field label="役割">
@@ -267,14 +278,14 @@ export function UserAdmin({
           </select>
         </Field>
         <Field
-          label="最初のパスワード"
-          hint={`${minPasswordLength} 文字以上・英字と数字を両方含める。本人は最初のログインで変える`}
+          label="初期パスワード"
+          hint={`${minPasswordLength} 文字以上・英字と数字を含む。初回ログイン時に変更されます`}
         >
           <Input name="password" type="password" required autoComplete="new-password" minLength={minPasswordLength} />
         </Field>
-        <Button type="submit" disabled={pending}>
-          作る
-        </Button>
+        <ActionButton type="submit" pending={creating} disabled={pending}>
+          追加
+        </ActionButton>
       </form>
     </section>
   );

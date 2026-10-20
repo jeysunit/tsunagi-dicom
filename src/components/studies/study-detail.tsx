@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useId, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
+import { PendingText, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { PacsActions } from "@/components/studies/pacs-actions";
 import { Thumbnail } from "@/components/studies/thumbnail";
@@ -58,6 +59,10 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       }}
     >
       {done ? <Check aria-hidden /> : <Copy aria-hidden />}
+      {/* 読み上げにも、コピーできたことを知らせる */}
+      <span role="status" className="sr-only">
+        {done ? "コピーしました" : ""}
+      </span>
     </Button>
   );
 }
@@ -83,11 +88,15 @@ function AllValues({ uid }: { uid: string }) {
   return (
     <div className={open ? "w-full" : undefined}>
       <Button type="button" size="sm" variant="outline" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        すべての DICOM の値
+        DICOM タグ
       </Button>
       {open && (
         <div className="mt-2 max-h-80 overflow-auto rounded border border-border" data-testid="all-values">
-          {query.isPending && <p className="p-2 text-label">読んでいる</p>}
+          {query.isPending && (
+            <p className="p-2">
+              <PendingText pending />
+            </p>
+          )}
           {query.isError && (
             <p role="alert" className="p-2 text-danger">
               {query.error.message}
@@ -112,6 +121,22 @@ function AllValues({ uid }: { uid: string }) {
   );
 }
 
+/** シリーズの並びの読み込みの間の骨組み（灰色の箱を3つ。0.3 秒たってから出す。docs/spec.md の 2.3） */
+function SeriesSkeleton({ pending }: { pending: boolean }) {
+  const shown = useDelayedPending(pending);
+  if (!shown) return <div className="h-32" aria-hidden />;
+  return (
+    <div className="flex gap-2" aria-busy="true" data-testid="series-skeleton">
+      <span className="sr-only" role="status">
+        読み込み中
+      </span>
+      {[0, 1, 2].map((i) => (
+        <div key={i} aria-hidden className="h-32 w-32 shrink-0 animate-pulse rounded border border-border bg-surface" />
+      ))}
+    </div>
+  );
+}
+
 const VIEWER_KEYS = ["rememberedViewer", "defaultViewer", "viewerVersion"] as const;
 
 /** 一覧の行の、ビューアの覚えの項目のうち、値があるものだけ */
@@ -125,12 +150,15 @@ export function StudyDetailPanel({
   row,
   screen,
   onChanged,
+  onDeleted,
   fetchEnabled = true,
 }: {
   /** 一覧の行の値（すぐ描く） */
   row: StudyView;
   screen: ScreenInfo;
   onChanged: () => void;
+  /** 削除が終わったとき（一覧の上に知らせを出し、一覧を読み直す） */
+  onDeleted?: (study: StudyView) => void;
   /** false の間は詳細を取らない（矢印のキーで通り過ぎる行の「詳細を開いた」記録を量産しないため。一覧の行の値だけで描く） */
   fetchEnabled?: boolean;
 }) {
@@ -166,16 +194,16 @@ export function StudyDetailPanel({
           <p className="flex flex-wrap items-baseline gap-x-3">
             <span className="font-bold break-words text-value" data-testid="detail-name">
               <span className="sr-only">氏名 </span>
-              {study.patientName || <span className="font-normal text-label">（氏名なし）</span>}
+              {study.patientName || <span className="font-normal text-label">（氏名未登録）</span>}
             </span>
             {study.patientKana && (
               <span className="text-xs break-words text-label">
-                <span className="sr-only">かな </span>
+                <span className="sr-only">カナ </span>
                 {study.patientKana}
               </span>
             )}
             <span className="font-mono">
-              <span className="sr-only">患者 ID </span>
+              <span className="sr-only">患者ID </span>
               {study.patientId}
             </span>
             <span>
@@ -196,7 +224,7 @@ export function StudyDetailPanel({
             )}
             {study.studyDescription && (
               <span className="break-words text-label">
-                <span className="sr-only">検査の記述 </span>
+                <span className="sr-only">検査名 </span>
                 {study.studyDescription}
               </span>
             )}
@@ -215,17 +243,17 @@ export function StudyDetailPanel({
       </div>
 
       {/* PACS の操作（送る・書き出し・削除。役割に許されたものだけ）。行が替わったら作り直す */}
-      <PacsActions key={uid} study={study} screen={screen} onChanged={changed} />
+      <PacsActions key={uid} study={study} screen={screen} onDeleted={(s) => (onDeleted ? onDeleted(s) : changed())} />
 
       {/* シリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地） */}
-      <div data-theme="dark" className="rounded-md bg-background p-2 text-foreground" data-testid="series-strip">
-        {!data && !failed && <p className="text-label">読んでいる</p>}
+      <div data-theme="dark" className="rounded-md bg-background p-2 text-foreground" data-testid="series-strip" data-loaded={data ? "true" : "false"}>
+        {!data && !failed && <SeriesSkeleton pending={fetchEnabled} />}
         {failed && (
           <p role="alert" className="text-danger">
             {detail.error?.message}
           </p>
         )}
-        {data && data.series.length === 0 && <p className="text-label">シリーズが無い</p>}
+        {data && data.series.length === 0 && <p className="text-label">シリーズがありません</p>}
         {data && data.series.length > 0 && (
           // 横にスクロールする部品は、キーボードでも動かせるようにフォーカスを受ける（矢印の左右）
           // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
@@ -235,7 +263,7 @@ export function StudyDetailPanel({
                 <Thumbnail studyUid={uid} seriesUid={s.seriesInstanceUid} size={72} />
                 <p className="text-xs font-bold break-words text-value">
                   {s.seriesNumber ? `#${s.seriesNumber} ` : ""}
-                  {s.seriesDescription || <span className="font-normal text-label">（記述なし）</span>}
+                  {s.seriesDescription || <span className="font-normal text-label">（シリーズ名なし）</span>}
                 </p>
                 <p className="text-xs text-label">
                   {[s.modality, s.bodyPartExamined, s.instanceCount != null ? `${s.instanceCount} 画像` : ""].filter(Boolean).join("・")}
@@ -266,28 +294,28 @@ export function StudyDetailPanel({
       <div id={allId} className="space-y-3 pt-1" data-testid="detail-all-items">
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
-          <h3 className="mb-2 text-xs font-bold text-label">検査の情報</h3>
+          <h3 className="mb-2 text-xs font-bold text-label">検査情報</h3>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
             <Item label="検査日時" value={`${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim()} />
             <Item label="モダリティ" value={study.modalities?.join("・")} />
             <Item label="受付番号" value={study.accessionNumber} />
-            <Item label="検査の番号（StudyID）" value={study.studyId} />
-            <Item label="検査の記述" value={study.studyDescription} wide />
+            <Item label="Study ID" value={study.studyId} />
+            <Item label="検査名" value={study.studyDescription} wide />
             <Item label="依頼医" value={study.referringPhysicianName} />
             <Item
-              label="シリーズ・画像"
-              value={study.seriesCount == null && study.instanceCount == null ? "" : `${study.seriesCount ?? "—"} シリーズ・${study.instanceCount ?? "—"} 画像`}
+              label="シリーズ数／画像数"
+              value={study.seriesCount == null && study.instanceCount == null ? "" : `${study.seriesCount ?? "—"}／${study.instanceCount ?? "—"}`}
             />
           </dl>
         </div>
         <div>
-          <h3 className="mb-2 text-xs font-bold text-label">患者の情報</h3>
+          <h3 className="mb-2 text-xs font-bold text-label">患者情報</h3>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-            <Item label="患者 ID" value={study.patientId} />
+            <Item label="患者ID" value={study.patientId} />
             <Item label="性別" value={sexLabel(study.patientSex)} />
-            <Item label="氏名（漢字）" value={study.patientName} />
-            <Item label="氏名（かな）" value={study.patientKana} />
-            <Item label="氏名（英字）" value={study.patientNameAlphabetic} />
+            <Item label="氏名" value={study.patientName} />
+            <Item label="カナ氏名" value={study.patientKana} />
+            <Item label="英字氏名" value={study.patientNameAlphabetic} />
             <Item label="生年月日" value={formatBirthLine(study.patientBirthDate, undefined, study.studyDate)} />
           </dl>
         </div>

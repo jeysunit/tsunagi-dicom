@@ -1,8 +1,16 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
+import { Spinner, useDelayedPending } from "@/components/ui/pending";
 import { cn } from "@/lib/utils";
+
+/** 押した頁の項目の、頁の切り替えの待ちの印（0.3 秒たっても移らなければ出す。docs/spec.md の 2.3） */
+function LinkPending() {
+  const { pending } = useLinkStatus();
+  const shown = useDelayedPending(pending);
+  return shown ? <Spinner className="ml-1.5 inline size-3.5 align-[-2px]" /> : null;
+}
 
 // 見出しの頁の道（docs/spec.md の 2.3）。今いる頁の項目は、タブの形（地の色と下の線・太字）で示し、aria-current="page" を付ける。
 // 色だけで示さない（下の線と太字も付ける）。出す項目は、役割に許された頁だけ（見出しの側で決めて渡す）。
@@ -37,6 +45,7 @@ export function NavLinks({ items }: { items: readonly NavItem[] }) {
             )}
           >
             {item.label}
+            <LinkPending />
           </Link>
         );
       })}

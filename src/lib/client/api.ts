@@ -21,7 +21,7 @@ export async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> 
   if (!res.ok) {
     handleAuthStatus(res.status);
     const body = (await res.json().catch(() => ({}))) as { error?: unknown };
-    throw new ApiError(res.status, typeof body.error === "string" ? body.error : `読めなかった（${res.status}）`);
+    throw new ApiError(res.status, typeof body.error === "string" ? body.error : `読み込めませんでした（${res.status}）`);
   }
   return (await res.json()) as T;
 }

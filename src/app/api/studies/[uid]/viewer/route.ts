@@ -30,7 +30,7 @@ export async function POST(request: Request, { params }: Context) {
       detail: { flag: "viewer", value: viewer },
     });
     if (viewer && !availableViewers(getConfig().viewers).some((v) => v.id === viewer && v.kind === "open")) {
-      return Response.json({ error: "このビューアは設定されていない" }, { status: 400 });
+      return Response.json({ error: "このビューアは設定されていません" }, { status: 400 });
     }
     const result = await auditWith(session, async (tx) => {
       const r = await rememberViewer(tx, session.actorId, uid, viewer, version);
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: Context) {
       };
     });
     if (result.kind === "conflict") {
-      return Response.json({ error: "ほかの利用者が先に変えた。読み直した値を確かめる", version: result.version }, { status: 409 });
+      return Response.json({ error: "ほかのユーザーが先に変更しました。最新の状態を確認してください", version: result.version }, { status: 409 });
     }
     return Response.json({ viewer, version: result.version });
   } catch (error) {

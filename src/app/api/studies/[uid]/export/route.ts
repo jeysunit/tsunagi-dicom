@@ -28,7 +28,7 @@ export async function GET(request: Request, { params }: Context) {
         studyInstanceUid: uid,
         detail: { reason: "not-same-origin", site: request.headers.get("sec-fetch-site")?.slice(0, 32) ?? null },
       });
-      throw new RequestError(403, "このアプリの画面から開いた要求だけを受ける");
+      throw new RequestError(403, "この画面からの要求だけを受け付けます");
     }
     await requirePermission(session, "study.export", { action: "export", studyInstanceUid: uid });
     await assertWriteAllowed(session, { action: "export", studyInstanceUid: uid });
@@ -37,10 +37,10 @@ export async function GET(request: Request, { params }: Context) {
     const backend = getBackend();
     const orthancId = await backend.lookupStudy(uid);
     const info = orthancId ? await backend.studyInfo(orthancId) : null;
-    if (!orthancId || !info) return Response.json({ error: "検査が見つからない" }, { status: 404 });
+    if (!orthancId || !info) return Response.json({ error: "検査が見つかりません" }, { status: 404 });
     if (info.studyInstanceUid !== uid) {
       await audit(session, { action: "export", outcome: "denied", patientId: info.patientId, studyInstanceUid: uid, detail: { reason: "mismatch" } });
-      return Response.json({ error: "Orthanc で引いた検査の StudyInstanceUID が、求めた UID と合わない" }, { status: 409 });
+      return Response.json({ error: "検査の StudyInstanceUID が一致しません" }, { status: 409 });
     }
     const patientId = info.patientId;
 
@@ -58,7 +58,7 @@ export async function GET(request: Request, { params }: Context) {
     }
     if (!zip.body) {
       await record("failed", "result", { status: 502 });
-      return Response.json({ error: "画像サーバーの答えに中身が無い" }, { status: 502 });
+      return Response.json({ error: "画像サーバーの応答が空です" }, { status: 502 });
     }
     return new Response(watchedBody(zip.body, record), {
       status: 200,

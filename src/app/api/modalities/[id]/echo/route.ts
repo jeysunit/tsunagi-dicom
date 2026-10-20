@@ -26,7 +26,7 @@ export async function POST(request: Request, { params }: Context) {
     const raw = (await params).id;
     const id = decoded(raw);
     await requirePermission(session, "modality.check", { action: "echo", detail: { modality: clip(id ?? raw) } });
-    if (id === null || !isModalityName(id)) return Response.json({ error: "機器の名前の形が誤り" }, { status: 400 });
+    if (id === null || !isModalityName(id)) return Response.json({ error: "接続先の名称が正しくありません" }, { status: 400 });
     let ok: boolean;
     try {
       ok = await getBackend().echoModality(id);

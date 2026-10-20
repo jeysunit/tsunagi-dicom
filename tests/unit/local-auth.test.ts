@@ -198,7 +198,7 @@ describe("ログインと二要素（TOTP）", () => {
     const { ctx } = await setup({ mfaRequired: false });
     await expect(
       createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw", mustChangePassword: false }, ADMIN),
-    ).rejects.toMatchObject({ problems: ["パスワード：13 文字以上にする"] });
+    ).rejects.toMatchObject({ problems: ["パスワード：13 文字以上にしてください"] });
     await createUser(ctx, { username: "sato", displayName: "佐藤", role: "viewer", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
     expect((await login(ctx, "sato", "kq7vz2mw-long1")).stage).toBe("active");
   });
@@ -408,7 +408,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
 
     await expect(unlockScreen(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({
       status: 401,
-      message: "パスワードが違う",
+      message: "パスワードが正しくありません",
       problems: [],
     });
     expect((await user()).failedLoginCount).toBe(1);

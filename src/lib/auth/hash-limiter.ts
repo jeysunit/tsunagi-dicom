@@ -23,7 +23,7 @@ export const HASH_BUSY_RETRY_AFTER_SECONDS = 5;
 
 export class HashBusyError extends Error {
   constructor(readonly lane: HashLane) {
-    super("パスワードの確かめが混んでいる");
+    super("混み合っています。しばらくしてから再度お試しください");
     this.name = "HashBusyError";
   }
 }

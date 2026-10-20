@@ -9,6 +9,7 @@ import { screenDeps } from "@/lib/screen-deps";
 import { searchAuditFields } from "@/lib/search-audit";
 import { parseFilter } from "@/lib/study-filter";
 import { listStudies, type StudyListResult } from "@/lib/study-list";
+import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
 
 // 検査の一覧の頁（docs/spec.md の 3.1）。最初の描画はサーバーの側で画面の API と同じ一覧を取り、
 // 後の絞り込み・ビューアの覚えの変更は画面（TanStack Query）が画面の API から取る。
@@ -24,7 +25,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   if (access.kind === "forbidden") {
     return (
       <p role="alert" className="text-label">
-        この役割では検査の一覧を開けない
+        {FORBIDDEN_PAGE}
       </p>
     );
   }
@@ -36,7 +37,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   try {
     result = await listStudies(deps, filter);
   } catch (error) {
-    const message = error instanceof BackendError ? error.message : "検査を読めなかった";
+    const message = error instanceof BackendError ? error.message : loadFailed("検査");
     if (!(error instanceof BackendError)) console.error(error);
     return (
       <p role="alert" className="text-label">
@@ -53,6 +54,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const screen: ScreenInfo = {
     csrfToken: session.local?.row.csrfToken,
     viewers: deps.viewers,
+    timeZone: config.timeZone,
     can: {
       rememberViewer: can(role, "viewer.remember"),
       allValues: can(role, "dicom.all_values"),
@@ -66,7 +68,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      {deps.backend.mock && <p className="mb-3 text-xs text-label">モックのバックエンド</p>}
+      {deps.backend.mock && <p className="mb-3 text-xs text-label">バックエンド：モック</p>}
       <StudyBrowser
         initialFilter={filter}
         initialData={{ count: result.count, studies: result.studies, facets: result.facets }}

@@ -107,15 +107,15 @@ export class AuthFailure extends Error {
 
 /** ログインの失敗の文言は1つにする（利用者名の有無・一時停止の有無を、答えの違いで知られないように） */
 export const LOGIN_FAILED_MESSAGE =
-  "利用者名かパスワード（か確認の番号）が違う。または、続けて失敗したため、しばらくログインを止めている";
+  "ユーザーID・パスワード・認証コードのいずれかが正しくありません。続けて失敗すると、しばらくログインできなくなります";
 /** 大事な操作の前に、本人の確かめが要るときの印（AuthFailure の problems） */
 export const REAUTH_REQUIRED = "reauth_required";
 /** パスワードの確かめが混んで断ったときの文言（503） */
-export const HASH_BUSY_MESSAGE = "いまログインの要求が混んでいる。少し待ってから、もう一度試す";
+export const HASH_BUSY_MESSAGE = "ログインが混み合っています。しばらくしてから再度お試しください";
 /** 失敗したので、ログインの途中のセッションを捨てたときの印（AuthFailure の problems。画面はログインへ戻る） */
 export const SESSION_CLOSED = "session_closed";
 /** ログインの途中のセッションが、もう使えないとき（ほかの画面で先に進んだ・閉じた） */
-export const SESSION_GONE_MESSAGE = "このログインの途中のセッションは、もう使えない。ログインし直す";
+export const SESSION_GONE_MESSAGE = "このログインの手続きは無効になりました。再度ログインしてください";
 
 const now = (ctx: AuthContext) => (ctx.now ? ctx.now() : new Date());
 
@@ -247,16 +247,16 @@ export async function createUser(
   by: { actorId: string; actorRole: string },
 ): Promise<User> {
   const problems: string[] = [];
-  if (!isValidUsername(input.username)) problems.push(`利用者名：${USERNAME_HINT}`);
+  if (!isValidUsername(input.username)) problems.push(`ユーザーID：${USERNAME_HINT}`);
   const displayName = input.displayName.trim();
-  if (displayName === "" || displayName.length > 100) problems.push("表示の名前：1〜100 文字");
-  if (!isRole(input.role)) problems.push("役割：admin・doctor・technologist・viewer のどれか");
+  if (displayName === "" || displayName.length > 100) problems.push("表示名：1〜100 文字");
+  if (!isRole(input.role)) problems.push("役割の指定が正しくありません");
   for (const p of checkPassword(input.password, { mfaRequired: ctx.settings.mfaRequired, username: input.username })) {
     problems.push(`パスワード：${p}`);
   }
-  if (problems.length > 0) throw new AuthFailure(400, "利用者を作れない", problems);
+  if (problems.length > 0) throw new AuthFailure(400, "ユーザーを追加できません", problems);
   if (await ctx.db.user.findUnique({ where: { username: input.username } })) {
-    throw new AuthFailure(409, "同じ利用者名がもうある");
+    throw new AuthFailure(409, "同じユーザーIDがすでにあります");
   }
 
   const at = now(ctx);
@@ -406,7 +406,7 @@ async function verifyAgain(
   }
   if (!passwordOk || !totpOk) {
     const locked = await registerFailure(ctx, user, passwordOk ? "bad_totp" : "bad_password", action);
-    throw new AuthFailure(401, checkTotp ? "パスワードか確認の番号が違う" : "パスワードが違う", locked ? ["locked"] : []);
+    throw new AuthFailure(401, checkTotp ? "パスワードまたは認証コードが正しくありません" : "パスワードが正しくありません", locked ? ["locked"] : []);
   }
   if (checkTotp || user.totpSecretEnc === null) {
     // 利用者が持つ確かめを全部通した（TOTP を登録していればそれも）ので、続けての失敗の数を0に戻す
@@ -667,12 +667,12 @@ async function advance(
 // ── TOTP ──
 
 export async function submitTotp(ctx: AuthContext, session: SessionRow, user: User, code: string): Promise<StageResult> {
-  if (session.stage !== "totp") throw new AuthFailure(409, "TOTP の入力の段ではない");
+  if (session.stage !== "totp") throw new AuthFailure(409, "認証コードを入力する段階ではありません");
   const secret = totpSecretOf(ctx, user);
   if (!secret) {
     // SESSION_SECRET を替えたなどで読めない。管理者が TOTP をやり直す
     await record(ctx, actorOf(user), { action: "login", outcome: "denied", detail: { reason: "totp_unreadable" } });
-    throw new AuthFailure(409, "TOTP の秘密を読めない。管理者に TOTP のやり直しを頼む");
+    throw new AuthFailure(409, "二要素認証の設定を読み込めません。管理者に二要素認証のリセットを依頼してください");
   }
   if (!(await claimAttempt(ctx, user))) {
     await record(ctx, actorOf(user), { action: "login", outcome: "denied", detail: { reason: "locked" } });
@@ -700,7 +700,7 @@ const isOptionalEnrollment = (ctx: AuthContext, session: SessionRow, user: User)
 /** 登録を始める（新しい秘密を作り、セッションに暗号化して置く）。登録の段か、二要素が任意で未登録のログインしたセッション */
 export async function startEnrollment(ctx: AuthContext, session: SessionRow, user: User): Promise<Enrollment> {
   if (session.stage !== "enroll" && !isOptionalEnrollment(ctx, session, user)) {
-    throw new AuthFailure(409, "TOTP の登録の段ではない");
+    throw new AuthFailure(409, "二要素認証を設定する段階ではありません");
   }
   const secret = generateTotpSecret();
   await ctx.db.session.update({
@@ -725,16 +725,16 @@ export async function confirmEnrollment(
   currentPassword?: string,
 ): Promise<StageResult> {
   const optional = isOptionalEnrollment(ctx, session, user);
-  if (session.stage !== "enroll" && !optional) throw new AuthFailure(409, "TOTP の登録の段ではない");
+  if (session.stage !== "enroll" && !optional) throw new AuthFailure(409, "二要素認証を設定する段階ではありません");
   const secret = session.pendingTotpEnc
     ? openField(session.pendingTotpEnc, ctx.settings.sessionSecret, session.id)
     : null;
-  if (!secret) throw new AuthFailure(409, "登録の途中の秘密が無い。登録の画面を開き直す");
+  if (!secret) throw new AuthFailure(409, "設定の途中の情報がありません。設定の画面を開き直してください");
   if (optional) await verifyAgain(ctx, user, { password: currentPassword }, "mfa_enroll");
   const step = verifyTotp(secret, code, now(ctx).getTime());
   if (step === null) {
     await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "denied", detail: { reason: "bad_totp" } });
-    throw new AuthFailure(400, "確認の番号が合わない。認証のアプリの番号を入れ直す");
+    throw new AuthFailure(400, "認証コードが正しくありません。認証アプリのコードを入力し直してください");
   }
   const at = now(ctx);
   const enrolled = {
@@ -764,7 +764,7 @@ export async function confirmEnrollment(
     throw new AuthFailure(
       409,
       reason === "already_enrolled"
-        ? "TOTP はもう登録してある。登録し直すときは、管理者に TOTP のやり直しを頼む"
+        ? "二要素認証は設定済みです。再設定は管理者に依頼してください"
         : SESSION_GONE_MESSAGE,
     );
   }
@@ -790,7 +790,7 @@ export async function changePassword(
   input: { currentPassword?: string; code?: string; newPassword: string },
 ): Promise<StageResult> {
   if (session.stage !== "change_password" && session.stage !== "active") {
-    throw new AuthFailure(409, "パスワードの変更の段ではない");
+    throw new AuthFailure(409, "パスワードを変更する段階ではありません");
   }
   // ログインしたセッションでは、いまのパスワードと、登録していれば TOTP を確かめる（再認証）。
   // 変更の段は、いまログインで確かめたところなので求めない
@@ -799,9 +799,9 @@ export async function changePassword(
   }
   const problems = checkPassword(input.newPassword, { mfaRequired: ctx.settings.mfaRequired, username: user.username });
   if (await hashing(ctx, "priority", () => verifyPassword(input.newPassword, user.passwordHash))) {
-    problems.push("いまのパスワードと違うものにする");
+    problems.push("現在のパスワードと違うものにしてください");
   }
-  if (problems.length > 0) throw new AuthFailure(400, "このパスワードは使えない", problems);
+  if (problems.length > 0) throw new AuthFailure(400, "このパスワードは使えません", problems);
 
   const at = now(ctx);
   const changes = {
@@ -826,7 +826,7 @@ export async function changePassword(
   });
   if (res.count !== 1) {
     await record(ctx, actorOf(user), { action: "password_change", outcome: "denied", detail: { reason: "changed_during_change" } });
-    throw new AuthFailure(409, "パスワードを変えられない（ほかの画面で先に変えたか、このセッションはもう使えない）。頁を開き直す");
+    throw new AuthFailure(409, "パスワードを変更できませんでした（ほかの画面で先に変更したか、このセッションが無効です）。頁を開き直してください");
   }
   if (session.stage === "active") await followVersion(ctx, session, user.credentialVersion);
   await closeOtherSessions(ctx, user.id, session.id);
@@ -845,7 +845,7 @@ export async function reauthenticate(
   user: User,
   input: { password: string; code?: string },
 ): Promise<void> {
-  if (session.stage !== "active" || session.lockedAt) throw new AuthFailure(409, "ログインしていない");
+  if (session.stage !== "active" || session.lockedAt) throw new AuthFailure(409, "ログインしていません。再度ログインしてください");
   await verifyAgain(ctx, user, input, "reauth");
   await ctx.db.session.update({ where: { id: session.id }, data: { reauthAt: now(ctx) } });
   await record(ctx, actorOf(user), { action: "reauth", outcome: "success" });
@@ -859,10 +859,10 @@ export async function reauthenticate(
 export function assertRecentReauth(ctx: AuthContext, session: SessionRow, user: Pick<User, "lockedUntil">): void {
   const at = now(ctx).getTime();
   if (user.lockedUntil !== null && user.lockedUntil.getTime() > at) {
-    throw new AuthFailure(403, "ログインの一時停止の間は、この操作はできない（一時停止が解けてから、もう一度確かめる）", ["locked"]);
+    throw new AuthFailure(403, "ロック中のため、この操作はできません（ロックが解除されてから、再度お試しください）", ["locked"]);
   }
   if (session.reauthAt && at - session.reauthAt.getTime() < ctx.settings.reauthMinutes * 60_000) return;
-  throw new AuthFailure(403, "この操作の前に、パスワード（と確認の番号）をもう一度入れる", [REAUTH_REQUIRED]);
+  throw new AuthFailure(403, "この操作にはパスワードの再入力が必要です", [REAUTH_REQUIRED]);
 }
 
 // ── セッション ──
@@ -963,7 +963,7 @@ export async function unlockScreen(
   user: User,
   input: { password: string; code?: string },
 ): Promise<void> {
-  if (session.stage !== "active") throw new AuthFailure(409, "ログインしていない");
+  if (session.stage !== "active") throw new AuthFailure(409, "ログインしていません。再度ログインしてください");
   const totp = await verifyAgain(ctx, user, input, "screen_unlock", { requireTotp: ctx.settings.screenUnlockRequireTotp });
   const at = now(ctx);
   await ctx.db.session.update({ where: { id: session.id }, data: { lockedAt: null, lastActivityAt: at } });
@@ -1017,7 +1017,7 @@ export interface UserChange {
 
 type Tx = Parameters<Parameters<Db["$transaction"]>[0]>[0];
 
-const NO_ADMIN_LEFT = "有効な管理者が1人もいなくなるので、変えられない";
+const NO_ADMIN_LEFT = "有効な管理者がいなくなるため、変更できません";
 
 /** 有効な管理者が1人もいなくなる変更か */
 async function wouldLoseLastAdmin(db: Tx, target: User, change: UserChange): Promise<boolean> {
@@ -1037,14 +1037,14 @@ export async function updateUser(
   by: { actorId: string; actorRole: string },
 ): Promise<User> {
   const target = await ctx.db.user.findUnique({ where: { id: targetId } });
-  if (!target) throw new AuthFailure(404, "利用者が無い");
+  if (!target) throw new AuthFailure(404, "ユーザーが見つかりません");
   // 自分の一時停止は、一時停止の有無に関わらず自分では解けない（別の管理者が解く）
   if (change.clearLoginLock && target.username === by.actorId) {
-    throw new AuthFailure(403, "自分のログインの一時停止は、自分では解けない。別の管理者が解く");
+    throw new AuthFailure(403, "自分のロックは解除できません。別の管理者に依頼してください");
   }
-  if (change.role !== undefined && !isRole(change.role)) throw new AuthFailure(400, "役割が誤り");
+  if (change.role !== undefined && !isRole(change.role)) throw new AuthFailure(400, "役割の指定が正しくありません");
   if (change.status !== undefined && change.status !== "active" && change.status !== "disabled") {
-    throw new AuthFailure(400, "状態は active か disabled");
+    throw new AuthFailure(400, "状態の指定が正しくありません");
   }
 
   const at = now(ctx);

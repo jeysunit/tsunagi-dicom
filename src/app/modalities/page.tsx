@@ -2,7 +2,9 @@ import { ModalityList } from "@/components/pacs/modality-list";
 import { pageAccess } from "@/lib/auth/page-session";
 import { getBackend } from "@/lib/backend";
 import { BackendError } from "@/lib/backend/types";
+import { getConfig } from "@/lib/config";
 import { allowlistFor, modalityView, type ModalityView } from "@/lib/fields";
+import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
 
 // 機器の頁（docs/spec.md の 3.3。段 4）。Orthanc に登録された受け元・送り先の機器の一覧と、つながるかの確かめ（C-ECHO）。
 // 住所（Host・Port）は、許可の一覧に載った役割にだけ出す（既定では管理者だけ）。
@@ -14,7 +16,7 @@ export default async function ModalitiesPage() {
   if (access.kind === "forbidden") {
     return (
       <p role="alert" className="text-label">
-        この役割では機器の一覧を開けない
+        {FORBIDDEN_PAGE}
       </p>
     );
   }
@@ -26,9 +28,9 @@ export default async function ModalitiesPage() {
     if (!(error instanceof BackendError)) console.error(error);
     return (
       <p role="alert" className="text-label">
-        {error instanceof BackendError ? error.message : "機器の一覧を読めなかった"}
+        {error instanceof BackendError ? error.message : loadFailed("接続先")}
       </p>
     );
   }
-  return <ModalityList modalities={modalities} csrfToken={access.session.local?.row.csrfToken} />;
+  return <ModalityList modalities={modalities} csrfToken={access.session.local?.row.csrfToken} timeZone={getConfig().timeZone} />;
 }

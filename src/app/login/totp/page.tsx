@@ -12,9 +12,9 @@ export default async function TotpPage() {
   if (state.stage !== "totp") redirect(STAGE_PATHS[state.stage]);
   return (
     <section className="mx-auto max-w-sm space-y-4 pt-8">
-      <h1 className="text-lg font-bold text-value">確認の番号</h1>
-      <p className="text-label">認証のアプリに出ている 6 桁の番号を入れる。</p>
-      <CodeForm endpoint="/api/auth/totp" csrfToken={state.row.csrfToken} label="確かめる" />
+      <h1 className="text-lg font-bold text-value">認証コードの入力</h1>
+      <p className="text-label">認証アプリに表示された 6 桁のコードを入力してください</p>
+      <CodeForm endpoint="/api/auth/totp" csrfToken={state.row.csrfToken} label="認証" />
     </section>
   );
 }

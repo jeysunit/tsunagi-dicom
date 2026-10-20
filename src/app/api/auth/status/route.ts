@@ -13,7 +13,7 @@ export async function GET() {
     const state = await getAuthState();
     if (state.kind === "locked") return Response.json({ locked: true }, { status: 423 });
     if (state.kind === "active") return Response.json({ locked: false });
-    return Response.json({ error: "ログインしていない" }, { status: 401 });
+    return Response.json({ error: "ログインしていません。再度ログインしてください" }, { status: 401 });
   } catch (error) {
     return errorResponse(error);
   }
