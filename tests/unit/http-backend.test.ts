@@ -72,6 +72,21 @@ beforeAll(async () => {
         // 画像単位の値（WADO-RS の metadata）：求めた3つの UID の画像を1件返す
         res.writeHead(200, { "content-type": "application/dicom+json" });
         res.end(JSON.stringify([instanceDataset]));
+      } else if (/^\/dicom-web\/studies\/1\.2\.3\/series\/4\.5\.6\/instances\/7\.8\.1[123]\/metadata$/.test(req.url ?? "")) {
+        // 3つの UID のうち、1つだけが求めたものと違う答え（7.8.11：検査、7.8.12：シリーズ、7.8.13：画像）
+        const sop = req.url!.split("/")[7]!;
+        const wrong = { vr: "UI", Value: ["9.9.9"] };
+        res.writeHead(200, { "content-type": "application/dicom+json" });
+        res.end(
+          JSON.stringify([
+            {
+              ...instanceDataset,
+              "00080018": sop === "7.8.13" ? wrong : { vr: "UI", Value: [sop] },
+              ...(sop === "7.8.11" ? { "0020000D": wrong } : {}),
+              ...(sop === "7.8.12" ? { "0020000E": wrong } : {}),
+            },
+          ]),
+        );
       } else if (req.url?.startsWith("/dicom-web/studies/1.2.3/series/4.5.6/instances/0.0.0")) {
         res.writeHead(404).end();
       } else if (req.url?.startsWith("/dicom-web/studies")) {
@@ -252,7 +267,9 @@ describe("実の画像サーバーへの接続", () => {
     expect(ds).toEqual(instanceDataset);
     // 見つからなければ null
     expect(await b.instanceDataset("1.2.3", "4.5.6", "0.0.0")).toBeNull();
-    // 答えの UID が求めたものと違う（手元のサーバーは検査の検索の答えを返す）ときは返さない
+    // 答えの UID が求めたものと違うときは返さない（検査・シリーズ・画像の UID を1つずつ違えて見る）
+    for (const sop of ["7.8.11", "7.8.12", "7.8.13"]) expect(await b.instanceDataset("1.2.3", "4.5.6", sop), sop).toBeNull();
+    // 画像の値でない答え（手元のサーバーは検査の検索の答えを返す）も返さない
     expect(await b.instanceDataset("1.2.3", "4.5.6", "1.1.1")).toBeNull();
     // UID の形でないものは、画像サーバーへ求めずに断る
     const before = seen.length;

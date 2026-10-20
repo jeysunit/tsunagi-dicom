@@ -961,11 +961,20 @@ test("詳細の「DICOM タグ」：開いてもボタンの位置は動かな�
   await expect(tags.getByTestId("instance-values")).toContainText("0008,0018");
 
   // 画像を替えると、その画像の値に替わる（画像ごとに値が違う）
+  const valueReads: string[] = [];
+  page.on("request", (req) => {
+    if (/\/instances\/[\d.]+\/values$/.test(req.url())) valueReads.push(req.url());
+  });
   await images.selectOption({ label: "#2" });
   await expect(sopLine.locator("code")).not.toHaveText(first);
   const second = (await sopLine.locator("code").textContent())!;
   await expect(tags.getByTestId("instance-values")).toContainText(second);
   await expect(tags.getByTestId("instance-values")).not.toContainText(first);
+  // 前の画像に戻しても、覚えた中身を出さずに読み直す（読むたびに権限の確かめと操作ログを通す）
+  await images.selectOption({ label: "#1" });
+  await expect(tags.getByTestId("instance-values")).toContainText(first);
+  expect(valueReads.filter((u) => u.includes(`/instances/${first}/values`))).toHaveLength(1);
+  expect(valueReads.filter((u) => u.includes(`/instances/${second}/values`))).toHaveLength(1);
 
   // 閉じても、ボタンの位置は動かない
   await toggle.click();

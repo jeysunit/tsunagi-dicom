@@ -110,25 +110,32 @@ function UidLine({ label, uid }: { label: string; uid: string }) {
   );
 }
 
+/**
+ * 操作ログに残る読み取り（DICOM タグ）の取り方：出すたびに必ず BFF から読み直し（権限の確かめと操作ログを通す）、
+ * 読み直している間と失敗したときは、前に読んだ中身を出さない。行を離れたら残さない（詳細の取り方と同じ）
+ */
+const AUDITED_READ = { staleTime: 0, gcTime: 0 } as const;
+
 /** DICOM タグの表（タグ・VR・値）。url の画面の API から読む（読んだことは BFF が操作ログに残す） */
 function ValuesBox({ url, queryKey, testId }: { url: string; queryKey: readonly unknown[]; testId: string }) {
-  const query = useQuery({ queryKey, queryFn: () => getJson<{ values: DicomValueRow[] }>(url) });
+  const query = useQuery({ queryKey, queryFn: () => getJson<{ values: DicomValueRow[] }>(url), ...AUDITED_READ });
+  const data = query.isFetching || query.isError ? undefined : query.data;
   return (
     <div className="max-h-80 overflow-auto rounded border border-border bg-background" data-testid={testId}>
-      {query.isPending && (
+      {query.isFetching && (
         <p className="p-2">
           <PendingText pending />
         </p>
       )}
-      {query.isError && (
+      {query.isError && !query.isFetching && (
         <p role="alert" className="p-2 text-danger">
           {query.error.message}
         </p>
       )}
-      {query.data && (
+      {data && (
         <table className="w-full text-xs">
           <tbody>
-            {query.data.values.map((row) => (
+            {data.values.map((row) => (
               <tr key={row.tag} className="border-b border-border align-top last:border-0">
                 <td className="px-2 py-1 font-mono whitespace-nowrap text-label">{row.tag}</td>
                 <td className="px-2 py-1 font-mono text-label">{row.vr}</td>
@@ -176,8 +183,9 @@ function InstanceTags({ uid, series }: { uid: string; series: SeriesView[] | und
     queryFn: () =>
       getJson<{ instances: InstanceItem[] }>(`/api/studies/${encodeURIComponent(uid)}/series/${encodeURIComponent(seriesUid)}/instances`),
     enabled: seriesUid !== "",
+    ...AUDITED_READ,
   });
-  const items = instances.data?.instances ?? [];
+  const items = (instances.isFetching || instances.isError ? undefined : instances.data?.instances) ?? [];
   const sop = items.some((i) => i.sopInstanceUid === sopPick) ? sopPick : (items[0]?.sopInstanceUid ?? "");
   if (!series) return <PendingText pending />;
   if (list.length === 0) return <p className="text-label">シリーズがありません</p>;
@@ -214,12 +222,12 @@ function InstanceTags({ uid, series }: { uid: string; series: SeriesView[] | und
         </label>
         <PendingText pending={instances.isFetching} />
       </div>
-      {instances.isError && (
+      {instances.isError && !instances.isFetching && (
         <p role="alert" className="text-danger">
           {instances.error.message}
         </p>
       )}
-      {instances.data && items.length === 0 && <p className="text-label">画像がありません</p>}
+      {!instances.isFetching && instances.data?.instances.length === 0 && <p className="text-label">画像がありません</p>}
       {sop && (
         <>
           <UidLine label="SOPInstanceUID" uid={sop} />
