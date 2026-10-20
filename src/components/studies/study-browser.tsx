@@ -116,35 +116,31 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
 /** 詳細条件の文字の欄で、打っても受けない字（QIDO-RS の値で特別の意味を持つ字。study-filter.ts の fieldValue） */
 const FIELD_STRIP = /[*?\\,]/g;
 
-/** 詳細条件の文字の欄（打つたびに要求を送らない。止まってから 300 ミリ秒。横断の検索と同じ） */
+/** 詳細条件の文字の欄（受付番号・検査名・依頼医） */
+const TEXT_FIELDS = ["accession", "desc", "referring"] as const;
+type TextField = (typeof TEXT_FIELDS)[number];
+
+/** 詳細条件の文字の欄。打った字は絞り込みの部品（FilterBar）が持つ（「詳細条件」を閉じても、打ちかけの字を失わない） */
 function FieldText({
   label,
   value,
-  onCommit,
+  onText,
   testId,
   className,
 }: {
   label: string;
-  value: string | undefined;
-  onCommit: (value: string | undefined) => void;
+  value: string;
+  onText: (text: string) => void;
   testId: string;
   className?: string;
 }) {
-  const [text, setText] = useState(value ?? "");
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const v = fieldValue(text);
-      if (v !== value) onCommit(v);
-    }, 300);
-    return () => window.clearTimeout(t);
-  }, [text, value, onCommit]);
   return (
     <label className="flex items-center gap-1.5">
       <span className="shrink-0 text-xs text-label">{label}</span>
       <Input
-        value={text}
+        value={value}
         maxLength={MAX_FIELD_LENGTH}
-        onChange={(e) => setText(e.target.value.replace(FIELD_STRIP, ""))}
+        onChange={(e) => onText(e.target.value.replace(FIELD_STRIP, ""))}
         className={cn("h-7", className)}
         data-testid={testId}
       />
@@ -177,6 +173,28 @@ function FilterBar({
     }, 300);
     return () => window.clearTimeout(t);
   }, [text, filter, onChange]);
+  // 詳細条件の文字の欄も同じ（打った字はここに持つので、300 ミリ秒の内に「詳細条件」を閉じても失わない）
+  const [fields, setFields] = useState<Record<TextField, string>>({
+    accession: filter.accession ?? "",
+    desc: filter.desc ?? "",
+    referring: filter.referring ?? "",
+  });
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const next = Object.fromEntries(TEXT_FIELDS.map((k) => [k, fieldValue(fields[k])])) as Record<TextField, string | undefined>;
+      if (TEXT_FIELDS.some((k) => next[k] !== filter[k])) onChange({ ...filter, ...next });
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [fields, filter, onChange]);
+  const fieldText = (key: TextField, label: string, className: string) => (
+    <FieldText
+      label={label}
+      value={fields[key]}
+      onText={(v) => setFields((f) => ({ ...f, [key]: v }))}
+      testId={`filter-${key}`}
+      className={className}
+    />
+  );
 
   return (
     <div className="shrink-0 space-y-1.5" data-testid="study-filters">
@@ -293,9 +311,9 @@ function FilterBar({
               ))}
             </select>
           </label>
-          <FieldText label="受付番号" value={filter.accession} onCommit={(v) => onChange({ ...filter, accession: v })} testId="filter-accession" className="w-32" />
-          <FieldText label="検査名" value={filter.desc} onCommit={(v) => onChange({ ...filter, desc: v })} testId="filter-desc" className="w-40" />
-          <FieldText label="依頼医" value={filter.referring} onCommit={(v) => onChange({ ...filter, referring: v })} testId="filter-referring" className="w-36" />
+          {fieldText("accession", "受付番号", "w-32")}
+          {fieldText("desc", "検査名", "w-40")}
+          {fieldText("referring", "依頼医", "w-36")}
         </div>
       )}
     </div>

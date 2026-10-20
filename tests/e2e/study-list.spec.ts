@@ -827,14 +827,23 @@ test("詳細条件：生年月日・性別・受付番号・依頼医で絞る�
   await panel.getByTestId("filter-sex").selectOption({ label: "男" });
   await expect(page.getByTestId("study-count")).toHaveText("2");
   await expect(page.getByTestId("filter-more-count")).toHaveText("（2）");
+  // 閉じても、絞っている数が見える
+  await more.click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（2）");
+  await more.click();
 
   // 受付番号（含むもの）。ワイルドカードの字は打っても入らない
   await panel.getByLabel("生年月日").fill("");
   await panel.getByTestId("filter-sex").selectOption({ label: "すべて" });
   await panel.getByTestId("filter-accession").fill("0004*");
   await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
+  // 打ってすぐ（300 ミリ秒の内に）閉じても、打った字は失わずに絞る
+  await more.click();
   await expect(page.getByTestId("study-count")).toHaveText("2");
   await expect(page).toHaveURL(/accession=0004/);
+  await more.click();
+  await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
 
   // 依頼医（姓と名を空白で区切ってもよい）
   await panel.getByTestId("filter-accession").fill("");
