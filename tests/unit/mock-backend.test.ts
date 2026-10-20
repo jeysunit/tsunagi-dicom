@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { datasetRows } from "@/lib/all-values";
 import { personNameToString, studyDateRange } from "@/lib/backend/dicom-json";
 import { createMockBackend } from "@/lib/backend/mock";
-import { safeRelayPath, wadoRsTarget, type WadoRsTarget } from "@/lib/backend/relay-path";
+import { safeRelayPath, wadoRsTarget, withRelayAccept, type WadoRsTarget } from "@/lib/backend/relay-path";
 import { BackendError, clampStudyLimit, STUDY_LIMIT } from "@/lib/backend/types";
 
 describe("モックのバックエンド", () => {
@@ -207,6 +207,31 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
     expect((await backend.relayDicomweb({ method: "GET", target: study, search: "" })).status).toBe(200);
     const other = wadoRsTarget(["studies", STUDY, "thumbnail"])!;
     if (found!.study !== STUDY) expect((await backend.relayDicomweb({ method: "GET", target: other, search: "" })).status).toBe(404);
+  });
+
+  it("中継：thumbnail・rendered は、受け付けない Accept（ブラウザの <img> の Accept）に 400。BFF が決めた Accept なら通る", async () => {
+    const backend = createMockBackend();
+    let target: WadoRsTarget | null = null;
+    for (const s of await backend.searchStudies()) {
+      for (const se of await backend.searchSeries(s.studyInstanceUid)) {
+        const t = wadoRsTarget(["studies", s.studyInstanceUid, "series", se.seriesInstanceUid, "thumbnail"])!;
+        if ((await backend.relayDicomweb({ method: "GET", target: t, search: "" })).status === 200) target = t;
+      }
+    }
+    expect(target).not.toBeNull();
+    const imgAccept = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
+    const res = await backend.relayDicomweb({ method: "GET", target: target!, search: "", accept: imgAccept });
+    expect(res.status).toBe(400);
+    for (const accept of ["image/jpeg", "image/png"]) {
+      expect((await backend.relayDicomweb({ method: "GET", target: target!, search: "", accept })).status).toBe(200);
+    }
+    // metadata など、サムネイルでない道はブラウザの Accept で断らない（見本が無いので 404）
+    const metadata = wadoRsTarget(["studies", STUDY, "metadata"])!;
+    expect((await backend.relayDicomweb({ method: "GET", target: metadata, search: "", accept: imgAccept })).status).toBe(404);
+
+    // 画面の経路（withRelayAccept を通す）では、同じブラウザの Accept でもサムネイルが出る
+    const viaBff = withRelayAccept(backend);
+    expect((await viaBff.relayDicomweb({ method: "GET", target: target!, search: "", accept: imgAccept })).status).toBe(200);
   });
 });
 

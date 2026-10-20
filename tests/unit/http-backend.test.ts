@@ -17,7 +17,7 @@ let dir: string;
 let server: Server;
 let baseUrl: string;
 let caPem: string;
-const seen: { url: string; authorization?: string; method: string }[] = [];
+const seen: { url: string; authorization?: string; method: string; accept?: string }[] = [];
 
 const studies = JSON.parse(readFileSync("tests/fixtures/orthanc/dicom-web/studies.json", "utf8"));
 
@@ -40,8 +40,18 @@ beforeAll(async () => {
   server = createServer(
     { key: readFileSync(path.join(dir, "server.key")), cert: readFileSync(path.join(dir, "server.pem")) },
     (req, res) => {
-      seen.push({ url: req.url ?? "", authorization: req.headers.authorization, method: req.method ?? "" });
-      if (req.url?.endsWith("/metadata?gzip=1")) {
+      seen.push({ url: req.url ?? "", authorization: req.headers.authorization, method: req.method ?? "", accept: req.headers.accept });
+      if (/\/(thumbnail|rendered)$/.test(req.url ?? "")) {
+        // 実の Orthanc の DICOMweb のプラグインと同じく、image/jpeg・image/png の名指し以外の Accept は 400
+        const accept = req.headers.accept;
+        if (accept === "image/jpeg" || accept === "image/png") {
+          res.writeHead(200, { "content-type": accept });
+          res.end(Buffer.from([0xff, 0xd8, 0xff]));
+        } else {
+          res.writeHead(400, { "content-type": "text/plain" });
+          res.end("Unsupported MIME type");
+        }
+      } else if (req.url?.endsWith("/metadata?gzip=1")) {
         // 圧縮した応答。content-length は圧縮の後の長さ
         const gz = gzipSync(Buffer.from(JSON.stringify(studies)));
         res.writeHead(200, {
@@ -118,6 +128,52 @@ describe("実の画像サーバーへの接続", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
     expect(seen.at(-1)!.url).toBe("/dicom-web/studies/1.2.3/series/1.2.3.4/metadata");
     expect(seen.at(-1)!.method).toBe("GET");
+  });
+
+  describe("中継の Accept", () => {
+    // ブラウザの <img> の Accept（Chrome）と、png を名指しする Safari の形
+    const IMG_ACCEPT = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
+    const SAFARI_ACCEPT = "image/png,image/svg+xml,image/*;q=0.8,video/*;q=0.8,*/*;q=0.5";
+    const relay = (rest: string[], accept?: string | null) =>
+      backend({ caPem }).relayDicomweb({
+        method: "GET",
+        target: wadoRsTarget(["studies", "1.2.3", "series", "1.2.3.4", ...rest])!,
+        search: "",
+        accept,
+      });
+
+    it("サムネイルの道では、ブラウザの <img> の Accept を渡さず image/jpeg にする（400 にならない）", async () => {
+      const res = await relay(["thumbnail"], IMG_ACCEPT);
+      expect(res.status).toBe(200);
+      expect(seen.at(-1)!.accept).toBe("image/jpeg");
+      expect(res.headers.get("content-type")).toBe("image/jpeg");
+    });
+
+    it("Accept が無くても image/jpeg。rendered も同じ", async () => {
+      expect((await relay(["thumbnail"])).status).toBe(200);
+      expect(seen.at(-1)!.accept).toBe("image/jpeg");
+      expect((await relay(["instances", "1.2.3.5", "rendered"], "*/*")).status).toBe(200);
+      expect(seen.at(-1)!.accept).toBe("image/jpeg");
+    });
+
+    it("image/png を名指しし、image/jpeg を名指ししていないときだけ image/png", async () => {
+      expect((await relay(["thumbnail"], SAFARI_ACCEPT)).status).toBe(200);
+      expect(seen.at(-1)!.accept).toBe("image/png");
+      await relay(["thumbnail"], "image/png, image/jpeg");
+      expect(seen.at(-1)!.accept).toBe("image/jpeg");
+      await relay(["thumbnail"], "image/png;q=0, */*");
+      expect(seen.at(-1)!.accept).toBe("image/jpeg");
+    });
+
+    it("ビューアの取得（metadata・frames など）は、ブラウザの Accept をそのまま渡す", async () => {
+      await relay(["metadata"], "application/dicom+json");
+      expect(seen.at(-1)!.accept).toBe("application/dicom+json");
+      const multipart = 'multipart/related; type="application/octet-stream"; transfer-syntax=*';
+      await relay(["instances", "1.2.3.5", "frames", "1"], multipart);
+      expect(seen.at(-1)!.accept).toBe(multipart);
+      await relay(["metadata"], IMG_ACCEPT);
+      expect(seen.at(-1)!.accept).toBe(IMG_ACCEPT);
+    });
   });
 
   it("圧縮の応答をほどいて渡し、画像サーバーの content-length・content-encoding を通さない", async () => {
