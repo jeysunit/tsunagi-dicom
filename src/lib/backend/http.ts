@@ -2,13 +2,14 @@ import "server-only";
 import { getCACertificates } from "node:tls";
 import { Agent, fetch, type Dispatcher } from "undici";
 import {
-  inDateRange,
+  matchesStudyQuery,
   seriesFromDicomJson,
   sortSeries,
   sortStudiesNewestFirst,
   stringValue,
   studyDateRange,
   studyFromDicomJson,
+  studyQueryParams,
   TAG,
   type DicomJsonDataset,
 } from "@/lib/backend/dicom-json";
@@ -188,6 +189,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     const query = new URLSearchParams({ limit: String(clampStudyLimit(limit)) });
     const range = studyDateRange(studyQuery);
     if (range) query.set("StudyDate", range);
+    // 詳細条件（生年月日・性別・受付番号・検査名・依頼医）も Orthanc で絞る（上限 1000 件の外の古い検査も引ける）
+    for (const [name, value] of studyQueryParams(studyQuery)) query.set(name, value);
     // 既定で返らないことがある項目を求める
     query.append("includefield", "00081030");
     query.append("includefield", "00080061");
@@ -207,8 +210,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     mock: false,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
-      // 範囲は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
-      const studies = (await qidoStudies(limit, query)).map(studyFromDicomJson).filter((s) => inDateRange(s.studyDate, query));
+      // 範囲と詳細条件は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
+      const studies = (await qidoStudies(limit, query)).map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, query));
       return sortStudiesNewestFirst(studies);
     },
 

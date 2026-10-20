@@ -15,6 +15,7 @@ import {
 import type { SimpleDate } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, primaryGroup, studyInGroup } from "@/lib/modalities";
 import {
+  advancedQuery,
   dateQuery,
   DEFAULT_FILTER,
   FACET_DATES,
@@ -125,7 +126,7 @@ export interface FacetAudit {
   /** 追加の検索が失敗して、検査日の件数を出さなかった */
   failed: boolean;
   /** 件数を数えたときの絞り込み（検索の語は有無だけ） */
-  filter: { date: string; from?: string; to?: string; modality?: string; query: boolean };
+  filter: { date: string; from?: string; to?: string; modality?: string; query: boolean; conditions?: string[] };
   /** 返した件数（数だけ） */
   counts: { date?: Record<string, number>; modality?: Record<string, number> };
   /** 件数が「以上」（上限に届いた）ものがあったか */
@@ -138,7 +139,9 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
   // 検査日を許されていない役割には、検査日の絞り込みも効かせない（隠した項目で探せないように。原則 8）
   const dateAllowed = fields.includes("studyDate");
   const fetchedAt = Date.now();
-  const studies = await deps.backend.searchStudies(STUDY_LIMIT, dateAllowed ? dateQuery(filter, today) : {});
+  // 詳細条件（生年月日・性別・受付番号・検査名・依頼医）も、許可の一覧に載った項目の条件だけを画像サーバーへ渡す
+  const advanced = advancedQuery(filter, fields);
+  const studies = await deps.backend.searchStudies(STUDY_LIMIT, { ...(dateAllowed ? dateQuery(filter, today) : {}), ...advanced });
   const decorated = await decorate(deps, studies);
   const rows = decorated.filter((r) => matchesFilter(r.view, filter));
   // 検査日の件数の元：いまの一覧が全期間でなければ、全期間をもう一度読む（件数を数えるだけ。監査の記録の「返した検査」には入れない）
@@ -149,7 +152,8 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
   let failed = false;
   if (extraSearch) {
     try {
-      const all = await deps.backend.searchStudies(STUDY_LIMIT, {});
+      // 検査日だけを外す（詳細条件は、いまの一覧と同じに当てる。押したあとの一覧の件数と合うように）
+      const all = await deps.backend.searchStudies(STUDY_LIMIT, advanced);
       dateFetched = all.length;
       dateRows = await decorate(deps, all);
     } catch (error) {
@@ -183,6 +187,8 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
         ...(filter.to ? { to: filter.to } : {}),
         ...(filter.modality ? { modality: filter.modality } : {}),
         query: !!filter.q,
+        // 詳細条件は、効かせた条件の名前だけ（値は患者の値なので入れない）
+        ...(Object.keys(advanced).length > 0 ? { conditions: Object.keys(advanced) } : {}),
       },
       counts: {
         ...(facets.date ? { date: facets.date } : {}),

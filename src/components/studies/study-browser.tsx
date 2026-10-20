@@ -24,11 +24,16 @@ import type { StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
 import {
+  advancedCount,
   DATE_LABELS,
   DEFAULT_FILTER,
   FACET_DATES,
+  fieldValue,
   filterToSearchParams,
+  MAX_FIELD_LENGTH,
   MAX_QUERY_LENGTH,
+  PATIENT_SEX,
+  type PatientSex,
   type StudyFacets,
   type StudyFilter,
 } from "@/lib/study-filter";
@@ -108,6 +113,45 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
   );
 }
 
+/** 詳細条件の文字の欄で、打っても受けない字（QIDO-RS の値で特別の意味を持つ字。study-filter.ts の fieldValue） */
+const FIELD_STRIP = /[*?\\,]/g;
+
+/** 詳細条件の文字の欄（打つたびに要求を送らない。止まってから 300 ミリ秒。横断の検索と同じ） */
+function FieldText({
+  label,
+  value,
+  onCommit,
+  testId,
+  className,
+}: {
+  label: string;
+  value: string | undefined;
+  onCommit: (value: string | undefined) => void;
+  testId: string;
+  className?: string;
+}) {
+  const [text, setText] = useState(value ?? "");
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const v = fieldValue(text);
+      if (v !== value) onCommit(v);
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [text, value, onCommit]);
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="shrink-0 text-xs text-label">{label}</span>
+      <Input
+        value={text}
+        maxLength={MAX_FIELD_LENGTH}
+        onChange={(e) => setText(e.target.value.replace(FIELD_STRIP, ""))}
+        className={cn("h-7", className)}
+        data-testid={testId}
+      />
+    </label>
+  );
+}
+
 function FilterBar({
   filter,
   facets,
@@ -120,9 +164,11 @@ function FilterBar({
   trailing?: React.ReactNode;
 }) {
   const [text, setText] = useState(filter.q ?? "");
-  // 使うことの少ない条件（期間の指定）は「詳しく」の中。期間で絞っているときは最初から開く
-  const [more, setMore] = useState(filter.date === "range");
+  // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名・依頼医）は「詳細条件」の中。どれかで絞っているときは最初から開く
+  const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0);
+  const [more, setMore] = useState(conditions > 0);
   const moreId = useId();
+  const birthId = useId();
   // 打つたびに要求を送らない（止まってから 300 ミリ秒）
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -177,17 +223,20 @@ function FilterBar({
         >
           {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
           詳細条件
+          {/* 閉じていても、詳細条件で絞っていることが分かるように数を添える */}
+          {conditions > 0 && <span data-testid="filter-more-count">（{conditions}）</span>}
         </button>
         {trailing}
       </div>
       {more && (
         <div
           id={moreId}
-          className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5"
+          className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-border bg-surface px-3 py-1.5"
           role="group"
           aria-label="詳細条件"
           data-testid="filter-more-panel"
         >
+          <span className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-label">検査日</span>
           <div className="inline-flex overflow-hidden rounded-md border border-border">
             <Chip pressed={filter.date === "range"} onClick={() => onChange({ ...filter, date: "range" })} testId="date-range">
@@ -213,6 +262,40 @@ function FilterBar({
               />
             </span>
           )}
+          </span>
+          {/* 生年月日・性別・受付番号・検査名・依頼医は Orthanc の検索（QIDO-RS）の条件にする（docs/spec.md の 3.1） */}
+          <span className="flex items-center gap-1.5">
+            <label htmlFor={birthId} className="shrink-0 text-xs text-label">
+              生年月日
+            </label>
+            <Input
+              id={birthId}
+              type="date"
+              value={filter.birth ?? ""}
+              onChange={(e) => onChange({ ...filter, birth: e.target.value || undefined })}
+              className="h-7 w-40"
+              data-testid="filter-birth"
+            />
+          </span>
+          <label className="flex items-center gap-1.5">
+            <span className="shrink-0 text-xs text-label">性別</span>
+            <select
+              value={filter.sex ?? ""}
+              onChange={(e) => onChange({ ...filter, sex: (PATIENT_SEX as readonly string[]).includes(e.target.value) ? (e.target.value as PatientSex) : undefined })}
+              className="h-7 rounded-md border border-border bg-background px-2 text-sm text-value"
+              data-testid="filter-sex"
+            >
+              <option value="">すべて</option>
+              {PATIENT_SEX.map((s) => (
+                <option key={s} value={s}>
+                  {sexLabel(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <FieldText label="受付番号" value={filter.accession} onCommit={(v) => onChange({ ...filter, accession: v })} testId="filter-accession" className="w-32" />
+          <FieldText label="検査名" value={filter.desc} onCommit={(v) => onChange({ ...filter, desc: v })} testId="filter-desc" className="w-40" />
+          <FieldText label="依頼医" value={filter.referring} onCommit={(v) => onChange({ ...filter, referring: v })} testId="filter-referring" className="w-36" />
         </div>
       )}
     </div>

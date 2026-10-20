@@ -806,6 +806,53 @@ test("「詳しく」：期間の指定は、押したときだけ出る。開�
   await expect(page.getByTestId("date-range")).toHaveAttribute("aria-pressed", "true");
 });
 
+// 検査名は、モックの見本（QIDO-RS の写し）に値が無いので、単体の試験（tests/unit/study-advanced-filter.test.ts）と結合の試験で見る
+test("詳細条件：生年月日・性別・受付番号・依頼医で絞る。URL に残り、閉じても絞っている数が見え、条件をクリアで戻る", async ({ page }) => {
+  await asRole(page, "一般");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  const more = page.getByTestId("filter-more");
+  await more.click();
+  const panel = page.getByTestId("filter-more-panel");
+
+  // 生年月日（一致）
+  await panel.getByLabel("生年月日").fill("1975-05-10");
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page).toHaveURL(/birth=1975-05-10/);
+  for (const id of await rows(page).getByTestId("patient-id").allTextContents()) expect(id).toBe("JP-TEST-0001");
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（1）");
+
+  // 性別を足す（どちらも当てる）
+  await panel.getByTestId("filter-sex").selectOption({ label: "女" });
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await panel.getByTestId("filter-sex").selectOption({ label: "男" });
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（2）");
+
+  // 受付番号（含むもの）。ワイルドカードの字は打っても入らない
+  await panel.getByLabel("生年月日").fill("");
+  await panel.getByTestId("filter-sex").selectOption({ label: "すべて" });
+  await panel.getByTestId("filter-accession").fill("0004*");
+  await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page).toHaveURL(/accession=0004/);
+
+  // 依頼医（姓と名を空白で区切ってもよい）
+  await panel.getByTestId("filter-accession").fill("");
+  await panel.getByTestId("filter-referring").fill("試験 医師");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await panel.getByTestId("filter-referring").fill("佐藤");
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+
+  // 開き直しても同じ条件で、詳細条件は開いている。条件をクリアで、すべての検査に戻る
+  await page.reload();
+  await expect(page.getByTestId("filter-more")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("filter-referring")).toHaveValue("佐藤");
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("filter-more-count")).toHaveCount(0);
+});
+
 test("狭い画面では絞り込みが折り返し、横にはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await asRole(page, "一般");

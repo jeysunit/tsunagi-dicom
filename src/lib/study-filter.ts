@@ -8,8 +8,9 @@ import { isModalityGroup, studyInGroup, type ModalityGroup } from "@/lib/modalit
 // 検査日：今日・昨日・1週間・今月・全期間・期間の指定。モダリティ。横断の検索。
 // 検査の状態の見出し（未検像・検像済・未読・既読・緊急・ブックマーク）は持たない（docs/spec.md の 0）。
 // 絞り込みの値は頁の URL（?date=…）に持ち、BFF の画面の API にも同じ形で渡す。
-// 検査日は画像サーバーの QIDO-RS の条件にし、ほかは BFF で、役割の許可の一覧で絞った後の項目に当てる
-// （許可されていない項目では探せない）。
+// 検査日と詳細条件（生年月日・性別・受付番号・検査名・依頼医。2026-10-21）は画像サーバーの QIDO-RS の条件にし、
+// モダリティと横断の検索は BFF で、役割の許可の一覧で絞った後の項目に当てる（許可されていない項目では探せない。
+// 詳細条件も、許可の一覧に載っていない項目の条件は効かせない）。
 
 export const DATE_PRESETS = ["today", "yesterday", "week", "month", "all", "range"] as const;
 export type DatePreset = (typeof DATE_PRESETS)[number];
@@ -51,7 +52,45 @@ export interface StudyFilter {
   to?: string;
   modality?: ModalityGroup;
   q?: string;
+  // ── 詳細条件（docs/spec.md の 3.1。2026-10-21）。Orthanc の QIDO-RS の条件にする ──
+  /** 生年月日（`YYYY-MM-DD`）。一致 */
+  birth?: string;
+  /** 性別（M・F・O）。一致 */
+  sex?: PatientSex;
+  /** 受付番号・検査名・依頼医。値を含むもの */
+  accession?: string;
+  desc?: string;
+  referring?: string;
 }
+
+export const PATIENT_SEX = ["M", "F", "O"] as const;
+export type PatientSex = (typeof PATIENT_SEX)[number];
+
+/** 詳細条件の文字の欄の長さの上限（受付番号は SH の 16 字、検査名は LO の 64 字、依頼医は PN の 1 つの組の 64 字） */
+export const MAX_FIELD_LENGTH = 64;
+
+/**
+ * 詳細条件の文字の欄で受けない字：制御文字と、QIDO-RS の値で特別の意味を持つ字（ワイルドカードの `*` `?`、
+ * 値の区切りの `\`、UID の並びの `,`）。含む値は条件にしない（Orthanc へ渡す値を、ワイルドカードとして解かせない）
+ */
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_FIELD_CHARS = /[\u0000-\u001f\u007f*?\\,]/;
+
+/** 詳細条件の文字の欄を読む。前後の空白を除き、空・長すぎる・受けない字を含む値は条件にしない */
+export function fieldValue(value: string | undefined): string | undefined {
+  const v = value?.trim();
+  if (!v || v.length > MAX_FIELD_LENGTH || FORBIDDEN_FIELD_CHARS.test(v)) return undefined;
+  return v;
+}
+
+/** 詳細条件（期間指定を除く）の URL の名前と、許可の一覧の項目（項目が許されていない役割には効かせない） */
+export const ADVANCED_KEYS = [
+  ["birth", "patientBirthDate"],
+  ["sex", "patientSex"],
+  ["accession", "accessionNumber"],
+  ["desc", "studyDescription"],
+  ["referring", "referringPhysicianName"],
+] as const satisfies readonly (readonly [keyof StudyFilter, keyof StudyView])[];
 
 /** 既定は全期間（段 1 の一覧と同じ見え方。新しい順に上限まで） */
 export const DEFAULT_FILTER: StudyFilter = { date: "all" };
@@ -84,7 +123,35 @@ export function parseFilter(params: Params): StudyFilter {
   }
   if (isModalityGroup(modality)) filter.modality = modality;
   if (q) filter.q = q;
+  const birth = isoDate(param(params, "birth"));
+  if (birth) filter.birth = birth;
+  const sex = param(params, "sex");
+  if ((PATIENT_SEX as readonly string[]).includes(sex ?? "")) filter.sex = sex as PatientSex;
+  for (const key of ["accession", "desc", "referring"] as const) {
+    const v = fieldValue(param(params, key));
+    if (v) filter[key] = v;
+  }
   return filter;
+}
+
+/** 詳細条件（期間指定を除く）で絞っている数（「詳細条件」のボタンに添える） */
+export function advancedCount(filter: StudyFilter): number {
+  return ADVANCED_KEYS.filter(([key]) => !!filter[key]).length;
+}
+
+/**
+ * 詳細条件を、画像サーバーへ渡す条件にする。許可の一覧に載っていない項目の条件は効かせない
+ * （隠した項目で探せないように。原則 8。検査日の絞り込みと同じ扱い）
+ */
+export function advancedQuery(filter: StudyFilter, fields: readonly string[]): StudyQuery {
+  const q: StudyQuery = {};
+  const allowed = (field: string) => fields.includes(field);
+  if (filter.birth && allowed("patientBirthDate")) q.patientBirthDate = filter.birth.replaceAll("-", "");
+  if (filter.sex && allowed("patientSex")) q.patientSex = filter.sex;
+  if (filter.accession && allowed("accessionNumber")) q.accessionNumber = filter.accession;
+  if (filter.desc && allowed("studyDescription")) q.studyDescription = filter.desc;
+  if (filter.referring && allowed("referringPhysicianName")) q.referringPhysicianName = filter.referring;
+  return q;
 }
 
 /** 頁の URL・画面の API の query にする（既定の値は書かない） */
@@ -97,6 +164,10 @@ export function filterToSearchParams(filter: StudyFilter): URLSearchParams {
   }
   if (filter.modality) out.set("modality", filter.modality);
   if (filter.q) out.set("q", filter.q);
+  for (const [key] of ADVANCED_KEYS) {
+    const v = filter[key];
+    if (v) out.set(key, v);
+  }
   return out;
 }
 

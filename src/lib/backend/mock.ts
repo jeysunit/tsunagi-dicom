@@ -17,7 +17,7 @@ import {
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
 import {
-  inDateRange,
+  matchesStudyQuery,
   sortSeries,
   sortStudiesNewestFirst,
   stringValue,
@@ -212,7 +212,8 @@ export function createMockBackend(): Backend {
     mock: true,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
-      const studies = (await qidoStudies()).map(studyFromDicomJson).filter((s) => inDateRange(s.studyDate, query));
+      // 検査日の範囲と詳細条件は、実の Orthanc の QIDO-RS の代わりに、ここで当てる
+      const studies = (await qidoStudies()).map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, query));
       return sortStudiesNewestFirst(studies).slice(0, clampStudyLimit(limit));
     },
 

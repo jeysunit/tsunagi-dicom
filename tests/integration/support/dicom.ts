@@ -21,9 +21,18 @@ export interface SyntheticStudy {
   studyDescription: string;
   modality: "CT";
   sopInstanceUids: string[];
+  /** 生年月日（DA）・性別（CS）・依頼医（PN）。詳細条件の試験で替える */
+  patientBirthDate: string;
+  patientSex: string;
+  referringPhysicianName: string;
 }
 
-export function syntheticStudy(batch: string, index: number, instances: number): SyntheticStudy {
+export function syntheticStudy(
+  batch: string,
+  index: number,
+  instances: number,
+  extra: Partial<Pick<SyntheticStudy, "patientBirthDate" | "patientSex" | "referringPhysicianName" | "studyDescription" | "accessionNumber">> = {},
+): SyntheticStudy {
   return {
     batch,
     patientId: `JP-TEST-IT${String(index).padStart(2, "0")}`,
@@ -34,6 +43,10 @@ export function syntheticStudy(batch: string, index: number, instances: number):
     studyDescription: `ITEST study ${index}`,
     modality: "CT",
     sopInstanceUids: Array.from({ length: instances }, () => newUid()),
+    patientBirthDate: "19800101",
+    patientSex: "M",
+    referringPhysicianName: "ITEST^REFERRER",
+    ...extra,
   };
 }
 
@@ -50,12 +63,12 @@ function dump(study: SyntheticStudy, sopInstanceUid: string, instanceNumber: num
     "(0008,0030) TM [090000]",
     `(0008,0050) SH [${study.accessionNumber}]`,
     `(0008,0060) CS [${study.modality}]`,
-    "(0008,0090) PN [ITEST^REFERRER]",
+    `(0008,0090) PN [${study.referringPhysicianName}]`,
     `(0008,1030) LO [${study.studyDescription}]`,
     `(0010,0010) PN [${study.patientName}]`,
     `(0010,0020) LO [${study.patientId}]`,
-    "(0010,0030) DA [19800101]",
-    "(0010,0040) CS [M]",
+    `(0010,0030) DA [${study.patientBirthDate}]`,
+    `(0010,0040) CS [${study.patientSex}]`,
     `(0020,000d) UI [${study.studyInstanceUid}]`,
     `(0020,000e) UI [${study.seriesInstanceUid}]`,
     "(0020,0010) SH [IT1]",
