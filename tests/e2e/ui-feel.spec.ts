@@ -75,6 +75,58 @@ test("押せる物：カーソルは指の形、押せないときは禁止の�
   expect(cursor).toBe("not-allowed");
 });
 
+test("押している間の手応え：ボタンは沈んで影が消え、絞り込みの並びは内側に影。枠のボタンは白い地と影で浮かせる", async ({ page }) => {
+  await asAdmin(page);
+  await expect(rows(page).first()).toBeVisible();
+  const style = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => {
+      const s = getComputedStyle(el);
+      // Tailwind CSS v4 の translate-* は、CSS の translate の属性（transform ではない）
+      return { translate: s.translate, shadow: s.boxShadow };
+    });
+  // 見える影があるか（Tailwind CSS v4 は、影の無い形も透明の影を並べて書く。色の透明度が 0 でない影を探す）
+  const shadowVisible = (v: string) => v !== "none" && v.split(/,(?![^(]*\))/).some((part) => !/rgba\([^)]*,\s*0\)/.test(part));
+
+  // 「詳細条件」（枠のボタンの形）：押す前は影で浮き、押している間は 1px 沈んで影が消える。離すと戻る
+  const before = await style("filter-more");
+  expect(shadowVisible(before.shadow)).toBe(true);
+  expect(before.translate).toBe("none");
+  await page.getByTestId("filter-more").hover();
+  await page.mouse.down();
+  await expect.poll(async () => (await style("filter-more")).translate).toBe("0px 1px");
+  await expect.poll(async () => shadowVisible((await style("filter-more")).shadow)).toBe(false);
+  await page.mouse.up();
+  await expect.poll(async () => (await style("filter-more")).translate).toBe("none");
+
+  // 絞り込みの並びのボタンは、並びを崩さないよう沈めずに内側の影
+  await page.getByTestId("modality-MR").hover();
+  await page.mouse.down();
+  await expect.poll(async () => (await style("modality-MR")).shadow).toContain("inset");
+  expect((await style("modality-MR")).translate).toBe("none");
+  await page.mouse.up();
+  await page.getByTestId("modality-all").click();
+
+  // 共通のボタン（詳細の「UID」）も同じ手応え。枠のボタンの地は白（明るい地の上で、押せる物の形に見せる）
+  await rows(page).first().click();
+  const uid = page.getByTestId("detail-uid-toggle");
+  expect(await uid.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
+  await uid.hover();
+  await page.mouse.down();
+  await expect.poll(() => uid.evaluate((el) => getComputedStyle(el).translate)).toBe("0px 1px");
+  await page.mouse.up();
+  await expect.poll(() => uid.evaluate((el) => getComputedStyle(el).translate)).toBe("none");
+  await uid.click();
+
+  // 動きを減らす設定では沈めない（地の色と影の変化だけ）
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByTestId("filter-more").hover();
+  await page.mouse.down();
+  await expect.poll(async () => shadowVisible((await style("filter-more")).shadow)).toBe(false);
+  expect((await style("filter-more")).translate).toBe("none");
+  await page.mouse.up();
+  await page.emulateMedia({ reducedMotion: null });
+});
+
 test("選んだ行：主の色の薄い地と左の縦線。hover の行の地とは違う", async ({ page }) => {
   await asAdmin(page);
   await expect(rows(page)).toHaveCount(8);

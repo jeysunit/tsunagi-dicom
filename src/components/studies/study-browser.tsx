@@ -1,9 +1,9 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, ChevronRight, Search, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Inbox, Search, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -99,8 +99,9 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
       data-testid={testId}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm transition-colors last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
-        pressed ? "bg-primary text-primary-foreground active:bg-primary-active" : "text-foreground hover:bg-hover active:bg-pressed",
+        "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
+        pressInset,
+        pressed ? "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active" : "bg-background text-foreground hover:bg-hover active:bg-pressed",
       )}
     >
       {children}
@@ -173,7 +174,10 @@ function FilterBar({
           aria-controls={moreId}
           data-testid="filter-more"
           onClick={() => setMore((v) => !v)}
-          className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-sm text-foreground hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className={cn(
+            "inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-sm text-foreground shadow-xs hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            pressFeedback,
+          )}
         >
           {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
           詳細条件
@@ -280,6 +284,7 @@ function StudyRows({
   onSelect,
   onChanged,
   dim = false,
+  empty,
 }: {
   studies: StudyView[];
   screen: ScreenInfo;
@@ -289,13 +294,16 @@ function StudyRows({
   onChanged: () => void;
   /** 取り直しの待ちの間、古い行を薄くする（docs/spec.md の 2.3） */
   dim?: boolean;
+  /** 行が無いときに、表の中に出す案内（0 件でも、表の枠と見出しの行は出す。docs/spec.md の 3.1） */
+  empty?: React.ReactNode;
 }) {
   // 矢印で動く（ローヴィングの tabindex）：選んだ行、無ければ先頭の行だけが tab の止まり先
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
   const columns = columnsFor(studies);
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
+    // @container：0 件の案内を、横にスクロールする表の幅ではなく、見えている一覧の幅の中に置くため（100cqw）
+    <div className="@container min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
       {/* 取り直しの待ちの細い帯は、一覧の上の縁に重ねる（場所を取らない。画面は覆わない） */}
       {dim && (
         <div className="sticky top-0 z-20 h-0">
@@ -329,6 +337,14 @@ function StudyRows({
           </tr>
         </thead>
         <tbody className={cn("transition-opacity", dim && "opacity-60")} data-dim={dim || undefined}>
+          {studies.length === 0 && empty && (
+            <tr>
+              <td colSpan={columns.length} className="p-0 text-label">
+                {/* 表は列の幅の合計より狭くならない（狭い画面では横にスクロールする）。案内は見えている幅の中で中央に置く */}
+                <div className="sticky left-0 flex w-[100cqw] justify-center px-2 py-8 text-center">{empty}</div>
+              </td>
+            </tr>
+          )}
           {studies.map((s, i) => {
             const uid = s.studyInstanceUid ?? "";
             const isOpen = selected !== null && uid === selected;
@@ -603,17 +619,30 @@ function Browser({
           {list.error.message}
         </p>
       )}
-      {data && data.studies.length === 0 && (
-        <p className="flex items-center gap-3 text-label" data-testid="study-list-empty">
-          該当する検査はありません
-          <Button type="button" size="sm" variant="outline" onClick={clearFilter}>
-            条件をクリア
-          </Button>
-        </p>
-      )}
-      {data && data.studies.length > 0 && (
-        <StudyRows studies={data.studies} screen={screen} selected={selected} onSelect={pick} onChanged={changed} dim={refetching} />
-      )}
+      {/* 0 件でも表の枠と見出しの行を出し、一覧の場所が分かるようにする（2026-10-21。空の場所が真っ白だった） */}
+      <StudyRows
+        studies={data?.studies ?? []}
+        screen={screen}
+        selected={selected}
+        onSelect={pick}
+        onChanged={changed}
+        dim={refetching}
+        // 0 件の案内は、一覧を読めたときだけ。読み込みの間と読めなかったときは、中身の無い行を作らない（待ちの印は一覧の上の細い帯）
+        empty={
+          data ? (
+            <span className="inline-flex flex-wrap items-center justify-center gap-3" data-testid="study-list-empty">
+              <Inbox aria-hidden className="size-5" />
+              該当する検査はありません
+              {/* 絞り込みが既定のままなら、戻す先が無いのでボタンを出さない */}
+              {params !== "" && (
+                <Button type="button" size="sm" variant="outline" onClick={clearFilter}>
+                  条件をクリア
+                </Button>
+              )}
+            </span>
+          ) : undefined
+        }
+      />
       </div>
 
       {/* 境目：上下に動かせる（矢印のキー・Home・End・ドラッグ）。狭い画面では上下に分けない */}
@@ -673,7 +702,10 @@ function Browser({
               type="button"
               aria-label="詳細を閉じる"
               onClick={closeDetail}
-              className="sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden"
+              className={cn(
+                "sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden",
+                pressFeedback,
+              )}
             >
               <X aria-hidden className="size-5" />
             </button>
