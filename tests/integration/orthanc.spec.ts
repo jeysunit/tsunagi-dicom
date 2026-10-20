@@ -212,7 +212,7 @@ test("2 接続先の一覧と接続確認：Orthanc の設定のファイルで�
   await page.goto("/modalities");
   const row = page.locator(`[data-modality="${ITEST.scp.id}"]`);
   await row.getByTestId("echo").click();
-  await expect(row.getByTestId("echo-result")).toHaveText("つながった");
+  await expect(row.getByTestId("echo-result")).toHaveText(/^成功 \d{2}:\d{2}:\d{2}$/);
 });
 
 test("3 検査の一覧・詳細：本物のデータ（DICOMweb の QIDO-RS と REST）で開き、中継は WADO-RS の読み取りだけを通す", async () => {
@@ -251,7 +251,13 @@ test("4 送信：tsunagi-dicom から storescp へ送り、storescp に同じ UI
   const { page } = admin;
   const panel = await sendToScp(page, A);
   await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 90_000 });
-  await expect(panel.getByTestId("send-status")).toHaveText("送った");
+  // 結果には送信先・画像の数・時刻が出る（docs/spec.md の 3.4）
+  await expect(panel.getByTestId("send-status")).toHaveText(
+    new RegExp(`^送信完了：${ITEST.scp.id}（${ITEST.scp.aet}） へ ${A.sopInstanceUids.length} 画像（\\d{2}:\\d{2}:\\d{2}）$`),
+  );
+  // 受け付けた後は、同じ画面から重ねて送らない（実行のボタンは外れ、「閉じる」だけが出る）
+  await expect(panel.getByTestId("send-submit")).toHaveCount(0);
+  await expect(panel.getByTestId("send-close")).toHaveText("閉じる");
 
   const received = await waitFor("storescp に A が届く", () => receivedOf(A), (uids) => uids.length >= A.sopInstanceUids.length);
   expect([...received].sort()).toEqual([...A.sopInstanceUids].sort());
@@ -289,7 +295,7 @@ test("5 送り先を止めると：接続確認は「つながらない」、送
     await page.goto("/modalities");
     const row = page.locator(`[data-modality="${ITEST.scp.id}"]`);
     await row.getByTestId("echo").click();
-    await expect(row.getByTestId("echo-result")).toHaveText("つながらない", { timeout: 60_000 });
+    await expect(row.getByTestId("echo-result")).toHaveText(/^失敗 \d{2}:\d{2}:\d{2}（.+）$/, { timeout: 60_000 });
     // 実測：C-ECHO が通らないときの Orthanc の答え（BFF は 500 を「つながらない」と読む）
     const echo = await orthanc(`modalities/${ITEST.scp.id}/echo`, { method: "POST", body: JSON.stringify({ Timeout: 10 }), contentType: "application/json" });
     const echoBody = await echo.text();
@@ -298,7 +304,7 @@ test("5 送り先を止めると：接続確認は「つながらない」、送
 
     const panel = await sendToScp(page, A);
     await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Failure", { timeout: 120_000 });
-    await expect(panel.getByTestId("send-status")).toContainText("送れなかった");
+    await expect(panel.getByTestId("send-status")).toContainText("送信失敗");
 
     const failed = (await storeJobs()).find((j) => !before.has(j.ID) && j.State === "Failure");
     expect(failed).toBeDefined();
@@ -369,7 +375,7 @@ test("8（round-trip-test の 7）答えが失われたとき：Orthanc は送�
     const panel = await sendToScp(page, C);
     const status = panel.getByTestId("send-status");
     await expect(status).toHaveAttribute("data-state", "Unknown", { timeout: 60_000 });
-    await expect(status).toContainText("結果が分からない");
+    await expect(status).toContainText("送信結果を確認できません");
     requestId = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.exec(await status.innerText())?.[0] ?? "";
     expect(requestId).not.toBe("");
     expect(gate.dropped).toHaveLength(1);
@@ -398,13 +404,13 @@ test("8（round-trip-test の 7）答えが失われたとき：Orthanc は送�
 
   // 管理者が送り先で確かめた内容を書き、「届いていた」を記録する
   await again.getByTestId("send-resolve-note").fill("storescp の受け取りの記録で、同じ UID の 2 件を確かめた（結合の試験）");
-  await again.getByTestId("send-resolve").getByRole("button", { name: "届いていた" }).click();
+  await again.getByTestId("send-resolve").getByRole("button", { name: "送信済みとして記録" }).click();
   await expect(again.getByTestId("send-status")).toHaveAttribute("data-state", "Settled");
-  await expect(again.getByTestId("send-status")).toContainText("届いていたと記録した");
+  await expect(again.getByTestId("send-status")).toContainText("送信済みとして記録しました");
 
-  // 照らした後は、また送れる
-  await again.getByTestId("send-submit").click();
-  await expect(again.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 90_000 });
+  // 照らした後は、また送れる（同じ画面からは送り直せない：開き直して新しい送信の確かめの画面にする）
+  const third = await sendToScp(page, C);
+  await expect(third.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 90_000 });
 });
 
 test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の分だけ行が増えている", async () => {
