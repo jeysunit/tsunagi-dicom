@@ -108,17 +108,42 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
     expect(JSON.parse(row!.detail!).returned).toHaveLength(8);
   });
 
-  it("自動更新の読み直し（refresh=auto）は、監査の記録に trigger: auto を残す。絞り込みには使わず、ほかの検索には付けない", async () => {
+  it("自動更新の名乗り（refresh=auto）：監査の行は手動と同じに全部残し、直前の手動の検索と同じ条件のときだけ trigger: auto を申告の値として残す", async () => {
     state.role = "general";
     const { GET } = await import("@/app/api/studies/route");
+    const { forgetManualSearches } = await import("@/lib/search-trigger");
     const { getDb } = await import("@/lib/db");
-    const last = async () => JSON.parse((await (await getDb()).auditLog.findFirst({ where: { action: "search" }, orderBy: { seq: "desc" } }))!.detail!);
-    const auto = await GET(new Request("http://127.0.0.1/api/studies?refresh=auto"));
-    expect(((await auto.json()) as { studies: unknown[] }).studies).toHaveLength(8);
-    expect(await last()).toMatchObject({ via: "api", trigger: "auto" });
-    await GET(new Request("http://127.0.0.1/api/studies"));
-    expect(await last()).not.toHaveProperty("trigger");
-    await GET(new Request("http://127.0.0.1/api/studies?refresh=manual"));
-    expect(await last()).not.toHaveProperty("trigger");
+    const lastRow = async () => (await (await getDb()).auditLog.findFirst({ where: { action: "search" }, orderBy: { seq: "desc" } }))!;
+    const get = async (qs: string) => {
+      const res = await GET(new Request(`http://127.0.0.1/api/studies${qs}`));
+      expect(res.status).toBe(200);
+      const row = await lastRow();
+      return { row, detail: JSON.parse(row.detail!) as Record<string, unknown> };
+    };
+    forgetManualSearches();
+
+    // 手動の検索の前の名乗りは、手動として扱う（監査は薄めない）
+    const first = await get("?refresh=auto");
+    expect(first.detail).not.toHaveProperty("trigger");
+    expect(first.detail.returned).toHaveLength(8);
+
+    // 手動の検索のあと、同じ条件の名乗りは auto と残す。行の中身（返した検査の組・件数）と項目は手動と同じ
+    const manual = await get("");
+    const auto = await get("?refresh=auto");
+    expect(auto.detail).toMatchObject({ via: "api", trigger: "auto" });
+    expect(auto.detail.returned).toEqual(manual.detail.returned);
+    expect(auto.detail.results).toBe(manual.detail.results);
+    expect(Object.keys(auto.detail).filter((k) => k !== "trigger").sort()).toEqual(Object.keys(manual.detail).sort());
+    expect({ outcome: auto.row.outcome, actorRole: auto.row.actorRole }).toEqual({ outcome: manual.row.outcome, actorRole: manual.row.actorRole });
+
+    // 条件が直前の手動の検索と違う名乗りは、手動として扱う（自動の読み直しは、同じ条件の読み直しに限る）
+    const other = await get("?modality=CT&refresh=auto");
+    expect(other.detail).not.toHaveProperty("trigger");
+    expect(Array.isArray(other.detail.returned)).toBe(true);
+    // その検索が、次の「直前の手動の検索」になる
+    expect((await get("?modality=CT&refresh=auto")).detail).toMatchObject({ trigger: "auto" });
+    expect((await get("?refresh=auto")).detail).not.toHaveProperty("trigger");
+    // auto でない名乗りは無視する
+    expect((await get("?refresh=manual")).detail).not.toHaveProperty("trigger");
   });
 });

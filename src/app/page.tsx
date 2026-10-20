@@ -7,7 +7,8 @@ import { BackendError } from "@/lib/backend/types";
 import { getConfig } from "@/lib/config";
 import { screenDeps } from "@/lib/screen-deps";
 import { searchAuditFields } from "@/lib/search-audit";
-import { parseFilter } from "@/lib/study-filter";
+import { filterToSearchParams, parseFilter } from "@/lib/study-filter";
+import { resolveSearchTrigger } from "@/lib/search-trigger";
 import { listStudies, type StudyListResult } from "@/lib/study-list";
 import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
 
@@ -51,6 +52,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </p>
     );
   }
+  // 頁を開いたことは手動の検索（自動更新の読み直しを認める基準の条件として覚える。src/lib/search-trigger.ts）
+  resolveSearchTrigger(session, filterToSearchParams(filter).toString(), null);
   await audit(session, searchAuditFields("page", result.returned, result.facetAudit));
 
   const role = session.role;
