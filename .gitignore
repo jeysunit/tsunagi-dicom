@@ -23,6 +23,11 @@ blob-report/
 !.env.example
 # compose.yaml の secret のファイル（SESSION_SECRET_FILE・BACKEND_PASSWORD_FILE）
 /secrets/
+# Orthanc とセットの compose（deploy/）と開発用の compose（docker/dev/）の secret のファイルと、施設の設定
+/deploy/secrets/
+/deploy/tsunagi.env
+/deploy/orthanc/site.local.json
+/docker/dev/secrets/
 
 # BFF のデータ（SQLite）
 /data/

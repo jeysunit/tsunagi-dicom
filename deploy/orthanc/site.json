@@ -1,0 +1,6 @@
+{
+  "DicomAet": "ORTHANC",
+  "DicomCheckCalledAet": true,
+  "DicomCheckModalityHost": true,
+  "DicomModalities": {}
+}
