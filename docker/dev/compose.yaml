@@ -8,7 +8,10 @@
 #
 # - deploy/compose.yaml の変数は dev.env で与える（相対のパスは deploy/ から数える）。シェルの環境変数があれば、そちらが先に効く。
 # - dicom-test-generator と storescp は、Orthanc の DICOM のネットワーク（dicom）に入る。tsunagi-dicom と Orthanc だけの
-#   内部ネットワーク（backend）には入らない。
+#   内部ネットワーク（backend）には入らない。dicom のコンテナどうしの通信は、dev.env の ORTHANC_DICOM_ICC=true で許す
+#   （配る compose の既定は止める）。そのため、この compose では dicom-test-generator と storescp から Orthanc の REST に届く（認証は要る）。
+# - Orthanc は送り元の IP アドレスを確かめない（docker/dev/orthanc/site.json の DicomCheckModalityHost: false。接続先の Host が
+#   コンテナの名前のため）。
 # - dicom-test-generator の Web 画面は 127.0.0.1:${DEV_TDG_WEB_PORT:-18080} に公開する（利用者 dtg、HTTP Basic）。
 
 name: tsunagi-dev
@@ -37,7 +40,8 @@ services:
     networks:
       - dicom
     depends_on:
-      - orthanc
+      orthanc:
+        condition: service_healthy
     init: true
     security_opt:
       - no-new-privileges:true

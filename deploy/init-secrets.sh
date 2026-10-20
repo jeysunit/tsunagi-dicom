@@ -25,9 +25,14 @@ rand() {
   LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$1"
 }
 
+# ファイルがあるか（壊れた symlink もあると見なし、その先に書かない）
+exists() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
 # ファイルが無ければ、値を書いて 0644 にする
 put() {
-  if [ -e "$dir/$1" ]; then
+  if exists "$dir/$1"; then
     echo "そのまま：$dir/$1"
     return 0
   fi
@@ -41,9 +46,9 @@ put session_secret.txt "$(rand 64)"
 put initial_admin_password.txt "Init$(rand 24)7"
 
 # Orthanc のパスワードは2つのファイルにそろえて書く。片方だけあるときは止める（そろっているか分からないため）
-if [ -e "$dir/backend_password.txt" ] && [ -e "$dir/orthanc-users.json" ]; then
+if exists "$dir/backend_password.txt" && exists "$dir/orthanc-users.json"; then
   echo "そのまま：$dir/backend_password.txt・$dir/orthanc-users.json"
-elif [ -e "$dir/backend_password.txt" ] || [ -e "$dir/orthanc-users.json" ]; then
+elif exists "$dir/backend_password.txt" || exists "$dir/orthanc-users.json"; then
   echo "backend_password.txt と orthanc-users.json の片方だけがある。2つの中のパスワードをそろえてから流し直す" >&2
   exit 1
 else

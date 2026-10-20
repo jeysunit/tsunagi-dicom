@@ -64,9 +64,9 @@ flowchart LR
 
 ### 図3　開発・試験のときの構成（本物の患者のデータを使わずに試す）
 
-この図で分かること：試験のときに、検査装置のふりをするソフトと送信先のダミーを組み合わせる構成（開発用の compose `docker/dev/compose.yaml`）。
+この図で分かること：試験のときに、検査装置のふりをするソフトと、試験用の送信先（DCMTK の storescp）を組み合わせる構成（開発用の compose `docker/dev/compose.yaml`）。
 
-[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator) は、CT などの検査装置のふりをして、試験用に作った架空の患者の画像を Orthanc へ送るソフト。その画像を tsunagi-dicom で見て、tsunagi-dicom から送信先のダミー（DCMTK の storescp）へ送信する。本物の患者のデータは使わない。
+[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator) は、CT などの検査装置のふりをして、試験用に作った架空の患者の画像を Orthanc へ送るソフト。その画像を tsunagi-dicom で見て、tsunagi-dicom から試験用の送信先（DCMTK の storescp）へ送信する。本物の患者のデータは使わない。
 
 ```mermaid
 flowchart LR
@@ -75,7 +75,7 @@ flowchart LR
   DTG["dicom-test-generator<br/>検査装置のふりをする試験用のソフト<br/>架空の患者の画像を作る"]:::box
   PACS[("Orthanc（試験用）")]:::box
   TD["tsunagi-dicom<br/>画面と中継のサーバー"]:::box
-  SCP["DCMTK storescp<br/>送信先のダミー"]:::box
+  SCP["DCMTK storescp<br/>試験用の送信先"]:::box
 
   DTG -->|"DICOM で画像を送る"| PACS
   TD -->|"検査を検索し、画像を取る<br/>送信を求める"| PACS
@@ -135,6 +135,8 @@ flowchart LR
 - tsunagi-dicom と Orthanc は、内部ネットワーク `backend`（`internal: true`。この2つだけが入る）でつなぐ。**Orthanc の REST（8042）はホストに公開しない。**
 - ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1。
 - 画像と Orthanc のデータベースは volume `orthanc-db`、tsunagi-dicom のデータ（利用者・設定・操作ログ）は volume `tsunagi-data` に置く。
+- Docker のホストの上の利用者とプロセスは、Orthanc のコンテナの IP アドレスで REST に届く（認証は要る）。ホストにログインできる人を絞る。
+- 確かめた版は Docker Engine 29.9.1・Docker Compose v5.6.0。Docker Compose は v2.24 以上が要る。
 
 ```sh
 cd deploy
@@ -147,7 +149,7 @@ docker compose up -d
 
 施設の値は `deploy/.env`（compose の変数。リポジトリに入れない）に書く。変数の一覧は `deploy/compose.yaml` の頭にある。
 
-- **検査装置から受けるとき**：`ORTHANC_DICOM_BIND` を、受ける側の IP アドレス（か `0.0.0.0`）にする。Orthanc は、登録した接続先からだけ画像を受ける。`deploy/orthanc/site.json` を `deploy/orthanc/site.local.json` に写し、AE タイトル（`DicomAet`）と接続先（`DicomModalities`。送信元の検査装置と送信先の機器）を書いて、`ORTHANC_SITE_CONFIG=./orthanc/site.local.json` で指す。
+- **検査装置から受けるとき**：`ORTHANC_DICOM_BIND` を、受ける側の IP アドレス（か `0.0.0.0`）にする。Orthanc は、登録した接続先からだけ画像を受け、AE タイトルと送り元の IP アドレスの組を確かめる（`DicomCheckModalityHost: true`）。`deploy/orthanc/site.json` を `deploy/orthanc/site.local.json` に写し、AE タイトル（`DicomAet`）と接続先（`DicomModalities`。送信元の検査装置と送信先の機器。`Host` は IP アドレス）を書いて、`ORTHANC_SITE_CONFIG=./orthanc/site.local.json` で指す。127.0.0.1 に公開したポートなど、Docker の userland-proxy を通るつなぎでは送り元の IP アドレスが変わる（`docs/spec.md` の 5）。
 - **画面を施設のネットワークに公開するとき**：TLS を終端するリバースプロキシを前に置く（cookie は `Secure`）。`TSUNAGI_HTTP_BIND` は、リバースプロキシからだけ届く IP アドレスにする。
 - **tsunagi-dicom の設定**（ビューアの URL など。`.env.example` の変数）：`deploy/tsunagi.env`（リポジトリに入れない）に書く。つなぎ先（Orthanc）と資格情報の渡し方は `deploy/compose.yaml` が決めるので、書かない。
 

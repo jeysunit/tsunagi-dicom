@@ -6,8 +6,15 @@
 #   施設で検査装置から DICOM を受けるときは ORTHANC_DICOM_BIND を変える（例：0.0.0.0 か、受ける側の IP アドレス）。
 #   画面を施設のネットワークに公開するときは、TLS を終端するリバースプロキシを前に置く（cookie は Secure）。
 # - Orthanc は DICOM のためのネットワーク dicom にも入る（ほかの機器へ送るとき、Orthanc から外へつなぐため）。
-#   Orthanc は REST も dicom の側で待ち受けるので、dicom にほかのコンテナを足すときは、その中から REST に届く（認証は要る）。
+#   Orthanc は REST も dicom の側で待ち受ける。dicom はコンテナどうしの通信を止める（enable_icc: false）ので、
+#   dicom にほかのコンテナを足しても、その中から Orthanc には届かない。
+# - Docker のホストの上の利用者とプロセスは、Orthanc のコンテナの IP アドレスで REST（8042）に届く（認証は要る）。
+#   ホストにログインできる人を絞る。
+# - Orthanc は登録した接続先からだけ C-STORE を受け、送り元の IP アドレスも確かめる（site.json の DicomCheckModalityHost）。
+#   127.0.0.1 に公開したポートへのつなぎは、Docker の userland-proxy を通ると送り元が gateway の IP アドレスに変わる
+#   （docs/spec.md の 5）。
 #
+# Docker Engine 29.9.1・Docker Compose v5.6.0 と、GitHub Actions の ubuntu-24.04 の Docker で確かめた。
 # Docker Compose は v2.24 以上（env_file の required を使う）。
 #
 # 使い方（このフォルダで）：
@@ -24,6 +31,7 @@
 #                        施設の値は ./orthanc/site.json を写した ./orthanc/site.local.json（リポジトリに入れない）に書いて指す
 #   TSUNAGI_ENV_FILE     tsunagi-dicom の設定（.env.example の変数。ビューアの URL など）のファイル（既定 ./tsunagi.env。無くてよい）
 #   TSUNAGI_SECRETS_DIR  secret のファイルの置き場（既定 ./secrets）
+#   ORTHANC_DICOM_ICC    dicom のネットワークでコンテナどうしの通信を許すか（既定 false。開発用の compose だけが true にする）
 # 相対のパスは、このフォルダから数える。
 
 name: tsunagi
@@ -60,7 +68,8 @@ services:
       - backend_password
       - initial_admin_password
     depends_on:
-      - orthanc
+      orthanc:
+        condition: service_healthy
     init: true
     read_only: true
     tmpfs:
@@ -95,9 +104,14 @@ services:
     networks:
       - backend
       - dicom
-    # 起動の確かめ：HTTP（8042）と DICOM（4242）が待ち受けているか（資格情報を使わない。イメージの既定の確かめは使わない）
+    # 起動の確かめ：REST が認証を求める（401）か。資格情報は使わない。DICOM（4242）にはつながない
+    # （AE タイトルの無い接続は、Orthanc のログに「invalid AET」として残るため）。イメージの既定の確かめは使わない
     healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; [socket.create_connection(('127.0.0.1', p), 3).close() for p in (8042, 4242)]"]
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request as r, urllib.error as e\ntry:\n  r.urlopen('http://127.0.0.1:8042/system', timeout=3)\nexcept e.HTTPError as x:\n  raise SystemExit(x.code != 401)\nraise SystemExit(1)"
       interval: 5s
       timeout: 5s
       retries: 30
@@ -112,8 +126,11 @@ networks:
     internal: true
   # tsunagi-dicom の画面をホストに公開する
   web: {}
-  # Orthanc の DICOM（検査装置から受ける・ほかの機器へ送る）
-  dicom: {}
+  # Orthanc の DICOM（検査装置から受ける・ほかの機器へ送る）。コンテナどうしの通信は止める
+  # （足したコンテナから Orthanc の REST に届かないように。開発用の compose だけが ORTHANC_DICOM_ICC=true にする）
+  dicom:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "${ORTHANC_DICOM_ICC:-false}"
 
 secrets:
   session_secret:

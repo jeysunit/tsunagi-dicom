@@ -1,5 +1,7 @@
 {
   "DicomAet": "ORTHANC",
+  "DicomCheckCalledAet": true,
+  "DicomCheckModalityHost": false,
   "DicomModalities": {
     "dtg": {
       "AET": "DTG_CT01",

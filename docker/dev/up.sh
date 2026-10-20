@@ -22,7 +22,8 @@ fi
 
 # 1. secret のファイル（tsunagi-dicom と Orthanc の分は配る compose と同じ作り方）
 "$root/deploy/init-secrets.sh" "$secrets"
-if [ ! -e "$secrets/tdg_web_password.txt" ]; then
+# 壊れた symlink もあると見なし、その先に書かない
+if [ ! -e "$secrets/tdg_web_password.txt" ] && [ ! -L "$secrets/tdg_web_password.txt" ]; then
   (
     umask 077
     LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24 > "$secrets/tdg_web_password.txt"

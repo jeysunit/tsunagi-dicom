@@ -482,8 +482,12 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
   - tsunagi-dicom と Orthanc は別々のコンテナにし、1つの compose で配る。Orthanc のイメージは `orthancteam/orthanc` を版と digest で固定する（結合の試験と同じ）。
   - 2つは内部ネットワーク `backend`（`internal: true`）でつなぐ。`backend` に入るのは tsunagi-dicom と Orthanc だけで、tsunagi-dicom は `http://orthanc:8042` の REST と DICOMweb を使う（Basic 認証。利用者 `tsunagi`）。
   - **Orthanc の REST（8042）はホストに公開しない。** ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1 で、施設で検査装置から受けるときは `ORTHANC_DICOM_BIND` を変える。画面を施設のネットワークに公開するときは、TLS を終端するリバースプロキシを前に置く。
-  - Orthanc は DICOM のネットワーク `dicom` にも入る。`internal: true` のネットワークだけでは、DICOM のポートをホストに公開できず、ほかの機器への送信（C-STORE）もできないため。Orthanc の REST は `dicom` の側でも待ち受けるので、`dicom` にほかのコンテナを足すと、その中から REST に届く（認証は要る）。
-  - Orthanc の設定：DICOMweb のプラグインを有効にし、認証を必須にする。利用者とパスワード（`RegisteredUsers`）は secret のファイルで渡す。C-STORE は、登録した接続先（`DicomModalities`）からだけ受ける（`DicomAlwaysAllowStore: false`）。AE タイトルと接続先は、施設の設定ファイル（`ORTHANC_SITE_CONFIG`。既定は `deploy/orthanc/site.json`）に書く。
+  - Orthanc は DICOM のネットワーク `dicom` にも入る。`internal: true` のネットワークだけでは、DICOM のポートをホストに公開できず、ほかの機器への送信（C-STORE）もできないため。Orthanc の REST は `dicom` の側でも待ち受ける。`dicom` はコンテナどうしの通信を止める（`com.docker.network.bridge.enable_icc: false`。変数 `ORTHANC_DICOM_ICC`。開発用の compose だけが `true` にする）ので、`dicom` にほかのコンテナを足しても、その中から Orthanc には届かない。
+  - **Docker のホストの上の利用者とプロセスは、Orthanc のコンテナの IP アドレスで REST（8042）に届く**（`backend` の側も `dicom` の側も。認証は要る）。ホストにログインできる人を絞る。
+  - Orthanc の設定：DICOMweb のプラグインを有効にし、認証を必須にする。利用者とパスワード（`RegisteredUsers`）は secret のファイルで渡す。C-STORE は、登録した接続先（`DicomModalities`）からだけ受ける（`DicomAlwaysAllowStore: false`。C-FIND・C-MOVE・C-GET も `DicomAlwaysAllow*: false`）。AE タイトルと接続先は、施設の設定ファイル（`ORTHANC_SITE_CONFIG`。既定は `deploy/orthanc/site.json`）に書く。
+  - 施設の設定ファイルの既定では、呼ばれた AE タイトルを確かめ（`DicomCheckCalledAet: true`）、接続先の AE タイトルと送り元の IP アドレスの組を確かめる（`DicomCheckModalityHost: true`）。登録した AE タイトルを名乗るだけでは、ほかのホストから C-STORE を通せない。このため、接続先の `Host` には、検査装置の IP アドレス（Orthanc から見える送り元）を書く。
+  - **送り元の IP アドレスが変わる場合がある。** ホストの 127.0.0.1 に公開したポートなど、Docker の userland-proxy を通るつなぎでは、Orthanc から見える送り元が、検査装置ではなく `dicom` のネットワークの gateway の IP アドレスになる。そのときは `DicomCheckModalityHost` で検査装置を見分けられないので、施設のネットワークの側で送り元を絞る。開発用の compose の設定ファイル（`docker/dev/orthanc/site.json`）は、接続先の `Host` がコンテナの名前なので `DicomCheckModalityHost: false` にしている。
+  - 確かめた版：Docker Engine 29.9.1・Docker Compose v5.6.0（p5820）と、GitHub Actions の ubuntu-24.04 の Docker。Docker Compose は v2.24 以上が要る（`include` と `env_file` の `required`）。
   - volume は、Orthanc の画像とデータベース（`orthanc-db`）と、tsunagi-dicom の `/data`（`tsunagi-data`）を分ける。
   - secret のファイル（`SESSION_SECRET`・Orthanc のパスワード・最初の管理者のパスワード）は `deploy/init-secrets.sh` が乱数で作る。リポジトリに入れない。
   - 開発・試験用の compose（`docker/dev/compose.yaml`）は、この compose を include し、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足す。`docker/dev/up.sh` で立てる（[`round-trip-test.md`](round-trip-test.md)）。

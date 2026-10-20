@@ -10,6 +10,8 @@ import { expect, test, type Page } from "@playwright/test";
 //
 // 1. 配る compose の形：Orthanc の REST（8042）がホストに出ていない。tsunagi-dicom と Orthanc だけが内部ネットワーク
 //    （internal: true）に入り、Orthanc はそれと DICOM のネットワークのほかに入らない。DICOM（4242）はホストから届く。
+//    Orthanc の守り：REST は認証なしでも、イメージの既定の利用者（orthanc:orthanc）でも 401。登録していない AE タイトルからの
+//    C-STORE は断る（DicomAlwaysAllowStore: false）。起動の確かめが DICOM につながず、ログに「invalid AET」が出ない。
 // 2. 流れ：dicom-test-generator の CLI で架空の患者を Orthanc へ送る → tsunagi-dicom の受信一覧に出る →
 //    tsunagi-dicom の「送信」で storescp へ送る → storescp に同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。
 // 前の試験に依らないが、順に流す。
@@ -48,7 +50,7 @@ interface Inspect {
   Id: string;
   Config: { Labels: Record<string, string> };
   HostConfig: { PortBindings: Record<string, unknown> | null };
-  NetworkSettings: { Ports: Record<string, { HostIp: string; HostPort: string }[] | null>; Networks: Record<string, unknown> };
+  NetworkSettings: { Ports: Record<string, { HostIp: string; HostPort: string }[] | null>; Networks: Record<string, { IPAddress: string }> };
 }
 
 const inspect = async (id: string) => (JSON.parse(await docker(["inspect", id])) as Inspect[])[0]!;
@@ -140,22 +142,51 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   }[];
   expect(backend!.Internal).toBe(true);
   expect(Object.keys(backend!.Containers).sort()).toEqual([orthanc.Id, tsunagi.Id].sort());
+  // dicom のコンテナどうしの通信は、開発用の compose だけが許す（dev.env の ORTHANC_DICOM_ICC=true が届いている）
+  const [dicom] = JSON.parse(await docker(["network", "inspect", net("dicom")])) as { Options: Record<string, string> }[];
+  expect(dicom!.Options["com.docker.network.bridge.enable_icc"]).toBe("true");
+
+  // Docker のホストの上からは、Orthanc のコンテナの IP アドレスで REST に届く。認証なしも、イメージの既定の利用者も 401
+  const orthancIp = orthanc.NetworkSettings.Networks[net("dicom")]!.IPAddress;
+  expect(orthancIp).not.toBe("");
+  for (const authorization of [undefined, `Basic ${Buffer.from("orthanc:orthanc").toString("base64")}`]) {
+    const res = await fetch(`http://${orthancIp}:8042/system`, {
+      headers: authorization ? { authorization } : {},
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(res.status, authorization ? "orthanc:orthanc で REST に入れた" : "認証なしで REST に入れた").toBe(401);
+  }
 
   // ホストに公開した DICOM の口に C-ECHO が通る（Orthanc は C-ECHO を誰からでも受ける）
-  await docker([
+  await docker(["run", "--rm", "--network", "host", "tsunagi-itest-dcmtk:local", "echoscu", "--aetitle", "FLOW_ECHO", "--call", "ORTHANC", "127.0.0.1", dicomPort]);
+
+  // 登録していない AE タイトル（FLOW_ECHO）からの C-STORE は断る（DicomAlwaysAllowStore: false）。架空の患者の画像を1枚作って送る
+  const dump = [
+    "(0008,0016) UI =SecondaryCaptureImageStorage",
+    "(0008,0018) UI [1.2.826.0.1.3680043.10.999.1.1]",
+    "(0010,0020) LO [FLOWREJECT]",
+    "(0020,000d) UI [1.2.826.0.1.3680043.10.999.1]",
+    "(0020,000e) UI [1.2.826.0.1.3680043.10.999.1.2]",
+  ].join("\n");
+  const storeOut = await docker([
     "run",
     "--rm",
     "--network",
     "host",
+    "--entrypoint",
+    "sh",
     "tsunagi-itest-dcmtk:local",
-    "echoscu",
-    "--aetitle",
-    "FLOW_ECHO",
-    "--call",
-    "ORTHANC",
-    "127.0.0.1",
+    "-c",
+    'printf "%s\\n" "$1" > /tmp/a.dump && dump2dcm --write-xfer-little /tmp/a.dump /tmp/a.dcm && { storescu --aetitle FLOW_ECHO --call ORTHANC 127.0.0.1 "$2" /tmp/a.dcm 2>&1; echo "storescu-exit=$?"; }',
+    "sh",
+    dump,
     dicomPort,
   ]);
+  expect(storeOut).toMatch(/storescu-exit=[1-9]/);
+  const orthancLog = await compose(["logs", "--no-color", "orthanc"]);
+  expect(orthancLog).toContain('Rejected Store request from remote DICOM modality with AET "FLOW_ECHO"');
+  // 起動の確かめ（healthcheck）は DICOM につながない。AE タイトルの無い接続の記録が出ていない
+  expect(orthancLog).not.toMatch(/invalid AET/i);
 });
 
 test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の送信 → storescp", async ({ page }) => {
