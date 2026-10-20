@@ -1,0 +1,147 @@
+# tsunagi-dicom を Orthanc とセットで導入する compose（docs/spec.md の 5「Orthanc とセットで導入する形」）。
+#
+# - tsunagi-dicom と Orthanc は別々のコンテナ。2つは内部ネットワーク backend（internal: true。この2つだけが入る）でつなぐ。
+# - Orthanc の REST（8042）はホストに公開しない（ports に書かない）。tsunagi-dicom だけが backend の中から使う。
+# - ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1。
+#   施設で検査装置から DICOM を受けるときは ORTHANC_DICOM_BIND を変える（例：0.0.0.0 か、受ける側の IP アドレス）。
+#   画面を施設のネットワークに公開するときは、TLS を終端するリバースプロキシを前に置く（cookie は Secure）。
+# - Orthanc は DICOM のためのネットワーク dicom にも入る（ほかの機器へ送るとき、Orthanc から外へつなぐため）。
+#   Orthanc は REST も dicom の側で待ち受ける。dicom はコンテナどうしの通信を止める（enable_icc: false）ので、
+#   dicom にほかのコンテナを足しても、その中から Orthanc には届かない。
+# - Docker のホストの上の利用者とプロセスは、Orthanc のコンテナの IP アドレスで REST（8042）に届く（認証は要る）。
+#   ホストにログインできる人を絞る。
+# - Orthanc は登録した接続先からだけ C-STORE を受け、送り元の IP アドレスも確かめる（site.json の DicomCheckModalityHost）。
+#   127.0.0.1 に公開したポートへのつなぎは、Docker の userland-proxy を通ると送り元が gateway の IP アドレスに変わる
+#   （docs/spec.md の 5）。
+#
+# Docker Engine 29.9.1・Docker Compose v5.6.0 と、GitHub Actions の ubuntu-24.04 の Docker で確かめた。
+# Docker Compose は v2.24 以上（env_file の required を使う）。
+#
+# 使い方（このフォルダで）：
+#   ./init-secrets.sh                      # secrets/ に乱数の secret のファイルを作る（あるものは書き換えない）
+#   printf 'TSUNAGI_IMAGE=%s\n' 'ghcr.io/jeysunit/tsunagi-dicom:vX.Y.Z' > .env   # 版のタグか digest
+#   docker compose up -d
+#   # 最初の管理者は admin。パスワードは secrets/initial_admin_password.txt（最初のログインで、TOTP の登録とパスワードの変更を求める）
+#
+# 施設の値は、このフォルダの .env（compose の変数。リポジトリに入れない）に書く：
+#   TSUNAGI_IMAGE        使うイメージ（必須）。GHCR の版のタグか digest
+#   TSUNAGI_HTTP_BIND    画面を待ち受けるホストの IP アドレス（既定 127.0.0.1）。TSUNAGI_HTTP_PORT（既定 3000）
+#   ORTHANC_DICOM_BIND   DICOM を待ち受けるホストの IP アドレス（既定 127.0.0.1）。ORTHANC_DICOM_PORT（既定 4242）
+#   ORTHANC_SITE_CONFIG  Orthanc の AE タイトルと登録する機器（DicomModalities）の設定ファイル（既定 ./orthanc/site.json）。
+#                        施設の値は ./orthanc/site.json を写した ./orthanc/site.local.json（リポジトリに入れない）に書いて指す
+#   TSUNAGI_ENV_FILE     tsunagi-dicom の設定（.env.example の変数。ビューアの URL など）のファイル（既定 ./tsunagi.env。無くてよい）
+#   TSUNAGI_SECRETS_DIR  secret のファイルの置き場（既定 ./secrets）
+#   ORTHANC_DICOM_ICC    dicom のネットワークでコンテナどうしの通信を許すか（既定 false。開発用の compose だけが true にする）
+# 相対のパスは、このフォルダから数える。
+
+name: tsunagi
+
+services:
+  tsunagi:
+    image: ${TSUNAGI_IMAGE:?TSUNAGI_IMAGE に GHCR の版のタグか digest を指定する（例：ghcr.io/jeysunit/tsunagi-dicom:vX.Y.Z）}
+    env_file:
+      - path: ${TSUNAGI_ENV_FILE:-./tsunagi.env}
+        required: false
+    # つなぎ先と資格情報の渡し方は、この形で決まっているので、ここで固定する（env_file より先に効く）
+    environment:
+      BACKEND_KIND: orthanc
+      BACKEND_MOCK: "false"
+      AUTH_MODE: local
+      BACKEND_ORTHANC_URL: http://orthanc:8042
+      BACKEND_DICOMWEB_URL: http://orthanc:8042/dicom-web
+      BACKEND_USERNAME: tsunagi
+      BACKEND_PASSWORD_FILE: /run/secrets/backend_password
+      SESSION_SECRET_FILE: /run/secrets/session_secret
+      # 最初の管理者（利用者が1人もいないときだけ作る。いれば使わず、パスワードも書き換えない）
+      INITIAL_ADMIN_USERNAME: admin
+      INITIAL_ADMIN_PASSWORD_FILE: /run/secrets/initial_admin_password
+      DATABASE_URL: file:/data/tsunagi.db
+    ports:
+      - "${TSUNAGI_HTTP_BIND:-127.0.0.1}:${TSUNAGI_HTTP_PORT:-3000}:3000"
+    networks:
+      - backend
+      - web
+    volumes:
+      - tsunagi-data:/data
+    secrets:
+      - session_secret
+      - backend_password
+      - initial_admin_password
+    depends_on:
+      orthanc:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  orthanc:
+    # Orthanc の作り手のチーム（orthancteam）の公式のイメージ。DICOMweb のプラグイン入り。
+    # 版と digest は結合の試験（docker/test/compose.yaml）と同じに固定する。上げるときは両方を一緒に上げ、試験を流す
+    image: orthancteam/orthanc:26.9.1@sha256:d2705f2c56547e55ce9bc2250fd22d05d326493b3f3d9fa191ecb7db8ca6b5a2
+    environment:
+      DICOM_WEB_PLUGIN_ENABLED: "true"
+      VERBOSE_STARTUP: "false"
+      TZ: Asia/Tokyo
+    volumes:
+      # 2つの設定ファイルは同じ項目を持たない（Orthanc が重なりを誤りにしないように）
+      - ./orthanc/orthanc.json:/etc/orthanc/tsunagi.json:ro
+      - ${ORTHANC_SITE_CONFIG:-./orthanc/site.json}:/etc/orthanc/site.json:ro
+      # 画像と Orthanc のデータベース（tsunagi-dicom の /data とは別の volume）
+      - orthanc-db:/var/lib/orthanc/db
+    secrets:
+      # /run/secrets の JSON は Orthanc の設定として読まれる（RegisteredUsers。tsunagi の利用者とパスワード）
+      - source: orthanc_users
+        target: orthanc-users.json
+    ports:
+      # DICOM だけ。REST（8042）は書かない
+      - "${ORTHANC_DICOM_BIND:-127.0.0.1}:${ORTHANC_DICOM_PORT:-4242}:4242"
+    networks:
+      - backend
+      - dicom
+    # 起動の確かめ：REST が認証を求める（401）か。資格情報は使わない。DICOM（4242）にはつながない
+    # （AE タイトルの無い接続は、Orthanc のログに「invalid AET」として残るため）。イメージの既定の確かめは使わない
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request as r, urllib.error as e\ntry:\n  r.urlopen('http://127.0.0.1:8042/system', timeout=3)\nexcept e.HTTPError as x:\n  raise SystemExit(x.code != 401)\nraise SystemExit(1)"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+networks:
+  # tsunagi-dicom と Orthanc だけ。外へ出る道が無い。tsunagi-dicom はここを通って Orthanc の REST と DICOMweb を使う
+  backend:
+    internal: true
+  # tsunagi-dicom の画面をホストに公開する
+  web: {}
+  # Orthanc の DICOM（検査装置から受ける・ほかの機器へ送る）。コンテナどうしの通信は止める
+  # （足したコンテナから Orthanc の REST に届かないように。開発用の compose だけが ORTHANC_DICOM_ICC=true にする）
+  dicom:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "${ORTHANC_DICOM_ICC:-false}"
+
+secrets:
+  session_secret:
+    file: ${TSUNAGI_SECRETS_DIR:-./secrets}/session_secret.txt
+  backend_password:
+    file: ${TSUNAGI_SECRETS_DIR:-./secrets}/backend_password.txt
+  initial_admin_password:
+    file: ${TSUNAGI_SECRETS_DIR:-./secrets}/initial_admin_password.txt
+  orthanc_users:
+    file: ${TSUNAGI_SECRETS_DIR:-./secrets}/orthanc-users.json
+
+volumes:
+  tsunagi-data:
+  orthanc-db:

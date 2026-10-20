@@ -49,6 +49,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 | BFF のデータベース | SQLite（WAL）＋ Prisma。PostgreSQL に切り替えられる | 小さく始め、件数が増えたら替える |
 | 試験 | Vitest（単体）・Playwright（画面。モックのバックエンドに対して流す）。結合の試験は Playwright で、試験の中で立てた Orthanc と DCMTK のコンテナに対して流す（[`integration-test.md`](integration-test.md)） | CI でもクラウドの開発環境でも、社内の画像サーバー無しで流せる |
 | 配布 | コンテナのイメージ（GHCR）。版の番号のタグと digest で配る | 前の版にすぐ戻せる |
+| 導入の形 | Orthanc とセットで導入する。tsunagi-dicom と Orthanc は別々のコンテナにし、1つの compose（`deploy/compose.yaml`）で配る（5 の「Orthanc とセットで導入する形」） | Orthanc を改造せずに、Orthanc の REST を外に出さない形を既定にできる。Orthanc を別の場所に置く形（環境変数でつなぐ）も残す |
 | ライセンス | MIT | Orthanc とは REST・DICOMweb でやり取りするだけで、そのコードを取り込まない。Orthanc Explorer 2（AGPL-3.0）のコードも写さない |
 
 画面の見た目の基準：
@@ -171,6 +172,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 
 - **今いる頁**：ナビゲーションの今いる頁の項目を、タブの形（地の色と下の線）で示し、`aria-current="page"` を付ける。ブラウザのタブの題名は頁ごとに変える（「検査一覧 - tsunagi-dicom」）。頁の見出しの大きさは1つにそろえる。
 - **押せる物**：ボタンとリンクは、カーソルを指の形にし、hover・押している間・フォーカスで見た目を変える。hover の地は、ボタンの地と見分けられる対比にする。押せないときは薄くし、カーソルを禁止の形にする。リンクは頁の移動だけに使い、操作はボタンにする。
+  - 地のあるボタンと枠のボタンは、小さな影で浮かせる（枠のボタンの地は白）。押している間は 1px 沈めて影を消す。絞り込みの並びの中のボタンは、並びを崩さないよう沈めずに内側に影を付ける。手応えの指定は共通の部品（`src/components/ui/button.tsx` の `pressFeedback`・`pressInset`）の1か所に置き、Button を使わない押せる物もそれを使う（2026-10-21。承認者が「全体にクリック感が無い」と指摘した）。
 - **待ちの表示**：操作から 0.3 秒たっても結果が出なければ待ちの印（スピナーと「読み込み中」などの文字）を出し、一度出した印は 0.5 秒は消さない（すぐ終わる操作でちらつかないように）。印は押したボタンの中か、一覧の上の細い帯に出し、画面全体を覆う幕にはしない。部品は1つにし、どの画面も同じ部品を使う。書き込みの操作は、待ちの表示のついでに自動で送り直さない（3.5）。
 - **選んだ行**：検査一覧で選んだ行は、主の色の薄い地と左の縦線で示し、hover の地と分ける。
 - **終わった後**：送信と削除は、終わったことを残る知らせで示す（送信は送信先と時刻、削除は消した検査）。送信を受け付けた後は、同じ確かめの画面から重ねて送らない（3.4）。
@@ -212,6 +214,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
   - **1 件を 1 行に**：一覧の行の高さは 28px（14px の文字、上下に 4px の余白）。列は、検査日時・患者 ID・受付番号（段 8。下の「受付番号の列とバーコード」）・氏名（漢字）・かな・生年月日・年齢・性別・モダリティと検査の記述・シリーズ数と画像数・ビューア（▶ 開く と ▾。ボタンは 24px）。インポートした検査には「インポート」の印を出す（段 6。3.5）。**患者 ID・生年月日・年齢・性別は切らない**（列の幅を値に合わせる）。氏名とかなの列も、出している行のいちばん長い値に幅を合わせ、上限（氏名 240px・かな 200px）を超える値だけを切る。ほかの値が 1 行に収まらないときは `…` で切り、全文は `title` に出す（一覧の行だけ。詳細のパネルでは切らない）。モダリティと検査の記述の列が、残りの幅を取る（狭い画面では一覧の中で横にスクロールし、この列も最小の幅より縮めない）。
   - **選んだ行**：主の色の薄い地と、左の縦線（3px）で示す。hover の地はそれより薄くし、選んだ行と見分けられるようにする（2.3）。
   - **サムネイルの列は、一覧から外した**（1 行 28px では見分けられないため。要求も減らせる）。サムネイルは詳細のパネルのシリーズの並びに出す。
+  - **0 件のとき**：表の枠と見出しの行を出し、表の中に「該当する検査はありません」を出す（一覧の場所が分かるように。2026-10-21 に、空の場所が真っ白だったのを直した）。「条件をクリア」は、絞り込みが既定でないときだけ出す。
 - **自動更新**（2026-10-21 に承認者が決めた。それまでは、新しく届いた検査を出すには頁を読み直すしかなかった）
   - 一覧は `STUDY_LIST_REFRESH_SECONDS`（既定 30 秒。`0` で止める）ごとに、**一覧の版**（画面の API `GET /api/studies/version`。Orthanc の変更の記録の最後の番号 `/changes?last` の `Last`）を読み、**版が変わったときだけ**一覧（`/api/studies`）を読み直す。版は Orthanc の変更の記録の番号なので、検査・シリーズの追加と削除のほか、画像の 1 枚ごとの受信、検査やシリーズが落ち着いたこと（`StableStudy` など）、送信などのジョブ、メタデータの更新でも進む。受信が続く間は、ほぼ間隔ごとに一覧を読み直す。
   - 版だけを読む理由：一覧の読み直しは、Orthanc へ検査の検索（上限 1000 件。検査日の件数のための検索も足すと 2 回）を求め、返した検査の組を監査の記録（`search`）に残す。版を挟まずに間隔ごとに一覧を読み直すと、受信が無い間も画面を開いているだけで、1 台あたり 1 日に約 2,900 回の検索と同じ数の監査の行（1 行に最大 1000 件の組）が積もる。版を挟むと、Orthanc に変化が無い間（夜間など）は読み直さない。受信が続く日中は、版を挟まない形とほぼ同じ回数を読み直す。版は患者の情報を含まないので、読めたことは監査の記録に残さない（権限で断ったものは残す）。
@@ -487,13 +490,27 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 
 ## 5. 公開と配布
 - リポジトリは公開。**社内の名前・秘密・実の患者のデータを入れない。** 見本のデータ（`tests/fixtures`）は合成の患者だけで、公開の前に中身を人が確かめる。
-- CI（GitHub Actions）：PR で lint・型・Vitest・Playwright（モック）と、結合の試験（試験の中で立てた Orthanc と DCMTK のコンテナ。`.github/workflows/integration.yml`。必須のチェックにはまだしていない）。`main` への merge と版のタグで、イメージを作って GHCR へ。週に1回、`main` を作り直して出す（イメージの中の包みの更新を取り込む）。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付け、`id-token: write`（署名）はイメージを作る仕事にだけ付ける（リポジトリ全体を読み書きにしない）。
+- **Orthanc とセットで導入する形**（`deploy/compose.yaml`。2026-10-20 に承認者が決めた）：
+  - tsunagi-dicom と Orthanc は別々のコンテナにし、1つの compose で配る。Orthanc のイメージは `orthancteam/orthanc` を版と digest で固定する（結合の試験と同じ）。
+  - 2つは内部ネットワーク `backend`（`internal: true`）でつなぐ。`backend` に入るのは tsunagi-dicom と Orthanc だけで、tsunagi-dicom は `http://orthanc:8042` の REST と DICOMweb を使う（Basic 認証。利用者 `tsunagi`）。
+  - **Orthanc の REST（8042）はホストに公開しない。** ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1 で、施設で検査装置から受けるときは `ORTHANC_DICOM_BIND` を変える。画面を施設のネットワークに公開するときは、TLS を終端するリバースプロキシを前に置く。
+  - Orthanc は DICOM のネットワーク `dicom` にも入る。`internal: true` のネットワークだけでは、DICOM のポートをホストに公開できず、ほかの機器への送信（C-STORE）もできないため。Orthanc の REST は `dicom` の側でも待ち受ける。`dicom` はコンテナどうしの通信を止める（`com.docker.network.bridge.enable_icc: false`。変数 `ORTHANC_DICOM_ICC`。開発用の compose だけが `true` にする）ので、`dicom` にほかのコンテナを足しても、その中から Orthanc には届かない。
+  - **Docker のホストの上の利用者とプロセスは、Orthanc のコンテナの IP アドレスで REST（8042）に届く**（`backend` の側も `dicom` の側も。認証は要る）。ホストにログインできる人を絞る。
+  - Orthanc の設定：DICOMweb のプラグインを有効にし、認証を必須にする。利用者とパスワード（`RegisteredUsers`）は secret のファイルで渡す。C-STORE は、登録した接続先（`DicomModalities`）からだけ受ける（`DicomAlwaysAllowStore: false`。C-FIND・C-MOVE・C-GET も `DicomAlwaysAllow*: false`）。AE タイトルと接続先は、施設の設定ファイル（`ORTHANC_SITE_CONFIG`。既定は `deploy/orthanc/site.json`）に書く。
+  - 施設の設定ファイルの既定では、呼ばれた AE タイトルを確かめ（`DicomCheckCalledAet: true`）、接続先の AE タイトルと送り元の IP アドレスの組を確かめる（`DicomCheckModalityHost: true`）。登録した AE タイトルを名乗るだけでは、ほかのホストから C-STORE を通せない。このため、接続先の `Host` には、検査装置の IP アドレス（Orthanc から見える送り元）を書く。
+  - **送り元の IP アドレスが変わる場合がある。** ホストの 127.0.0.1 に公開したポートなど、Docker の userland-proxy を通るつなぎでは、Orthanc から見える送り元が、検査装置ではなく `dicom` のネットワークの gateway の IP アドレスになる。そのときは `DicomCheckModalityHost` で検査装置を見分けられないので、施設のネットワークの側で送り元を絞る。開発用の compose の設定ファイル（`docker/dev/orthanc/site.json`）は、接続先の `Host` がコンテナの名前なので `DicomCheckModalityHost: false` にしている。
+  - 確かめた版：Docker Engine 29.9.1・Docker Compose v5.6.0（p5820）と、GitHub Actions の ubuntu-24.04 の Docker。Docker Compose は v2.24 以上が要る（`include` と `env_file` の `required`）。
+  - volume は、Orthanc の画像とデータベース（`orthanc-db`）と、tsunagi-dicom の `/data`（`tsunagi-data`）を分ける。
+  - secret のファイル（`SESSION_SECRET`・Orthanc のパスワード・最初の管理者のパスワード）は `deploy/init-secrets.sh` が乱数で作る。リポジトリに入れない。
+  - 開発・試験用の compose（`docker/dev/compose.yaml`）は、この compose を include し、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足す。`docker/dev/up.sh` で立てる（[`round-trip-test.md`](round-trip-test.md)）。
+  - 1つのコンテナだけの `compose.yaml`（リポジトリの直下）は、モックで画面を試すときと、Orthanc を別の場所に置くときに使う。
+- CI（GitHub Actions）：PR で lint・型・Vitest・Playwright（モック）と、結合の試験（試験の中で立てた Orthanc と DCMTK のコンテナ）と、開発用の compose の流れ（`tests/flow`。開発用の compose をそのまま立てる）。後の2つは `.github/workflows/integration.yml` にあり、必須のチェックにはまだしていない。`main` への merge と版のタグで、イメージを作って GHCR へ。週に1回、`main` を作り直して出す（イメージの中の包みの更新を取り込む）。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付け、`id-token: write`（署名）はイメージを作る仕事にだけ付ける（リポジトリ全体を読み書きにしない）。
 - イメージのタグ：`vX.Y.Z` と `sha-<短い hash>`、作り直しには `rebuild-YYYYMMDD` も付ける。作り直しは版のタグを付けない・上書きしない。`latest` は付けてもよいが、配備は版のタグか digest を指定する。イメージは CI（lint・型・Vitest・Playwright・イメージの試しの起動）が通ってから出す。
 - イメージの署名：出したイメージの digest に、cosign の鍵の要らない署名（GitHub Actions の OIDC）を付ける。確かめ方は README。
 - イメージの片付け：版のタグの付いたイメージは消さない。ほかのタグのイメージは新しい順に 10 個と、2 日より新しいものを残し、残りとタグの無いイメージを週に1回消す（署名などの子は親と一緒）。いまは dry-run で、消す候補を記録に出すだけ（記録を確かめてから消す形にする）。範囲は README と `.github/workflows/image-cleanup.yml`。
 - **仕様の外で足した道**（アプリの機能ではないもの）：`/api/health`（コンテナの生死の確かめ。認証なし・画像サーバーにつながない）、`/api/audit/verify`（監査の記録のつなぎの確かめ。管理者だけ）。3.6 を参照。
-- **アプリの設定の外の変数**（`.env.example` に入れない。アプリは読まない）：`TSUNAGI_IMAGE`（`compose.yaml` で使うイメージ。既定は手元で作る `tsunagi-dicom:local`）、`PLAYWRIGHT_CHROMIUM_EXECUTABLE`（試験だけ。入っている Chromium を使うとき）、`E2E_INITIAL_ADMIN_PASSWORD`・`E2E_SKIP_PREPARE`（試験だけ。`scripts/e2e-server.mjs` が `AUTH_MODE=local` の試験のサーバーを起こすとき）、`ITEST_*`（結合の試験だけ。`tests/integration/run.mjs` が作って渡す）。
-- 文書：README（日本語）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`docs/security-and-maintenance.md`（セキュリティと保守の方針）、`docs/round-trip-test.md`（実の Orthanc と検査装置の試験用のソフトでの往復の試験の手順。段 4）、`docs/integration-test.md`（本物の Orthanc と DCMTK のコンテナでの結合の試験）、`SECURITY.md`（脆弱性の報告の窓口）、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
+- **アプリの設定の外の変数**（`.env.example` に入れない。アプリは読まない）：`TSUNAGI_IMAGE`（`compose.yaml` で使うイメージ。既定は手元で作る `tsunagi-dicom:local`）、`PLAYWRIGHT_CHROMIUM_EXECUTABLE`（試験だけ。入っている Chromium を使うとき）、`E2E_INITIAL_ADMIN_PASSWORD`・`E2E_SKIP_PREPARE`（試験だけ。`scripts/e2e-server.mjs` が `AUTH_MODE=local` の試験のサーバーを起こすとき）、`ITEST_*`（結合の試験だけ。`tests/integration/run.mjs` が作って渡す）。`deploy/compose.yaml` の変数：`TSUNAGI_HTTP_BIND`・`TSUNAGI_HTTP_PORT`・`ORTHANC_DICOM_BIND`・`ORTHANC_DICOM_PORT`・`ORTHANC_SITE_CONFIG`・`TSUNAGI_ENV_FILE`・`TSUNAGI_SECRETS_DIR`（意味は `deploy/compose.yaml` の頭）。開発用の compose の変数：`DEV_TDG_WEB_PORT`（dicom-test-generator の Web 画面のポート）・`TDG_GIT_REF`（dicom-test-generator を作る commit）・`FLOW_KEEP`（試験だけ。`tests/flow/run.mjs` が終わってもコンテナを残す）。
+- 文書：README（日本語）、`docs/spec.md`（この文書）、`docs/guideline-mapping.md`、`docs/patient-name-test-cases.md`、`docs/security-and-maintenance.md`（セキュリティと保守の方針）、`docs/round-trip-test.md`（開発用の compose で、検査装置の試験用のソフトから Orthanc・tsunagi-dicom・storescp へ流す往復の試験の手順。段 4）、`docs/integration-test.md`（本物の Orthanc と DCMTK のコンテナでの結合の試験と、開発用の compose の流れの試験）、`SECURITY.md`（脆弱性の報告の窓口）、`AGENTS.md`（開発の決まり。`CLAUDE.md` は `@AGENTS.md` の1行）。
 - 「DICOM® は NEMA の登録商標」の一文を README に書く。
 
 ## 6. 段階（PR の単位）
@@ -513,6 +530,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 
 - 段の表は 2026-10-19 に作り直した。前の表の段 2b（ブラインド読影の役割・閉じた網）・段 3（時系列・比較・簡易レポート）・段 4（ワークリスト・監査の検索と CSV・緊急のアクセス・安全の機能の頁・外部の認証）とは中身が違う。前の段 2b・4 の中身は「後ろ」（3.8）に、時系列と比較は段 8 に移し、簡易レポートは外した。
 - 2026-10-20 の画面の見直し（用語集と画面の振る舞いの決まり（2.2・2.3）・役割の整理と再認証（3.6）・詳細のパネルの組み直し（3.1））は、段 5 と段 6 の間に、段の外の直しとして入れる。PR は、仕様・ナビゲーションと一覧の見え方・待ちの表示と文言・役割と再認証と詳細のパネル・アクセシビリティの順に分ける。
+- 2026-10-21 に承認者が開発用の一式で実際に触って出した指摘（0 件の一覧・一覧の自動更新・送信の手応え・押せる物の手応え・画像単位の DICOM タグ・詳細条件）も、段の外の直しとして入れる。PR は指摘ごとに分ける。
 - 段 4 からは、PACS の操作の段ごとに、試験の線に加えて、モックでの一巡りを完了の線にする。実の Orthanc での確かめは、それができる環境で人が行い、結果を PR に書く（`AGENTS.md`）。
 
 ## 7. 既知の制約（2026-10-18 時点の実測）
