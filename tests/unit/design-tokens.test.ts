@@ -72,6 +72,20 @@ describe("文字と地の対比（WCAG 2.2 の AA）", () => {
   }
 });
 
+describe("部品の枠の線は、地と 3:1 以上（WCAG 2.2 の 1.4.11。UX のレビューの M4）", () => {
+  for (const [name, set] of [
+    ["明るい地", light],
+    ["暗い地", dark],
+  ] as const) {
+    it.each(["background", "surface"])(`${name}：control の線と %s の地は 3:1 以上`, (bg) => {
+      expect(contrast(set.control!, set[bg]!)).toBeGreaterThanOrEqual(3);
+    });
+  }
+  it("前の部品の枠（border の色）は 3:1 に届かない（飾りの線にだけ使う）", () => {
+    expect(contrast(light.border!, light.background!)).toBeLessThan(3);
+  });
+});
+
 describe("押せる物の hover と選んだ行は、地と見分けられる（docs/spec.md の 2.3）", () => {
   for (const [name, set] of [
     ["明るい地", light],

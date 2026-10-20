@@ -190,8 +190,24 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
 
   // 役割の変更（管理者 → 一般）。役割の選択欄は管理者と一般の2つだけ
   await expect(row.getByLabel(`${DOCTOR.username} の役割`).locator("option")).toHaveText(["管理者", "一般"]);
+  // 選んだだけでは送らず、確かめの画面を出す（UX のレビューの M7）。取りやめたら役割は変わらない
   await row.getByLabel(`${DOCTOR.username} の役割`).selectOption("general");
+  const confirm = page.getByRole("dialog", { name: "役割の変更" });
+  await expect(confirm).toContainText(`${DOCTOR.username} の役割を「管理者」から「一般」に変更します`);
+  await expect(confirm.getByRole("button", { name: "キャンセル" })).toBeFocused();
+  await confirm.getByRole("button", { name: "キャンセル" }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(row.getByLabel(`${DOCTOR.username} の役割`)).toHaveValue("admin");
+  await row.getByLabel(`${DOCTOR.username} の役割`).selectOption("general");
+  await confirm.getByRole("button", { name: "変更する" }).click();
   await expect(page.getByRole("main").getByRole("status")).toContainText("役割を「一般」に変更しました");
+  // 無効にするのも、確かめの画面を出す。Escape で閉じれば何も送らない
+  await row.getByRole("button", { name: "無効にする" }).click();
+  const disable = page.getByRole("dialog", { name: "ユーザーの無効化" });
+  await expect(disable).toContainText(`${DOCTOR.username} を無効にします`);
+  await page.keyboard.press("Escape");
+  await expect(disable).toHaveCount(0);
+  await expect(row).toContainText("有効");
   await page.reload();
   await expect(table.locator(`tr[data-username="${DOCTOR.username}"]`).getByLabel(`${DOCTOR.username} の役割`)).toHaveValue(
     "general",

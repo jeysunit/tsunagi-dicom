@@ -85,7 +85,13 @@ const withCount = (label: string, n: number | undefined, atLeast = false) =>
 function Segmented({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     // 見える名前は付けない（幅のため）。読み上げにはグループの名前、マウスには title で知らせる
-    <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label={label} title={label}>
+    // 狭い画面で入りきらないときは、並びの中を横に送る（頁の外へはみ出さず、端の項目も押せる。UX のレビューの M8）
+    <div
+      className="inline-flex max-w-full overflow-x-auto rounded-md border border-control [scrollbar-width:none]"
+      role="group"
+      aria-label={label}
+      title={label}
+    >
       {children}
     </div>
   );
@@ -99,7 +105,7 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
       data-testid={testId}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm transition-colors last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
+        "inline-flex h-7 shrink-0 items-center whitespace-nowrap border-r border-border px-1.5 text-sm transition-colors last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
         pressed ? "bg-primary text-primary-foreground active:bg-primary-active" : "text-foreground hover:bg-hover active:bg-pressed",
       )}
     >
@@ -173,7 +179,7 @@ function FilterBar({
           aria-controls={moreId}
           data-testid="filter-more"
           onClick={() => setMore((v) => !v)}
-          className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-sm text-foreground hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-control px-2 text-sm text-foreground hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
           詳細条件
@@ -189,7 +195,7 @@ function FilterBar({
           data-testid="filter-more-panel"
         >
           <span className="text-xs text-label">検査日</span>
-          <div className="inline-flex overflow-hidden rounded-md border border-border">
+          <div className="inline-flex overflow-hidden rounded-md border border-control">
             <Chip pressed={filter.date === "range"} onClick={() => onChange({ ...filter, date: "range" })} testId="date-range">
               {DATE_LABELS.range}
             </Chip>
@@ -340,6 +346,8 @@ function StudyRows({
                   key={uid || `row-${i}`}
                   data-study-uid={uid}
                   aria-selected={isOpen}
+                  // 表は grid ではないので、選んだ行は aria-current でも読み上げに伝える（UX のレビューの M2）
+                  aria-current={isOpen ? "true" : undefined}
                   tabIndex={uid === tabStop ? 0 : -1}
                   // 選んだ行は主の色の薄い地と左の縦線（3px）。hover の地（muted）はそれより薄く、選んだ行には当てない（docs/spec.md の 3.1）
                   data-selected={isOpen || undefined}
@@ -361,6 +369,10 @@ function StudyRows({
                     if (e.key === "Enter") {
                       e.preventDefault();
                       openInViewer(uid, s.defaultViewer);
+                    } else if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+                      // 行の中の 2 つのボタンは Tab の止まり先にしないので、ビューアのメニューは行から開く（UX のレビューの M2）
+                      e.preventDefault();
+                      e.currentTarget.querySelector<HTMLButtonElement>('[data-testid="open-menu"]:not(:disabled)')?.click();
                     } else if (e.key === " ") {
                       e.preventDefault();
                       onSelect(uid, "click");
