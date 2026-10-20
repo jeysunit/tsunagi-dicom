@@ -54,7 +54,8 @@ export function rememberSeen(latest: string | null): void {
   if (!latest) return;
   try {
     const stored = window.localStorage.getItem(RECEIVED_SEEN_KEY);
-    if (stored && !isNewArrival(latest, stored)) return;
+    // 覚えた値が日時として読めないときは、上書きして直す
+    if (timeOf(stored) !== null && !isNewArrival(latest, stored)) return;
     window.localStorage.setItem(RECEIVED_SEEN_KEY, latest);
   } catch {
     // 覚えられなくても一覧は使える（新着の印が出ないだけ）

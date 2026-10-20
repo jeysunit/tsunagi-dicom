@@ -74,7 +74,8 @@ export function ReceivedList({
   }, [items]);
   useEffect(() => () => forgetPreviousSeen(), []);
 
-  const sources = useMemo(() => [...new Set(items.map(sourceOf).filter(Boolean))].sort(), [items]);
+  // 選んでいる送信元は、再読み込みで読んだ範囲から消えても選択肢に残す（選択の欄の見た目と絞り込みを食い違わせない）
+  const sources = useMemo(() => [...new Set([...items.map(sourceOf), source].filter(Boolean))].sort(), [items, source]);
   const newCount = items.filter((r) => isNewArrival(r.receivedAt, previous)).length;
   const needle = normalizeForSearch(text);
   const shown = items.filter((r) => {
@@ -175,8 +176,8 @@ export function ReceivedList({
         <div className="max-h-[calc(100dvh-12rem)] overflow-auto rounded-md border border-border" data-testid="received-scroll">
           <table className="w-full min-w-[1000px] table-fixed border-collapse" data-testid="received-table">
             <colgroup>
-              {/* 受信日時（秒まで）とボタンの列は、値が切れない幅にする */}
-              <col style={{ width: 176 }} />
+              {/* 受信日時（秒まで。「新着」の印も入る）とボタンの列は、値が切れない幅にする */}
+              <col style={{ width: 216 }} />
               <col style={{ width: 140 }} />
               <col style={{ width: 80 }} />
               <col style={{ width: 120 }} />
