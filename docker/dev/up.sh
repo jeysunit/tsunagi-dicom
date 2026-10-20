@@ -34,9 +34,17 @@ if [ ! -e "$secrets/tdg_web_password.txt" ] && [ ! -L "$secrets/tdg_web_password
   echo "作った：$secrets/tdg_web_password.txt"
 fi
 
-# 2. tsunagi-dicom のイメージ
+# 2. tsunagi-dicom のイメージ。名前に compose のプロジェクトの名前を入れ、一式ごとに分ける（compose.yaml の tdg・storescp と同じ）。
+#    プロジェクトの名前は compose が決めたもの（環境変数・.env・compose.yaml の name）を、tdg のイメージの名前から取る
+project=$(docker compose -f "$here/compose.yaml" config --images | sed -n 's/-tdg:local$//p')
+if [ -z "$project" ]; then
+  echo "compose のプロジェクトの名前を決められない（docker compose -f $here/compose.yaml config --images を見る）" >&2
+  exit 1
+fi
+COMPOSE_PROJECT_NAME=$project
+export COMPOSE_PROJECT_NAME
 if [ -z "${TSUNAGI_IMAGE:-}" ]; then
-  TSUNAGI_IMAGE=tsunagi-dicom:dev
+  TSUNAGI_IMAGE="$project-tsunagi:local"
   export TSUNAGI_IMAGE
   echo "tsunagi-dicom のイメージを作る（$TSUNAGI_IMAGE）"
   docker build -t "$TSUNAGI_IMAGE" "$root"

@@ -48,7 +48,7 @@ async function containerId(service: string): Promise<string> {
 
 interface Inspect {
   Id: string;
-  Config: { Labels: Record<string, string> };
+  Config: { Image: string; Labels: Record<string, string> };
   HostConfig: { PortBindings: Record<string, unknown> | null };
   NetworkSettings: { Ports: Record<string, { HostIp: string; HostPort: string }[] | null>; Networks: Record<string, { IPAddress: string }> };
 }
@@ -120,6 +120,13 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   const tsunagi = await inspect(tsunagiId);
   const project = orthanc.Config.Labels["com.docker.compose.project"]!;
   const net = (name: string) => `${project}_${name}`;
+  // storescp と同じ DCMTK のイメージ（名前は一式ごと。docker/dev/compose.yaml）
+  const dcmtkImage = `${project}-dcmtk:local`;
+
+  // 作るイメージの名前は一式ごと（プロジェクトの名前が入る）。ほかの一式（tsunagi-dev など）の作り直しが及ばない
+  expect((await inspect(await containerId("tdg"))).Config.Image).toBe(`${project}-tdg:local`);
+  expect((await inspect(await containerId("storescp"))).Config.Image).toBe(dcmtkImage);
+  expect(tsunagi.Config.Image).toBe(process.env.TSUNAGI_IMAGE || `${project}-tsunagi:local`);
 
   // ホストへの公開：Orthanc は DICOM（4242）だけ。REST（8042）は出さない
   expect(Object.keys(orthanc.HostConfig.PortBindings ?? {})).toEqual(["4242/tcp"]);
@@ -158,7 +165,7 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   }
 
   // ホストに公開した DICOM の口に C-ECHO が通る（Orthanc は C-ECHO を誰からでも受ける）
-  await docker(["run", "--rm", "--network", "host", "tsunagi-itest-dcmtk:local", "echoscu", "--aetitle", "FLOW_ECHO", "--call", "ORTHANC", "127.0.0.1", dicomPort]);
+  await docker(["run", "--rm", "--network", "host", dcmtkImage, "echoscu", "--aetitle", "FLOW_ECHO", "--call", "ORTHANC", "127.0.0.1", dicomPort]);
 
   // 登録していない AE タイトル（FLOW_ECHO）からの C-STORE は断る（DicomAlwaysAllowStore: false）。架空の患者の画像を1枚作って送る
   const dump = [
@@ -175,7 +182,7 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
     "host",
     "--entrypoint",
     "sh",
-    "tsunagi-itest-dcmtk:local",
+    dcmtkImage,
     "-c",
     'printf "%s\\n" "$1" > /tmp/a.dump && dump2dcm --write-xfer-little /tmp/a.dump /tmp/a.dcm && { storescu --aetitle FLOW_ECHO --call ORTHANC 127.0.0.1 "$2" /tmp/a.dcm 2>&1; echo "storescu-exit=$?"; }',
     "sh",

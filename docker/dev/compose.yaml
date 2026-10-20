@@ -17,6 +17,9 @@
 #   UTC の時刻で書き、検査一覧の検査日時が 9 時間ずれる（2026-10-21 に承認者が見つけた）。
 # - 4 つのサービス（tsunagi-dicom・Orthanc は deploy/compose.yaml、dicom-test-generator・storescp はここ）は restart: unless-stopped。
 #   Docker が起き直したときに、一式がそろって立つ（止めたものは止めたまま）。
+# - 作るイメージの名前には compose のプロジェクトの名前（COMPOSE_PROJECT_NAME。既定は下の name の tsunagi-dev）を入れる
+#   （<プロジェクト>-tdg:local・<プロジェクト>-dcmtk:local。tsunagi-dicom は up.sh が <プロジェクト>-tsunagi:local で作る）。
+#   一式を2つ立てても、片方を作り直したときに、もう片方のイメージの名前が付け替わらない。
 
 name: tsunagi-dev
 
@@ -27,7 +30,7 @@ include:
 services:
   tdg:
     # dicom-test-generator の Dockerfile から作る。版は commit で固定する（TDG_GIT_REF で替えられる）
-    image: tsunagi-dev-tdg:local
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-tdg:local
     build:
       # 既定は main の 09e95a6（#17・#18 のマージの後）
       context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-09e95a6054a649a43301d95cde5a86c322ecd059}
@@ -55,8 +58,8 @@ services:
     restart: unless-stopped
 
   storescp:
-    # 結合の試験と同じ DCMTK のイメージ（docker/test/dcmtk）。受けたファイルを検査の UID ごとのフォルダに置く
-    image: tsunagi-itest-dcmtk:local
+    # 結合の試験と同じ Dockerfile（docker/test/dcmtk）の DCMTK のイメージ。受けたファイルを検査の UID ごとのフォルダに置く
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-dcmtk:local
     build: ../test/dcmtk
     init: true
     command:
