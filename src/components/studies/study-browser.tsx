@@ -165,27 +165,23 @@ function FilterBar({
   const [more, setMore] = useState(conditions > 0);
   const moreId = useId();
   const birthId = useId();
-  // 打つたびに要求を送らない（止まってから 300 ミリ秒）
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      const q = text.trim() || undefined;
-      if (q !== filter.q) onChange({ ...filter, q });
-    }, 300);
-    return () => window.clearTimeout(t);
-  }, [text, filter, onChange]);
-  // 詳細条件の文字の欄も同じ（打った字はここに持つので、300 ミリ秒の内に「詳細条件」を閉じても失わない）
+  // 詳細条件の文字の欄の字もここに持つ（300 ミリ秒の内に「詳細条件」を閉じても失わない）
   const [fields, setFields] = useState<Record<TextField, string>>({
     accession: filter.accession ?? "",
     desc: filter.desc ?? "",
     referring: filter.referring ?? "",
   });
+  // 打つたびに要求を送らない（横断の検索と詳細条件の文字の欄の、どれかを打ち止めてから 300 ミリ秒。待ちは1本にまとめる）
   useEffect(() => {
     const t = window.setTimeout(() => {
-      const next = Object.fromEntries(TEXT_FIELDS.map((k) => [k, fieldValue(fields[k])])) as Record<TextField, string | undefined>;
-      if (TEXT_FIELDS.some((k) => next[k] !== filter[k])) onChange({ ...filter, ...next });
+      const next = {
+        q: text.trim() || undefined,
+        ...(Object.fromEntries(TEXT_FIELDS.map((k) => [k, fieldValue(fields[k])])) as Record<TextField, string | undefined>),
+      };
+      if ((["q", ...TEXT_FIELDS] as const).some((k) => next[k] !== filter[k])) onChange({ ...filter, ...next });
     }, 300);
     return () => window.clearTimeout(t);
-  }, [fields, filter, onChange]);
+  }, [text, fields, filter, onChange]);
   const fieldText = (key: TextField, label: string, className: string) => (
     <FieldText
       label={label}

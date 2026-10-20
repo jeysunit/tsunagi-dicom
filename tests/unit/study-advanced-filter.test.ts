@@ -3,7 +3,7 @@ import { matchesStudyQuery, studyQueryParams } from "@/lib/backend/dicom-json";
 import { createMockBackend } from "@/lib/backend/mock";
 import type { StudyQuery, StudySummary } from "@/lib/backend/types";
 import { ROLE_FIELD_ALLOWLIST } from "@/lib/fields";
-import { advancedCount, advancedQuery, filterToSearchParams, parseFilter } from "@/lib/study-filter";
+import { advancedCount, advancedQuery, blockedConditions, filterToSearchParams, parseFilter } from "@/lib/study-filter";
 import { listStudies } from "@/lib/study-list";
 
 // 詳細条件（docs/spec.md の 3.1。2026-10-21）：生年月日・性別・受付番号・検査名・依頼医。
@@ -54,10 +54,26 @@ describe("画像サーバーへ渡す条件", () => {
     ]);
   });
 
-  it("許可の一覧に載っていない項目の条件は効かせない（隠した項目で探せないように）", () => {
+  it("許可の一覧に載っていない項目の条件は画像サーバーへ渡さず、付いていたことを返す（一覧は 0 件にする）", () => {
     const filter = { date: "all" as const, birth: "1975-05-10", sex: "M" as const, accession: "A", desc: "B", referring: "C" };
     expect(advancedQuery(filter, ["studyInstanceUid", "patientSex"])).toEqual({ patientSex: "M" });
+    expect(blockedConditions(filter, ["studyInstanceUid", "patientSex"])).toEqual(["birth", "accession", "desc", "referring"]);
     expect(advancedQuery(filter, [])).toEqual({});
+    expect(blockedConditions({ date: "all", sex: "M" }, ["patientSex"])).toEqual([]);
+  });
+});
+
+describe("許可されていない項目の条件（広げる側に倒さない）", () => {
+  it("許可の一覧に無い項目の条件が付いていたら、条件を外して広げず、画像サーバーへ求めずに 0 件にする", async () => {
+    const mock = createMockBackend();
+    let calls = 0;
+    const backend = { ...mock, searchStudies: (limit?: number, query?: StudyQuery) => (calls++, mock.searchStudies(limit, query)) };
+    const allowlists = { ...ROLE_FIELD_ALLOWLIST, general: { ...ROLE_FIELD_ALLOWLIST.general, study: ROLE_FIELD_ALLOWLIST.general.study.filter((f) => f !== "patientBirthDate") } };
+    const result = await listStudies({ backend, role: "general", actorId: "dev", timeZone: "Asia/Tokyo", allowlists }, { date: "week", birth: "1975-05-10" });
+    expect(result.count.count).toBe(0);
+    expect(result.studies).toEqual([]);
+    expect(calls).toBe(0);
+    expect(result.facetAudit.filter).toMatchObject({ blocked: ["birth"] });
   });
 });
 

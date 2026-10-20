@@ -140,8 +140,16 @@ export function advancedCount(filter: StudyFilter): number {
 }
 
 /**
- * 詳細条件を、画像サーバーへ渡す条件にする。許可の一覧に載っていない項目の条件は効かせない
- * （隠した項目で探せないように。原則 8。検査日の絞り込みと同じ扱い）
+ * 付いている詳細条件のうち、許可の一覧に載っていない項目のもの（URL の名前）。
+ * これがあれば、一覧は条件を外して広げずに 0 件にする（study-list.ts。隠した項目で探せないように。原則 8）
+ */
+export function blockedConditions(filter: StudyFilter, fields: readonly string[]): string[] {
+  return ADVANCED_KEYS.filter(([key, field]) => !!filter[key] && !fields.includes(field)).map(([key]) => key);
+}
+
+/**
+ * 詳細条件を、画像サーバーへ渡す条件にする。許可の一覧に載っていない項目の条件は渡さない
+ * （そのときは blockedConditions があるので、一覧は 0 件にする）
  */
 export function advancedQuery(filter: StudyFilter, fields: readonly string[]): StudyQuery {
   const q: StudyQuery = {};
