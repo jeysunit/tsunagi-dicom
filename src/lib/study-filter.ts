@@ -8,7 +8,7 @@ import { isModalityGroup, studyInGroup, type ModalityGroup } from "@/lib/modalit
 // 検査日：今日・昨日・1週間・今月・全期間・期間の指定。モダリティ。横断の検索。
 // 検査の状態の見出し（未検像・検像済・未読・既読・緊急・ブックマーク）は持たない（docs/spec.md の 0）。
 // 絞り込みの値は頁の URL（?date=…）に持ち、BFF の画面の API にも同じ形で渡す。
-// 検査日と詳細条件（生年月日・性別・受付番号・検査名・依頼医。2026-10-21）は画像サーバーの QIDO-RS の条件にし、
+// 検査日と詳細条件（生年月日・性別・受付番号・検査名。2026-10-21）は画像サーバーの QIDO-RS の条件にし、
 // モダリティと横断の検索は BFF で、役割の許可の一覧で絞った後の項目に当てる（許可されていない項目では探せない。
 // 詳細条件も、許可の一覧に載っていない項目の条件は効かせない）。
 
@@ -57,16 +57,15 @@ export interface StudyFilter {
   birth?: string;
   /** 性別（M・F・O）。一致 */
   sex?: PatientSex;
-  /** 受付番号・検査名・依頼医。値を含むもの */
+  /** 受付番号・検査名。値を含むもの */
   accession?: string;
   desc?: string;
-  referring?: string;
 }
 
 export const PATIENT_SEX = ["M", "F", "O"] as const;
 export type PatientSex = (typeof PATIENT_SEX)[number];
 
-/** 詳細条件の文字の欄の長さの上限（受付番号は SH の 16 字、検査名は LO の 64 字、依頼医は PN の 1 つの組の 64 字） */
+/** 詳細条件の文字の欄の長さの上限（受付番号は SH の 16 字、検査名は LO の 64 字） */
 export const MAX_FIELD_LENGTH = 64;
 
 /**
@@ -89,7 +88,6 @@ export const ADVANCED_KEYS = [
   ["sex", "patientSex"],
   ["accession", "accessionNumber"],
   ["desc", "studyDescription"],
-  ["referring", "referringPhysicianName"],
 ] as const satisfies readonly (readonly [keyof StudyFilter, keyof StudyView])[];
 
 /** 既定は全期間（段 1 の一覧と同じ見え方。新しい順に上限まで） */
@@ -127,7 +125,7 @@ export function parseFilter(params: Params): StudyFilter {
   if (birth) filter.birth = birth;
   const sex = param(params, "sex");
   if ((PATIENT_SEX as readonly string[]).includes(sex ?? "")) filter.sex = sex as PatientSex;
-  for (const key of ["accession", "desc", "referring"] as const) {
+  for (const key of ["accession", "desc"] as const) {
     const v = fieldValue(param(params, key));
     if (v) filter[key] = v;
   }
@@ -158,7 +156,6 @@ export function advancedQuery(filter: StudyFilter, fields: readonly string[]): S
   if (filter.sex && allowed("patientSex")) q.patientSex = filter.sex;
   if (filter.accession && allowed("accessionNumber")) q.accessionNumber = filter.accession;
   if (filter.desc && allowed("studyDescription")) q.studyDescription = filter.desc;
-  if (filter.referring && allowed("referringPhysicianName")) q.referringPhysicianName = filter.referring;
   return q;
 }
 

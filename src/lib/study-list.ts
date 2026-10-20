@@ -140,7 +140,7 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
   // 検査日を許されていない役割には、検査日の絞り込みも効かせない（隠した項目で探せないように。原則 8）
   const dateAllowed = fields.includes("studyDate");
   const fetchedAt = Date.now();
-  // 詳細条件（生年月日・性別・受付番号・検査名・依頼医）は、許可の一覧に載った項目の条件だけを画像サーバーへ渡す。
+  // 詳細条件（生年月日・性別・受付番号・検査名）は、許可の一覧に載った項目の条件だけを画像サーバーへ渡す。
   // 許可されていない項目の条件が付いていたら、条件を外して広げず、0 件にする（隠した項目で探せないように。原則 8。
   // 横断の検索が、隠した項目では合わないのと同じ向き）
   const advanced = advancedQuery(filter, fields);

@@ -473,23 +473,21 @@ test("10 書き出しの結果が記録に残り、サムネイルがブラウ�
   expect.soft(asImg.headers()["content-type"] ?? "", "サムネイルの答えが画像でない").toMatch(/^image\//);
 });
 
-test("11 詳細条件：生年月日・性別・受付番号・検査名・依頼医が、本物の Orthanc の QIDO-RS で引ける（2026-10-21）", async () => {
+test("11 詳細条件：生年月日・性別・受付番号・検査名が、本物の Orthanc の QIDO-RS で引ける（2026-10-21）", async () => {
   test.setTimeout(180_000);
   const { page } = admin;
-  // 詳細条件の値だけを替えた、架空の患者の検査を2つ足す（生年月日は同じ、性別・受付番号・検査名・依頼医は違う）
+  // 詳細条件の値だけを替えた、架空の患者の検査を2つ足す（生年月日は同じ、性別・受付番号・検査名は違う）
   const D = syntheticStudy("adv-d", 21, 1, {
     patientBirthDate: "19750510",
     patientSex: "F",
     accessionNumber: "IT-ADV-0001",
     studyDescription: "Chest CT plain",
-    referringPhysicianName: "SATO^ICHIRO=佐藤^一郎=さとう^いちろう",
   });
   const E = syntheticStudy("adv-e", 22, 1, {
     patientBirthDate: "19750510",
     patientSex: "M",
     accessionNumber: "IT-ADV-0002",
     studyDescription: "HEAD CT",
-    referringPhysicianName: "TANAKA^JIRO=田中^次郎=たなか^じろう",
   });
   for (const study of [D, E]) {
     writeDumps(study);
@@ -513,8 +511,6 @@ test("11 詳細条件：生年月日・性別・受付番号・検査名・依�
   expect(await found({ birth: "1975-05-10", sex: "F" })).toEqual(["adv-d"]);
   expect(await found({ accession: "ADV-0002" })).toEqual(["adv-e"]);
   expect(await found({ desc: "Chest CT" })).toEqual(["adv-d"]);
-  expect(await found({ referring: "佐藤 一郎" })).toEqual(["adv-d"]);
-  expect(await found({ referring: "たなか" })).toEqual(["adv-e"]);
   // ほかの検査（生年月日 19800101）は、生年月日の条件で出ない
   const others = await page.request.get(`/api/studies?${new URLSearchParams({ birth: "1975-05-10" })}`);
   expect(((await others.json()) as { studies: { patientId: string }[] }).studies.every((s) => s.patientId.startsWith("JP-TEST-IT2"))).toBe(true);
@@ -522,7 +518,6 @@ test("11 詳細条件：生年月日・性別・受付番号・検査名・依�
   // 大文字と小文字：Orthanc の QIDO-RS の答えと、BFF の答えを並べて残す（仕様の 3.1 に書く）
   const caseCheck = {
     descLower: { orthanc: await raw({ StudyDescription: "*chest*" }), bff: await found({ desc: "chest" }) },
-    referringLower: { orthanc: await raw({ ReferringPhysicianName: "*sato*" }), bff: await found({ referring: "sato" }) },
     accessionLower: { orthanc: await raw({ AccessionNumber: "*adv-0001*" }), bff: await found({ accession: "adv-0001" }) },
   };
   observe("qido.advancedCase", caseCheck);

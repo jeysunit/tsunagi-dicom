@@ -215,14 +215,13 @@ describe("実の画像サーバーへの接続", () => {
       patientBirthDate: "19750510",
       patientSex: "M",
       accessionNumber: "ACC-0001",
-      referringPhysicianName: "試験 医師",
     });
     const params = new URL(seen[0]!.url, "https://x").searchParams;
     expect(params.get("PatientBirthDate")).toBe("19750510");
     expect(params.get("PatientSex")).toBe("M");
     expect(params.get("AccessionNumber")).toBe("*ACC-0001*");
-    expect(params.get("ReferringPhysicianName")).toBe("*試験*医師*");
     expect(params.has("StudyDescription")).toBe(false);
+    expect(params.has("ReferringPhysicianName")).toBe(false);
     // 手元のサーバーは条件を見ずに 8 件を返すので、BFF の側で JP-TEST-0001 の 2 件に絞る
     expect(found.map((s) => s.accessionNumber).sort()).toEqual(["ACC-0001-1", "ACC-0001-2"]);
   });

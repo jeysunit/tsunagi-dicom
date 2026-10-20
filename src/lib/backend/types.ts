@@ -44,10 +44,9 @@ export interface StudyQuery {
   patientBirthDate?: string;
   /** 性別（M・F・O）。一致 */
   patientSex?: string;
-  /** 受付番号・検査名・依頼医。値を含むもの（QIDO-RS では `*値*`） */
+  /** 受付番号・検査名。値を含むもの（QIDO-RS では `*値*`） */
   accessionNumber?: string;
   studyDescription?: string;
-  referringPhysicianName?: string;
 }
 
 /** BFF から見た Orthanc（docs/spec.md の 0。Orthanc 専用）。資格情報はこの中だけで使い、ブラウザには渡さない */

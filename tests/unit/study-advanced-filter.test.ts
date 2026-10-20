@@ -6,25 +6,25 @@ import { ROLE_FIELD_ALLOWLIST } from "@/lib/fields";
 import { advancedCount, advancedQuery, blockedConditions, filterToSearchParams, parseFilter } from "@/lib/study-filter";
 import { listStudies } from "@/lib/study-list";
 
-// 詳細条件（docs/spec.md の 3.1。2026-10-21）：生年月日・性別・受付番号・検査名・依頼医。
+// 詳細条件（docs/spec.md の 3.1。2026-10-21）：生年月日・性別・受付番号・検査名。
 // Orthanc の QIDO-RS の条件にし（上限 1000 件の外の古い検査も引ける）、BFF でも答えを確かめる。
 // 許可の一覧に載っていない項目の条件は効かせない（原則 8）。
 
 const ALL = ROLE_FIELD_ALLOWLIST.general.study;
 
 describe("URL の値を読む", () => {
-  it("生年月日・性別・受付番号・検査名・依頼医を読み、同じ形で書き戻す", () => {
+  it("生年月日・性別・受付番号・検査名を読み、同じ形で書き戻す。依頼医の条件は持たない（2026-10-21 に承認者が外した）", () => {
     const filter = parseFilter(
       new URLSearchParams({ birth: "1975-05-10", sex: "F", accession: " ACC-0001 ", desc: "Chest CT", referring: "佐藤 一郎" }),
     );
-    expect(filter).toEqual({ date: "all", birth: "1975-05-10", sex: "F", accession: "ACC-0001", desc: "Chest CT", referring: "佐藤 一郎" });
-    expect(advancedCount(filter)).toBe(5);
+    expect(filter).toEqual({ date: "all", birth: "1975-05-10", sex: "F", accession: "ACC-0001", desc: "Chest CT" });
+    expect(advancedCount(filter)).toBe(4);
     expect(parseFilter(filterToSearchParams(filter))).toEqual(filter);
   });
 
   it("読めない値は条件にしない：日付の形・性別の値・ワイルドカードと区切りの字・制御文字・長すぎる値", () => {
     const bad = parseFilter(
-      new URLSearchParams({ birth: "1975-13-40", sex: "X", accession: "ACC*", desc: "a?b", referring: "a\\b" }),
+      new URLSearchParams({ birth: "1975-13-40", sex: "X", accession: "ACC*", desc: "a?b" }),
     );
     expect(bad).toEqual({ date: "all" });
     expect(parseFilter(new URLSearchParams({ accession: "A,B" }))).toEqual({ date: "all" });
@@ -37,27 +37,25 @@ describe("URL の値を読む", () => {
 
 describe("画像サーバーへ渡す条件", () => {
   it("生年月日・性別は一致、文字の条件は含むもの（空白で区切った語は、その順に）", () => {
-    const query = advancedQuery({ date: "all", birth: "1975-05-10", sex: "M", accession: "ACC-0001", desc: "Chest CT", referring: "佐藤 一郎" }, ALL);
+    const query = advancedQuery({ date: "all", birth: "1975-05-10", sex: "M", accession: "ACC-0001", desc: "Chest CT" }, ALL);
     expect(query).toEqual({
       patientBirthDate: "19750510",
       patientSex: "M",
       accessionNumber: "ACC-0001",
       studyDescription: "Chest CT",
-      referringPhysicianName: "佐藤 一郎",
     });
     expect(studyQueryParams(query)).toEqual([
       ["PatientBirthDate", "19750510"],
       ["PatientSex", "M"],
       ["AccessionNumber", "*ACC-0001*"],
       ["StudyDescription", "*Chest*CT*"],
-      ["ReferringPhysicianName", "*佐藤*一郎*"],
     ]);
   });
 
   it("許可の一覧に載っていない項目の条件は画像サーバーへ渡さず、付いていたことを返す（一覧は 0 件にする）", () => {
-    const filter = { date: "all" as const, birth: "1975-05-10", sex: "M" as const, accession: "A", desc: "B", referring: "C" };
+    const filter = { date: "all" as const, birth: "1975-05-10", sex: "M" as const, accession: "A", desc: "B" };
     expect(advancedQuery(filter, ["studyInstanceUid", "patientSex"])).toEqual({ patientSex: "M" });
-    expect(blockedConditions(filter, ["studyInstanceUid", "patientSex"])).toEqual(["birth", "accession", "desc", "referring"]);
+    expect(blockedConditions(filter, ["studyInstanceUid", "patientSex"])).toEqual(["birth", "accession", "desc"]);
     expect(advancedQuery(filter, [])).toEqual({});
     expect(blockedConditions({ date: "all", sex: "M" }, ["patientSex"])).toEqual([]);
   });
@@ -108,9 +106,7 @@ describe("答えの確かめ（BFF でも、条件に合わない検査を返さ
     expect(ok({ studyDescription: "chest" })).toBe(true);
     expect(ok({ studyDescription: "chest plain" })).toBe(true);
     expect(ok({ studyDescription: "plain chest" })).toBe(false);
-    expect(ok({ referringPhysicianName: "佐藤 一郎" })).toBe(true);
-    expect(ok({ referringPhysicianName: "sato" })).toBe(true);
-    expect(ok({ referringPhysicianName: "田中" })).toBe(false);
+    expect(ok({ accessionNumber: "ACC-0002" })).toBe(false);
   });
 
   it("検査日の範囲と一緒に当てる", () => {
@@ -130,8 +126,7 @@ describe("検査の一覧（モック）", () => {
     const female = await listStudies(deps(), { date: "all", sex: "F" });
     expect(female.count.count).toBe(all.studies.filter((s) => s.patientSex === "F").length);
     expect((await listStudies(deps(), { date: "all", accession: "ACC-0004-2" })).studies).toHaveLength(1);
-    expect((await listStudies(deps(), { date: "all", referring: "試験 医師" })).count.count).toBe(all.count.count);
-    expect((await listStudies(deps(), { date: "all", referring: "佐藤" })).count.count).toBe(0);
+    expect((await listStudies(deps(), { date: "all", accession: "該当しない" })).count.count).toBe(0);
     expect(birth.facetAudit.filter).toEqual({ date: "all", query: false, conditions: ["patientBirthDate"] });
     expect(JSON.stringify(birth.facetAudit)).not.toContain("1975");
   });

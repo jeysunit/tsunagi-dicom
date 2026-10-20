@@ -116,8 +116,8 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
 /** 詳細条件の文字の欄で、打っても受けない字（QIDO-RS の値で特別の意味を持つ字。study-filter.ts の fieldValue） */
 const FIELD_STRIP = /[*?\\,]/g;
 
-/** 詳細条件の文字の欄（受付番号・検査名・依頼医） */
-const TEXT_FIELDS = ["accession", "desc", "referring"] as const;
+/** 詳細条件の文字の欄（受付番号・検査名） */
+const TEXT_FIELDS = ["accession", "desc"] as const;
 type TextField = (typeof TEXT_FIELDS)[number];
 
 /** 詳細条件の文字の欄。打った字は絞り込みの部品（FilterBar）が持つ（「詳細条件」を閉じても、打ちかけの字を失わない） */
@@ -160,7 +160,7 @@ function FilterBar({
   trailing?: React.ReactNode;
 }) {
   const [text, setText] = useState(filter.q ?? "");
-  // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名・依頼医）は「詳細条件」の中。どれかで絞っているときは最初から開く
+  // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名）は「詳細条件」の中。どれかで絞っているときは最初から開く
   const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0);
   const [more, setMore] = useState(conditions > 0);
   const moreId = useId();
@@ -169,7 +169,6 @@ function FilterBar({
   const [fields, setFields] = useState<Record<TextField, string>>({
     accession: filter.accession ?? "",
     desc: filter.desc ?? "",
-    referring: filter.referring ?? "",
   });
   // 打つたびに要求を送らない（横断の検索と詳細条件の文字の欄の、どれかを打ち止めてから 300 ミリ秒。待ちは1本にまとめる）
   useEffect(() => {
@@ -277,7 +276,7 @@ function FilterBar({
             </span>
           )}
           </span>
-          {/* 生年月日・性別・受付番号・検査名・依頼医は Orthanc の検索（QIDO-RS）の条件にする（docs/spec.md の 3.1） */}
+          {/* 生年月日・性別・受付番号・検査名は Orthanc の検索（QIDO-RS）の条件にする（docs/spec.md の 3.1）。どれも一覧の列に見える */}
           <span className="flex items-center gap-1.5">
             <label htmlFor={birthId} className="shrink-0 text-xs text-label">
               生年月日
@@ -309,7 +308,6 @@ function FilterBar({
           </label>
           {fieldText("accession", "受付番号", "w-32")}
           {fieldText("desc", "検査名", "w-40")}
-          {fieldText("referring", "依頼医", "w-36")}
         </div>
       )}
     </div>
@@ -346,7 +344,7 @@ const DESC_MIN = 160;
  * 氏名とかなも、いちばん長い値に合わせ、上限を超える値だけを `…` で切る（全文は title）。
  * モダリティ・検査の記述は残りの幅を取る。氏名の漢字とかなは別の列（かなは漢字の右）
  */
-function columnsFor(studies: readonly StudyView[]) {
+function columnsFor(studies: readonly StudyView[], showAccession: boolean) {
   const widest = (pick: (s: StudyView) => string | undefined) => Math.max(0, ...studies.map((s) => textWidth(pick(s))));
   const fit = (pick: (s: StudyView) => string | undefined, min: number, max: number) =>
     Math.min(max, Math.max(min, widest(pick) + CELL_PAD));
@@ -354,6 +352,9 @@ function columnsFor(studies: readonly StudyView[]) {
     { key: "date", width: 148 },
     // 患者 ID は DICOM の LO（64 字まで）。上限を置かずに値に合わせる（切らない）
     { key: "id", width: Math.max(80, widest((s) => s.patientId) + CELL_PAD) },
+    // 受付番号（2026-10-21。詳細条件で絞れる項目を列に見せる）。SH（16 字まで）なので値に合わせ、上限を超える値だけを切る。
+    // 役割の許可の一覧に無い（行に項目が無い）ときは、列ごと出さない
+    ...(showAccession ? [{ key: "accession", width: fit((s) => s.accessionNumber, 88, 160) } as const] : []),
     { key: "name", width: fit((s) => s.patientName, 104, 240) },
     { key: "kana", width: fit((s) => s.patientKana, 96, 200) },
     { key: "birth", width: 104 },
@@ -389,7 +390,9 @@ function StudyRows({
 }) {
   // 矢印で動く（ローヴィングの tabindex）：選んだ行、無ければ先頭の行だけが tab の止まり先
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
-  const columns = columnsFor(studies);
+  // 受付番号の列は、許可の一覧に受付番号がある役割だけ（行に項目がある。0 件のときは見出しを出す）
+  const showAccession = studies.length === 0 || studies.some((s) => Object.hasOwn(s, "accessionNumber"));
+  const columns = columnsFor(studies, showAccession);
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
@@ -411,6 +414,7 @@ function StudyRows({
           <tr className="border-b border-border">
             <th className={cn("px-2 py-1 font-normal", CUT)}>検査日時</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>患者ID</th>
+            {showAccession && <th className={cn("px-2 py-1 font-normal", CUT)}>受付番号</th>}
             <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>カナ</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>
@@ -481,6 +485,11 @@ function StudyRows({
                   <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
                     {s.patientId}
                   </td>
+                  {showAccession && (
+                    <td className={cn(CELL, CUT, "font-mono")} title={s.accessionNumber} data-testid="accession-number">
+                      {s.accessionNumber}
+                    </td>
+                  )}
                   <td className={cn(CELL, CUT)} title={s.patientName}>
                     {s.patientName ? (
                       <span className="font-bold text-value" data-testid="patient-name">

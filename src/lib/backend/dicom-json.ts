@@ -120,22 +120,21 @@ export function inDateRange(studyDate: string, query: StudyQuery | undefined): b
 }
 
 /** 含むかで比べる詳細条件（QIDO-RS では `*値*`） */
-const CONTAINS_KEYS = ["accessionNumber", "studyDescription", "referringPhysicianName"] as const;
+const CONTAINS_KEYS = ["accessionNumber", "studyDescription"] as const;
 /** QIDO-RS の属性の名前 */
 const QIDO_KEYS = {
   patientBirthDate: "PatientBirthDate",
   patientSex: "PatientSex",
   accessionNumber: "AccessionNumber",
   studyDescription: "StudyDescription",
-  referringPhysicianName: "ReferringPhysicianName",
 } as const;
 
-/** 文字の条件の語（空白で区切る。氏名の姓と名など） */
+/** 文字の条件の語（空白で区切る） */
 const words = (value: string) => value.trim().split(/\s+/).filter(Boolean);
 
 /**
- * 詳細条件（docs/spec.md の 3.1）を QIDO-RS の検索の値にする。生年月日・性別は一致、受付番号・検査名・依頼医は値を含むもの
- * （`*値*`。空白で区切った語は、その順に含むもの：`佐藤 一郎` → `*佐藤*一郎*`。PN の姓と名の間の `^` にも合う）。
+ * 詳細条件（docs/spec.md の 3.1）を QIDO-RS の検索の値にする。生年月日・性別は一致、受付番号・検査名は値を含むもの
+ * （`*値*`。空白で区切った語は、その順に含むもの：`chest ct` → `*chest*ct*`）。
  * 値は study-filter.ts で、ワイルドカードの字（`*` `?`）・区切りの字（`\` `,`）・制御文字を含まないことを確かめてある
  */
 export function studyQueryParams(query: StudyQuery | undefined): [string, string][] {
