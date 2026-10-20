@@ -62,7 +62,8 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 | 6 | エクスポート | ZIP が開け、中の DICOM のファイルの数が画像の数と合う |
 | 7 | 削除 | 管理者が理由と再認証（パスワード）を通して消すと、Orthanc から消える（再認証の前は消えない） |
 | 8 | 答えが失われたとき（[`round-trip-test.md`](round-trip-test.md) の 7） | 入口（gate）が送る要求の答えを捨てて 504 を返すと、Orthanc は送るが画面は「結果が分からない」と要求の ID を出す。同じ検査・同じ送り先へは重ねて送れない。管理者が「届いていた」を記録すると、また送れる |
-| 9 | 監査のつなぎ | `/api/audit/verify` が `ok`。試験の操作の分だけ行が増えている |
+| 9 | 監査のつなぎ | `/api/audit/verify` が `ok`。送る・削除・照らし合わせの要求ごとに「求めた」「結果」「終わり」の行が要求の ID で結ばれ、結果不明の間に重ねた要求は断った行だけが残る。C-ECHO の成功と失敗が残る |
+| 10 | 見つけた食い違い | 書き出しの「結果」の行が残る。サムネイルがブラウザの Accept のまま画像で返る。どちらも 2026-10-20 の時点で BFF が満たしていないので赤（[`round-trip-test.md`](round-trip-test.md) の「結合の試験で見つけた、BFF の食い違い」）。直したら緑になる |
 
 試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報と住所は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」に写す。
 

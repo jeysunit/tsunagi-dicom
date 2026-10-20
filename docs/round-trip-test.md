@@ -68,6 +68,11 @@ flowchart LR
 | 書き出し（`/studies/{id}/archive`） | 画像の数だけの DICOM のファイルの ZIP（患者・検査・シリーズのフォルダの下）。ほかのファイルは無い | 合う |
 | 受けた後に答えが失われたとき（上の手順 7） | 入口が 504 を返しても、Orthanc は仕事を作って送り先へ送る | BFF の結果不明の扱い（[`spec.md`](spec.md) の 3.5）の前提と合う |
 
+### 結合の試験で見つけた、BFF の食い違い（直すまで、結合の試験の 10 は赤のまま）
+
+- **サムネイルが出ない。** 一覧と詳細の `<img>` がブラウザの既定の Accept（`image/avif,image/webp,…,image/*,*/*;q=0.8`）のまま中継（`/api/dicom-web/…/thumbnail`）を通ると、DICOMweb のプラグインは 400（`Unsupported MIME type in WADO-RS rendered frame`）を返す。`Accept: image/jpeg` なら 200 で JPEG を返す。モックはサムネイルの見本の PNG を Accept に依らず返すので、モックの試験では見えない。直し方の案：中継が `thumbnail`・`rendered` の要求に限って、Orthanc へ送る Accept を、プラグインの受ける画像の形に決める。
+- **書き出しの「結果」の行が記録に残らない。** ZIP は流れ切るが、監査の記録には「求めた」の行だけが残り、BFF のログに `export_result_not_recorded` が出る。本文を流し終えたときに書く記録（`src/app/api/studies/[uid]/export/route.ts` の `watchedBody`）が、`audit()` の中で要求のヘッダー（`headers()`）を読むが、答えを返した後なので読めずに失敗する。モックでも同じだが、モックの試験は結果の行を見ていない。直し方の案：接続元をルートの中で先に読んでおき、流し終えたときはそれを使って書く。
+
 ### まだ測っていないこと
 
 - 送り先の機器の数が多いとき・受け取りの記録が多いときの、画面の答えの時間。
