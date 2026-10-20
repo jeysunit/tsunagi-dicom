@@ -65,7 +65,7 @@ describe("見出しの件数", () => {
   });
 
   it("既定の役割は、どれも全部の見出しの件数を見る。一覧に無い役割は何も見ない", () => {
-    for (const role of ["admin", "doctor", "technologist", "viewer"] as const) {
+    for (const role of ["admin", "general"] as const) {
       const f = computeFacets(views, views, { date: "all" }, today, ROLE_FIELD_ALLOWLIST[role].study);
       expect(Object.keys(f).sort()).toEqual(["date", "modality"]);
     }

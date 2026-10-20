@@ -26,10 +26,11 @@ vi.mock("@/lib/config", async (importOriginal) => {
   return { ...real, getConfig: () => state.config! };
 });
 
-// 閲覧（viewer）から画像の取得を外した割り当て（「割り当ての無い役割」を作る）
+// 一般（general）から画像の取得を外した割り当て（「割り当ての無い役割」を作る。2026-10-20 に役割を2つにしたので、
+// 前の閲覧（viewer）で作っていた形を一般で作り、割り当てのある役割は管理者で見る。確かめる中身は同じ）
 vi.mock("@/lib/auth/roles", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/auth/roles")>();
-  const map = { ...real.ROLE_PERMISSIONS, viewer: real.ROLE_PERMISSIONS.viewer.filter((p) => p !== "image.retrieve") };
+  const map = { ...real.ROLE_PERMISSIONS, general: real.ROLE_PERMISSIONS.general.filter((p) => p !== "image.retrieve") };
   return {
     ...real,
     ROLE_PERMISSIONS: map,
@@ -85,19 +86,29 @@ describe("中継の route handler の役割の確かめ", () => {
   });
 
   it("画像の取得が割り当てられていない役割では、中継は 403 を返し、断ったことを記録する", async () => {
-    await loginAs("viewer1", "viewer");
+    await loginAs("general1", "general");
     const res = await relay(["studies", STUDY, "metadata"]);
     expect(res.status).toBe(403);
     expect((await res.json()).error).toBe("この役割では画像を取れない");
 
     const { getDb } = await import("@/lib/db");
     const rows = await (await getDb()).auditLog.findMany({ where: { action: "retrieve" }, orderBy: { seq: "asc" } });
-    expect(rows.at(-1)).toMatchObject({ actorId: "viewer1", actorRole: "viewer", outcome: "denied" });
+    expect(rows.at(-1)).toMatchObject({ actorId: "general1", actorRole: "general", outcome: "denied" });
     expect(rows.at(-1)!.detail).toContain('"reason":"forbidden"');
   });
 
+  it("データベースの役割が知らない名前（前の閲覧・誤記）なら、セッションを使わせない（一般に読み替えない。閉じる側）", async () => {
+    await loginAs("legacy1", "general");
+    const { getDb } = await import("@/lib/db");
+    const db = await getDb();
+    for (const role of ["viewer", "doctor", "", "Admin"]) {
+      await db.user.update({ where: { username: "legacy1" }, data: { role } });
+      expect((await relay(["studies", STUDY, "metadata"])).status, role).toBe(401);
+    }
+  });
+
   it("割り当てられている役割は、同じ道で画像サーバー（モック）まで届く", async () => {
-    await loginAs("doctor1", "doctor");
+    await loginAs("admin1", "admin");
     const res = await relay(["studies", STUDY, "metadata"]);
     expect(res.status).not.toBe(403);
     expect(res.status).not.toBe(401);

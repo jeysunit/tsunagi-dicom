@@ -13,14 +13,17 @@ import type { DicomValueRow } from "@/lib/all-values";
 import { getJson } from "@/lib/client/api";
 import { getDetailOpen, getServerDetailOpen, setDetailOpen, subscribeDetailOpen } from "@/lib/client/detail-open";
 import type { SeriesView, StudyView } from "@/lib/fields";
-import { formatBirthLine, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
+import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { cn } from "@/lib/utils";
 
 // 詳細のパネル（docs/spec.md の 3.1）。一覧の下の場所に出す。行を選ぶと、動きの遅れ無しに替わる（一覧の行の値ですぐ描き、
-// シリーズの並びは画面の API から後で足す）。見出しは 1〜2 行（氏名・かな・患者 ID・生年月日と和暦・年齢・性別／検査日・
-// モダリティ・検査の記述）、その下にシリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。
-// ほかの値（検査の情報・患者の情報の 2 列と UID）は「すべての項目」を押したときに開く（開閉はこの端末のブラウザに覚える）。
-// 値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
+// シリーズの並びは画面の API から後で足す）。
+// 業務で毎回見る値は見出しの 2 行に常に出す（2026-10-20 に「すべての項目」を開け閉めする形から直した。UX のレビューの H8）：
+//   1 行目：氏名・カナ・英字氏名・患者ID・生年月日と和暦・年齢・性別
+//   2 行目：検査日時・モダリティ・検査名・受付番号・依頼医・Study ID・シリーズ数と画像数
+// 値の無い項目は省く。受付番号だけは、無いときも「受付番号 —」を出す（無いこと自体が照合の手がかりになる）。
+// その下にシリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。開け閉めは「UID」と「DICOM タグ」の2つだけ
+// （UID の開閉はこの端末のブラウザに覚える）。値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
 
 export interface StudyDetailData {
   study: StudyView;
@@ -31,12 +34,41 @@ export const detailKey = (uid: string) => ["study", uid] as const;
 // UID は画像サーバーから来た値なので、path に入れるときは符号化する（BFF の側でも形を確かめる）
 export const fetchDetail = (uid: string) => getJson<StudyDetailData>(`/api/studies/${encodeURIComponent(uid)}`);
 
-function Item({ label, value, wide }: { label: string; value: React.ReactNode; wide?: boolean }) {
+/**
+ * 見出しの1つの項目（小さな項目名と値）。値が無ければ何も出さない（keepEmpty なら「—」を出す。受付番号）。
+ * 項目名は読み上げにも見た目にも付ける（「受付番号 ACC-0002-2」）
+ */
+function HeadItem({
+  label,
+  value,
+  keepEmpty = false,
+  testId,
+  className,
+}: {
+  label: string;
+  value: string | null | undefined;
+  keepEmpty?: boolean;
+  testId?: string;
+  className?: string;
+}) {
+  const empty = value === "" || value == null;
+  if (empty && !keepEmpty) return null;
   return (
-    <div className={cn("min-w-0", wide && "col-span-2")}>
-      <dt className="text-xs text-label">{label}</dt>
-      <dd className="font-bold break-words text-value">{value === "" || value == null ? <span className="font-normal text-label">—</span> : value}</dd>
-    </div>
+    <span className={cn("break-words", className)} data-testid={testId}>
+      <span className="mr-1 text-xs text-label">{label}</span>
+      {empty ? <span className="text-label">—</span> : value}
+    </span>
+  );
+}
+
+/** 見出しの、項目名を見せない値（氏名・患者ID など。読み上げにだけ項目名を付ける） */
+function HeadValue({ label, value, className, testId }: { label: string; value: string | null | undefined; className?: string; testId?: string }) {
+  if (value === "" || value == null) return null;
+  return (
+    <span className={cn("break-words", className)} data-testid={testId}>
+      <span className="sr-only">{label} </span>
+      {value}
+    </span>
   );
 }
 
@@ -191,43 +223,33 @@ export function StudyDetailPanel({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         {/* 左の縦線は、一覧で選んだ行の縦線と同じ（どの行の詳細かを示す。docs/spec.md の 3.1） */}
         <div className="min-w-0 flex-1 basis-96 border-l-[3px] border-primary pl-2" data-testid="detail-head">
-          <p className="flex flex-wrap items-baseline gap-x-3">
+          {/* 1 行目：患者（本人の確かめの手がかり） */}
+          <p className="flex flex-wrap items-baseline gap-x-3" data-testid="detail-head-patient">
             <span className="font-bold break-words text-value" data-testid="detail-name">
               <span className="sr-only">氏名 </span>
               {study.patientName || <span className="font-normal text-label">（氏名未登録）</span>}
             </span>
-            {study.patientKana && (
-              <span className="text-xs break-words text-label">
-                <span className="sr-only">カナ </span>
-                {study.patientKana}
-              </span>
-            )}
-            <span className="font-mono">
-              <span className="sr-only">患者ID </span>
-              {study.patientId}
-            </span>
-            <span>
-              <span className="sr-only">生年月日 </span>
-              {formatBirthLine(study.patientBirthDate, study.patientSex, study.studyDate)}
-            </span>
+            <HeadValue label="カナ" value={study.patientKana} className="text-xs text-label" />
+            <HeadValue label="英字氏名" value={study.patientNameAlphabetic} className="text-xs text-label" testId="detail-alphabetic" />
+            <HeadValue label="患者ID" value={study.patientId} className="font-mono" />
+            <HeadValue label="生年月日" value={formatBirthWareki(study.patientBirthDate)} />
+            <HeadValue label="年齢" value={formatAge(study.patientBirthDate, study.studyDate)} />
+            <HeadValue label="性別" value={sexLabel(study.patientSex)} />
           </p>
-          <p className="flex flex-wrap items-baseline gap-x-3">
-            <span>
-              <span className="sr-only">検査日時 </span>
-              {`${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim()}
-            </span>
-            {study.modalities && study.modalities.length > 0 && (
-              <span className="font-bold text-value">
-                <span className="sr-only">モダリティ </span>
-                {study.modalities.join("・")}
-              </span>
-            )}
-            {study.studyDescription && (
-              <span className="break-words text-label">
-                <span className="sr-only">検査名 </span>
-                {study.studyDescription}
-              </span>
-            )}
+          {/* 2 行目：検査（毎回見る値。前は「すべての項目」の中にあった受付番号・依頼医・Study ID・シリーズ数と画像数もここ） */}
+          <p className="flex flex-wrap items-baseline gap-x-3" data-testid="detail-head-study">
+            <HeadValue label="検査日時" value={`${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim()} />
+            <HeadValue label="モダリティ" value={study.modalities?.join("・")} className="font-bold text-value" />
+            <HeadValue label="検査名" value={study.studyDescription} className="text-label" />
+            {/* 受付番号は、値が空でも「受付番号 —」を出す。役割の許可の一覧に無い（項目ごと返らない）ときは出さない（空と見分ける） */}
+            <HeadItem label="受付番号" value={study.accessionNumber} keepEmpty={Object.hasOwn(study, "accessionNumber")} testId="detail-accession" />
+            <HeadItem label="依頼医" value={study.referringPhysicianName} testId="detail-referring" />
+            <HeadItem label="Study ID" value={study.studyId} />
+            <HeadItem
+              label="Se/Im"
+              value={study.seriesCount == null && study.instanceCount == null ? "" : `${study.seriesCount ?? "—"} / ${study.instanceCount ?? "—"}`}
+              testId="detail-counts"
+            />
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -281,46 +303,18 @@ export function StudyDetailPanel({
           variant="outline"
           aria-expanded={allOpen}
           aria-controls={allId}
-          data-testid="detail-all-items-toggle"
+          data-testid="detail-uid-toggle"
           onClick={() => setDetailOpen(!allOpen)}
         >
           {allOpen ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
-          すべての項目
+          UID
         </Button>
         {screen.can.allValues && uid && <AllValues uid={uid} />}
       </div>
 
+      {/* 開け閉めの「UID」の中は、StudyInstanceUID と SeriesInstanceUID だけ（ほかの値は見出しに上げた） */}
       {allOpen && (
-      <div id={allId} className="space-y-3 pt-1" data-testid="detail-all-items">
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div>
-          <h3 className="mb-2 text-xs font-bold text-label">検査情報</h3>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-            <Item label="検査日時" value={`${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim()} />
-            <Item label="モダリティ" value={study.modalities?.join("・")} />
-            <Item label="受付番号" value={study.accessionNumber} />
-            <Item label="Study ID" value={study.studyId} />
-            <Item label="検査名" value={study.studyDescription} wide />
-            <Item label="依頼医" value={study.referringPhysicianName} />
-            <Item
-              label="シリーズ数／画像数"
-              value={study.seriesCount == null && study.instanceCount == null ? "" : `${study.seriesCount ?? "—"}／${study.instanceCount ?? "—"}`}
-            />
-          </dl>
-        </div>
-        <div>
-          <h3 className="mb-2 text-xs font-bold text-label">患者情報</h3>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-            <Item label="患者ID" value={study.patientId} />
-            <Item label="性別" value={sexLabel(study.patientSex)} />
-            <Item label="氏名" value={study.patientName} />
-            <Item label="カナ氏名" value={study.patientKana} />
-            <Item label="英字氏名" value={study.patientNameAlphabetic} />
-            <Item label="生年月日" value={formatBirthLine(study.patientBirthDate, undefined, study.studyDate)} />
-          </dl>
-        </div>
-      </div>
-
+      <div id={allId} className="space-y-1 pt-1" data-testid="detail-uid">
       {uid && <UidLine label="StudyInstanceUID" uid={uid} />}
       {data?.series.map(
         (s) =>
