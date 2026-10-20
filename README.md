@@ -148,7 +148,7 @@ docker compose up -d
 施設の値は `deploy/.env`（compose の変数。リポジトリに入れない）に書く。変数の一覧は `deploy/compose.yaml` の頭にある。
 
 - **検査装置から受けるとき**：`ORTHANC_DICOM_BIND` を、受ける側の IP アドレス（か `0.0.0.0`）にする。Orthanc は、登録した接続先からだけ画像を受ける。`deploy/orthanc/site.json` を `deploy/orthanc/site.local.json` に写し、AE タイトル（`DicomAet`）と接続先（`DicomModalities`。送信元の検査装置と送信先の機器）を書いて、`ORTHANC_SITE_CONFIG=./orthanc/site.local.json` で指す。
-- **画面を施設のネットワークに出すとき**：TLS を終端するリバースプロキシを前に置く（cookie は `Secure`）。`TSUNAGI_HTTP_BIND` は、リバースプロキシからだけ届く IP アドレスにする。
+- **画面を施設のネットワークに公開するとき**：TLS を終端するリバースプロキシを前に置く（cookie は `Secure`）。`TSUNAGI_HTTP_BIND` は、リバースプロキシからだけ届く IP アドレスにする。
 - **tsunagi-dicom の設定**（ビューアの URL など。`.env.example` の変数）：`deploy/tsunagi.env`（リポジトリに入れない）に書く。つなぎ先（Orthanc）と資格情報の渡し方は `deploy/compose.yaml` が決めるので、書かない。
 
 ### 開発・試験用の一式（Orthanc・dicom-test-generator・storescp）

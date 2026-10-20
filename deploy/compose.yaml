@@ -4,7 +4,7 @@
 # - Orthanc の REST（8042）はホストに公開しない（ports に書かない）。tsunagi-dicom だけが backend の中から使う。
 # - ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1。
 #   施設で検査装置から DICOM を受けるときは ORTHANC_DICOM_BIND を変える（例：0.0.0.0 か、受ける側の IP アドレス）。
-#   画面を施設のネットワークに出すときは、TLS を終端するリバースプロキシを前に置く（cookie は Secure）。
+#   画面を施設のネットワークに公開するときは、TLS を終端するリバースプロキシを前に置く（cookie は Secure）。
 # - Orthanc は DICOM のためのネットワーク dicom にも入る（ほかの機器へ送るとき、Orthanc から外へつなぐため）。
 #   Orthanc は REST も dicom の側で待ち受けるので、dicom にほかのコンテナを足すときは、その中から REST に届く（認証は要る）。
 #

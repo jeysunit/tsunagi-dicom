@@ -60,7 +60,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 | 4 | 「検査一覧」で 1 の検査を選び、詳細のパネルの「送信」から `dev-scp` を選んで送る | 確認の画面に検査と送信先が出る。送ると「送信完了」になり、送信先・画像の数・時刻が出る | Orthanc のジョブの ID（`/jobs` に出る）・かかった時間 |
 | 5 | storescp に届いたファイルを見る：`dc exec storescp find /received -type f`（検査の StudyInstanceUID ごとのフォルダに置かれる） | 1 と同じ検査（同じ StudyInstanceUID・画像の数）が届いている | 届いた画像の数 |
 | 6 | storescp を止めてから（`dc stop storescp`）、4 をもう一度流す。終わったら `dc start storescp` | 「送信失敗」と、Orthanc のエラーの文言が出る | 出たエラーの番号と文言 |
-| 7 | **受けた後に応答が失われたとき**：tsunagi-dicom と Orthanc の間の入口（リバースプロキシ）の応答を待つ時間を短くして（例：1 秒）、4 を流す。開発用の compose には入口が無いので、結合の試験（[`integration-test.md`](integration-test.md) の 8）で CI が毎回流す | Orthanc はジョブを受けて送信先へ送るが、画面は送信結果を確認できないと要求ID を出し、「送信」は押せない。新しく送ろうとしても、同じ検査・同じ送信先は断られる | Orthanc の `/jobs` にジョブができたか、storescp に届いたか。届いていれば、管理者が「送信済みとして記録」すると、操作ログに `reconcile` の行が足されること。入口の待つ時間は元に戻す |
+| 7 | **受けた後に応答が失われたとき**：tsunagi-dicom と Orthanc の間の入口（リバースプロキシ）の応答を待つ時間を短くして（例：1 秒）、4 を流す。開発用の compose には入口が無いので、結合の試験（[`integration-test.md`](integration-test.md) の 8）で CI が毎回流す | Orthanc はジョブを受けて送信先へ送るが、画面は「送信結果を確認できません」と要求ID を出し、「送信」は押せない。新しく送ろうとしても、同じ検査・同じ送信先は断られる | Orthanc の `/jobs` にジョブができたか、storescp に届いたか。届いていれば、管理者が「送信済みとして記録」すると、操作ログに `reconcile` の行が足されること。入口の待つ時間は元に戻す |
 | 8 | **操作ログが書けないとき**：試しの環境だけで、tsunagi-dicom の `/data` を読み取りだけにしてから、4 を流す（施設の本番の環境では行わない） | 「求めた」を記録できないので、Orthanc を呼ばずにエラーになる（Orthanc の `/jobs` にジョブができない・storescp に届かない） | Orthanc の `/jobs` に新しいジョブが無いこと。`/data` を戻してから、9 で記録のつなぎが壊れていないこと |
 | 9 | 管理者で `/api/audit/verify` を開く | `ok` が `true`。`checked` が 4 の手順の前より増えている | 増えた行の数。送るの記録が、要求の ID で「求めた」「結果」「終わり」の3行（7 の送信は「求めた」「結果（unknown）」「照らした」）につながっていること |
 

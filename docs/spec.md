@@ -481,7 +481,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 - **Orthanc とセットで導入する形**（`deploy/compose.yaml`。2026-10-20 に承認者が決めた）：
   - tsunagi-dicom と Orthanc は別々のコンテナにし、1つの compose で配る。Orthanc のイメージは `orthancteam/orthanc` を版と digest で固定する（結合の試験と同じ）。
   - 2つは内部ネットワーク `backend`（`internal: true`）でつなぐ。`backend` に入るのは tsunagi-dicom と Orthanc だけで、tsunagi-dicom は `http://orthanc:8042` の REST と DICOMweb を使う（Basic 認証。利用者 `tsunagi`）。
-  - **Orthanc の REST（8042）はホストに公開しない。** ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1 で、施設で検査装置から受けるときは `ORTHANC_DICOM_BIND` を変える。画面を施設のネットワークに出すときは、TLS を終端するリバースプロキシを前に置く。
+  - **Orthanc の REST（8042）はホストに公開しない。** ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1 で、施設で検査装置から受けるときは `ORTHANC_DICOM_BIND` を変える。画面を施設のネットワークに公開するときは、TLS を終端するリバースプロキシを前に置く。
   - Orthanc は DICOM のネットワーク `dicom` にも入る。`internal: true` のネットワークだけでは、DICOM のポートをホストに公開できず、ほかの機器への送信（C-STORE）もできないため。Orthanc の REST は `dicom` の側でも待ち受けるので、`dicom` にほかのコンテナを足すと、その中から REST に届く（認証は要る）。
   - Orthanc の設定：DICOMweb のプラグインを有効にし、認証を必須にする。利用者とパスワード（`RegisteredUsers`）は secret のファイルで渡す。C-STORE は、登録した接続先（`DicomModalities`）からだけ受ける（`DicomAlwaysAllowStore: false`）。AE タイトルと接続先は、施設の設定ファイル（`ORTHANC_SITE_CONFIG`。既定は `deploy/orthanc/site.json`）に書く。
   - volume は、Orthanc の画像とデータベース（`orthanc-db`）と、tsunagi-dicom の `/data`（`tsunagi-data`）を分ける。
