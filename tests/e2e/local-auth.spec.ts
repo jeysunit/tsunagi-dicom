@@ -315,6 +315,49 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   expect(after.checked).toBeGreaterThanOrEqual(before.checked + 5);
 });
 
+test("送信の手応え：押した直後から状態の枠、送っている間は進みと「閉じても送信は続きます」、閉じた後も状態が出て、終わったら「再送信…」", async () => {
+  test.setTimeout(60_000);
+  const { page } = admin;
+  await page.goto("/");
+  await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
+  await page.getByTestId("send-open").click();
+  const panel = page.getByTestId("send-panel");
+  await panel.getByTestId("send-modality").selectOption("dtg");
+  await panel.getByTestId("send-submit").click();
+  // 押した直後から、状態の枠と進みの帯（0.3 秒を待たない）。送っている間は、閉じても続くことを出す
+  const status = panel.getByTestId("send-status");
+  await expect(status).toBeVisible({ timeout: 1_000 });
+  await expect(status).toHaveAttribute("data-state", /^(Starting|Accepted|Pending|Running)$/);
+  await expect(status.getByRole("progressbar")).toBeVisible();
+  await expect(panel.getByTestId("send-continues")).toHaveText("閉じても送信は続きます");
+  await expect(panel.getByTestId("send-again")).toHaveCount(0);
+
+  // 送っている間に閉じる：「送信」の横に送信中を出し、終わると送信完了に変わる（閉じていても状態を読み続ける）
+  await panel.getByTestId("send-close").click();
+  await expect(page.getByTestId("send-panel")).toHaveCount(0);
+  const badge = page.getByTestId("send-badge");
+  await expect(badge).toHaveText("送信中");
+  await expect(badge).toHaveText("送信完了", { timeout: 15_000 });
+
+  // 開き直すと結果が出て、「再送信…」で確かめの画面に戻る（送るのは「送信する」を押したとき）
+  await page.getByTestId("send-open").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success");
+  await expect(panel.getByTestId("send-continues")).toHaveCount(0);
+  await expect(page.getByTestId("send-badge")).toHaveCount(0);
+  await panel.getByTestId("send-again").click();
+  await expect(panel.getByTestId("send-status")).toHaveCount(0);
+  await expect(panel.getByTestId("send-submit")).toBeVisible();
+  await expect(panel.getByTestId("send-confirm")).toContainText("dtg（DTG_SCP）");
+
+  // 送信失敗：印つきの失敗の枠と「再送信…」
+  await panel.getByTestId("send-modality").selectOption("offline");
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Failure", { timeout: 15_000 });
+  await expect(panel.getByTestId("send-status")).toContainText("送信失敗");
+  await expect(panel.getByTestId("send-again")).toBeVisible();
+  await panel.getByTestId("send-close").click();
+});
+
 test("ログインの一時停止：3回続けて失敗したら、正しいパスワードでも止める。管理者は解ける", async ({ browser }) => {
   const { context, page } = await newPage(browser);
   for (let i = 0; i < 3; i++) {

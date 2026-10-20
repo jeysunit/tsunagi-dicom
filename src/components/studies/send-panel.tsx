@@ -1,20 +1,23 @@
 "use client";
 
-import { CheckCircle2, Send } from "lucide-react";
+import { CheckCircle2, RotateCcw, Send, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ActionButton, PendingText } from "@/components/ui/pending";
+import { ActionButton, ProgressBar, Spinner } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { getJson } from "@/lib/client/api";
 import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityView, StudyView } from "@/lib/fields";
 import { formatDateTimeIn, formatSlashDate } from "@/lib/format/japanese-date";
+import { cn } from "@/lib/utils";
 
 // ほかの機器へ送る（docs/spec.md の 3.4。段 4）。詳細のパネルの「送信」から、登録された機器を選び、
 // 確かめの画面（検査と送り先を2行の表に並べる）を通して送る。送ったあとは、Orthanc の仕事の状態を終わるまで読んで出す。
 // 書き込みの要求は自分で送り直さない。答えが分からなければ「結果不明」と要求の ID を出し、送り直さずに確かめる道だけを出す。
 // 送信を受け付けた後は、同じ確かめの画面から重ねて送らない：実行のボタンを外して「閉じる」だけを出す（2026-10-20。UX のレビューの H7）。
-// 続けて送るときは、送信先を選び直すか、閉じて開き直す（新しい要求の ID になる）。
+// 手応え（2026-10-21。承認者の指摘）：押した直後から、待ちの印つきの状態の枠を出す（0.3 秒を待たない）。送っている間は進みの帯と
+// 「閉じても送信は続きます」、終わったら印つきの完了・失敗の枠と「再送信…」（新しい要求の ID で、確かめの画面に戻る）を出す。
+// 閉じた後も、送信の状態は「送信」のボタンの横に出す（呼ぶ側の PacsActions。onStatus）。
 // 画面の言葉は docs/spec.md の 2.2 の用語集から選ぶ。
 
 interface JobView {
@@ -37,9 +40,12 @@ type Phase =
   | { kind: "job"; requestId: string; token: string; target: Target; job: JobView | null; readError?: string }
   /** 結果不明。照らし合わせが済むまで、この画面からは送り直させない（BFF の側でも断る） */
   | { kind: "unknown"; requestId: string; checkError?: string }
-  /** 照らし合わせで結果が分かった（管理者が確かめた・確かめの道で分かった） */
-  | { kind: "settled"; text: string }
+  /** 照らし合わせで結果が分かった（管理者が確かめた・確かめの道で分かった）。resend は再送してよいとき */
+  | { kind: "settled"; text: string; resend: boolean }
   | { kind: "error"; text: string };
+
+/** 閉じた後に「送信」のボタンの横に出す、送信の状態（docs/spec.md の 3.4） */
+export type SendActivity = "sending" | "success" | "failure" | "unknown";
 
 const POLL_MS = 1500;
 
@@ -53,6 +59,18 @@ export const SEND_STATE_TEXT: Record<JobView["state"], string> = {
   Retry: "再試行待ち",
 };
 
+const isDone = (job: JobView | null | undefined) => job?.state === "Success" || job?.state === "Failure";
+
+/** 送信の状態を、閉じた後の印にする */
+function activityOf(phase: Phase): SendActivity | null {
+  if (phase.kind === "sending") return "sending";
+  if (phase.kind === "unknown") return "unknown";
+  if (phase.kind !== "job") return null;
+  if (phase.job?.state === "Success") return "success";
+  if (phase.job?.state === "Failure") return "failure";
+  return "sending";
+}
+
 /** 送る画面（開閉は呼ぶ側の PacsActions が持つ。ボタンもそちら） */
 export function SendPanel({
   study,
@@ -60,12 +78,15 @@ export function SendPanel({
   open,
   panelId,
   onClose,
+  onStatus,
 }: {
   study: StudyView;
   screen: ScreenInfo;
   open: boolean;
   panelId: string;
   onClose: () => void;
+  /** 送信の状態が変わったとき（閉じた後も「送信」のボタンの横に出すため） */
+  onStatus?: (activity: SendActivity | null) => void;
 }) {
   const [modalities, setModalities] = useState<ModalityView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -85,10 +106,10 @@ export function SendPanel({
     );
   }, [open, modalities]);
 
-  // 仕事の状態を、終わるまで読む。読めなかったときは token と要求の ID を残したまま止め、「再読み込み」を出す
+  // 仕事の状態を、終わるまで読む（閉じていても読む）。読めなかったときは token と要求の ID を残したまま止め、「再読み込み」を出す
   useEffect(() => {
     if (phase.kind !== "job" || phase.readError) return;
-    if (phase.job && (phase.job.state === "Success" || phase.job.state === "Failure")) return;
+    if (isDone(phase.job)) return;
     timer.current = window.setTimeout(() => {
       getJson<JobView>(`/api/jobs/${encodeURIComponent(phase.token)}`).then(
         (job) => setPhase((p) => (p.kind === "job" && p.token === phase.token ? { ...p, job, readError: undefined } : p)),
@@ -97,6 +118,11 @@ export function SendPanel({
     }, phase.job ? POLL_MS : 0);
     return () => window.clearTimeout(timer.current);
   }, [phase]);
+
+  // 閉じた後の印のために、送信の状態を呼ぶ側へ知らせる
+  useEffect(() => {
+    onStatus?.(activityOf(phase));
+  }, [phase, onStatus]);
 
   // 行が替わったら、送る画面を閉じる（別の検査を送らないように）：呼ぶ側が key に検査の UID を付けて、作り直す
 
@@ -131,8 +157,8 @@ export function SendPanel({
         `/api/studies/${encodeURIComponent(uid)}/send?${new URLSearchParams({ requestId })}`,
       );
       if (r.outcome === "accepted" && r.job) setPhase({ kind: "job", requestId, token: r.job, target: { id: target, aet: chosen?.aet ?? "" }, job: null });
-      else if (r.outcome === "failed") setPhase({ kind: "settled", text: "送信されていませんでした。再送できます" });
-      else if (r.outcome === "delivered") setPhase({ kind: "settled", text: "送信済み（管理者が確認）" });
+      else if (r.outcome === "failed") setPhase({ kind: "settled", text: "送信されていませんでした。再送できます", resend: true });
+      else if (r.outcome === "delivered") setPhase({ kind: "settled", text: "送信済み（管理者が確認）", resend: false });
       else setPhase({ kind: "unknown", requestId });
     } catch (e) {
       // 確かめの通信が失敗しても、結果不明のまま要求の ID と確かめの道を残す
@@ -143,17 +169,23 @@ export function SendPanel({
   /** 管理者が送り先で確かめた結果を、記録に足す（照らし合わせ） */
   async function resolve(requestId: string, delivered: boolean, note: string) {
     const result = await postJson(`/api/studies/${encodeURIComponent(uid)}/send/resolve`, { requestId, delivered, note }, screen.csrfToken);
-    if (result.ok) setPhase({ kind: "settled", text: delivered ? "送信済みとして記録しました" : "未送信として記録しました。再送できます" });
-    else setPhase({ kind: "unknown", requestId, checkError: errorText(result) });
+    if (result.ok) {
+      setPhase(
+        delivered
+          ? { kind: "settled", text: "送信済みとして記録しました", resend: false }
+          : { kind: "settled", text: "未送信として記録しました。再送できます", resend: true },
+      );
+    } else setPhase({ kind: "unknown", requestId, checkError: errorText(result) });
   }
 
   // 結果不明の間・送っている間は送れない（新しい要求の ID で重ねて送らない）
-  const inFlight =
-    phase.kind === "sending" ||
-    phase.kind === "unknown" ||
-    (phase.kind === "job" && !(phase.job?.state === "Success" || phase.job?.state === "Failure"));
+  const inFlight = phase.kind === "sending" || phase.kind === "unknown" || (phase.kind === "job" && !isDone(phase.job));
   // 送信を受け付けた後（終わった後も）は、同じ画面から重ねて送らない。送信先を選び直すと、新しい送信の確かめの画面に戻る
   const sent = phase.kind !== "idle" && phase.kind !== "error";
+  // 終わった後は「再送信…」で確かめの画面に戻せる（送信完了・送信失敗・再送できると分かったとき）
+  const canResend = (phase.kind === "job" && isDone(phase.job)) || (phase.kind === "settled" && phase.resend);
+  // 送っている間に閉じても、Orthanc の送信は続く（結果不明のときは、その知らせの中に次にすることを出す）
+  const continuesNote = phase.kind === "sending" || (phase.kind === "job" && !isDone(phase.job));
 
   /** 閉じる：送り終えた・断られた画面は片付ける（開き直すと新しい送信の確かめの画面）。送っている間・結果不明の間は残す */
   function close() {
@@ -206,16 +238,6 @@ export function SendPanel({
                   {chosen?.id}（{chosen?.aet}）
                 </dd>
               </dl>
-              <div className="flex items-center gap-2">
-                {!sent && (
-                  <ActionButton type="button" size="sm" disabled={!target} data-testid="send-submit" icon={<Send aria-hidden />} onClick={() => void send()}>
-                    送信する
-                  </ActionButton>
-                )}
-                <Button type="button" size="sm" variant="outline" disabled={phase.kind === "sending"} onClick={close} data-testid="send-close">
-                  {sent ? "閉じる" : "キャンセル"}
-                </Button>
-              </div>
             </>
           )}
           <SendStatus
@@ -226,6 +248,30 @@ export function SendPanel({
             onReread={() => setPhase((p) => (p.kind === "job" ? { ...p, readError: undefined } : p))}
             onResolve={screen.can.reconcile ? (id, delivered, note) => void resolve(id, delivered, note) : undefined}
           />
+          {modalities && modalities.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {!sent && (
+                <ActionButton type="button" size="sm" disabled={!target} data-testid="send-submit" icon={<Send aria-hidden />} onClick={() => void send()}>
+                  送信する
+                </ActionButton>
+              )}
+              {canResend && (
+                // 確かめの画面に戻す（送るのは、そこで「送信する」を押したとき。新しい要求の ID になる）
+                <Button type="button" size="sm" variant="outline" onClick={() => setPhase({ kind: "idle" })} data-testid="send-again">
+                  <RotateCcw aria-hidden />
+                  再送信…
+                </Button>
+              )}
+              <Button type="button" size="sm" variant="outline" onClick={close} data-testid="send-close">
+                {sent ? "閉じる" : "キャンセル"}
+              </Button>
+              {continuesNote && (
+                <span className="text-xs text-label" data-testid="send-continues">
+                  閉じても送信は続きます
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
     </>
@@ -236,6 +282,28 @@ export function SendPanel({
 function timeOf(iso: string | null | undefined, timeZone: string): string {
   const at = iso && formatDateTimeIn(iso, timeZone, { seconds: true }) ? iso : new Date().toISOString();
   return formatDateTimeIn(at, timeZone, { seconds: true }).split(" ")[1] ?? "";
+}
+
+/** 状態の枠（送っている間・完了・失敗で、地の色と印を変える。色だけに頼らず、印と文字を添える） */
+const BOX = "rounded-md border px-3 py-2";
+
+/** 送っている間の進みの帯。進みの割合が分かれば、その長さ。分からなければ流れる帯 */
+function SendProgress({ progress }: { progress: number | null }) {
+  if (progress === null) return <ProgressBar label="送信中" />;
+  const value = Math.max(0, Math.min(100, Math.round(progress)));
+  return (
+    <div
+      role="progressbar"
+      aria-label="送信中"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={value}
+      className="relative h-1 w-full overflow-hidden rounded-full bg-hover"
+      data-testid="send-progress"
+    >
+      <div className="absolute inset-y-0 left-0 bg-primary transition-[width]" style={{ width: `${value}%` }} />
+    </div>
+  );
 }
 
 function SendStatus({
@@ -256,22 +324,28 @@ function SendStatus({
 }) {
   if (phase.kind === "idle") return null;
   if (phase.kind === "sending") {
+    // 押した直後から出す（0.3 秒を待たない。押したことが分かるように）
     return (
-      <p data-testid="send-status">
-        <PendingText pending>送信を開始しています…</PendingText>
-      </p>
+      <div role="status" className={cn(BOX, "space-y-1.5 border-primary bg-background")} data-testid="send-status" data-state="Starting">
+        <p className="flex items-center gap-1.5 font-bold text-value">
+          <Spinner />
+          送信を開始しています…（{phase.target.id}（{phase.target.aet}））
+        </p>
+        <SendProgress progress={null} />
+      </div>
     );
   }
   if (phase.kind === "error") {
     return (
-      <p role="alert" className="text-danger" data-testid="send-status">
+      <p role="alert" className={cn(BOX, "flex items-center gap-1.5 border-danger bg-background text-danger")} data-testid="send-status" data-state="Error">
+        <XCircle aria-hidden className="size-4 shrink-0" />
         {phase.text}
       </p>
     );
   }
   if (phase.kind === "settled") {
     return (
-      <p role="status" data-testid="send-status" data-state="Settled">
+      <p role="status" className={cn(BOX, "border-border bg-background")} data-testid="send-status" data-state="Settled">
         {phase.text}
       </p>
     );
@@ -282,7 +356,7 @@ function SendStatus({
   const job = phase.job;
   if (phase.readError) {
     return (
-      <div role="alert" className="space-y-1" data-testid="send-status" data-state={job?.state ?? "Accepted"}>
+      <div role="alert" className={cn(BOX, "space-y-1 border-danger bg-background")} data-testid="send-status" data-state={job?.state ?? "Accepted"}>
         <p className="text-danger">状態を取得できませんでした（{phase.readError}）。再送せずに「再読み込み」を押してください</p>
         <p className="font-mono text-xs text-label">要求ID {phase.requestId}</p>
         <Button type="button" size="sm" variant="outline" onClick={onReread}>
@@ -294,22 +368,37 @@ function SendStatus({
   const to = `${phase.target.id}（${phase.target.aet}）`;
   if (job?.state === "Success") {
     return (
-      <p role="status" className="flex items-center gap-1.5 font-bold text-success" data-testid="send-status" data-state="Success">
-        <CheckCircle2 aria-hidden className="size-4" />
+      <p role="status" className={cn(BOX, "flex items-center gap-1.5 border-success bg-background font-bold text-success")} data-testid="send-status" data-state="Success">
+        <CheckCircle2 aria-hidden className="size-4 shrink-0" />
         <span data-testid="send-result">
           {SEND_STATE_TEXT.Success}：{to} へ {instanceCount ?? "—"} 画像（{timeOf(job.completionTime, timeZone)}）
         </span>
       </p>
     );
   }
+  if (job?.state === "Failure") {
+    return (
+      <p role="alert" className={cn(BOX, "flex items-center gap-1.5 border-danger bg-background font-bold text-danger")} data-testid="send-status" data-state="Failure">
+        <XCircle aria-hidden className="size-4 shrink-0" />
+        <span data-testid="send-result">
+          {SEND_STATE_TEXT.Failure}
+          {job.errorDescription ? `：${job.errorDescription}` : ""}（{to}・{timeOf(job.completionTime, timeZone)}）
+        </span>
+      </p>
+    );
+  }
+  // 送っている間（受け付けた・待機中・送信中・一時停止中・再試行待ち）
   const text = job ? SEND_STATE_TEXT[job.state] : "送信を受け付けました";
   return (
-    <p role="status" className={job?.state === "Failure" ? "text-danger" : undefined} data-testid="send-status" data-state={job?.state ?? "Accepted"}>
-      {text}
-      {job?.state === "Running" ? `（${job.progress}%）` : ""}
-      {job?.state === "Failure" && job.errorDescription ? `：${job.errorDescription}` : ""}
-      {job?.state === "Failure" ? `（${to}・${timeOf(job.completionTime, timeZone)}）` : ""}
-    </p>
+    <div role="status" className={cn(BOX, "space-y-1.5 border-primary bg-background")} data-testid="send-status" data-state={job?.state ?? "Accepted"}>
+      <p className="flex items-center gap-1.5 font-bold text-value">
+        <Spinner />
+        {text}
+        {job?.state === "Running" ? `（${job.progress}%）` : ""}
+        <span className="font-normal text-label">：{to} へ</span>
+      </p>
+      <SendProgress progress={job?.state === "Running" ? job.progress : null} />
+    </div>
   );
 }
 
@@ -327,7 +416,7 @@ function UnknownStatus({
 }) {
   const [note, setNote] = useState("");
   return (
-    <div role="alert" className="space-y-1" data-testid="send-status" data-state="Unknown">
+    <div role="alert" className={cn(BOX, "space-y-1 border-danger bg-background")} data-testid="send-status" data-state="Unknown">
       <p className="text-danger">送信結果を確認できません。再送せずに状態を確認してください。確認が終わるまで、同じ送信先へは送信できません</p>
       <p className="font-mono text-xs text-label">要求ID {requestId}</p>
       {checkError && <p className="text-xs text-danger">確認できませんでした：{checkError}</p>}
