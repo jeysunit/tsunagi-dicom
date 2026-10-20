@@ -917,3 +917,58 @@ test("詳細の見出しは 1〜2 行：氏名・かな・患者 ID・生年月�
   const strip = (await page.getByTestId("series-strip").boundingBox())!;
   expect(strip.y + Math.min(strip.height, 80)).toBeLessThanOrEqual(pane.y + pane.height);
 });
+
+test("詳細の「DICOM タグ」：開いてもボタンの位置は動かない。既定は検査単位（要約）、画像単位でシリーズ → 画像を選ぶと、その画像の SOPInstanceUID と値が出る", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  const toggle = page.getByTestId("detail-tags-toggle");
+  const uidToggle = page.getByTestId("detail-uid-toggle");
+  // 詳細の中での位置（詳細の場所はスクロールするので、画面の中の位置ではなく詳細の頭からの位置で比べる）
+  const place = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = el.closest("[data-testid=study-detail]")!.getBoundingClientRect();
+      return { x: r.left - top.left, y: r.top - top.top, bottom: r.bottom - top.top };
+    });
+  const before = await place("detail-tags-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const after = await place("detail-tags-toggle");
+  expect([after.x, after.y]).toEqual([before.x, before.y]);
+  // 「UID」のボタンも同じ行のまま
+  expect((await place("detail-uid-toggle")).y).toBe(before.y);
+
+  // 既定は検査単位（要約）。中身はボタンの並びの下
+  const tags = page.getByTestId("dicom-tags");
+  await expect(tags.getByTestId("tags-level-study")).toHaveText("検査単位（要約）");
+  await expect(tags.getByTestId("tags-level-study")).toHaveAttribute("aria-pressed", "true");
+  await expect(tags.getByTestId("all-values")).toContainText("0010,0020");
+  expect((await place("dicom-tags")).y).toBeGreaterThan(after.bottom);
+  await expect(uidToggle).toBeVisible();
+
+  // 画像単位：最初はシリーズと画像の先頭。選んだ画像の SOPInstanceUID と、その画像の値（0008,0018）が出る
+  await tags.getByTestId("tags-level-instance").click();
+  await expect(tags.getByTestId("tags-level-instance")).toHaveAttribute("aria-pressed", "true");
+  await expect(tags.getByTestId("tags-series").locator("option")).toHaveCount(1);
+  await expect(tags.getByTestId("tags-series")).toContainText("#1");
+  const images = tags.getByTestId("tags-instance");
+  await expect(images.locator("option")).toHaveText(["#1", "#2", "#3", "#4"]);
+  const sopLine = tags.getByTestId("uid-line");
+  await expect(sopLine).toContainText("SOPInstanceUID");
+  const first = (await sopLine.locator("code").textContent())!;
+  await expect(tags.getByTestId("instance-values")).toContainText(first);
+  await expect(tags.getByTestId("instance-values")).toContainText("0008,0018");
+
+  // 画像を替えると、その画像の値に替わる（画像ごとに値が違う）
+  await images.selectOption({ label: "#2" });
+  await expect(sopLine.locator("code")).not.toHaveText(first);
+  const second = (await sopLine.locator("code").textContent())!;
+  await expect(tags.getByTestId("instance-values")).toContainText(second);
+  await expect(tags.getByTestId("instance-values")).not.toContainText(first);
+
+  // 閉じても、ボタンの位置は動かない
+  await toggle.click();
+  await expect(tags).toHaveCount(0);
+  expect((await place("detail-tags-toggle")).y).toBe(before.y);
+});

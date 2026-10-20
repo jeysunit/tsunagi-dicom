@@ -35,6 +35,14 @@ export interface SeriesSummary {
   instanceCount: number | null;
 }
 
+/** シリーズの中の画像（BFF の側の QIDO-RS で引く。画像単位の DICOM タグの選び先。中継からは返さない） */
+export interface InstanceSummary {
+  sopInstanceUid: string;
+  sopClassUid: string;
+  instanceNumber: string;
+  numberOfFrames: number | null;
+}
+
 /** 検査の検索の条件。日付は DICOM の DA（YYYYMMDD）。画像サーバーへは QIDO-RS の条件として渡す */
 export interface StudyQuery {
   dateFrom?: string;
@@ -55,6 +63,16 @@ export interface Backend {
    * すべての DICOM の値を見る権限（dicom.all_values）のときだけ
    */
   studyDataset(studyInstanceUid: string): Promise<DicomJsonDataset | null>;
+  /**
+   * シリーズの中の画像（QIDO-RS の studies/{study}/series/{series}/instances。画像の番号の順）。無ければ空。
+   * 画像単位の DICOM タグ（dicom.all_values）の選び先。BFF の側で引き、中継からは返さない（docs/spec.md の 3.2）
+   */
+  searchInstances(studyInstanceUid: string, seriesInstanceUid: string): Promise<InstanceSummary[]>;
+  /**
+   * 1枚の画像の DICOM の値の全部（WADO-RS の studies/{study}/series/{series}/instances/{sop}/metadata）。無ければ null。
+   * 返す前に、答えの3つの UID が求めたものと同じかを確かめる。dicom.all_values のときだけ画面へ返す
+   */
+  instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string): Promise<DicomJsonDataset | null>;
   /** 検査の件数。Orthanc の /statistics で正確に数える */
   countStudies(): Promise<StudyCount>;
   /**

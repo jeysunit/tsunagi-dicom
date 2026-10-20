@@ -3,7 +3,9 @@ import { getCACertificates } from "node:tls";
 import { Agent, fetch, type Dispatcher } from "undici";
 import {
   inDateRange,
+  instanceFromDicomJson,
   seriesFromDicomJson,
+  sortInstances,
   sortSeries,
   sortStudiesNewestFirst,
   stringValue,
@@ -230,6 +232,43 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const rows = await getJson<DicomJsonDataset[]>(dicomwebUrl!, `studies?${query}`);
       if (!Array.isArray(rows)) return null;
       return rows.find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid) ?? null;
+    },
+
+    async searchInstances(studyInstanceUid: string, seriesInstanceUid: string) {
+      const query = new URLSearchParams();
+      query.append("includefield", TAG.InstanceNumber);
+      query.append("includefield", TAG.NumberOfFrames);
+      const rows = await getJson<DicomJsonDataset[]>(
+        dicomwebUrl!,
+        `studies/${checkedUid(studyInstanceUid)}/series/${checkedUid(seriesInstanceUid)}/instances?${query}`,
+      );
+      // UID の形でない行は落とす（画面で選び、次の要求の path に入るため）
+      return sortInstances(Array.isArray(rows) ? rows.map(instanceFromDicomJson).filter((i) => isDicomUid(i.sopInstanceUid)) : []);
+    },
+
+    async instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string) {
+      const path = `studies/${checkedUid(studyInstanceUid)}/series/${checkedUid(seriesInstanceUid)}/instances/${checkedUid(sopInstanceUid)}/metadata`;
+      const res = await call(dicomwebUrl!, path, { headers: { accept: "application/dicom+json" } });
+      if (res.status === 404) {
+        await res.body?.cancel();
+        return null;
+      }
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+      }
+      const rows = (await res.json()) as unknown;
+      const ds = Array.isArray(rows) ? (rows[0] as DicomJsonDataset | undefined) : undefined;
+      // 答えをそのまま信じない：求めた検査・シリーズ・画像のものだけを返す
+      if (
+        !ds ||
+        stringValue(ds, TAG.StudyInstanceUID) !== studyInstanceUid ||
+        stringValue(ds, TAG.SeriesInstanceUID) !== seriesInstanceUid ||
+        stringValue(ds, TAG.SOPInstanceUID) !== sopInstanceUid
+      ) {
+        return null;
+      }
+      return ds;
     },
 
     async countStudies() {

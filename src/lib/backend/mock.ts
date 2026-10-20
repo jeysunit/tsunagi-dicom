@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { crc32 } from "node:zlib";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/backend/orthanc-rest";
 import {
   inDateRange,
+  sortInstances,
   sortSeries,
   sortStudiesNewestFirst,
   stringValue,
@@ -31,6 +32,7 @@ import {
   clampStudyLimit,
   STUDY_LIMIT,
   type Backend,
+  type InstanceSummary,
   type ReceivedStudy,
   type RelayRequest,
   type SeriesSummary,
@@ -48,6 +50,8 @@ import {
 //   機器 offline は C-ECHO に答えない。
 // - 段 5：書き出しは、画像の本体を入れない小さな ZIP を返す。削除は、このプロセスの記憶の中で検査を隠す（見本のファイルは変えない。
 //   消した検査は、検索・詳細・受け取りの記録・引き当て・中継のどれにも出さない）。
+// - 画像単位の DICOM タグ（2026-10-21）：シリーズの中の画像は REST の写しの Instances の並びから作る。画像の写しが1枚しか無いので、
+//   ほかの画像の SOPInstanceUID と値は、Orthanc の ID から決まる合成の値にする（instanceDatasetOf）。
 
 /** モックの仕事（このプロセスの記憶の中だけ。Next.js が部品を分けて組んでも1つにする） */
 interface MockJob {
@@ -151,7 +155,63 @@ interface RestSeries {
 interface RestInstance {
   ID: string;
   ParentSeries: string;
-  MainDicomTags: { SOPInstanceUID?: string };
+  MainDicomTags: { SOPInstanceUID?: string; InstanceNumber?: string; AcquisitionNumber?: string; ImagePositionPatient?: string };
+}
+
+/** モックの画像（画像単位の DICOM タグの見本） */
+interface MockInstance {
+  series: RestSeries;
+  tags: RestInstance["MainDicomTags"];
+  summary: InstanceSummary;
+}
+
+/** モダリティごとの SOP Class（CT Image Storage・MR Image Storage・ほかは Secondary Capture Image Storage） */
+const SOP_CLASS: Record<string, string> = {
+  CT: "1.2.840.10008.5.1.4.1.1.2",
+  MR: "1.2.840.10008.5.1.4.1.1.4",
+  OT: "1.2.840.10008.5.1.4.1.1.7",
+};
+
+/** 写しの無い画像の SOPInstanceUID（Orthanc の ID から決まる、2.25 の形の UID。64 字に収まる） */
+function syntheticUid(orthancId: string): string {
+  return `2.25.${BigInt(`0x${createHash("sha256").update(orthancId).digest("hex").slice(0, 30)}`)}`;
+}
+
+/** シリーズの MainDicomTags の VR（画像単位の DICOM タグの見本に入れるもの） */
+const SERIES_TAGS: Record<string, [string, string]> = {
+  Modality: ["00080060", "CS"],
+  SeriesDate: ["00080021", "DA"],
+  SeriesTime: ["00080031", "TM"],
+  Manufacturer: ["00080070", "LO"],
+  SeriesDescription: ["0008103E", "LO"],
+  BodyPartExamined: ["00180015", "CS"],
+  SeriesInstanceUID: ["0020000E", "UI"],
+  SeriesNumber: ["00200011", "IS"],
+};
+
+/** 検査の単位の検索だけにある項目（画像の値には無い）。画像単位の見本からは外す */
+const STUDY_ONLY = new Set(["00080056", "00080061", "00081190", "00201206", "00201208"]);
+
+/**
+ * 1枚の画像の DICOM の値の見本（WADO-RS の metadata の形）。検査の値（QIDO-RS の写し）に、シリーズと画像の値を足す。
+ * 画像の位置（ImagePositionPatient）は、写しがあればその値、無ければ画像の番号から決める（画像ごとに値が違う形の見本）
+ */
+function instanceDatasetOf(study: DicomJsonDataset, instance: MockInstance): DicomJsonDataset {
+  const ds: DicomJsonDataset = {};
+  for (const [key, value] of Object.entries(study)) if (!STUDY_ONLY.has(key)) ds[key] = value;
+  for (const [name, [tag, vr]] of Object.entries(SERIES_TAGS)) {
+    const v = instance.series.MainDicomTags[name];
+    if (v) ds[tag] = { vr, Value: [v] };
+  }
+  const { summary, tags } = instance;
+  const position = tags.ImagePositionPatient ?? `-160.0\\-160.0\\${(-55 + Number(summary.instanceNumber) * 5).toFixed(1)}`;
+  ds[TAG.SOPClassUID] = { vr: "UI", Value: [summary.sopClassUid] };
+  ds[TAG.SOPInstanceUID] = { vr: "UI", Value: [summary.sopInstanceUid] };
+  ds[TAG.InstanceNumber] = { vr: "IS", Value: [summary.instanceNumber] };
+  ds["00200012"] = { vr: "IS", Value: [tags.AcquisitionNumber ?? "1"] };
+  ds["00200032"] = { vr: "DS", Value: position.split("\\") };
+  ds["7FE00010"] = { vr: "OW", BulkDataURI: "bulk" };
+  return ds;
 }
 
 async function readAll<T>(dir: string): Promise<T[]> {
@@ -186,6 +246,35 @@ export function createMockBackend(): Backend {
       out.set(uid, [...(out.get(uid) ?? []), s]);
     }
     return out;
+  }
+
+  /** シリーズの中の画像（Orthanc の REST の写しの Instances の並び）。写しのある画像はその値、ほかは ID から決まる合成の値 */
+  async function mockInstances(studyInstanceUid: string, seriesInstanceUid: string): Promise<MockInstance[]> {
+    const series = ((await restSeriesByStudy()).get(studyInstanceUid) ?? []).find(
+      (s) => s.MainDicomTags.SeriesInstanceUID === seriesInstanceUid,
+    );
+    if (!series) return [];
+    const copied = new Map((await readAll<RestInstance>("instances")).map((i) => [i.ID, i]));
+    // 写しの無い画像の番号は、写しの画像の番号と重ならないように 1 から振る
+    const used = new Set(series.Instances.map((id) => copied.get(id)?.MainDicomTags.InstanceNumber).filter(Boolean));
+    let next = 1;
+    const nextNumber = () => {
+      while (used.has(String(next))) next += 1;
+      return String(next++);
+    };
+    return series.Instances.map((id) => {
+      const tags = copied.get(id)?.MainDicomTags;
+      return {
+        series,
+        tags: tags ?? {},
+        summary: {
+          sopInstanceUid: tags?.SOPInstanceUID ?? syntheticUid(id),
+          sopClassUid: SOP_CLASS[series.MainDicomTags.Modality ?? ""] ?? SOP_CLASS.OT!,
+          instanceNumber: tags?.InstanceNumber ?? nextNumber(),
+          numberOfFrames: null,
+        },
+      };
+    });
   }
 
   async function previews(): Promise<PreviewImage[]> {
@@ -240,6 +329,16 @@ export function createMockBackend(): Backend {
 
     async studyDataset(studyInstanceUid: string) {
       return (await qidoStudies()).find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid) ?? null;
+    },
+
+    async searchInstances(studyInstanceUid: string, seriesInstanceUid: string) {
+      return sortInstances((await mockInstances(studyInstanceUid, seriesInstanceUid)).map((i) => i.summary));
+    },
+
+    async instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string) {
+      const found = (await mockInstances(studyInstanceUid, seriesInstanceUid)).find((i) => i.summary.sopInstanceUid === sopInstanceUid);
+      const study = (await qidoStudies()).find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid);
+      return found && study ? instanceDatasetOf(study, found) : null;
     },
 
     async relayDicomweb(req: RelayRequest) {

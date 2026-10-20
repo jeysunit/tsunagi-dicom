@@ -110,44 +110,161 @@ function UidLine({ label, uid }: { label: string; uid: string }) {
   );
 }
 
-function AllValues({ uid }: { uid: string }) {
-  const [open, setOpen] = useState(false);
-  const query = useQuery({
-    queryKey: ["study-values", uid],
-    queryFn: () => getJson<{ values: DicomValueRow[] }>(`/api/studies/${encodeURIComponent(uid)}/values`),
-    enabled: open,
-  });
+/** DICOM タグの表（タグ・VR・値）。url の画面の API から読む（読んだことは BFF が操作ログに残す） */
+function ValuesBox({ url, queryKey, testId }: { url: string; queryKey: readonly unknown[]; testId: string }) {
+  const query = useQuery({ queryKey, queryFn: () => getJson<{ values: DicomValueRow[] }>(url) });
   return (
-    <div className={open ? "w-full" : undefined}>
-      <Button type="button" size="sm" variant="outline" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        DICOM タグ
-      </Button>
-      {open && (
-        <div className="mt-2 max-h-80 overflow-auto rounded border border-border" data-testid="all-values">
-          {query.isPending && (
-            <p className="p-2">
-              <PendingText pending />
-            </p>
-          )}
-          {query.isError && (
-            <p role="alert" className="p-2 text-danger">
-              {query.error.message}
-            </p>
-          )}
-          {query.data && (
-            <table className="w-full text-xs">
-              <tbody>
-                {query.data.values.map((row) => (
-                  <tr key={row.tag} className="border-b border-border align-top last:border-0">
-                    <td className="px-2 py-1 font-mono whitespace-nowrap text-label">{row.tag}</td>
-                    <td className="px-2 py-1 font-mono text-label">{row.vr}</td>
-                    <td className="px-2 py-1 break-all">{row.value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+    <div className="max-h-80 overflow-auto rounded border border-border bg-background" data-testid={testId}>
+      {query.isPending && (
+        <p className="p-2">
+          <PendingText pending />
+        </p>
+      )}
+      {query.isError && (
+        <p role="alert" className="p-2 text-danger">
+          {query.error.message}
+        </p>
+      )}
+      {query.data && (
+        <table className="w-full text-xs">
+          <tbody>
+            {query.data.values.map((row) => (
+              <tr key={row.tag} className="border-b border-border align-top last:border-0">
+                <td className="px-2 py-1 font-mono whitespace-nowrap text-label">{row.tag}</td>
+                <td className="px-2 py-1 font-mono text-label">{row.vr}</td>
+                <td className="px-2 py-1 break-all">{row.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+interface InstanceItem {
+  sopInstanceUid: string;
+  sopClassUid: string;
+  instanceNumber: string;
+  numberOfFrames: number | null;
+}
+
+/** シリーズの選択肢の文字（許可の一覧に無い項目は省く。何も無ければ UID） */
+function seriesLabel(s: SeriesView): string {
+  const head = [s.seriesNumber ? `#${s.seriesNumber}` : "", s.seriesDescription ?? ""].filter(Boolean).join(" ");
+  const tail = [s.modality, s.instanceCount != null ? `${s.instanceCount} 画像` : ""].filter(Boolean).join("・");
+  const text = [head, tail ? `（${tail}）` : ""].join("");
+  return text || (s.seriesInstanceUid ?? "");
+}
+
+/** 画像の選択肢の文字（画像の番号。複数フレームの画像はフレームの数も） */
+function instanceLabel(i: InstanceItem): string {
+  const frames = i.numberOfFrames != null && i.numberOfFrames > 1 ? `（${i.numberOfFrames} フレーム）` : "";
+  return `${i.instanceNumber ? `#${i.instanceNumber}` : i.sopInstanceUid}${frames}`;
+}
+
+const SELECT = "h-7 max-w-full rounded-md border border-border bg-background px-2 text-sm text-value";
+
+/** 画像単位の DICOM タグ：シリーズ → 画像を選び、その画像の SOPInstanceUID と値の全部を出す（最初はシリーズと画像の先頭） */
+function InstanceTags({ uid, series }: { uid: string; series: SeriesView[] | undefined }) {
+  const list = (series ?? []).filter((s) => !!s.seriesInstanceUid);
+  const [seriesPick, setSeriesPick] = useState("");
+  const [sopPick, setSopPick] = useState("");
+  const seriesUid = list.some((s) => s.seriesInstanceUid === seriesPick) ? seriesPick : (list[0]?.seriesInstanceUid ?? "");
+  const instances = useQuery({
+    queryKey: ["instances", uid, seriesUid],
+    queryFn: () =>
+      getJson<{ instances: InstanceItem[] }>(`/api/studies/${encodeURIComponent(uid)}/series/${encodeURIComponent(seriesUid)}/instances`),
+    enabled: seriesUid !== "",
+  });
+  const items = instances.data?.instances ?? [];
+  const sop = items.some((i) => i.sopInstanceUid === sopPick) ? sopPick : (items[0]?.sopInstanceUid ?? "");
+  if (!series) return <PendingText pending />;
+  if (list.length === 0) return <p className="text-label">シリーズがありません</p>;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-xs text-label">シリーズ</span>
+          <select
+            className={SELECT}
+            value={seriesUid}
+            onChange={(e) => {
+              setSeriesPick(e.target.value);
+              setSopPick("");
+            }}
+            data-testid="tags-series"
+          >
+            {list.map((s) => (
+              <option key={s.seriesInstanceUid} value={s.seriesInstanceUid}>
+                {seriesLabel(s)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-xs text-label">画像</span>
+          <select className={SELECT} value={sop} disabled={items.length === 0} onChange={(e) => setSopPick(e.target.value)} data-testid="tags-instance">
+            {items.map((i) => (
+              <option key={i.sopInstanceUid} value={i.sopInstanceUid}>
+                {instanceLabel(i)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <PendingText pending={instances.isFetching} />
+      </div>
+      {instances.isError && (
+        <p role="alert" className="text-danger">
+          {instances.error.message}
+        </p>
+      )}
+      {instances.data && items.length === 0 && <p className="text-label">画像がありません</p>}
+      {sop && (
+        <>
+          <UidLine label="SOPInstanceUID" uid={sop} />
+          <ValuesBox
+            key={sop}
+            url={`/api/studies/${encodeURIComponent(uid)}/series/${encodeURIComponent(seriesUid)}/instances/${encodeURIComponent(sop)}/values`}
+            queryKey={["instance-values", uid, seriesUid, sop]}
+            testId="instance-values"
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 開け閉めの「DICOM タグ」の中身（docs/spec.md の 3.1）。検査単位（QIDO-RS の検査の検索の1行の要約。どの画像の値かは分からない）と、
+ * 画像単位（選んだ1枚の画像の値の全部）を切り替える。既定は検査単位
+ */
+function DicomTags({ uid, series, id }: { uid: string; series: SeriesView[] | undefined; id: string }) {
+  const [level, setLevel] = useState<"study" | "instance">("study");
+  const tab = (value: "study" | "instance", label: string) => (
+    <button
+      type="button"
+      aria-pressed={level === value}
+      onClick={() => setLevel(value)}
+      data-testid={`tags-level-${value}`}
+      className={cn(
+        "inline-flex h-7 items-center border-r border-border px-2 text-sm last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
+        level === value ? "bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-hover active:bg-pressed",
+      )}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div id={id} className="space-y-2 pt-1" data-testid="dicom-tags">
+      <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="DICOM タグの単位">
+        {tab("study", "検査単位（要約）")}
+        {tab("instance", "画像単位")}
+      </div>
+      {level === "study" ? (
+        <ValuesBox url={`/api/studies/${encodeURIComponent(uid)}/values`} queryKey={["study-values", uid]} testId="all-values" />
+      ) : (
+        <InstanceTags uid={uid} series={series} />
       )}
     </div>
   );
@@ -216,6 +333,10 @@ export function StudyDetailPanel({
   const changed = onChanged;
   const allOpen = useSyncExternalStore(subscribeDetailOpen, getDetailOpen, getServerDetailOpen);
   const allId = useId();
+  // 「DICOM タグ」（権限のある役割だけ。既定は閉じる。行が替わると閉じる）
+  const tagsShown = screen.can.allValues && uid !== "";
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const tagsId = useId();
 
   return (
     <section aria-label="検査の詳細" className="space-y-2 px-3 py-2" data-testid="study-detail" data-study-uid={uid}>
@@ -309,7 +430,21 @@ export function StudyDetailPanel({
           {allOpen ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
           UID
         </Button>
-        {screen.can.allValues && uid && <AllValues uid={uid} />}
+        {/* 開いても、ボタンの位置は動かさない（中身はボタンの並びの下に出す。2026-10-21。前は開くと入れ物が横いっぱいになり、ボタンが次の行へ移った） */}
+        {tagsShown && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-expanded={tagsOpen}
+            aria-controls={tagsId}
+            data-testid="detail-tags-toggle"
+            onClick={() => setTagsOpen((v) => !v)}
+          >
+            {tagsOpen ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
+            DICOM タグ
+          </Button>
+        )}
       </div>
 
       {/* 開け閉めの「UID」の中は、StudyInstanceUID と SeriesInstanceUID だけ（ほかの値は見出しに上げた） */}
@@ -324,6 +459,7 @@ export function StudyDetailPanel({
       )}
       </div>
       )}
+      {tagsShown && tagsOpen && <DicomTags uid={uid} series={data?.series} id={tagsId} />}
     </section>
   );
 }
