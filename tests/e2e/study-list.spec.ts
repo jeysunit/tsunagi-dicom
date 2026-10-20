@@ -84,6 +84,31 @@ test("すぐ絞れる見出し：期間の指定・モダリティ・横断の�
   await expect(page.getByTestId("study-count")).toHaveText("8");
 });
 
+test("0 件でも一覧の場所が分かる：表の枠と見出しの行を出し、空の案内は表の中。絞り込みが既定なら「条件をクリア」を出さない", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.goto(`/?${new URLSearchParams({ q: "該当しない語" })}`);
+  const table = page.getByTestId("study-table");
+  await expect(table.getByTestId("study-list-empty")).toBeVisible();
+  await expect(table.locator("thead")).toContainText("患者ID");
+  await expect(table.locator("thead")).toContainText("検査日時");
+  await expect(rows(page)).toHaveCount(0);
+  await expect(table.getByRole("button", { name: "条件をクリア" })).toBeVisible();
+  // 表の枠は一覧の場所の大きさのまま（真っ白の場所にしない）
+  const box = await page.getByTestId("study-list-scroll").boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(200);
+
+  // 画像サーバーに検査が 1 件も無いとき（絞り込みは既定）：案内だけを出し、戻す先の無い「条件をクリア」は出さない
+  await page.route(/\/api\/studies$/, (route) =>
+    route.fulfill({ json: { count: { count: 0, exact: true }, studies: [], facets: { modality: { all: 0 } } } }),
+  );
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await expect(table.getByTestId("study-list-empty")).toBeVisible();
+  await expect(page.getByRole("button", { name: "条件をクリア" })).toHaveCount(0);
+  await expect(table.locator("thead")).toContainText("患者ID");
+});
+
 // 期待の変更（1 件）：一覧の行のサムネイル（写しのある検査は画像・無い検査は印）の確かめを外した。
 // 1 行 28px の一覧ではサムネイルの列を外したため（docs/spec.md の 3.1）。サムネイルは詳細のシリーズの横 1 列で確かめる（下の試験）。
 test("一覧の行：氏名（漢字・かな）・和暦と年齢・シリーズ数と画像数", async ({ page }) => {
