@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ActionButton, PendingText } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { getJson } from "@/lib/client/api";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
@@ -10,7 +11,7 @@ import type { StudyView } from "@/lib/fields";
 import { formatSlashDate } from "@/lib/format/japanese-date";
 
 // 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確かめの画面：消す検査を並べ、「戻せない」ことを示し、
-// 理由を書いてから「削除」を押す。大事な操作なので、BFF が再認証を求めたら、パスワード（と確認の番号）を入れてから続ける。
+// 理由を書いてから「削除する」を押す。大事な操作なので、BFF が再認証を求めたら、パスワードを入れてから続ける（TOTP は求めない）。
 // 答えが分からなければ「結果不明」と要求の ID を出し、もう一度消さずに確かめる道（Orthanc にまだあるかを読む）だけを出す。
 // 検査がまだあっても「消えていない」とは確定しない。管理者（照らし合わせの役割）は、Orthanc の側で先の削除が終わっていることを
 // 確かめてから、確かめた内容を書いて手で解ける。
@@ -50,6 +51,8 @@ export function DeletePanel({
 }) {
   const [reason, setReason] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  /** 再認証の要求を送っている間 */
+  const [authing, setAuthing] = useState(false);
   const uid = study.studyInstanceUid ?? "";
   // 確かめの画面に出すのは、BFF が Orthanc から読み直した、消す検査の要点（一覧の行の値ではない）。消すときに確かめの token を添える
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -80,7 +83,7 @@ export function DeletePanel({
       setPhase({ kind: "unknown", requestId });
     } else if (result.status === 409 && Array.isArray(result.data.pendingRequestIds) && typeof result.data.pendingRequestIds[0] === "string") {
       // この検査に、結果の分からない先の削除がある：その要求を確かめる道を出す（新しく消し直させない）
-      setPhase({ kind: "unknown", requestId: result.data.pendingRequestIds[0], note: "この検査に、結果の分からない先の削除がある。" });
+      setPhase({ kind: "unknown", requestId: result.data.pendingRequestIds[0], note: "この検査には結果未確認の削除があります" });
     } else {
       // 409（確かめの後に検査が変わった・同じ UID の検査が2つある・結果の分からない削除がある）は、確かめの画面を読み直す
       if (result.status === 409) loadPreview();
@@ -102,11 +105,13 @@ export function DeletePanel({
     event.preventDefault();
     if (phase.kind !== "reauth") return;
     const form = new FormData(event.currentTarget);
+    setAuthing(true);
     const res = await postJson(
       "/api/auth/reauth",
-      { password: form.get("password"), ...(screen.reauth?.needsTotp ? { code: form.get("code") } : {}) },
+      { password: form.get("password") },
       screen.csrfToken,
     );
+    setAuthing(false);
     if (res.data.next) {
       window.location.assign(res.data.next);
       return;
@@ -130,20 +135,20 @@ export function DeletePanel({
         setPhase({ kind: "deleted" });
         onDeleted();
       } else if (r.outcome === "not_deleted" || r.outcome === "failed") {
-        setPhase({ kind: "error", text: "消えていない（Orthanc に検査が残っている）" });
+        setPhase({ kind: "error", text: "削除されていません（検査はサーバーに残っています）" });
         loadPreview();
       } else {
         setPhase({
           kind: "unknown",
           requestId,
           note: r.studyPresent
-            ? "検査は Orthanc にまだある。先の削除が止まったとも、遅れて消えるとも言えないので、結果不明のまま残す。"
+            ? "検査はまだサーバーに残っています。前回の削除が完了したかは不明です"
             : undefined,
         });
       }
     } catch (e) {
       // 確かめられなかったときも、結果不明のまま残す（消し直す道を出さない）
-      setPhase({ kind: "unknown", requestId, note: `確かめられなかった（${(e as Error).message}）` });
+      setPhase({ kind: "unknown", requestId, note: `確認できませんでした（${(e as Error).message}）` });
     }
   }
 
@@ -155,7 +160,7 @@ export function DeletePanel({
       setPhase({ kind: "deleted" });
       onDeleted();
     } else if (res.data.outcome === "not_deleted") {
-      setPhase({ kind: "error", text: "解いた：消えていない（Orthanc に検査が残っている）。消すなら、もう一度確かめてから" });
+      setPhase({ kind: "error", text: "解除しました。検査は削除されていません。削除する場合は、もう一度確認してから実行してください" });
       loadPreview();
     } else {
       setPhase({ kind: "unknown", requestId, note: errorText(res) });
@@ -170,22 +175,40 @@ export function DeletePanel({
           {previewError}
         </p>
       )}
-      {!preview && !previewError && <p className="text-label">消す検査を Orthanc から読んでいる</p>}
-      {preview && (
-        <p className="text-sm" data-testid="delete-confirm">
-          <span className="font-bold text-value">{preview.patientId}</span>
-          {preview.patientName ? ` ${preview.patientName}` : ""}・{formatSlashDate(preview.studyDate)}・{study.modalities?.join("・")}・
-          {preview.seriesCount} シリーズ・{preview.instanceCount} 画像 を Orthanc から消す。
-          <span className="font-bold text-danger">戻せない。</span>戻すには、取り込み直すか、送り元から送り直す。
+      {!preview && !previewError && (
+        <p className="min-h-5">
+          <PendingText pending>削除する検査を確認しています…</PendingText>
         </p>
+      )}
+      {preview && (
+        // 確かめの画面：消す検査を表の形で並べ、取り消せないことを示す（docs/spec.md の 3.5）
+        <div className="space-y-1 text-sm" data-testid="delete-confirm">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+            <dt className="text-xs text-label">削除する検査</dt>
+            <dd>
+              <span className="font-bold text-value">{preview.patientId}</span>
+              {preview.patientName ? ` ${preview.patientName}` : ""}／{formatSlashDate(preview.studyDate)} {study.modalities?.join("・")}／
+              {preview.seriesCount} シリーズ・{preview.instanceCount} 画像
+            </dd>
+          </dl>
+          <p className="font-bold text-danger">この操作は取り消せません。</p>
+          <p className="text-xs text-label">元に戻すには、再度インポートするか送信元から再送します</p>
+        </div>
       )}
       {preview && phase.kind !== "deleted" && phase.kind !== "reauth" && phase.kind !== "unknown" && (
         <form onSubmit={(e) => void submit(e)} className="space-y-2">
           <label className="block space-y-1">
-            <span className="text-xs text-label">理由（必須。監査の記録に残る）</span>
+            <span className="text-xs text-label">削除理由（必須・操作ログに記録）</span>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
+              onKeyDown={(e) => {
+                // Escape は削除の画面だけを閉じる（詳細のパネルごと閉じて、書いた理由を失わないように。UX のレビューの M11）
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  onClose();
+                }
+              }}
               maxLength={500}
               required
               rows={2}
@@ -194,66 +217,66 @@ export function DeletePanel({
             />
           </label>
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={busy || reason.trim() === ""} className="bg-danger text-background hover:bg-danger" data-testid="delete-submit">
-              削除
-            </Button>
-            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onClose}>
-              やめる
+            <ActionButton type="submit" size="sm" variant="danger" pending={busy} disabled={reason.trim() === ""} data-testid="delete-submit">
+              削除する
+            </ActionButton>
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onClose}>
+              キャンセル
             </Button>
           </div>
         </form>
       )}
       {phase.kind === "reauth" && (
-        <form onSubmit={(e) => void reauth(e)} aria-label="本人の確かめ" className="max-w-sm space-y-2" data-testid="delete-reauth">
-          <p className="text-label">削除は大事な操作なので、パスワード{screen.reauth?.needsTotp ? "と確認の番号" : ""}をもう一度入れる。</p>
+        <form onSubmit={(e) => void reauth(e)} aria-label="再認証" className="max-w-sm space-y-2" data-testid="delete-reauth">
+          {/* 再認証はパスワードだけ。一度通れば REAUTH_MINUTES の間は聞き直さない（docs/spec.md の 3.6） */}
+          <p className="text-label">削除にはパスワードの再入力が必要です</p>
           <Input name="password" type="password" autoComplete="current-password" aria-label="パスワード" required />
-          {screen.reauth?.needsTotp && (
-            <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} aria-label="確認の番号" required />
-          )}
           {phase.error && (
             <p role="alert" className="text-sm text-danger">
               {phase.error}
             </p>
           )}
           <div className="flex gap-2">
-            <Button type="submit" size="sm">
-              確かめて消す
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setPhase({ kind: "idle" })}>
-              やめる
+            <ActionButton type="submit" size="sm" pending={authing}>
+              認証して削除
+            </ActionButton>
+            <Button type="button" size="sm" variant="outline" disabled={authing} onClick={() => setPhase({ kind: "idle" })}>
+              キャンセル
             </Button>
           </div>
         </form>
       )}
-      {busy && <p role="status">消している</p>}
+      {busy && (
+        <p>
+          <PendingText pending>削除中…</PendingText>
+        </p>
+      )}
       {phase.kind === "deleted" && (
         <p role="status" className="font-bold text-value" data-testid="delete-status">
-          消した
+          削除しました
         </p>
       )}
       {phase.kind === "unknown" && (
         <div role="alert" className="space-y-1" data-testid="delete-status">
-          <p className="text-danger">結果が分からない。もう一度消さずに、状態を確かめる。</p>
+          <p className="text-danger">削除結果を確認できません。再実行せずに状態を確認してください</p>
           {phase.note && <p className="text-sm text-label">{phase.note}</p>}
-          <p className="font-mono text-xs text-label">要求の ID {phase.requestId}</p>
+          <p className="font-mono text-xs text-label">要求ID {phase.requestId}</p>
           <Button type="button" size="sm" variant="outline" onClick={() => void check(phase.requestId)}>
-            確かめる
+            状態を確認
           </Button>
           {screen.can.reconcile && (
-            <form onSubmit={(e) => void resolve(e, phase.requestId)} aria-label="結果不明の削除を解く" className="space-y-1 pt-2" data-testid="delete-resolve">
-              <p className="text-xs text-label">
-                管理者：Orthanc の側（ログ・再起動の有無など）で、先の削除の処理が終わっていることを確かめてから解く。解くと、同じ検査をまた消せる。
-              </p>
+            <form onSubmit={(e) => void resolve(e, phase.requestId)} aria-label="結果不明の削除の解除" className="space-y-1 pt-2" data-testid="delete-resolve">
+              <p className="text-xs text-label">管理者：Orthanc のログで前回の削除の完了を確認してから解除してください</p>
               <textarea
                 name="note"
                 required
                 maxLength={500}
                 rows={2}
-                aria-label="確かめた内容"
+                aria-label="確認内容"
                 className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-value"
               />
               <Button type="submit" size="sm" variant="outline">
-                確かめて解く
+                確認済みとして解除
               </Button>
             </form>
           )}

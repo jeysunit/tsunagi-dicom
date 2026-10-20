@@ -13,11 +13,11 @@ import { isRequestId, requestOutcome, rowsOfRequest } from "@/lib/pacs-ops";
 type Context = { params: Promise<{ uid: string }> };
 
 const Body = z.object({
-  requestId: z.string().refine(isRequestId, "要求の ID（UUID）の形が誤り"),
+  requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
   /** 送り先に届いていたか（管理者が確かめた結果） */
   delivered: z.boolean(),
   /** どこで・どう確かめたか（必須） */
-  note: z.string().trim().min(1, "確かめた内容を書く").max(500),
+  note: z.string().trim().min(1, "確認内容を入力してください").max(500),
 });
 
 export async function POST(request: Request, { params }: Context) {
@@ -44,8 +44,8 @@ export async function POST(request: Request, { params }: Context) {
         },
       };
     });
-    if (result === "missing") return Response.json({ error: "この検査の、その要求の ID の送信が無い" }, { status: 404 });
-    if (result === "settled") return Response.json({ error: "この送信の結果は、もう分かっている" }, { status: 409 });
+    if (result === "missing") return Response.json({ error: "この検査に、その要求ID の送信はありません" }, { status: 404 });
+    if (result === "settled") return Response.json({ error: "この送信の結果は確定しています" }, { status: 409 });
     return Response.json({ requestId, outcome: delivered ? "delivered" : "not_delivered" });
   } catch (error) {
     return errorResponse(error);

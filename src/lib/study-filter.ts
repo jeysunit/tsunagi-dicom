@@ -13,13 +13,14 @@ import { isModalityGroup, studyInGroup, type ModalityGroup } from "@/lib/modalit
 
 export const DATE_PRESETS = ["today", "yesterday", "week", "month", "all", "range"] as const;
 export type DatePreset = (typeof DATE_PRESETS)[number];
+/** 画面の言葉（docs/spec.md の 2.2 の用語集） */
 export const DATE_LABELS: Record<DatePreset, string> = {
   today: "今日",
   yesterday: "昨日",
-  week: "1週間",
+  week: "過去7日",
   month: "今月",
-  all: "全期間",
-  range: "期間の指定",
+  all: "すべて",
+  range: "期間指定",
 };
 
 /** 件数を添える検査日の見出し（期間の指定には添えない） */

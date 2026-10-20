@@ -158,7 +158,7 @@ export async function assertWriteAllowed(
   const { auth } = getConfig();
   if (auth.mode !== "dev" || auth.devAllowWrite) return;
   await audit(session, { ...denied, outcome: "denied", detail: { ...(denied.detail ?? {}), reason: "dev_write_blocked" } });
-  throw new RequestError(403, "検証モードでは書き込みの操作を止めている（試すときは DEV_ALLOW_WRITE=true）");
+  throw new RequestError(403, "検証モードでは書き込みが無効です（DEV_ALLOW_WRITE=true で有効になります）");
 }
 
 /**

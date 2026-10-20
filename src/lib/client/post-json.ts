@@ -22,12 +22,12 @@ export async function postJson(
     const data = (await res.json().catch(() => ({}))) as PostResult["data"];
     return { ok: res.ok, status: res.status, data };
   } catch {
-    return { ok: false, status: 0, data: { error: "サーバーにつながらなかった" } };
+    return { ok: false, status: 0, data: { error: "サーバーに接続できませんでした" } };
   }
 }
 
 /** 誤りの文言（理由の並びがあれば添える） */
 export function errorText(result: PostResult): string {
-  const base = result.data.error ?? `失敗した（${result.status}）`;
+  const base = result.data.error ?? `エラーが発生しました（${result.status}）`;
   return result.data.problems?.length ? `${base}：${result.data.problems.join("・")}` : base;
 }

@@ -108,51 +108,42 @@ afterEach(async () => {
 });
 
 describe("受け取りの記録", () => {
-  it("技師には、受け取った検査を新しい順に、時刻・送ってきた機器・画像の数とともに返し、返した検査を記録する", async () => {
-    state.role = "technologist";
+  it("一般には、受け取った検査を新しい順に、時刻・送ってきた機器・画像の数とともに返し、返した検査を記録する", async () => {
+    state.role = "general";
     const { GET } = await import("@/app/api/receive-log/route");
     const res = await GET();
     expect(res.status).toBe(200);
     const { items } = await res.json();
     expect(items).toHaveLength(8);
-    expect(items[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00", remoteAet: "DTG_SCU", receivedInstances: 6 });
+    expect(items[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00Z", remoteAet: "DTG_SCU", receivedInstances: 6 });
     expect(items[0].study).toMatchObject({ patientId: "JP-TEST-0004", modalities: ["MR"] });
     // REST で入った検査は、送ってきた機器が無く、入った道が分かる
     expect(items.find((i: { study: { patientId: string }; origin: string }) => i.origin === "RestApi")).toMatchObject({ remoteAet: null });
     const times = items.map((i: { receivedAt: string }) => i.receivedAt);
     expect(times).toEqual([...times].sort().reverse());
     const row = await lastAudit("receive_log");
-    expect(row).toMatchObject({ outcome: "success", actorRole: "technologist" });
+    expect(row).toMatchObject({ outcome: "success", actorRole: "general" });
     expect((detailOf(row).returned as unknown[]).length).toBe(8);
   });
 
-  it("医師・閲覧には断り、断ったことを記録する", async () => {
-    const { GET } = await import("@/app/api/receive-log/route");
-    for (const role of ["doctor", "viewer"]) {
-      state.role = role;
-      expect((await GET()).status).toBe(403);
-      expect(await lastAudit("receive_log")).toMatchObject({ outcome: "denied", actorRole: role });
-    }
-  });
+  // 外した試験：「医師・閲覧には断る」。役割を管理者と一般の2つにし（2026-10-20）、受信一覧は両方が使うので、断る役割が無い
 });
 
 describe("機器の一覧と C-ECHO", () => {
-  it("管理者には住所まで、技師には名前と AE タイトルだけを返す", async () => {
+  it("管理者には住所まで、一般には名前と AE タイトルだけを返す", async () => {
     const { GET } = await import("@/app/api/modalities/route");
     state.role = "admin";
     const admin = (await (await GET()).json()).modalities;
     expect(admin.map((m: { id: string }) => m.id)).toEqual(["dtg", "offline", "workstation"]);
     expect(admin[0]).toMatchObject({ id: "dtg", aet: "DTG_SCP", host: "192.0.2.20", port: 11112 });
-    state.role = "technologist";
+    state.role = "general";
     const tech = (await (await GET()).json()).modalities;
     for (const m of tech) expect(Object.keys(m).sort()).toEqual(["aet", "id"]);
-    state.role = "viewer";
-    expect((await GET()).status).toBe(403);
-    expect(await lastAudit("echo")).toMatchObject({ outcome: "denied", actorRole: "viewer" });
+    // 外した確かめ：閲覧には断る（閲覧の役割を無くした。2026-10-20）
   });
 
   it("つながる機器・つながらない機器・登録の無い機器を確かめ、結果を記録する", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { POST } = await import("@/app/api/modalities/[id]/echo/route");
     const ok = await POST(post("/api/modalities/dtg/echo", {}), idParams("dtg"));
     expect(await ok.json()).toEqual({ modality: "dtg", connected: true });
@@ -173,7 +164,7 @@ describe("機器の一覧と C-ECHO", () => {
 
 describe("ほかの機器へ送る", () => {
   it("モックで一巡りする：送ると仕事の ID を受け、状態は終わりまで進み、呼ぶ前・呼んだ後・終わりを要求の ID で結んで記録する", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const requestId = crypto.randomUUID();
     const res = await send({ modality: "dtg", requestId });
     expect(res.status).toBe(202);
@@ -191,7 +182,7 @@ describe("ほかの機器へ送る", () => {
     const rows = await rowsOf(requestId);
     expect(rows.map((r) => detailOf(r).phase)).toEqual(["request", "result", "done"]);
     expect(rows.map((r) => r.outcome)).toEqual(["success", "success", "success"]);
-    expect(rows[0]).toMatchObject({ patientId: "JP-TEST-0004", studyInstanceUid: STUDY, actorRole: "technologist" });
+    expect(rows[0]).toMatchObject({ patientId: "JP-TEST-0004", studyInstanceUid: STUDY, actorRole: "general" });
     expect(detailOf(rows[0]!)).toMatchObject({ modality: "dtg", aet: "DTG_SCP" });
     expect(detailOf(rows[1]!).jobId).toBe(detailOf(rows[2]!).jobId);
     // 仕事の中身（Content）は返さない
@@ -211,23 +202,11 @@ describe("ほかの機器へ送る", () => {
     expect(detailOf(rows.at(-1)!)).toMatchObject({ phase: "done", state: "Failure", errorCode: 9 });
   });
 
-  it("医師・閲覧には断り、Orthanc を呼ばずに、断ったことを記録する", async () => {
-    const { getBackend } = await import("@/lib/backend");
-    const spy = vi.spyOn(getBackend(), "sendStudy");
-    for (const role of ["doctor", "viewer"]) {
-      state.role = role;
-      const requestId = crypto.randomUUID();
-      expect((await send({ modality: "dtg", requestId })).status).toBe(403);
-      const rows = await rowsOf(requestId);
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ outcome: "denied", actorRole: role });
-      expect(detailOf(rows[0]!)).toMatchObject({ reason: "forbidden", permission: "study.send" });
-    }
-    expect(spy).not.toHaveBeenCalled();
-  });
+  // 外した試験：「医師・閲覧には断る」。送信は管理者と一般の両方が使う（2026-10-20）ので、役割で断る相手が無い。
+  // 断ったときに Orthanc を呼ばず記録に残ることは、下の検証モードの書き込みの止めの試験で見る
 
   it("同じ要求の ID は二度流さない：Orthanc を呼び直さず、前の結果を返す", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const spy = vi.spyOn(getBackend(), "sendStudy");
     const requestId = crypto.randomUUID();
@@ -241,7 +220,7 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("Orthanc の答えが分からなければ「結果不明」を返し、unknown として記録する。確かめの道は送り直さない", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const { BackendUnknownError } = await import("@/lib/backend/types");
     const spy = vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendUnknownError());
@@ -263,7 +242,7 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("Orthanc が断れば失敗を記録し、誤りを返す", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const { BackendError } = await import("@/lib/backend/types");
     vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendError("画像サーバーの応答が 500"));
@@ -273,7 +252,7 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("呼ぶ前の記録ができなければ、Orthanc を呼ばない", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const spy = vi.spyOn(getBackend(), "sendStudy");
     const session = await import("@/lib/auth/session");
@@ -307,7 +286,7 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("仕事の状態：書き換えた token・期限の過ぎた token・ほかの利用者の token は読ませない。token の中身は読めない", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { job } = await (await send({ modality: "dtg", requestId: crypto.randomUUID() })).json();
     // 中身（UID・利用者）は暗号化していて、token の文字に出ない
     expect(job).not.toContain(STUDY);
@@ -327,12 +306,11 @@ describe("ほかの機器へ送る", () => {
     expect((await readJob(signJobToken(payload, state.config!.sessionSecret, Date.now() - JOB_TOKEN_TTL_MS - 1000))).status).toBe(404);
     // ほかの鍵（SESSION_SECRET を替えた後）の token
     expect(openJobToken(signJobToken(payload, "t".repeat(48)), state.config!.sessionSecret)).toBeNull();
-    state.role = "viewer";
-    expect((await readJob(job)).status).toBe(403);
+    // 外した確かめ：閲覧には仕事の状態を読ませない（閲覧の役割を無くした。2026-10-20）
   });
 
   it("同じ要求の ID が並んで届いても、Orthanc を呼ぶのは1回、「求めた」の行も1つ", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const spy = vi.spyOn(getBackend(), "sendStudy");
     const requestId = crypto.randomUUID();
@@ -343,7 +321,7 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("同じ要求の ID で、別の検査・別の送り先を求めると 409（前の送信の「受けた」を返さない）", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const spy = vi.spyOn(getBackend(), "sendStudy");
     const requestId = crypto.randomUUID();
@@ -357,7 +335,7 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("答えが分からず、結果の記録にも失敗しても、結果不明として返す（誤りとして送り直しを誘わない）", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const { BackendUnknownError } = await import("@/lib/backend/types");
     vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendUnknownError());
@@ -377,16 +355,19 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("断った行は「求めた」と読まれない：断った後に同じ要求の ID で送れる", async () => {
-    state.role = "doctor";
+    // 断る道は、前は医師の役割（役割で断る）。医師の役割を無くした（2026-10-20）ので、検証モードの書き込みの止めで断る
+    state.role = "general";
+    state.config!.auth.devAllowWrite = false;
     const requestId = crypto.randomUUID();
     expect((await send({ modality: "dtg", requestId })).status).toBe(403);
+    state.config!.auth.devAllowWrite = true;
     expect(detailOf((await rowsOf(requestId))[0]!).phase).toBeUndefined();
-    state.role = "technologist";
+    state.role = "general";
     expect(await (await send({ modality: "dtg", requestId })).json()).toMatchObject({ outcome: "accepted" });
   });
 
   it("仕事の終わりを並んで読んでも、終わりの行は1つ", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const requestId = crypto.randomUUID();
     const { job } = await (await send({ modality: "dtg", requestId })).json();
     await readJob(job);
@@ -396,7 +377,7 @@ describe("ほかの機器へ送る", () => {
   });
 
   it("結果不明の送信があるうちは、同じ検査を同じ送り先へ、新しい要求の ID でも送れない（照らし合わせの後は送れる）", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const { BackendUnknownError } = await import("@/lib/backend/types");
     const spy = vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendUnknownError());
@@ -411,7 +392,7 @@ describe("ほかの機器へ送る", () => {
     // 別の送り先へは送れる
     expect((await send({ modality: "workstation", requestId: crypto.randomUUID() })).status).toBe(202);
     expect(spy).toHaveBeenCalledTimes(2);
-    // 技師は照らし合わせを記録できない。管理者が送り先で確かめて記録する
+    // 一般は照らし合わせを記録できない。管理者が送り先で確かめて記録する
     expect((await resolveSend(first, false)).status).toBe(403);
     state.role = "admin";
     expect(await (await resolveSend(first, false)).json()).toEqual({ requestId: first, outcome: "not_delivered" });
@@ -420,12 +401,12 @@ describe("ほかの機器へ送る", () => {
     // 結果の分かった送信は、もう照らせない
     expect((await resolveSend(first, true)).status).toBe(409);
     // 照らした後は、同じ送り先へ送れる
-    state.role = "technologist";
+    state.role = "general";
     expect((await send({ modality: "dtg", requestId: crypto.randomUUID() })).status).toBe(202);
   });
 
   it("解いていない結果不明の送信は、8 日たっても止めになり、確かめの道と照らし合わせから見える", async () => {
-    state.role = "technologist";
+    state.role = "general";
     const { getBackend } = await import("@/lib/backend");
     const { BackendUnknownError } = await import("@/lib/backend/types");
     vi.spyOn(getBackend(), "sendStudy").mockRejectedValueOnce(new BackendUnknownError());

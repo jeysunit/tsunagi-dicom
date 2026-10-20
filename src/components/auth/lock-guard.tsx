@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { ActionButton } from "@/components/ui/pending";
 import { LOCK_COOKIE, type LockCookieReason } from "@/lib/auth/lock-cookie";
 import { errorText, postJson } from "@/lib/client/post-json";
 import { cn } from "@/lib/utils";
@@ -362,14 +363,14 @@ export function LockGuard({
           >
             <h2 id="screen-lock-title" className="flex items-center gap-1.5 font-bold text-value">
               <Lock aria-hidden className="size-4" />
-              画面をロックしている
+              画面ロック中
             </h2>
-            <p className="text-label">続けるには、パスワード{needsTotp ? "と確認の番号" : ""}を入れる。</p>
+            <p className="text-label">{needsTotp ? "パスワードと認証コードを入力してロックを解除してください" : "パスワードを入力してロックを解除してください"}</p>
             <Field label="パスワード">
               <Input name="password" type="password" autoComplete="current-password" required />
             </Field>
             {needsTotp && (
-              <Field label="確認の番号（認証のアプリの 6 桁）">
+              <Field label="認証コード（6 桁）">
                 <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} required />
               </Field>
             )}
@@ -379,9 +380,9 @@ export function LockGuard({
               </p>
             )}
             <div className="flex gap-2">
-              <Button type="submit" disabled={busy}>
-                ロックを解く
-              </Button>
+              <ActionButton type="submit" pending={busy}>
+                ロック解除
+              </ActionButton>
             </div>
           </form>
         </div>
@@ -390,12 +391,12 @@ export function LockGuard({
   );
 }
 
-/** ヘッダーの「ロック」のボタン（すぐにロックする） */
+/** ヘッダーの「画面ロック」のボタン（すぐにロックする） */
 export function LockNowButton() {
   return (
     <Button type="button" size="sm" variant="outline" onClick={() => window.dispatchEvent(new Event(LOCK_NOW_EVENT))}>
       <Lock aria-hidden />
-      ロック
+      画面ロック
     </Button>
   );
 }

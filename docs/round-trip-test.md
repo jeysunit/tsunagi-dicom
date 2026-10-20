@@ -28,7 +28,7 @@ flowchart LR
 1. **Orthanc**：DICOMweb のプラグインを有効にする。dicom-test-generator の受け取る側を、送り先の機器として登録する（例：Orthanc の設定の `DicomModalities` に `"dtg": ["DTG_SCP", "192.0.2.20", 11112]`。名前・AE タイトル・住所は環境の値にする）。dicom-test-generator からの C-STORE を受けられるようにする（受け元の確かめは Orthanc の設定で、施設の決まりに従う）。
    - REST で機器を足したときは、Orthanc の記憶の中だけにあり、再起動で消える（`DicomModalitiesInDatabase` を `true` にすると残る）。
 2. **dicom-test-generator**：`config/app_config.yaml` の `storage_scp:` を `enabled: true` にして、受け取る側を起こす（`python -m app.cli scp start`）。既定は手元（127.0.0.1）だけで待ち受けるので、Orthanc から届く住所で待ち受けるように設定する。C-ECHO には Success を返す。
-3. **tsunagi-dicom**：`AUTH_MODE=local`、`BACKEND_MOCK=false`、`BACKEND_ORTHANC_URL`（Orthanc の REST）と `BACKEND_DICOMWEB_URL`（Orthanc の DICOMweb のプラグイン）を設定する。書く資格情報を分けるときは `BACKEND_WRITE_USERNAME`・`BACKEND_WRITE_PASSWORD_FILE` も渡す。管理者か技師の利用者でログインする。
+3. **tsunagi-dicom**：`AUTH_MODE=local`、`BACKEND_MOCK=false`、`BACKEND_ORTHANC_URL`（Orthanc の REST）と `BACKEND_DICOMWEB_URL`（Orthanc の DICOMweb のプラグイン）を設定する。書く資格情報を分けるときは `BACKEND_WRITE_USERNAME`・`BACKEND_WRITE_PASSWORD_FILE` も渡す。管理者か一般の利用者でログインする。
 4. 試す前に、管理者で `/api/audit/verify` を開き、`checked`（記録の行の数）を控える。
 
 ## 手順と、確かめること

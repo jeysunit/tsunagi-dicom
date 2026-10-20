@@ -3,7 +3,7 @@ import { RequestError } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { sameOriginRequest } from "@/lib/api/same-origin";
 import { studyUidParam } from "@/lib/api/study-param";
-import { audit, requirePermission, requireSession } from "@/lib/auth/session";
+import { audit, auditSource, requirePermission, requireSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { BackendError } from "@/lib/backend/types";
 import { assertWriteAllowed } from "@/lib/pacs-ops";
@@ -28,7 +28,7 @@ export async function GET(request: Request, { params }: Context) {
         studyInstanceUid: uid,
         detail: { reason: "not-same-origin", site: request.headers.get("sec-fetch-site")?.slice(0, 32) ?? null },
       });
-      throw new RequestError(403, "このアプリの画面から開いた要求だけを受ける");
+      throw new RequestError(403, "この画面からの要求だけを受け付けます");
     }
     await requirePermission(session, "study.export", { action: "export", studyInstanceUid: uid });
     await assertWriteAllowed(session, { action: "export", studyInstanceUid: uid });
@@ -37,17 +37,24 @@ export async function GET(request: Request, { params }: Context) {
     const backend = getBackend();
     const orthancId = await backend.lookupStudy(uid);
     const info = orthancId ? await backend.studyInfo(orthancId) : null;
-    if (!orthancId || !info) return Response.json({ error: "検査が見つからない" }, { status: 404 });
+    if (!orthancId || !info) return Response.json({ error: "検査が見つかりません" }, { status: 404 });
     if (info.studyInstanceUid !== uid) {
       await audit(session, { action: "export", outcome: "denied", patientId: info.patientId, studyInstanceUid: uid, detail: { reason: "mismatch" } });
-      return Response.json({ error: "Orthanc で引いた検査の StudyInstanceUID が、求めた UID と合わない" }, { status: 409 });
+      return Response.json({ error: "検査の StudyInstanceUID が一致しません" }, { status: 409 });
     }
     const patientId = info.patientId;
 
     // 取る前に「求めた」を記録する（記録できなければ渡さない）。結果（流し終えた・途中で切れた）は別の行に残し、要求の ID で結ぶ
     const requestId = randomUUID();
+    // 結果の行は、答えを返した後（流し終えた・切られたとき）に書く。そのときは要求の headers() を読めないので、
+    // 送り元は要求の間に取っておき、どの行にも同じ値を渡す
+    const source = await auditSource();
     const record = (outcome: "success" | "failed", phase: "request" | "result", extra: Record<string, unknown> = {}) =>
-      audit(session, { action: "export", outcome, patientId, studyInstanceUid: uid, detail: { format: "zip", requestId, phase, ...extra } });
+      audit(
+        session,
+        { action: "export", outcome, patientId, studyInstanceUid: uid, detail: { format: "zip", requestId, phase, ...extra } },
+        source,
+      );
     await record("success", "request");
     let zip: Response;
     try {
@@ -58,7 +65,7 @@ export async function GET(request: Request, { params }: Context) {
     }
     if (!zip.body) {
       await record("failed", "result", { status: 502 });
-      return Response.json({ error: "画像サーバーの答えに中身が無い" }, { status: 502 });
+      return Response.json({ error: "画像サーバーの応答が空です" }, { status: 502 });
     }
     return new Response(watchedBody(zip.body, record), {
       status: 200,

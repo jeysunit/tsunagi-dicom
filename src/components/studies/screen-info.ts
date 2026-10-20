@@ -6,6 +6,8 @@ export interface ScreenInfo {
   csrfToken?: string;
   /** 設定されたビューア（URL は渡さない。開く時に BFF が作る） */
   viewers: ViewerInfo[];
+  /** サーバーの時間帯（TZ）。画面の時刻（送信の時刻など）は、この時間帯で出す（docs/spec.md の 2.2） */
+  timeZone: string;
   /** いまの役割でできること（src/lib/auth/roles.ts） */
   can: {
     rememberViewer: boolean;
@@ -19,6 +21,6 @@ export interface ScreenInfo {
     /** 削除（段 5。管理者だけ）。検証モードで書き込みを止めているときは false */
     delete: boolean;
   };
-  /** 大事な操作の前の再認証（AUTH_MODE=local のときだけ）。needsTotp は確認の番号も求めるか */
-  reauth?: { needsTotp: boolean };
+  /** 大事な操作の前の再認証がある（AUTH_MODE=local のときだけ）。再認証はパスワードだけ（docs/spec.md の 3.6） */
+  reauth?: boolean;
 }

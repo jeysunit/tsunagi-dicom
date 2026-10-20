@@ -66,9 +66,14 @@ export async function authContext(): Promise<AuthContext> {
   };
 }
 
-function toSession(user: User, row: SessionRow): Session {
-  // 役割はデータベースの値を毎回読む（管理者が変えたら、次の要求から効く）
-  const role: Role = isRole(user.role) ? user.role : "viewer";
+/**
+ * 役割はデータベースの値を毎回読む（管理者が変えたら、次の要求から効く）。
+ * 知らない役割の名前（誤記・空・migration 20261020100000_two_roles を通っていない前の名前など）は、どの役割にも当てず、
+ * セッションを使わせない（ログインしていない扱い。閉じる側に倒す）。前の役割の名前の移し替えは migration だけが行う
+ */
+function toSession(user: User, row: SessionRow): Session | null {
+  if (!isRole(user.role)) return null;
+  const role: Role = user.role;
   return { actorId: user.username, role, authMode: "local", local: { row, user } };
 }
 
@@ -92,11 +97,15 @@ export const getAuthState = cache(async (): Promise<AuthState> => {
       return { kind: "anonymous" };
     case "pending":
       return { kind: "pending", stage: resolved.session.stage as Exclude<Stage, "active">, row: resolved.session, user: resolved.user };
-    case "locked":
-      return { kind: "locked", session: toSession(resolved.user, resolved.session) };
-    case "active":
+    case "locked": {
+      const session = toSession(resolved.user, resolved.session);
+      return session ? { kind: "locked", session } : { kind: "anonymous" };
+    }
+    case "active": {
       // 操作の時刻は、画面が操作を知らせたとき（/api/auth/activity）だけ数え直す（画像の取得などの裏の要求では数えない）
-      return { kind: "active", session: toSession(resolved.user, resolved.session) };
+      const session = toSession(resolved.user, resolved.session);
+      return session ? { kind: "active", session } : { kind: "anonymous" };
+    }
   }
 });
 
@@ -106,10 +115,10 @@ export const getAuthState = cache(async (): Promise<AuthState> => {
  */
 export async function requireSession(permission?: Permission): Promise<Session> {
   const state = await getAuthState();
-  if (state.kind === "anonymous" || state.kind === "pending") throw new AuthError(401, "ログインしていない");
-  if (state.kind === "locked") throw new AuthError(423, "画面をロックしている。パスワードで解く");
+  if (state.kind === "anonymous" || state.kind === "pending") throw new AuthError(401, "ログインしていません。再度ログインしてください");
+  if (state.kind === "locked") throw new AuthError(423, "画面ロック中です。パスワードでロックを解除してください");
   if (permission && !can(state.session.role, permission)) {
-    throw new AuthError(403, "この役割ではできない操作");
+    throw new AuthError(403, "この操作を行う権限がありません");
   }
   return state.session;
 }
@@ -125,15 +134,26 @@ export type AuditFields = Omit<
 >;
 
 /** いまの利用者で監査の記録に1行足す。接続元の分け方は src/lib/auth/source-address.ts */
-export async function audit(session: Session, fields: AuditFields) {
+export async function audit(session: Session, fields: AuditFields, source?: AuditSource) {
   const db = await getDb();
   return appendAudit(db, {
     ...fields,
     actorId: session.actorId,
     actorRole: session.role,
     authMode: session.authMode,
-    ...sourceFromHeaders(await headers()),
+    ...(source ?? (await auditSource())),
   });
+}
+
+/** 監査の記録の送り元（要求の headers から読む） */
+export type AuditSource = ReturnType<typeof sourceFromHeaders>;
+
+/**
+ * 送り元を、要求の間に読んで取っておく。答えを返した後に書く記録（書き出しを流し終えたとき）では headers() を読めない
+ * （Next.js は要求の外の headers() を失敗にする）ので、要求の間に取った値を audit の source に渡す
+ */
+export async function auditSource(): Promise<AuditSource> {
+  return sourceFromHeaders(await headers());
 }
 
 /**
@@ -193,5 +213,5 @@ export async function requirePermission(
     outcome: "denied",
     detail: { ...(denied.detail ?? {}), reason: "forbidden", permission },
   });
-  throw new AuthError(403, "この役割ではできない操作");
+  throw new AuthError(403, "この操作を行う権限がありません");
 }

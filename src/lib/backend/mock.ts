@@ -25,7 +25,7 @@ import {
   TAG,
   type DicomJsonDataset,
 } from "@/lib/backend/dicom-json";
-import { wadoRsTarget } from "@/lib/backend/relay-path";
+import { isAcceptableImageAccept, wadoRsTarget } from "@/lib/backend/relay-path";
 import {
   BackendError,
   clampStudyLimit,
@@ -249,6 +249,11 @@ export function createMockBackend(): Backend {
 
       const last = target.path.split("/").at(-1);
       if (last === "thumbnail" || last === "rendered") {
+        // 実の Orthanc と同じく、受け付けない Accept（ブラウザの <img> の Accept など）には 400 を返す。
+        // BFF が Accept を決める前の値が来たら、ここで見つかる（画面の経路は withRelayAccept を通す）
+        if (!isAcceptableImageAccept(req.accept)) {
+          return Response.json({ error: "Unsupported MIME type" }, { status: 400 });
+        }
         const image = (await previews()).find(
           (p) =>
             p.studyInstanceUid === target.studyInstanceUid &&
@@ -299,7 +304,7 @@ export function createMockBackend(): Backend {
 
     async echoModality(modalityId: string) {
       const list = modalitiesFromRest(await readJson<unknown>("made", "modalities.json"));
-      if (!list.some((m) => m.id === modalityId)) throw new BackendError("機器が登録されていない", 404);
+      if (!list.some((m) => m.id === modalityId)) throw new BackendError("接続先が登録されていません", 404);
       return modalityId !== "offline";
     },
 
@@ -322,8 +327,8 @@ export function createMockBackend(): Backend {
 
     async sendStudy(modalityId: string, orthancStudyId: string) {
       const list = modalitiesFromRest(await readJson<unknown>("made", "modalities.json"));
-      if (!list.some((m) => m.id === modalityId)) throw new BackendError("機器が登録されていない", 404);
-      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID の形が誤り", 400);
+      if (!list.some((m) => m.id === modalityId)) throw new BackendError("接続先が登録されていません", 404);
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
       const id = randomUUID();
       mockJobs.set(id, { id, modality: modalityId, study: orthancStudyId, reads: 0, creationTime: orthancNow() });
       return { jobId: id };
@@ -350,14 +355,14 @@ export function createMockBackend(): Backend {
 
     async exportStudy(orthancStudyId: string) {
       const study = (await restStudies()).find((s) => s.ID === orthancStudyId);
-      if (!study) throw new BackendError("検査が見つからない", 404);
+      if (!study) throw new BackendError("検査が見つかりません", 404);
       const text = `モックの書き出し（画像の本体は入っていない）\nStudyInstanceUID: ${study.MainDicomTags.StudyInstanceUID ?? ""}\n`;
       return new Response(mockZip("README.txt", text), { status: 200, headers: { "content-type": "application/zip" } });
     },
 
     async deleteStudy(orthancStudyId: string) {
       const study = (await restStudies()).find((s) => s.ID === orthancStudyId);
-      if (!study) throw new BackendError("検査が見つからない", 404);
+      if (!study) throw new BackendError("検査が見つかりません", 404);
       mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
     },
   };

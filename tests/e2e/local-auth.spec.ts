@@ -39,7 +39,7 @@ async function newPage(browser: Browser): Promise<{ context: BrowserContext; pag
 async function submitLogin(page: Page, username: string, password: string) {
   await page.goto("/login");
   const form = page.getByRole("form", { name: "ログイン" });
-  await form.getByLabel("利用者名").fill(username);
+  await form.getByLabel("ユーザーID").fill(username);
   await form.getByLabel("パスワード").fill(password);
   await form.getByRole("button", { name: "ログイン" }).click();
 }
@@ -50,9 +50,10 @@ async function enrollTotp(page: Page): Promise<string> {
   await expect(page.getByTestId("totp-qr")).toBeVisible();
   const secret = (await page.getByTestId("totp-secret").getAttribute("data-secret"))!;
   expect(secret).toMatch(/^[A-Z2-7]{32}$/);
-  const form = page.getByRole("form", { name: "登録する" });
-  await form.getByLabel(/確認の番号/).fill(await nextCode(secret));
-  await form.getByRole("button", { name: "登録する" }).click();
+  // 画面の言葉は docs/spec.md の 2.2（登録する→設定を完了・確認の番号→認証コード）
+  const form = page.getByRole("form", { name: "設定を完了" });
+  await form.getByLabel(/認証コード/).fill(await nextCode(secret));
+  await form.getByRole("button", { name: "設定を完了" }).click();
   return secret;
 }
 
@@ -61,7 +62,7 @@ async function changeOwnPassword(page: Page, password: string) {
   const form = page.getByRole("form", { name: "パスワードの変更" });
   await form.locator('input[name="newPassword"]').fill(password);
   await form.locator('input[name="confirm"]').fill(password);
-  await form.getByRole("button", { name: "パスワードを変える" }).click();
+  await form.getByRole("button", { name: "変更" }).click();
 }
 
 /** 検査の一覧の1行目の、患者 ID・氏名・StudyInstanceUID（合成の見本の値） */
@@ -130,19 +131,19 @@ test("最初の管理者：TOTP を登録し、決められたパスワードを
   for (const [bad, reason] of [
     ["password123", "よく使われる"],
     ["ab1", "8 文字以上"],
-    ["onlyletters", "英字と数字を両方含める"],
+    ["onlyletters", "英字と数字を含めてください"],
   ] as const) {
     await form.locator('input[name="newPassword"]').fill(bad);
     await form.locator('input[name="confirm"]').fill(bad);
     await form.locator('input[name="newPassword"]').evaluate((el) => el.removeAttribute("minlength"));
-    await form.getByRole("button", { name: "パスワードを変える" }).click();
+    await form.getByRole("button", { name: "変更" }).click();
     await expect(form.getByRole("alert")).toContainText(reason);
   }
   await changeOwnPassword(page, ADMIN_PASSWORD);
 
   await expect(page).toHaveURL(`${LOCAL_BASE_URL}/`);
   await expect(page.getByTestId("study-count")).toHaveText("8");
-  await expect(page.getByTestId("current-user")).toContainText("e2e-admin・管理者");
+  await expect(page.getByTestId("current-user")).toContainText("e2e-admin（管理者）");
   expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
 });
 
@@ -152,65 +153,72 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
   await page.goto("/admin/users");
   const table = page.getByTestId("user-table");
   const adminRow = table.locator(`tr[data-username="${E2E_ADMIN.username}"]`);
-  await expect(adminRow).toContainText("登録あり");
-  await expect(adminRow.getByTestId("last-login")).not.toHaveText("まだ無い");
+  // 画面の言葉は docs/spec.md の 2.2（登録あり→設定済み・まだ無い→—・利用者を作る→ユーザーの追加・本人の確かめ→再認証など）
+  await expect(adminRow).toContainText("設定済み");
+  await expect(adminRow.getByTestId("last-login")).not.toHaveText("—");
 
-  const form = page.getByRole("form", { name: "利用者を作る" });
+  const form = page.getByRole("form", { name: "ユーザーの追加" });
   // 規則に合わない最初のパスワードは断る
   await form.locator('input[name="username"]').fill(DOCTOR.username);
-  await form.getByLabel("表示の名前").fill("試験 医師");
-  await form.locator('select[name="role"]').selectOption("viewer");
+  await form.getByLabel("表示名").fill("試験 医師");
+  // 役割は管理者と一般の2つ（2026-10-20）。前の閲覧で作り医師に変えていた流れを、管理者で作り一般に変える流れにした
+  await form.locator('select[name="role"]').selectOption("admin");
   await form.locator('input[name="password"]').fill("qwerty123");
-  await form.getByRole("button", { name: "作る" }).click();
+  await form.getByRole("button", { name: "追加" }).click();
 
-  // 利用者の管理は大事な操作なので、BFF が再認証を求める。違うパスワードでは通らない
-  const reauth = page.getByRole("form", { name: "本人の確かめ" });
+  // 利用者の管理は大事な操作なので、BFF が再認証を求める。違うパスワードでは通らない。
+  // 削除の再認証はパスワードだけ（2026-10-20）だが、利用者の管理は TOTP を登録した管理者には認証コードも求める
+  // （パスワードとセッションだけで管理者を作り足させない。docs/spec.md の 3.6）
+  const reauth = page.getByRole("form", { name: "再認証" });
   await expect(reauth).toBeVisible();
   await reauth.locator('input[name="password"]').fill("wrong-Pass-1x");
   await reauth.locator('input[name="code"]').fill("000000");
-  await reauth.getByRole("button", { name: "確かめて続ける" }).click();
-  await expect(reauth.getByRole("alert")).toContainText("違う");
+  await reauth.getByRole("button", { name: "認証して続行" }).click();
+  await expect(reauth.getByRole("alert")).toContainText("正しくありません");
   await reauth.locator('input[name="password"]').fill(ADMIN_PASSWORD);
   await reauth.locator('input[name="code"]').fill(await nextCode(adminSecret));
-  await reauth.getByRole("button", { name: "確かめて続ける" }).click();
+  await reauth.getByRole("button", { name: "認証して続行" }).click();
   await expect(reauth).toHaveCount(0);
   // 通ったら同じ操作をもう一度送る（ここでは規則に合わない最初のパスワードで断られる）
   await expect(page.getByRole("main").getByRole("alert")).toContainText("よく使われる");
 
   await form.locator('input[name="password"]').fill(DOCTOR.initial);
-  await form.getByRole("button", { name: "作る" }).click();
-  await expect(page.getByRole("main").getByRole("status")).toContainText("利用者を作った");
+  await form.getByRole("button", { name: "追加" }).click();
+  await expect(page.getByRole("main").getByRole("status")).toContainText("ユーザーを追加しました");
   const row = table.locator(`tr[data-username="${DOCTOR.username}"]`);
-  await expect(row.getByTestId("last-login")).toHaveText("まだ無い");
+  await expect(row.getByTestId("last-login")).toHaveText("—");
 
-  // 役割の変更（閲覧 → 医師）
-  await row.getByLabel(`${DOCTOR.username} の役割`).selectOption("doctor");
-  await expect(page.getByRole("main").getByRole("status")).toContainText("役割を医師にした");
+  // 役割の変更（管理者 → 一般）。役割の選択欄は管理者と一般の2つだけ
+  await expect(row.getByLabel(`${DOCTOR.username} の役割`).locator("option")).toHaveText(["管理者", "一般"]);
+  await row.getByLabel(`${DOCTOR.username} の役割`).selectOption("general");
+  await expect(page.getByRole("main").getByRole("status")).toContainText("役割を「一般」に変更しました");
   await page.reload();
   await expect(table.locator(`tr[data-username="${DOCTOR.username}"]`).getByLabel(`${DOCTOR.username} の役割`)).toHaveValue(
-    "doctor",
+    "general",
   );
+  // 自分の二要素認証のリセットのボタンは出さない（別の管理者が行う）
+  await expect(adminRow.getByRole("button", { name: "二要素認証をリセット" })).toHaveCount(0);
 
   // ログインの一時停止の試験に使う利用者
   await form.locator('input[name="username"]').fill(LOCKED.username);
-  await form.getByLabel("表示の名前").fill("試験 一時停止");
+  await form.getByLabel("表示名").fill("試験 一時停止");
   await form.locator('input[name="password"]').fill(LOCKED.initial);
-  await form.getByRole("button", { name: "作る" }).click();
+  await form.getByRole("button", { name: "追加" }).click();
   await expect(table.locator(`tr[data-username="${LOCKED.username}"]`)).toBeVisible();
 
   const list = await (await page.request.get("/api/admin/users")).json();
   expect(JSON.stringify(list)).not.toMatch(/argon2id|passwordHash|totpSecret/);
 });
 
-test("役割ごとにできる操作：医師は検査と画像を見られ、利用者の管理と監査の確かめはできない", async ({ browser }) => {
+test("役割ごとにできる操作：一般は検査と画像を見られ、利用者の管理と監査の確かめはできない", async ({ browser }) => {
   test.setTimeout(90_000);
   const { context, page } = await newPage(browser);
   await submitLogin(page, DOCTOR.username, DOCTOR.initial);
   await enrollTotp(page);
   await changeOwnPassword(page, DOCTOR.password);
   await expect(page.getByTestId("study-count")).toHaveText("8");
-  await expect(page.getByTestId("current-user")).toContainText("e2e-doctor・医師");
-  await expect(page.getByRole("link", { name: "利用者" })).toHaveCount(0);
+  await expect(page.getByTestId("current-user")).toContainText("e2e-doctor（一般）");
+  await expect(page.getByRole("link", { name: "ユーザー管理" })).toHaveCount(0);
 
   expect((await page.request.get("/api/studies")).status()).toBe(200);
   // 中継は役割の確かめを通り、モック（WADO-RS の見本が無い）まで届く
@@ -232,7 +240,7 @@ test("役割ごとにできる操作：医師は検査と画像を見られ、�
     ).status(),
   ).toBe(403);
   await page.goto("/admin/users");
-  await expect(page.getByRole("main").getByRole("alert")).toHaveText("管理者だけが開ける");
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText("管理者のみ利用できます");
   await context.close();
 });
 
@@ -270,7 +278,7 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   // 送り先を確かめる（C-ECHO）
   await page.goto("/modalities");
   await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
-  await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText("つながった");
+  await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText(/^成功 \d{2}:\d{2}:\d{2}$/);
 
   // 送る：詳細のパネルの「送る」から、確かめの画面を通して送り、仕事の終わりまで出す
   await page.goto("/");
@@ -281,8 +289,18 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   await expect(panel.getByTestId("send-confirm")).toContainText("JP-TEST-0004");
   await expect(panel.getByTestId("send-confirm")).toContainText("dtg（DTG_SCP）");
   await panel.getByTestId("send-submit").click();
+  // 受け付けた後は、同じ画面から重ねて送らない（実行のボタンを外し、「閉じる」だけ。docs/spec.md の 3.4・UX のレビューの H7）
+  await expect(panel.getByTestId("send-submit")).toHaveCount(0);
+  await expect(panel.getByTestId("send-close")).toHaveText("閉じる");
   await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 15_000 });
-  await expect(panel.getByTestId("send-status")).toHaveText("送った");
+  // 結果には送信先と時刻を出す（前は「送った」だけ）
+  await expect(panel.getByTestId("send-status")).toHaveText(/^送信完了：dtg（DTG_SCP） へ \d+ 画像（\d{2}:\d{2}:\d{2}）$/);
+  await expect(panel.getByTestId("send-submit")).toHaveCount(0);
+  // 閉じて開き直すと、新しい送信の確かめの画面になる
+  await panel.getByTestId("send-close").click();
+  await page.getByTestId("send-open").click();
+  await expect(page.getByTestId("send-panel").getByTestId("send-submit")).toBeVisible();
+  await expect(page.getByTestId("send-panel").getByTestId("send-status")).toHaveCount(0);
 
   // CSRF：token の無い送る要求は断る
   const noToken = await page.request.post(`/api/studies/${STUDY}/send`, {
@@ -301,18 +319,19 @@ test("ログインの一時停止：3回続けて失敗したら、正しいパ�
   const { context, page } = await newPage(browser);
   for (let i = 0; i < 3; i++) {
     await submitLogin(page, LOCKED.username, `wrong-Pass-${i}x9`);
-    await expect(page.getByRole("main").getByRole("alert")).toContainText("利用者名かパスワード");
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("ユーザーID・パスワード");
   }
   await submitLogin(page, LOCKED.username, LOCKED.initial);
-  await expect(page.getByRole("main").getByRole("alert")).toContainText("しばらくログインを止めている");
+  // 失敗の文言は1つ（一時停止の有無を答えの違いで知らせない）
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("しばらくログインできなくなります");
   await expect(page).toHaveURL(/\/login$/);
 
   // 管理者の一覧に一時停止が出て、解ける
   await admin.page.goto("/admin/users");
   const row = admin.page.getByTestId("user-table").locator(`tr[data-username="${LOCKED.username}"]`);
-  await expect(row).toContainText("一時停止");
-  await row.getByRole("button", { name: "一時停止を解く" }).click();
-  await expect(admin.page.getByRole("main").getByRole("status")).toContainText("一時停止を解いた");
+  await expect(row).toContainText("ロック中");
+  await row.getByRole("button", { name: "ロック解除" }).click();
+  await expect(admin.page.getByRole("main").getByRole("status")).toContainText("ロックを解除しました");
 
   await submitLogin(page, LOCKED.username, LOCKED.initial);
   await expect(page).toHaveURL(/\/login\/enroll$/);
@@ -346,17 +365,18 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
   // 既定（SCREEN_UNLOCK_REQUIRE_TOTP=false）では、6桁の欄を出さない
-  await expect(lock.getByLabel(/確認の番号/)).toHaveCount(0);
-  await expect(lock).toContainText("続けるには、パスワードを入れる。");
+  // 画面の言葉は docs/spec.md の 2.2（確認の番号→認証コード・ロックを解く→ロック解除など）
+  await expect(lock.getByLabel(/認証コード/)).toHaveCount(0);
+  await expect(lock).toContainText("パスワードを入力してロックを解除してください");
 
   // 違うパスワードでは解けない
   await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
-  await lock.getByRole("button", { name: "ロックを解く" }).click();
-  await expect(lock.getByRole("alert")).toContainText("パスワードが違う");
+  await lock.getByRole("button", { name: "ロック解除" }).click();
+  await expect(lock.getByRole("alert")).toContainText("パスワードが正しくありません");
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await lock.getByRole("button", { name: "ロック解除" }).click();
   await expect(page.getByTestId("screen-lock")).toHaveCount(0);
   await expect(page.getByTestId("study-count")).toHaveText("8");
   expect((await page.request.get("/api/studies")).status()).toBe(200);
@@ -372,7 +392,7 @@ test("画面のロック：ヘッダーの「ロック」で、同じブラウ�
   await expect(other.getByTestId("study-count")).toHaveText("8");
   const patient = await patientValues(other);
 
-  await page.getByRole("button", { name: "ロック", exact: true }).click();
+  await page.getByRole("button", { name: "画面ロック", exact: true }).click();
   await expect(page.getByTestId("screen-lock")).toBeVisible();
   await expect(other.getByTestId("screen-lock")).toBeVisible();
   await expectNoPatientValues(page, patient);
@@ -381,7 +401,7 @@ test("画面のロック：ヘッダーの「ロック」で、同じブラウ�
   // 1つのタブで解けば、ほかのタブも戻る
   const lock = page.getByTestId("screen-lock");
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await lock.getByRole("button", { name: "ロック解除" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await expect(other.getByTestId("study-count")).toHaveText("8");
   await other.close();
@@ -392,13 +412,24 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   // 時計を進めた管理者のタブは、操作の無い時間でロックを掛けうるので、この試験の間は閉じた頁にしておく
   await admin.page.goto("about:blank");
   const page = await admin.context.newPage();
+  // ここまでの試験で、管理者は画面のロックの解除でパスワードを誤っている。パスワードだけのロックの解除と再認証は、TOTP を
+  // 確かめないので、成功しても失敗の数を消さない（docs/spec.md の 3.6）。この試験の誤りで閾値（3回）に近づきすぎないよう、
+  // 先に TOTP まで確かめるログインをし直して、数を0に戻す
   await page.goto("/");
+  await page.getByRole("button", { name: "ログアウト" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await submitLogin(page, E2E_ADMIN.username, ADMIN_PASSWORD);
+  await expect(page).toHaveURL(/\/login\/totp$/);
+  const totp = page.getByRole("form", { name: "認証" });
+  await totp.getByLabel(/認証コード/).fill(await nextCode(adminSecret));
+  await totp.getByRole("button", { name: "認証" }).click();
+  await expect(page).toHaveURL(`${LOCAL_BASE_URL}/`);
   await expect(page.getByTestId("study-count")).toHaveText("8");
   const patient = await patientValues(page);
 
   // ロックの POST を網の切れのように落とす（このタブからは何度送り直しても届かない）
   await page.route("**/api/auth/lock", (route) => route.abort("internetdisconnected"));
-  await page.getByRole("button", { name: "ロック", exact: true }).click();
+  await page.getByRole("button", { name: "画面ロック", exact: true }).click();
   const lock = page.getByTestId("screen-lock");
   await expect(lock).toBeVisible();
   await expect(page.getByTestId("study-count")).toHaveCount(0);
@@ -419,13 +450,13 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
 
   // 違うパスワードでは解けない
   await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
-  await lock.getByRole("button", { name: "ロックを解く" }).click();
-  await expect(lock.getByRole("alert")).toContainText("違う");
+  await lock.getByRole("button", { name: "ロック解除" }).click();
+  await expect(lock.getByRole("alert")).toContainText("正しくありません");
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
   await page.unroute("**/api/auth/lock");
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await lock.getByRole("button", { name: "ロック解除" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   // 解いたらロックの印は消え、読み直しても中身が出る
   await page.reload();
@@ -451,7 +482,7 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
   await expect(deaf.getByTestId("study-count")).toHaveText("8");
   const patient = await patientValues(deaf);
 
-  await page.getByRole("button", { name: "ロック", exact: true }).click();
+  await page.getByRole("button", { name: "画面ロック", exact: true }).click();
   await expect(page.getByTestId("screen-lock")).toBeVisible();
   // 知らせは届かないが、BFF の状態の確かめ（423）で閉じる
   await expect(deaf.getByTestId("screen-lock")).toBeVisible({ timeout: 30_000 });
@@ -459,7 +490,7 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
 
   const lock = page.getByTestId("screen-lock");
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await lock.getByRole("button", { name: "ロックを解く" }).click();
+  await lock.getByRole("button", { name: "ロック解除" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   // 知らせを受けないタブは、閉じたまま（自分で解く）
   await expect(deaf.getByTestId("screen-lock")).toBeVisible();
@@ -475,9 +506,9 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   const { page } = fresh;
   await submitLogin(page, E2E_ADMIN.username, ADMIN_PASSWORD);
   await expect(page).toHaveURL(/\/login\/totp$/);
-  const totp = page.getByRole("form", { name: "確かめる" });
-  await totp.getByLabel(/確認の番号/).fill(await nextCode(adminSecret));
-  await totp.getByRole("button", { name: "確かめる" }).click();
+  const totp = page.getByRole("form", { name: "認証" });
+  await totp.getByLabel(/認証コード/).fill(await nextCode(adminSecret));
+  await totp.getByRole("button", { name: "認証" }).click();
   await expect(page).toHaveURL(/\/$/);
   const target = "1.2.826.0.1.3680043.8.498.74370219478963110549339491256573063606";
   await page.goto("/");
@@ -494,20 +525,33 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await page.getByTestId("delete-open").click();
   const panel = page.getByTestId("delete-panel");
   await expect(panel.getByTestId("delete-confirm")).toContainText("JP-TEST-0003");
-  await expect(panel.getByTestId("delete-confirm")).toContainText("戻せない");
+  await expect(panel.getByTestId("delete-confirm")).toContainText("この操作は取り消せません");
   await expect(panel.getByTestId("delete-submit")).toBeDisabled();
   await panel.getByTestId("delete-reason").fill("取り違えた検査（試験）");
   await panel.getByTestId("delete-submit").click();
-  // 再認証の前は消さない（パスワードと確認の番号を求め、検査はまだ一覧にある）
+  // 再認証の前は消さない（パスワードだけを求め、検査はまだ一覧にある）。
+  // 期待の変更：前はパスワードと認証コードを求めた。再認証は TOTP を求めない（2026-10-20。docs/spec.md の 3.6）
   const reauth = panel.getByTestId("delete-reauth");
   await expect(reauth).toBeVisible();
+  await expect(reauth.getByLabel("認証コード")).toHaveCount(0);
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await reauth.getByLabel("パスワード").fill(ADMIN_PASSWORD);
-  await reauth.getByLabel("確認の番号").fill(await nextCode(adminSecret));
-  await reauth.getByRole("button", { name: "確かめて消す" }).click();
+  await reauth.getByRole("button", { name: "認証して削除" }).click();
   // 消えると一覧を読み直し、その行（と詳細）は消える
   await expect(page.getByTestId("study-count")).toHaveText("7");
   await expect(page.locator(`tr[data-study-uid="${target}"]`)).toHaveCount(0);
+  // 消したことは、一覧の上の知らせで示す（行も詳細も消えるため。docs/spec.md の 3.5・UX のレビューの H6）
+  await expect(page.getByTestId("list-notice")).toContainText("検査を削除しました（JP-TEST-0003");
+
+  // 一度通れば REAUTH_MINUTES（既定 5 分）の間は聞き直さない：続けて消すときは、理由と確かめの画面だけ
+  await page.locator("tbody > tr[data-study-uid]").first().click();
+  await page.getByTestId("delete-open").click();
+  const second = page.getByTestId("delete-panel");
+  await expect(second.getByTestId("delete-confirm")).toContainText("この操作は取り消せません");
+  await second.getByTestId("delete-reason").fill("試験の2件目");
+  await second.getByTestId("delete-submit").click();
+  await expect(page.getByTestId("study-count")).toHaveText("6");
+  await expect(page.getByTestId("delete-reauth")).toHaveCount(0);
   expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
   await fresh.context.close();
 });

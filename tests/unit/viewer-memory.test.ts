@@ -89,7 +89,7 @@ describe("ビューアの覚えと、モダリティの既定", () => {
 
   it("検査ごとの覚え → モダリティの既定の順に、既定のビューアを決める", async () => {
     const db = await dbs.fresh();
-    const deps = { backend: createMockBackend(), db, role: "doctor" as const, actorId: "alice", viewers: VIEWERS };
+    const deps = { backend: createMockBackend(), db, role: "general" as const, actorId: "alice", viewers: VIEWERS };
     const before = (await listStudies(deps)).studies.find((s) => s.studyInstanceUid === STUDY)!;
     expect(before).toMatchObject({ defaultViewer: "ohif", rememberedViewer: null });
 

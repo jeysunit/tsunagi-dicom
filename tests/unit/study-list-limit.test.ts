@@ -43,7 +43,7 @@ function fakeBackend(all: StudySummary[], behavior: (call: number, query: StudyQ
 
 const deps = (backend: { searchStudies: ReturnType<typeof vi.fn> }, extra: Record<string, unknown> = {}) => ({
   backend: backend as never,
-  role: "doctor" as const,
+  role: "general" as const,
   actorId: "a",
   now: NOW,
   timeZone: "Asia/Tokyo",
@@ -121,9 +121,9 @@ describe("追加の検索", () => {
   });
 
   it("検査日を許されていない役割は、追加の検索をしない（検査日の絞り込みも件数も効かせない）", async () => {
-    const allowlists: FieldAllowlistMap = { ...ROLE_FIELD_ALLOWLIST, viewer: { study: ["studyInstanceUid", "modalities"], series: [] } };
+    const allowlists: FieldAllowlistMap = { ...ROLE_FIELD_ALLOWLIST, general: { study: ["studyInstanceUid", "modalities"], series: [] } };
     const { backend, searchStudies } = fakeBackend(all);
-    const r = await listStudies(deps(backend, { role: "viewer", allowlists }), { date: "today" });
+    const r = await listStudies(deps(backend, { role: "general", allowlists }), { date: "today" });
     expect(searchStudies).toHaveBeenCalledTimes(1);
     expect(searchStudies.mock.calls[0]).toEqual([STUDY_LIMIT, {}]);
     expect(r.facets.date).toBeUndefined();

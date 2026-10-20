@@ -31,7 +31,8 @@ vi.mock("@/lib/config", async (importOriginal) => {
 
 vi.mock("@/lib/fields", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/fields")>();
-  const map = { ...real.ROLE_FIELD_ALLOWLIST, viewer: { study: ["studyInstanceUid", "studyDate"] as const, series: ["seriesInstanceUid"] as const } };
+  // 一般だけを狭める（2026-10-20 に役割を2つにしたので、前の「閲覧を狭め、医師で既定を見る」形を「一般を狭め、管理者で既定を見る」形にした）
+  const map = { ...real.ROLE_FIELD_ALLOWLIST, general: { study: ["studyInstanceUid", "studyDate"] as const, series: ["seriesInstanceUid"] as const } };
   return { ...real, ROLE_FIELD_ALLOWLIST: map, allowlistFor: (role: never, m = map) => real.allowlistFor(role, m) };
 });
 
@@ -65,7 +66,7 @@ async function getStudies() {
 
 describe("検査の一覧の画面の API と、役割の許可の一覧", () => {
   it("許可の一覧を狭めた役割（閲覧）には、載っていない項目が返らない", async () => {
-    state.role = "viewer";
+    state.role = "general";
     const { status, body } = await getStudies();
     expect(status).toBe(200);
     expect(body.studies).toHaveLength(8);
@@ -75,7 +76,7 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
   });
 
   it("見出しの件数は、許可の一覧に載っていない項目の分を返さない（閲覧は検査日の件数だけ）", async () => {
-    state.role = "viewer";
+    state.role = "general";
     const { body } = await getStudies();
     expect(Object.keys(body.facets)).toEqual(["date"]);
     expect(body.facets.date).toMatchObject({ all: 8 });
@@ -83,7 +84,7 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
   });
 
   it("ほかの役割には、検査日・モダリティの件数がある（状態の件数は段 3 で外した）", async () => {
-    state.role = "doctor";
+    state.role = "admin";
     const { body } = await getStudies();
     expect(Object.keys(body.facets).sort()).toEqual(["date", "modality"]);
     expect(body.facets.date!.all).toBe(8);
@@ -91,7 +92,7 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
   });
 
   it("ほかの役割の見え方は変わらない", async () => {
-    state.role = "doctor";
+    state.role = "admin";
     const { status, body } = await getStudies();
     expect(status).toBe(200);
     expect(body.studies[0]).toHaveProperty("patientName");
@@ -99,11 +100,11 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
   });
 
   it("返した検査を監査の記録に残す（絞った役割でも、記録には患者 ID と検査の組を残す）", async () => {
-    state.role = "viewer";
+    state.role = "general";
     await getStudies();
     const { getDb } = await import("@/lib/db");
     const row = await (await getDb()).auditLog.findFirst({ where: { action: "search" }, orderBy: { seq: "desc" } });
-    expect(row?.actorRole).toBe("viewer");
+    expect(row?.actorRole).toBe("general");
     expect(JSON.parse(row!.detail!).returned).toHaveLength(8);
   });
 });

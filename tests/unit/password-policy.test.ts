@@ -9,20 +9,20 @@ describe("パスワードの規則", () => {
     expect(minPasswordLength(true)).toBe(8);
     expect(minPasswordLength(false)).toBe(13);
     expect(checkPassword("kq7vz2mw", { mfaRequired: true })).toEqual([]);
-    expect(checkPassword("kq7vz2m", { mfaRequired: true })).toEqual(["8 文字以上にする"]);
+    expect(checkPassword("kq7vz2m", { mfaRequired: true })).toEqual(["8 文字以上にしてください"]);
     expect(checkPassword("kq7vz2mwpx4ra", { mfaRequired: false })).toEqual([]);
-    expect(checkPassword("kq7vz2mwpx4r", { mfaRequired: false })).toEqual(["13 文字以上にする"]);
+    expect(checkPassword("kq7vz2mwpx4r", { mfaRequired: false })).toEqual(["13 文字以上にしてください"]);
   });
 
   it("英字と数字の混在を求める（記号は使ってよい）", () => {
-    expect(checkPassword("kqvzxmwpra", { mfaRequired: true })).toEqual(["英字と数字を両方含める"]);
-    expect(checkPassword("8264019375", { mfaRequired: true })).toEqual(["英字と数字を両方含める"]);
+    expect(checkPassword("kqvzxmwpra", { mfaRequired: true })).toEqual(["英字と数字を含めてください"]);
+    expect(checkPassword("8264019375", { mfaRequired: true })).toEqual(["英字と数字を含めてください"]);
     expect(checkPassword("kq7v-z2m!w", { mfaRequired: true })).toEqual([]);
   });
 
   it("よく使われるパスワードの一覧にあるものを断る（大文字・小文字を区別しない）", () => {
     for (const pw of ["password1", "Passw0rd", "1qaz2wsx", "QWERTY123", "abcd1234"]) {
-      expect(checkPassword(pw, { mfaRequired: true }), pw).toContain("よく使われるパスワードの一覧にある（推測されやすい）");
+      expect(checkPassword(pw, { mfaRequired: true }), pw).toContain("よく使われるパスワードのため使えません");
     }
   });
 
@@ -38,21 +38,21 @@ describe("パスワードの規則", () => {
   });
 
   it("利用者名を含むものを断る", () => {
-    expect(checkPassword("tanaka-2026x", { mfaRequired: true, username: "tanaka" })).toEqual(["利用者名を含めない"]);
-    expect(checkPassword("TANAKA-2026x", { mfaRequired: true, username: "tanaka" })).toEqual(["利用者名を含めない"]);
+    expect(checkPassword("tanaka-2026x", { mfaRequired: true, username: "tanaka" })).toEqual(["ユーザーIDを含むパスワードは使えません"]);
+    expect(checkPassword("TANAKA-2026x", { mfaRequired: true, username: "tanaka" })).toEqual(["ユーザーIDを含むパスワードは使えません"]);
     // 短い利用者名（2 文字以下）は見ない（ほとんどの語に含まれてしまうため）
     expect(checkPassword("kq7vz2mw", { mfaRequired: true, username: "kq" })).toEqual([]);
   });
 
   it("長すぎるもの・制御文字を含むものを断る", () => {
     expect(checkPassword(`a1${"x".repeat(MAX_PASSWORD_LENGTH)}`, { mfaRequired: true })).toEqual([
-      `${MAX_PASSWORD_LENGTH} 文字以下にする`,
+      `${MAX_PASSWORD_LENGTH} 文字以下にしてください`,
     ]);
-    expect(checkPassword("kq7vz2mw\n", { mfaRequired: true })).toEqual(["制御文字は使えない"]);
+    expect(checkPassword("kq7vz2mw\n", { mfaRequired: true })).toEqual(["制御文字は使えません"]);
   });
 
   it("日本語の文字も1文字と数える（英字と数字の混在は別に要る）", () => {
     expect(checkPassword("つなぎ画像a1x", { mfaRequired: true })).toEqual([]);
-    expect(checkPassword("つなぎa1", { mfaRequired: true })).toEqual(["8 文字以上にする"]);
+    expect(checkPassword("つなぎa1", { mfaRequired: true })).toEqual(["8 文字以上にしてください"]);
   });
 });

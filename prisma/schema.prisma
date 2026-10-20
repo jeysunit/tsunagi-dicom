@@ -56,8 +56,11 @@ model User {
   // ログインの名前。作った後は変えない（監査の記録の actorId に使う）
   username           String    @unique
   displayName        String
-  // admin・doctor・technologist・viewer（src/lib/auth/roles.ts）
+  // admin・general（src/lib/auth/roles.ts。2026-10-20 に4つから2つにした。migration 20261020100000_two_roles）
   role               String
+  // 役割の世代。役割を変えるたびに、同じ文で1つ上げる。再認証の印は、通した時の世代と今の世代が同じときだけ使う
+  // （src/lib/auth/local-auth.ts の assertRecentReauth。前の役割で通した印を、格上げの後に使わせない）
+  roleVersion        Int       @default(0)
   // active・disabled
   status             String    @default("active")
   // argon2id の PHC の文字列（$argon2id$v=19$m=…,t=…,p=…$salt$hash）。平文には戻せない
@@ -102,8 +105,14 @@ model Session {
   lockedAt       DateTime?
   // 登録の途中の TOTP の秘密（暗号化）。登録を確かめたら User へ移す
   pendingTotpEnc String?
-  // 大事な操作（利用者の管理）の前の、もう一度の本人の確かめの時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）
+  // 大事な操作（利用者の管理・削除など）の前の、もう一度の本人の確かめの時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）。
+  // サーバーの側のこの行だけに持つ（cookie・本文から読まない）。パスワードの変更で消す
   reauthAt       DateTime?
+  // 上の確かめで TOTP まで確かめた時刻。利用者の管理（ユーザーの追加・役割・無効・TOTP のやり直しなど）は、TOTP を登録した
+  // 利用者にはこちらを求める（削除の再認証はパスワードだけ。docs/spec.md の 3.6。2026-10-20）
+  reauthMfaAt    DateTime?
+  // 上の確かめを通した時の利用者の役割の世代（User.roleVersion）。違えば、上の2つの時刻は使わない
+  reauthRoleVersion Int?
   // 作った時の利用者の認証の世代（User.credentialVersion）。違えば、このセッションは使えない
   credentialVersion Int    @default(0)
 

@@ -146,7 +146,8 @@ describe("実の Orthanc の REST（段 4）", () => {
     const { studies: received, complete } = await backend().receivedStudies(3);
     expect(complete).toBe(true);
     expect(received.map((r) => r.summary.patientId)).toEqual(["JP-TEST-0004", "JP-TEST-0003", "JP-TEST-0002"]);
-    expect(received[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00", remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6 });
+    // Orthanc の変更の記録の Date は時間帯の印なしの UTC。BFF は UTC と分かる形（Z つき）で返す（docs/spec.md の 3.3）
+    expect(received[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00Z", remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6 });
     expect(received[0]!.summary).toMatchObject({ modalities: ["MR"], seriesCount: 2 });
     expect(seen[0]!.url).toBe("/changes?last");
     // 答えの Last を次の since にする（50 件ずつ返るので、267 件を 6 回で読み切る）
@@ -232,8 +233,9 @@ describe("実の Orthanc の REST（段 4）", () => {
       progress: 100,
       errorCode: 0,
       errorDescription: "Success",
-      creationTime: "2026-10-19T23:00:00",
-      completionTime: "2026-10-19T23:00:05",
+      // 仕事の時刻も Orthanc は UTC で返す。Z つきで返す
+      creationTime: "2026-10-19T23:00:00Z",
+      completionTime: "2026-10-19T23:00:05Z",
     });
     expect(JSON.stringify(job)).not.toContain("secret-should-not-pass");
     expect(await b.jobStatus("not-a-job")).toBeNull();

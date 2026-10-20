@@ -1,4 +1,4 @@
-import { BackendError } from "@/lib/backend/types";
+import { BackendError, type Backend } from "@/lib/backend/types";
 
 // 中継の path（docs/spec.md の 3.2・原則 8）。
 // 中継はビューアが画像を取る道（WADO-RS の読み取り）だけで、検索（QIDO-RS）と書き込み（STOW-RS など）は通さない。
@@ -79,4 +79,46 @@ export function wadoRsTarget(segments: string[]): WadoRsTarget | null {
     return more.length >= 1 && more.length <= 8 && more.every((s) => BULK_SEGMENT.test(s)) ? target : null;
   }
   return null;
+}
+
+/** 画像の表現（`thumbnail`・`rendered`）を求める path か（最後の段で決める。frames/1/rendered も含む） */
+export function isImageRendition(path: string): boolean {
+  const last = path.split("/").at(-1);
+  return last === "thumbnail" || last === "rendered";
+}
+
+/** Accept の中で、q が 0 より大きい形で名指しされている media type か（ワイルドカードの範囲指定は名指しにしない） */
+function namesMediaType(accept: string, type: string): boolean {
+  return accept.split(",").some((part) => {
+    const [name, ...params] = part.split(";").map((s) => s.trim().toLowerCase());
+    if (name !== type) return false;
+    const q = params.find((p) => p.startsWith("q="));
+    return q === undefined || Number(q.slice(2)) > 0;
+  });
+}
+
+/**
+ * 画像サーバーへ渡す Accept を決める（docs/spec.md の 3.2）。
+ * `thumbnail`・`rendered` は BFF が決める：既定は `image/jpeg`、ブラウザが `image/png` を名指しし、`image/jpeg` を名指ししていないときだけ `image/png`。
+ * ブラウザの `<img>` の Accept（`image/avif,…` のあとにワイルドカードの範囲が続く形）をそのまま渡すと、Orthanc の DICOMweb のプラグインは 400（Unsupported MIME type）を返す。
+ * それ以外（metadata・frames・bulk など、ビューアの取得）は、ブラウザの Accept をそのまま渡す（無ければ付けない）。
+ */
+export function relayAccept(path: string, browserAccept: string | null | undefined): string | undefined {
+  if (!isImageRendition(path)) return browserAccept || undefined;
+  const accept = browserAccept ?? "";
+  return namesMediaType(accept, "image/png") && !namesMediaType(accept, "image/jpeg") ? "image/png" : "image/jpeg";
+}
+
+/** 中継の Accept を relayAccept で決めてから渡す Backend にする（モックを実の接続と同じ決め方にする） */
+export function withRelayAccept(backend: Backend): Backend {
+  return {
+    ...backend,
+    relayDicomweb: (req) => backend.relayDicomweb({ ...req, accept: relayAccept(req.target.path, req.accept) ?? null }),
+  };
+}
+
+/** 画像サーバー（モック）が `thumbnail`・`rendered` で受ける Accept か（`image/jpeg`・`image/png` のどちらかだけ。無ければ受ける） */
+export function isAcceptableImageAccept(accept: string | null | undefined): boolean {
+  if (!accept) return true;
+  return accept === "image/jpeg" || accept === "image/png";
 }

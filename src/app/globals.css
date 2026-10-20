@@ -18,17 +18,27 @@
   /* 値（太字で出す） */
   --color-value: #1f2328;
   --color-border: #d1d9e0;
-  /* 行の hover などの、地との差の小さい色 */
+  /* 一覧の行の hover などの、地との差の小さい色（選んだ行の地より薄く） */
   --color-muted: #eff2f5;
+  /* 押せる物（枠のボタン・枠の無いボタン・絞り込み）の hover の地。白い地・控えめな地と見分けられる差にする（docs/spec.md の 2.3） */
+  --color-hover: #dfe5eb;
+  /* 押している間の地（hover より一段濃く） */
+  --color-pressed: #d1d9e0;
+  /* 選んだ行の地（主の色の薄い地。左の縦線は主の色） */
+  --color-selected: #ddf4ff;
   /* 主の色（ボタンの地。白い字） */
   --color-primary: #0969da;
   --color-primary-foreground: #ffffff;
   /* ボタンの地の hover（白い字との対比を下げないよう、濃くする） */
   --color-primary-hover: #0757b5;
+  /* ボタンの地の、押している間（hover より一段濃く） */
+  --color-primary-active: #054a9b;
   /* リンク・強調の文字 */
   --color-link: #0969da;
   --color-ring: #0969da;
   --color-danger: #d1242f;
+  /* 終わったことの印（送信完了・接続確認の成功）。文字と印を必ず添える */
+  --color-success: #1a7f37;
   --color-dev-band: #6b4a00;
   --color-dev-band-foreground: #ffe8a3;
   /* モダリティの色分け（一覧の印。文字ではなく飾りで、名前の文字を必ず添える） */
@@ -70,13 +80,51 @@ body:has([data-split-root]) {
   --color-value: #ffffff;
   --color-border: #2a2f36;
   --color-muted: #23272d;
+  --color-hover: #272c33;
+  --color-pressed: #30363d;
+  /* 主の色 #1f6feb を 25% だけ地に重ねた色 */
+  --color-selected: #152b4c;
   --color-primary: #1f6feb;
   --color-primary-foreground: #ffffff;
   --color-primary-hover: #1858c4;
+  --color-primary-active: #1550b0;
   /* 暗い地の上のリンクの文字は、ボタンの地の色より明るくする */
   --color-link: #4493f8;
   --color-ring: #4493f8;
   --color-danger: #ff7b72;
+  --color-success: #3fb950;
+}
+
+/* 一覧の上の細い進みの帯（src/components/ui/pending.tsx） */
+@keyframes tsunagi-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/*
+ * 押せる物のカーソル（docs/spec.md の 2.3）。Tailwind CSS v4 の既定では、ボタンのカーソルが矢印のままなので、1か所で指の形にする。
+ * 押せないときは禁止の形にする。個々の部品の cursor-* の指定（境目の cursor-row-resize など）は、utilities の層なのでこちらより勝つ。
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"],
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
+  }
 }
 
 body {

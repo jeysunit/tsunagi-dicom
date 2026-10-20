@@ -46,6 +46,17 @@ const PAIRS: [string, string][] = [
   ["label", "muted"],
   ["foreground", "muted"],
   ["dev-band-foreground", "dev-band"],
+  // 押せる物の hover・押している間・選んだ行（docs/spec.md の 2.3）
+  ["foreground", "hover"],
+  ["label", "hover"],
+  ["foreground", "pressed"],
+  ["primary-foreground", "primary-active"],
+  ["foreground", "selected"],
+  ["value", "selected"],
+  ["label", "selected"],
+  // 終わったことの印の文字（送信完了・接続確認の成功）
+  ["success", "background"],
+  ["success", "surface"],
 ];
 
 describe("文字と地の対比（WCAG 2.2 の AA）", () => {
@@ -57,6 +68,27 @@ describe("文字と地の対比（WCAG 2.2 の AA）", () => {
       expect(set[fg], fg).toBeDefined();
       expect(set[bg], bg).toBeDefined();
       expect(contrast(set[fg]!, set[bg]!)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
+describe("押せる物の hover と選んだ行は、地と見分けられる（docs/spec.md の 2.3）", () => {
+  for (const [name, set] of [
+    ["明るい地", light],
+    ["暗い地", dark],
+  ] as const) {
+    // 前の hover（muted）は、白い地との差が 1.12:1 で、ほぼ見えなかった
+    it(`${name}：hover の地は、地と控えめな地のどちらとも 1.2:1 以上の差`, () => {
+      expect(contrast(set.hover!, set.background!)).toBeGreaterThanOrEqual(1.2);
+      expect(contrast(set.hover!, set.surface!)).toBeGreaterThanOrEqual(1.15);
+    });
+    it(`${name}：押している間の地は hover の地より濃い（明るい地）・明るい（暗い地）`, () => {
+      expect(contrast(set.pressed!, set.background!)).toBeGreaterThan(contrast(set.hover!, set.background!));
+      expect(contrast(set["primary-active"]!, set.background!)).not.toBe(contrast(set["primary-hover"]!, set.background!));
+    });
+    it(`${name}：選んだ行の地は、行の hover の地（muted）と違う`, () => {
+      expect(set.selected).not.toBe(set.muted);
+      expect(contrast(set.selected!, set.background!)).toBeGreaterThan(1.05);
     });
   }
 });

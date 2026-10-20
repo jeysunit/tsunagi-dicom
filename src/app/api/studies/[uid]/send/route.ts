@@ -30,7 +30,7 @@ type Context = { params: Promise<{ uid: string }> };
 
 const Body = z.object({
   modality: z.string().min(1).max(64),
-  requestId: z.string().refine(isRequestId, "要求の ID（UUID）の形が誤り"),
+  requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
 });
 
 export async function POST(request: Request, { params }: Context) {
@@ -42,7 +42,7 @@ export async function POST(request: Request, { params }: Context) {
     const denied = { action: "send" as const, studyInstanceUid: uid, detail: { requestId, modality: clip(modality) } };
     await requirePermission(session, "study.send", denied);
     await assertWriteAllowed(session, denied);
-    if (!isModalityName(modality)) return Response.json({ error: "機器の名前の形が誤り" }, { status: 400 });
+    if (!isModalityName(modality)) return Response.json({ error: "接続先の名称が正しくありません" }, { status: 400 });
 
     const db = await getDb();
     const backend = getBackend();
@@ -56,8 +56,8 @@ export async function POST(request: Request, { params }: Context) {
       backend.listModalities(),
     ]);
     const target = modalities.find((m) => m.id === modality);
-    if (!dataset || !orthancId) return Response.json({ error: "検査が見つからない" }, { status: 404 });
-    if (!target) return Response.json({ error: "機器が登録されていない" }, { status: 404 });
+    if (!dataset || !orthancId) return Response.json({ error: "検査が見つかりません" }, { status: 404 });
+    if (!target) return Response.json({ error: "接続先が登録されていません" }, { status: 404 });
     const patientId = stringValue(dataset, TAG.PatientID);
     const detail = { requestId, modality, aet: target.aet };
 
@@ -85,7 +85,7 @@ export async function POST(request: Request, { params }: Context) {
     if (begin.kind === "pending") {
       return Response.json(
         {
-          error: "同じ検査を同じ機器へ送った結果が、まだ分からない。送り直さずに、先にその結果を確かめる",
+          error: "同じ送信先への前回の送信結果が未確認です。先に状態を確認してください",
           pendingRequestIds: begin.pending,
         },
         { status: 409 },
@@ -132,7 +132,7 @@ export async function GET(request: Request, { params }: Context) {
     const session = await requireSession();
     const uid = studyUidParam((await params).uid);
     const requestId = new URL(request.url).searchParams.get("requestId") ?? "";
-    if (!isRequestId(requestId)) return Response.json({ error: "要求の ID（UUID）の形が誤り" }, { status: 400 });
+    if (!isRequestId(requestId)) return Response.json({ error: "要求ID が正しくありません" }, { status: 400 });
     await requirePermission(session, "study.send", { action: "send", studyInstanceUid: uid, detail: { requestId } });
     const rows = await rowsOfRequest(await getDb(), "send", requestId, uid);
     if (requestOutcome(rows).phase === "none") return Response.json({ requestId, outcome: "none" });
@@ -151,7 +151,7 @@ function logRecordFailure(requestId: string, jobId: string | null, error: unknow
 
 function unknownResponse(requestId: string): Response {
   return Response.json(
-    { requestId, outcome: "unknown", error: "結果が分からない。送り直さずに、Orthanc の状態を確かめる" },
+    { requestId, outcome: "unknown", error: "送信結果を確認できません。再送せずに状態を確認してください" },
     { status: 202 },
   );
 }
@@ -163,7 +163,7 @@ function unknownResponse(requestId: string): Response {
 function priorResponse(session: Session, requestId: string, uid: string, modality: string | null, rows: readonly RequestRow[]): Response {
   const o = requestOutcome(rows);
   if (o.actorId !== session.actorId || o.studyInstanceUid !== uid || (modality !== null && o.modality !== modality)) {
-    return Response.json({ error: "この要求の ID は、別の送信に使われている。新しい要求として送り直す" }, { status: 409 });
+    return Response.json({ error: "この要求ID は別の送信に使われています。新しい送信として送信してください" }, { status: 409 });
   }
   if (o.jobId && o.studyInstanceUid && o.modality) {
     const job = signJobToken(

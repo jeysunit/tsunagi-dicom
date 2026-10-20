@@ -86,10 +86,14 @@ export function receivedStudyIds(changes: readonly OrthancChange[], limit: numbe
     .map(([id, v]) => ({ id, date: v.date }));
 }
 
-/** Orthanc の時刻（`YYYYMMDDTHHMMSS`）を ISO 8601 の形（時間帯なし）にする。読めなければ空 */
+/**
+ * Orthanc の時刻（`YYYYMMDDTHHMMSS`。変更の記録の `Date`・仕事の `CreationTime` など）を、UTC の ISO 8601（`Z` つき）にする。
+ * Orthanc はこれらの時刻を時間帯の印なしの UTC で返す（2026-10-20 に、受信一覧で UTC のまま出ていたのを直した。docs/spec.md の 3.3）。
+ * 画面は TZ の時刻に直して出す。読めなければ空
+ */
 export function orthancTime(value: string): string {
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(value);
-  return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}` : "";
+  return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z` : "";
 }
 
 /** `/studies/{id}` と、その検査のシリーズ（`/studies/{id}/series`）から、検査の要約と画像の数を作る */
@@ -185,7 +189,7 @@ export function studyIdsFromLookup(json: unknown): string[] {
 /** 引き当ての答えがちょうど1件ならその ID、無ければ null、2件以上なら選ばずに 409（取り違えて書かない） */
 export function singleStudyId(ids: readonly string[]): string | null {
   if (ids.length === 0) return null;
-  if (ids.length > 1) throw new BackendError("同じ StudyInstanceUID の検査が Orthanc に2つ以上ある（患者違いなど）。どれかを選んで書かない", 409);
+  if (ids.length > 1) throw new BackendError("同じ StudyInstanceUID の検査が複数あるため実行できません（患者違いなど）", 409);
   return ids[0]!;
 }
 

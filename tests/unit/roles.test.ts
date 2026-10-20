@@ -1,32 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { can, PERMISSIONS, ROLE_PERMISSIONS, ROLES, type Permission, type Role } from "@/lib/auth/roles";
+import { can, DEFAULT_DEV_ROLE, isRole, PERMISSIONS, ROLE_LABELS, ROLE_PERMISSIONS, ROLES, type Permission, type Role } from "@/lib/auth/roles";
 
-// 役割ごとにできる操作（docs/spec.md の 3.6、第7.0版 14.2）。段 1b の割り当てを表のとおりに確かめる。
+// 役割ごとにできる操作（docs/spec.md の 3.6、第7.0版 14.2）。役割は管理者と一般の2つ（2026-10-20 に承認者が決めた）。
+// 前の医師・技師・閲覧の役割の割り当ての試験は、役割そのものを無くしたので外し、一般の割り当ての試験に替えた。
 
-// 段 4 の操作（受け取りの記録・機器の確かめ・送る）は、管理者と技師（docs/spec.md の 3.6。推奨の案）
-const PACS_OPS = ["receive.view", "modality.check", "study.send"] as const;
-// 段 5：書き出しは管理者・医師・技師、削除は管理者だけ（推奨の案）
+// 一般：普段使う機能の全部（一覧・詳細・ビューア・受信一覧・接続確認・送信・エクスポート・DICOM タグ・ビューアの覚え）
+const GENERAL: Permission[] = [
+  "study.search",
+  "image.retrieve",
+  "dicom.all_values",
+  "viewer.remember",
+  "receive.view",
+  "modality.check",
+  "study.send",
+  "study.export",
+];
 const EXPECTED: Record<Role, Permission[]> = {
-  admin: [
-    "study.search",
-    "image.retrieve",
-    "dicom.all_values",
-    "audit.verify",
-    "user.manage",
-    "viewer.remember",
-    "viewer.defaults",
-    ...PACS_OPS,
-    // 結果の分からない送信の照らし合わせは管理者だけ
-    "pacs.reconcile",
-    "study.export",
-    "study.delete",
-  ],
-  doctor: ["study.search", "image.retrieve", "viewer.remember", "study.export"],
-  technologist: ["study.search", "image.retrieve", "dicom.all_values", "viewer.remember", ...PACS_OPS, "study.export"],
-  viewer: ["study.search", "image.retrieve"],
+  // 管理者：一般の全部に加えて、削除・ユーザー管理・システムの設定・照らし合わせ・監査の確かめ
+  admin: [...GENERAL, "audit.verify", "user.manage", "viewer.defaults", "pacs.reconcile", "study.delete"],
+  general: GENERAL,
 };
 
 describe("役割ごとにできる操作", () => {
+  it("役割は管理者と一般の2つだけ。閲覧だけの役割は無い", () => {
+    expect([...ROLES]).toEqual(["admin", "general"]);
+    expect(ROLE_LABELS).toEqual({ admin: "管理者", general: "一般" });
+    for (const removed of ["doctor", "technologist", "viewer"]) expect(isRole(removed)).toBe(false);
+  });
+
   for (const role of ROLES) {
     for (const permission of PERMISSIONS) {
       const allowed = EXPECTED[role].includes(permission);
@@ -36,18 +37,23 @@ describe("役割ごとにできる操作", () => {
     }
   }
 
-  it("利用者の管理と監査の確かめは管理者だけ", () => {
-    expect(ROLES.filter((r) => can(r, "user.manage"))).toEqual(["admin"]);
-    expect(ROLES.filter((r) => can(r, "audit.verify"))).toEqual(["admin"]);
+  it("管理者は一般の全部ができる", () => {
+    for (const p of ROLE_PERMISSIONS.general) expect(can("admin", p)).toBe(true);
   });
 
-  it("すべての DICOM の値を見る権限は、既定では管理者と技師（docs/spec.md 原則 8）", () => {
-    expect(ROLES.filter((r) => can(r, "dicom.all_values"))).toEqual(["admin", "technologist"]);
+  it("削除・ユーザー管理・システムの設定・照らし合わせ・監査の確かめは管理者だけ", () => {
+    for (const p of ["study.delete", "user.manage", "viewer.defaults", "pacs.reconcile", "audit.verify"] as const) {
+      expect(ROLES.filter((r) => can(r, p)), p).toEqual(["admin"]);
+    }
   });
 
-  it("段 2：モダリティの既定のビューアは管理者だけ、閲覧は見るだけ", () => {
-    expect(ROLES.filter((r) => can(r, "viewer.defaults"))).toEqual(["admin"]);
-    expect(PERMISSIONS.filter((p) => can("viewer", p))).toEqual(["study.search", "image.retrieve"]);
+  it("DICOM タグ（すべての DICOM の値）は、既定では管理者と一般の両方（docs/spec.md 原則 8）", () => {
+    expect(ROLES.filter((r) => can(r, "dicom.all_values"))).toEqual(["admin", "general"]);
+  });
+
+  it("検証モードで役割を選んでいないときは、狭いほうの一般", () => {
+    expect(DEFAULT_DEV_ROLE).toBe("general");
+    expect(PERMISSIONS.filter((p) => can(DEFAULT_DEV_ROLE, p)).length).toBeLessThan(PERMISSIONS.filter((p) => can("admin", p)).length);
   });
 
   it("段 3：検査の状態の印の操作は、どの役割にも無い（操作そのものを外した）", () => {
@@ -57,9 +63,10 @@ describe("役割ごとにできる操作", () => {
   });
 
   it("割り当てに無い操作・役割はできない側に倒れる", () => {
-    const empty = { admin: [], doctor: [], technologist: [], viewer: [] };
+    const empty = { admin: [], general: [] };
     for (const role of ROLES) for (const p of PERMISSIONS) expect(can(role, p, empty)).toBe(false);
     expect(can("nurse" as Role, "study.search")).toBe(false);
+    expect(can("viewer" as Role, "study.search")).toBe(false);
   });
 
   it("割り当ての表は、決めた操作だけを持つ", () => {

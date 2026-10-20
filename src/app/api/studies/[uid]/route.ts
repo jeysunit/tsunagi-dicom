@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: Context) {
     // 権限が無ければ、断ったことを記録して 403
     await requirePermission(session, "study.search", { action: "view_study", studyInstanceUid: uid });
     const detail = await studyDetail(await screenDeps(session), uid);
-    if (!detail) return Response.json({ error: "検査が見つからない" }, { status: 404 });
+    if (!detail) return Response.json({ error: "検査が見つかりません" }, { status: 404 });
     await audit(session, {
       action: "view_study",
       patientId: detail.summary.patientId,

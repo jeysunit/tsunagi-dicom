@@ -26,14 +26,15 @@ export function checkPassword(password: string, options: PasswordPolicyOptions):
   const min = minPasswordLength(options.mfaRequired);
   // 文字の数は、サロゲートの組を1文字と数える
   const length = [...password].length;
-  if (length < min) problems.push(`${min} 文字以上にする`);
-  if (length > MAX_PASSWORD_LENGTH) problems.push(`${MAX_PASSWORD_LENGTH} 文字以下にする`);
+  // 画面に出す文言（docs/spec.md の 2.2）
+  if (length < min) problems.push(`${min} 文字以上にしてください`);
+  if (length > MAX_PASSWORD_LENGTH) problems.push(`${MAX_PASSWORD_LENGTH} 文字以下にしてください`);
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f]/.test(password)) problems.push("制御文字は使えない");
-  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) problems.push("英字と数字を両方含める");
+  if (/[\u0000-\u001f\u007f]/.test(password)) problems.push("制御文字は使えません");
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) problems.push("英字と数字を含めてください");
   const lower = password.toLowerCase();
-  if (COMMON.has(lower)) problems.push("よく使われるパスワードの一覧にある（推測されやすい）");
+  if (COMMON.has(lower)) problems.push("よく使われるパスワードのため使えません");
   const username = options.username?.trim().toLowerCase();
-  if (username && username.length >= 3 && lower.includes(username)) problems.push("利用者名を含めない");
+  if (username && username.length >= 3 && lower.includes(username)) problems.push("ユーザーIDを含むパスワードは使えません");
   return problems;
 }

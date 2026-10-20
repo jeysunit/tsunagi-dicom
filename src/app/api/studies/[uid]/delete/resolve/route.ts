@@ -24,9 +24,9 @@ import {
 type Context = { params: Promise<{ uid: string }> };
 
 const Body = z.object({
-  requestId: z.string().refine(isRequestId, "要求の ID（UUID）の形が誤り"),
+  requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
   /** 先の削除の処理が終わっていることを、どこで・どう確かめたか（必須） */
-  note: z.string().trim().min(1, "確かめた内容を書く").max(500),
+  note: z.string().trim().min(1, "確認内容を入力してください").max(500),
 });
 
 export async function POST(request: Request, { params }: Context) {
@@ -38,7 +38,7 @@ export async function POST(request: Request, { params }: Context) {
     const db = await getDb();
     const before = await rowsOfRequest(db, "delete", requestId, uid);
     const o = requestOutcome(before);
-    if (o.phase === "none" || o.studyInstanceUid !== uid) return Response.json({ error: "この検査の、その要求の ID の削除が無い" }, { status: 404 });
+    if (o.phase === "none" || o.studyInstanceUid !== uid) return Response.json({ error: "この検査に、その要求ID の削除はありません" }, { status: 404 });
     const still = await deletedStudyStillPresent(getBackend(), before, uid);
     type Resolve = "resolved" | "settled" | "running";
     const result = await auditIf<Resolve>(session, async (tx) => {
@@ -61,9 +61,9 @@ export async function POST(request: Request, { params }: Context) {
         },
       };
     });
-    if (result === "settled") return Response.json({ error: "この削除の結果は、もう分かっている" }, { status: 409 });
+    if (result === "settled") return Response.json({ error: "この削除の結果は確定しています" }, { status: 409 });
     if (result === "running") {
-      return Response.json({ error: "この削除の要求は、まだ動いている途中（DELETE を送る前）。終わってから確かめる" }, { status: 409 });
+      return Response.json({ error: "この削除はまだ処理中です（実行の前）。終わってから確認してください" }, { status: 409 });
     }
     return Response.json({ requestId, outcome: still ? "not_deleted" : "deleted" });
   } catch (error) {

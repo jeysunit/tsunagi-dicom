@@ -23,7 +23,7 @@ export async function GET(request: Request) {
         outcome: "denied",
         detail: { reason: "not-same-origin", site: request.headers.get("sec-fetch-site")?.slice(0, 32) ?? null },
       });
-      throw new RequestError(403, "このアプリの画面から開いた要求だけを受ける");
+      throw new RequestError(403, "この画面からの要求だけを受け付けます");
     }
     const uid = studyUidParam(url.searchParams.get("study"));
     const viewer = url.searchParams.get("viewer");
@@ -34,10 +34,10 @@ export async function GET(request: Request) {
     });
     const config = getConfig();
     const info = availableViewers(config.viewers).find((v) => v.id === viewer);
-    if (!isViewerId(viewer) || !info) throw new RequestError(400, "このビューアは設定されていない");
+    if (!isViewerId(viewer) || !info) throw new RequestError(400, "このビューアは設定されていません");
 
     const target = viewerUrl(viewer, config.viewers, uid, `${url.origin}/api/dicom-web`);
-    if (!target) throw new RequestError(400, "このビューアは設定されていない");
+    if (!target) throw new RequestError(400, "このビューアは設定されていません");
     await audit(session, { action: "open_viewer", studyInstanceUid: uid, detail: { viewer } });
 
     if (info.kind === "copy") return Response.json({ url: target, outsideAudit: true });

@@ -2,7 +2,7 @@
 
 import { Download, Send, Trash2 } from "lucide-react";
 import { useId, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { DeletePanel } from "@/components/studies/delete-panel";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { SendPanel } from "@/components/studies/send-panel";
@@ -11,7 +11,8 @@ import type { StudyView } from "@/lib/fields";
 // 詳細のパネルの PACS の操作（docs/spec.md の 3.4・3.5）：送る（段 4）・書き出し（段 5）・削除（段 5。管理者だけ）。
 // 役割に許された操作だけのボタンを 1 行に並べ、押した操作の画面をその下に出す（1 つずつ）。
 // 行が替わったら、呼ぶ側が key に検査の UID を付けて作り直す（別の検査を送らない・消さないように）。
-export function PacsActions({ study, screen, onChanged }: { study: StudyView; screen: ScreenInfo; onChanged: () => void }) {
+// 画面の言葉は docs/spec.md の 2.2（送信・エクスポート（ZIP）・削除…）。
+export function PacsActions({ study, screen, onDeleted }: { study: StudyView; screen: ScreenInfo; onDeleted: (study: StudyView) => void }) {
   const [open, setOpen] = useState<"send" | "delete" | null>(null);
   const sendId = useId();
   const deleteId = useId();
@@ -21,11 +22,11 @@ export function PacsActions({ study, screen, onChanged }: { study: StudyView; sc
 
   return (
     <div className="w-full" data-testid="pacs-actions">
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="PACS の操作">
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="検査の操作">
         {screen.can.send && (
           <Button type="button" size="sm" variant="outline" aria-expanded={open === "send"} aria-controls={sendId} data-testid="send-open" onClick={() => toggle("send")}>
             <Send aria-hidden />
-            送る
+            送信
           </Button>
         )}
         {screen.can.export && (
@@ -33,23 +34,23 @@ export function PacsActions({ study, screen, onChanged }: { study: StudyView; sc
           <a
             href={`/api/studies/${encodeURIComponent(uid)}/export`}
             download
-            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
             data-testid="export-zip"
           >
             <Download aria-hidden className="size-4" />
-            書き出し（ZIP）
+            エクスポート（ZIP）
           </a>
         )}
         {screen.can.delete && (
           <Button type="button" size="sm" variant="outline" aria-expanded={open === "delete"} aria-controls={deleteId} className="text-danger" data-testid="delete-open" onClick={() => toggle("delete")}>
             <Trash2 aria-hidden />
-            削除
+            削除…
           </Button>
         )}
       </div>
       {screen.can.send && <SendPanel study={study} screen={screen} open={open === "send"} panelId={sendId} onClose={() => setOpen(null)} />}
       {screen.can.delete && open === "delete" && (
-        <DeletePanel study={study} screen={screen} panelId={deleteId} onClose={() => setOpen(null)} onDeleted={onChanged} />
+        <DeletePanel study={study} screen={screen} panelId={deleteId} onClose={() => setOpen(null)} onDeleted={() => onDeleted(study)} />
       )}
     </div>
   );

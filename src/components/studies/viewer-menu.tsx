@@ -13,6 +13,10 @@ import { cn } from "@/lib/utils";
 // 開くのは BFF の /api/viewers/open を通す（どの検査をどのビューアで開いたかを監査の記録に残してから移す）。
 // ▾ からは「この検査は次から○○」と覚えさせ、DICOMweb の URL（このアプリの監査の外）をコピーできる。
 
+/** メニューの項目。hover・押している間・フォーカスで地を変える（docs/spec.md の 2.3） */
+const MENU_ITEM =
+  "block w-full px-3 py-1.5 text-left hover:bg-hover active:bg-pressed focus-visible:bg-hover focus-visible:outline-none";
+
 export function openUrl(studyUid: string, viewer: string): string {
   return `/api/viewers/open?${new URLSearchParams({ study: studyUid, viewer })}`;
 }
@@ -76,7 +80,7 @@ export function ViewerMenu({
       screen.csrfToken,
     );
     if (result.status === 409) {
-      setMessage("ほかの利用者が先に変えたので、読み直した。もう一度選ぶ");
+      setMessage("ほかのユーザーが先に変更しました。最新の状態を読み込みました");
       onChanged();
       return;
     }
@@ -89,9 +93,9 @@ export function ViewerMenu({
     try {
       const { url } = await getJson<{ url: string }>(openUrl(studyUid, "dicomweb"));
       await navigator.clipboard.writeText(url);
-      setMessage("DICOMweb の URL をコピーした（このアプリの監査の外）");
+      setMessage("DICOMweb URL をコピーしました（操作ログの対象外）");
     } catch {
-      setMessage("コピーできなかった");
+      setMessage("コピーできませんでした");
     }
   }
 
@@ -108,7 +112,7 @@ export function ViewerMenu({
           size={compact ? "xs" : "sm"}
           className="rounded-r-none"
           disabled={!defaultViewer}
-          title={defaultViewer ? undefined : "ビューアが設定されていない"}
+          title={defaultViewer ? undefined : "ビューア未設定"}
           aria-label={`${seriesLabel ?? ""}${label ?? "既定のビューア"}で開く`}
           data-testid="open-default"
           onClick={() => openInViewer(studyUid, defaultViewer)}
@@ -120,7 +124,7 @@ export function ViewerMenu({
           type="button"
           size={compact ? "xs" : "sm"}
           className="rounded-l-none border-l border-primary-foreground/30 px-1.5"
-          aria-label="ビューアを選ぶ"
+          aria-label="ビューアを選択"
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls={menuId}
@@ -133,7 +137,7 @@ export function ViewerMenu({
       </div>
       {rememberedViewer && isViewerId(rememberedViewer) && (
         <span className="min-w-0 truncate text-xs text-label" data-testid="remembered-viewer">
-          既定: {VIEWER_LABELS[rememberedViewer]}
+          この検査: {VIEWER_LABELS[rememberedViewer]}
         </span>
       )}
       {open && (
@@ -150,7 +154,7 @@ export function ViewerMenu({
               key={v.id}
               type="button"
               role="menuitem"
-              className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+              className={MENU_ITEM}
               onClick={() => {
                 setOpen(false);
                 openInViewer(studyUid, v.id);
@@ -167,20 +171,20 @@ export function ViewerMenu({
                   key={`remember-${v.id}`}
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+                  className={MENU_ITEM}
                   onClick={() => void remember(v.id)}
                 >
-                  この検査は次から {v.label}
+                  この検査は {v.label} で開く
                 </button>
               ))}
               {rememberedViewer && (
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+                  className={MENU_ITEM}
                   onClick={() => void remember(null)}
                 >
-                  覚えを消す（モダリティの既定で開く）
+                  記憶を解除（モダリティ別の設定に戻す）
                 </button>
               )}
             </>
@@ -191,11 +195,11 @@ export function ViewerMenu({
               <button
                 type="button"
                 role="menuitem"
-                className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+                className={MENU_ITEM}
                 onClick={() => void copyDicomweb()}
               >
-                DICOMweb の URL をコピー
-                <span className="block text-xs text-label">このアプリの監査の外（研究の道具に渡す）</span>
+                DICOMweb URL をコピー
+                <span className="block text-xs text-label">操作ログの対象外です</span>
               </button>
             </>
           )}

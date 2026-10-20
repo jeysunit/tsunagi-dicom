@@ -10,6 +10,9 @@ import { testDatabases } from "./helpers/test-db";
 const state = vi.hoisted(() => ({
   role: undefined as string | undefined,
   config: undefined as AppConfig | undefined,
+  /** true のときは、Next.js と同じく、要求の外（答えを返した後）で headers() を読むと失敗させる */
+  scoped: false,
+  inRequest: false,
 }));
 
 vi.mock("next/headers", async () => {
@@ -22,7 +25,10 @@ vi.mock("next/headers", async () => {
           : undefined,
       set: () => undefined,
     }),
-    headers: async () => new Headers(),
+    headers: async () => {
+      if (state.scoped && !state.inRequest) throw new Error("`headers` was called outside a request scope");
+      return new Headers({ "x-forwarded-for": "192.0.2.10" });
+    },
   };
 });
 
@@ -53,6 +59,8 @@ afterAll(async () => {
 });
 beforeEach(() => {
   state.role = undefined;
+  state.scoped = false;
+  state.inRequest = false;
   state.config!.auth.devAllowWrite = true;
   vi.restoreAllMocks();
 });
@@ -131,8 +139,8 @@ async function listed(uid = STUDY) {
 }
 
 describe("書き出し（ZIP）", () => {
-  it("管理者・医師・技師は落とせ、落とす前に記録する。ファイルの名前に患者の情報を入れない", async () => {
-    for (const role of ["admin", "doctor", "technologist"]) {
+  it("管理者・一般は落とせ、落とす前に記録する。ファイルの名前に患者の情報を入れない", async () => {
+    for (const role of ["admin", "general"]) {
       state.role = role;
       const res = await exportZip();
       expect(res.status).toBe(200);
@@ -194,6 +202,31 @@ describe("書き出し（ZIP）", () => {
     expect(log.mock.calls.some((c) => String(c[0]).includes("export_result_not_recorded"))).toBe(true);
   });
 
+  // 結合の試験（実の Orthanc。#30）で、流し終えたときの結果の行が残らないと分かった（BFF のログに export_result_not_recorded）。
+  // 結果は答えを返した後に書くので、その時には要求の headers() を読めない。要求の間に送り元を取っておき、結果の記録に渡す
+  it("流し終えた・切られたときの結果の行は、答えを返した後（要求の外）でも残り、送り元も要求の時のもの", async () => {
+    state.role = "admin";
+    state.scoped = true;
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (const end of ["read", "cancel"] as const) {
+      state.inRequest = true;
+      const res = await exportZip();
+      state.inRequest = false;
+      expect(res.status).toBe(200);
+      const requestId = detailOf(await lastAudit("export")).requestId as string;
+      if (end === "read") await res.arrayBuffer();
+      else await res.body!.cancel();
+      await vi.waitFor(async () => expect((await exportRows(requestId)).length).toBe(2));
+      const rows = await exportRows(requestId);
+      expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
+        ["request", "success"],
+        ["result", end === "read" ? "success" : "failed"],
+      ]);
+      expect(rows[1]).toMatchObject({ sourceAddressUnverified: "192.0.2.10", actorRole: "admin", studyInstanceUid: STUDY });
+    }
+    expect(log.mock.calls.some((c) => String(c[0]).includes("export_result_not_recorded"))).toBe(false);
+  });
+
   it("ブラウザの側で切ったら、切られたと記録する", async () => {
     state.role = "admin";
     const res = await exportZip();
@@ -202,11 +235,7 @@ describe("書き出し（ZIP）", () => {
     expect(await lastAudit("export")).toMatchObject({ outcome: "failed" });
   });
 
-  it("閲覧には断り、断ったことを記録する", async () => {
-    state.role = "viewer";
-    expect((await exportZip()).status).toBe(403);
-    expect(await lastAudit("export")).toMatchObject({ outcome: "denied", actorRole: "viewer" });
-  });
+  // 外した試験：「閲覧には断る」。閲覧の役割を無くし（2026-10-20）、エクスポートは管理者と一般の両方が使う
 
   it("このアプリの画面のほか（別のサイト・別の origin）からの要求は断る", async () => {
     state.role = "admin";
@@ -267,7 +296,8 @@ describe("削除", () => {
   it("管理者のほかの役割には断り、Orthanc を呼ばずに、断ったことを記録する", async () => {
     const { getBackend } = await import("@/lib/backend");
     const spy = vi.spyOn(getBackend(), "deleteStudy");
-    for (const role of ["doctor", "technologist", "viewer"]) {
+    // 役割は管理者と一般の2つ（2026-10-20）。前の医師・技師・閲覧の代わりに一般で確かめる
+    for (const role of ["general"]) {
       state.role = role;
       const requestId = crypto.randomUUID();
       expect((await del({ requestId, reason: "試験" })).status).toBe(403);
@@ -354,8 +384,8 @@ describe("削除", () => {
     const blocked = await del({ requestId: crypto.randomUUID(), reason: "試験" });
     expect(blocked.status).toBe(409);
     expect((await blocked.json()).pendingRequestIds).toEqual([requestId]);
-    // 解くのは、管理者が確かめた内容を書いて手で解く操作だけ（技師は解けない）
-    state.role = "technologist";
+    // 解くのは、管理者が確かめた内容を書いて手で解く操作だけ（一般は解けない）
+    state.role = "general";
     expect((await resolveDelete({ requestId, note: "試験" })).status).toBe(403);
     state.role = "admin";
     expect((await resolveDelete({ requestId, note: "" })).status).toBe(400);
@@ -420,7 +450,8 @@ describe("削除", () => {
     const { requestId, answer, release } = await pausedDelete(confirmToken);
     const res = await resolveDelete({ requestId, note: "試験" });
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toContain("まだ動いている");
+    // 文言は 2026-10-20 に画面の用語集（docs/spec.md の 2.2）に合わせた。確かめる中身（処理中の要求は解かない）は同じ
+    expect((await res.json()).error).toContain("まだ処理中");
     release();
     expect((await answer).status).toBe(200);
     expect(spy).toHaveBeenCalledTimes(1);
@@ -439,7 +470,7 @@ describe("削除", () => {
       release();
       const res = await answer;
       expect(res.status).toBe(409);
-      expect((await res.json()).error).toContain("ほかで片付けられた");
+      expect((await res.json()).error).toContain("ほかで解除された");
     } finally {
       vi.useRealTimers();
     }
@@ -556,7 +587,7 @@ describe("削除：違う検査を消さない", () => {
     // token は暗号化してあり、中身（患者 ID）がそのまま読めない
     expect(body.confirmToken).not.toContain("JP-TEST");
     expect(detailOf(await lastAudit("view_study"))).toMatchObject({ via: "delete_preview" });
-    state.role = "technologist";
+    state.role = "general";
     expect((await preview()).status).toBe(403);
   });
 
@@ -683,7 +714,7 @@ describe("削除：違う検査を消さない", () => {
     const requestId = crypto.randomUUID();
     const res = await del({ requestId, reason: "試験", confirmToken });
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toContain("検査が変わった");
+    expect((await res.json()).error).toContain("検査が更新されました");
     expect(detailOf((await rowsOf(requestId))[0])).toMatchObject({ reason: "changed", changed: ["version"] });
     expect(spy).not.toHaveBeenCalled();
     expect(await listed()).toBe(true);

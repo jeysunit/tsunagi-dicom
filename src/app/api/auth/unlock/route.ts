@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   try {
     const state = await checkedState(request);
     const local = state.kind === "locked" || state.kind === "active" ? state.session.local : undefined;
-    if (!local) throw new AuthError(401, "ログインしていない");
+    if (!local) throw new AuthError(401, "ログインしていません。再度ログインしてください");
     const body = await readJson(request, Body);
     await unlockScreen(await authContext(), local.row, local.user, body);
     // 確かめが通ったので、画面が置いたロックの印（src/lib/auth/lock-cookie.ts）を消す

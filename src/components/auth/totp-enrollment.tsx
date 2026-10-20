@@ -21,18 +21,18 @@ export function TotpEnrollment({
   return (
     <div className="space-y-4">
       <ol className="list-decimal space-y-1 pl-5 text-label">
-        <li>認証のアプリ（TOTP。RFC 6238 に対応したもの）で、この QR を読む。</li>
-        <li>アプリに出た 6 桁の番号を入れて、登録を確かめる。</li>
+        <li>認証アプリで QR コードを読み取ります</li>
+        <li>表示された 6 桁のコードを入力します</li>
       </ol>
-      <img src={src} alt="TOTP の登録の QR" width={200} height={200} className="rounded bg-white" data-testid="totp-qr" />
+      <img src={src} alt="二要素認証の QR コード" width={200} height={200} className="rounded bg-white" data-testid="totp-qr" />
       <p className="text-label">
-        QR を読めないときは、次の秘密を手で入れる（30 秒・6 桁・SHA1）：
+        読み取れない場合は、次のキーを入力します：
         <br />
         <code className="font-mono text-value" data-testid="totp-secret" data-secret={secret}>
           {grouped}
         </code>
       </p>
-      <CodeForm endpoint="/api/auth/totp/enroll" csrfToken={csrfToken} label="登録する" askPassword={askPassword} />
+      <CodeForm endpoint="/api/auth/totp/enroll" csrfToken={csrfToken} label="設定を完了" askPassword={askPassword} />
     </div>
   );
 }

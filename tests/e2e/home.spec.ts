@@ -20,8 +20,12 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(table).toContainText("山田 太郎");
     await expect(table).toContainText("やまだ たろう");
     await expect(table).not.toContainText("Yamada^Taro");
-    // 生年月日は和暦・検査日の時点の年齢・性別を添える
-    await expect(table).toContainText("1975/05/10（昭和50年・51歳・男）");
+    // 生年月日・検査日の時点の年齢・性別は3つの列（和暦は生年月日の title。docs/spec.md の 3.1）
+    const yamada = table.locator("tbody tr", { hasText: "JP-TEST-0001" }).first();
+    await expect(yamada.getByTestId("patient-birth")).toHaveText("1975/05/10");
+    await expect(yamada.getByTestId("patient-birth")).toHaveAttribute("title", "1975/05/10（昭和50年）");
+    await expect(yamada.getByTestId("patient-age")).toHaveText("51歳");
+    await expect(yamada.getByTestId("patient-sex")).toHaveText("男");
 
     const body = page.locator("body");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -31,8 +35,11 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
   });
 
   test("暗い地に切り替えると、利用者ごとに覚えて、開き直しても暗い地のまま", async ({ page }) => {
+    // 期待の変更：切り替えは「表示」のライト・ダークの2つのボタンの並びにした（1つのボタンでは今の状態か切り替え先かが分からないため。
+    // docs/spec.md の 2）。押している側が今の地であることを確かめる
     await page.goto("/");
-    const toggle = page.getByTestId("theme-toggle");
+    await expect(page.getByTestId("theme-light")).toHaveAttribute("aria-pressed", "true");
+    const toggle = page.getByTestId("theme-dark");
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const saved = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
@@ -44,11 +51,11 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
 
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expect(page.getByTestId("theme-toggle")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("theme-dark")).toHaveAttribute("aria-pressed", "true");
 
     // 次の試験のために明るい地へ戻す
     const back = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
-    await page.getByTestId("theme-toggle").click();
+    await page.getByTestId("theme-light").click();
     await back;
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -120,30 +127,33 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
     await page.goto("/");
     const band = page.getByTestId("dev-mode-band");
     await expect(band).toContainText("検証モード");
-    await expect(band).toContainText("書き込みは止めている");
-    for (const label of ["管理者", "医師", "技師", "閲覧"]) {
+    // 文言は docs/spec.md の 2.2 の用語集（書き込みは止めている→書き込み：無効）
+    await expect(band).toContainText("書き込み：無効");
+    // 役割は管理者と一般の2つ（2026-10-20。docs/spec.md の 3.6・4）。前の医師・技師・閲覧のボタンは無い
+    for (const label of ["管理者", "一般"]) {
       await expect(band.getByRole("button", { name: label })).toBeVisible();
     }
-    // 役割を選んでいなければ「閲覧」
-    await expect(band.getByRole("button", { name: "閲覧" })).toHaveAttribute("aria-pressed", "true");
+    for (const label of ["医師", "技師", "閲覧"]) await expect(band.getByRole("button", { name: label })).toHaveCount(0);
+    // 役割を選んでいなければ「一般」（狭いほう）
+    await expect(band.getByRole("button", { name: "一般" })).toHaveAttribute("aria-pressed", "true");
   });
 
   test("役割を切り替えると画面に反映し、切り替えを監査の記録に残す", async ({ page }) => {
     await page.goto("/");
     const band = page.getByTestId("dev-mode-band");
 
-    // 閲覧では監査の確かめを使えない
+    // 一般では監査の確かめを使えない
     expect((await page.request.get("/api/audit/verify")).status()).toBe(403);
 
     await band.getByRole("button", { name: "管理者" }).click();
     await expect(band.getByRole("button", { name: "管理者" })).toHaveAttribute("aria-pressed", "true");
-    await expect(band.getByRole("button", { name: "閲覧" })).toHaveAttribute("aria-pressed", "false");
+    await expect(band.getByRole("button", { name: "一般" })).toHaveAttribute("aria-pressed", "false");
 
     const before = await (await page.request.get("/api/audit/verify")).json();
     expect(before.ok).toBe(true);
 
-    await band.getByRole("button", { name: "医師" }).click();
-    await expect(band.getByRole("button", { name: "医師" })).toHaveAttribute("aria-pressed", "true");
+    await band.getByRole("button", { name: "一般" }).click();
+    await expect(band.getByRole("button", { name: "一般" })).toHaveAttribute("aria-pressed", "true");
     await band.getByRole("button", { name: "管理者" }).click();
     await expect(band.getByRole("button", { name: "管理者" })).toHaveAttribute("aria-pressed", "true");
 
@@ -156,7 +166,7 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
   test("署名の無い役割の cookie は使わない", async ({ page, context }) => {
     await context.addCookies([{ name: "tsunagi_dev_role", value: "admin.forged", url: "http://127.0.0.1:3100" }]);
     await page.goto("/");
-    await expect(page.getByTestId("dev-mode-band").getByRole("button", { name: "閲覧" })).toHaveAttribute(
+    await expect(page.getByTestId("dev-mode-band").getByRole("button", { name: "一般" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
