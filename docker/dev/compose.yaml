@@ -13,6 +13,10 @@
 # - Orthanc は送り元の IP アドレスを確かめない（docker/dev/orthanc/site.json の DicomCheckModalityHost: false。接続先の Host が
 #   コンテナの名前のため）。
 # - dicom-test-generator の Web 画面は 127.0.0.1:${DEV_TDG_WEB_PORT:-18080} に公開する（利用者 dtg、HTTP Basic）。
+# - dicom-test-generator の時間帯は Asia/Tokyo（Orthanc と同じ）。コンテナの既定の UTC のままだと、検査日・時刻（StudyDate・StudyTime）を
+#   UTC の時刻で書き、検査一覧の検査日時が 9 時間ずれる（2026-10-21 に承認者が見つけた）。
+# - 4 つのサービス（tsunagi-dicom・Orthanc は deploy/compose.yaml、dicom-test-generator・storescp はここ）は restart: unless-stopped。
+#   Docker が起き直したときに、一式がそろって立つ（止めたものは止めたまま）。
 
 name: tsunagi-dev
 
@@ -25,9 +29,12 @@ services:
     # dicom-test-generator の Dockerfile から作る。版は commit で固定する（TDG_GIT_REF で替えられる）
     image: tsunagi-dev-tdg:local
     build:
-      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-6bd2b3ea8292b60696445d4b0f85069203f691cd}
+      # 既定は main の 09e95a6（#17・#18 のマージの後）
+      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-09e95a6054a649a43301d95cde5a86c322ecd059}
     environment:
       DTG_WEB_PASSWORD_FILE: /run/secrets/tdg_web_password
+      # 検査日・時刻を日本の時刻で書く（Orthanc の TZ と同じ）
+      TZ: Asia/Tokyo
     volumes:
       # 送信先は Orthanc（orthanc:4242）。Web 画面はコンテナの中で 0.0.0.0 に bind する
       - ./tdg/app_config.yaml:/app/config/app_config.yaml:ro
@@ -45,6 +52,7 @@ services:
     init: true
     security_opt:
       - no-new-privileges:true
+    restart: unless-stopped
 
   storescp:
     # 結合の試験と同じ DCMTK のイメージ（docker/test/dcmtk）。受けたファイルを検査の UID ごとのフォルダに置く
@@ -71,6 +79,7 @@ services:
       retries: 30
     security_opt:
       - no-new-privileges:true
+    restart: unless-stopped
 
 secrets:
   tdg_web_password:
