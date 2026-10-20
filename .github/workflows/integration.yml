@@ -1,0 +1,49 @@
+# 結合の試験：本物の Orthanc と DCMTK を、この仕事の中のコンテナで立てて、BFF を通して一巡りする（docs/integration-test.md）。
+# 相手はこの仕事の中のコンテナだけ。施設の画像サーバーにはつながない。資格情報は試験のたびに乱数で作り、リポジトリにも記録にも置かない。
+# まずは必須のチェックにしない（必須にするかは後で決める）。
+name: 結合の試験
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CHECKPOINT_DISABLE: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  orthanc:
+    name: 結合の試験（Orthanc・DCMTK のコンテナ）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      # コンテナを立て（Orthanc のイメージは digest で固定）、試験を流し、片付ける
+      - run: node tests/integration/run.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: integration-results
+          # 測った値（名前・数・状態だけ）と、失敗したときの画面の写しだけを上げる（trace と HTML の報告は作らない。
+          # 入力した資格情報が残りうるため。tests/integration/playwright.config.ts）
+          path: |
+            test-results/integration/observations.json
+            test-results/integration/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
