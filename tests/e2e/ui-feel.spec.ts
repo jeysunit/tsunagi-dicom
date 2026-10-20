@@ -116,6 +116,15 @@ test("押している間の手応え：ボタンは沈んで影が消え、絞�
   await page.mouse.up();
   await expect.poll(() => uid.evaluate((el) => getComputedStyle(el).translate)).toBe("none");
   await uid.click();
+
+  // 動きを減らす設定では沈めない（地の色と影の変化だけ）
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByTestId("filter-more").hover();
+  await page.mouse.down();
+  await expect.poll(async () => shadowVisible((await style("filter-more")).shadow)).toBe(false);
+  expect((await style("filter-more")).translate).toBe("none");
+  await page.mouse.up();
+  await page.emulateMedia({ reducedMotion: null });
 });
 
 test("選んだ行：主の色の薄い地と左の縦線。hover の行の地とは違う", async ({ page }) => {

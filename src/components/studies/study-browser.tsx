@@ -302,7 +302,8 @@ function StudyRows({
   const columns = columnsFor(studies);
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
+    // @container：0 件の案内を、横にスクロールする表の幅ではなく、見えている一覧の幅の中に置くため（100cqw）
+    <div className="@container min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
       {/* 取り直しの待ちの細い帯は、一覧の上の縁に重ねる（場所を取らない。画面は覆わない） */}
       {dim && (
         <div className="sticky top-0 z-20 h-0">
@@ -338,8 +339,9 @@ function StudyRows({
         <tbody className={cn("transition-opacity", dim && "opacity-60")} data-dim={dim || undefined}>
           {studies.length === 0 && empty && (
             <tr>
-              <td colSpan={columns.length} className="px-2 py-8 text-center text-label">
-                {empty}
+              <td colSpan={columns.length} className="p-0 text-label">
+                {/* 表は列の幅の合計より狭くならない（狭い画面では横にスクロールする）。案内は見えている幅の中で中央に置く */}
+                <div className="sticky left-0 flex w-[100cqw] justify-center px-2 py-8 text-center">{empty}</div>
               </td>
             </tr>
           )}

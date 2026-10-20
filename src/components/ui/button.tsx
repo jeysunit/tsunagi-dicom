@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * （Button のほか、Button を使わない押せる物も）。動きを減らす設定のときは、地の色の変化だけにする
  */
 const pressFeedback =
-  "transition-[color,background-color,border-color,box-shadow,transform,filter] duration-100 motion-reduce:transition-none not-disabled:active:translate-y-px not-disabled:active:shadow-none";
+  "transition-[color,background-color,border-color,box-shadow,translate,filter] duration-100 motion-reduce:transition-none motion-safe:not-disabled:active:translate-y-px not-disabled:active:shadow-none";
 
 /** 1つの並び（絞り込みの見出しなど）の中のボタンの手応え：並びを崩さないよう沈めずに、内側に影を付ける */
 const pressInset =

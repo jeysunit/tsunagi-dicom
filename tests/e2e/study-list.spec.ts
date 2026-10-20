@@ -109,6 +109,20 @@ test("0 件でも一覧の場所が分かる：表の枠と見出しの行を出
   await expect(table.locator("thead")).toContainText("患者ID");
 });
 
+test("0 件の案内は、狭い画面でも見えている幅の中に出る（表が横にスクロールする幅でも、右の外に隠れない）", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await asRole(page, "一般");
+  await page.goto(`/?${new URLSearchParams({ q: "該当しない語" })}`);
+  const list = (await page.getByTestId("study-list-scroll").boundingBox())!;
+  const empty = page.getByTestId("study-table").getByTestId("study-list-empty");
+  await expect(empty).toBeVisible();
+  for (const target of [empty, page.getByRole("button", { name: "条件をクリア" })]) {
+    const box = (await target.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(list.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(list.x + list.width);
+  }
+});
+
 // 期待の変更（1 件）：一覧の行のサムネイル（写しのある検査は画像・無い検査は印）の確かめを外した。
 // 1 行 28px の一覧ではサムネイルの列を外したため（docs/spec.md の 3.1）。サムネイルは詳細のシリーズの横 1 列で確かめる（下の試験）。
 test("一覧の行：氏名（漢字・かな）・和暦と年齢・シリーズ数と画像数", async ({ page }) => {
