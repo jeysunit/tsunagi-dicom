@@ -6,6 +6,8 @@ import { modalityDefaults } from "@/lib/viewer-memory";
 import { availableViewers } from "@/lib/viewers";
 
 // モダリティごとの既定のビューアを変える管理の画面（docs/spec.md の 3.2）。管理者だけ。
+export const metadata = { title: "ビューア設定" };
+
 export default async function ViewerDefaultsPage() {
   const access = await pageAccess("viewer.defaults");
   if (access.kind === "locked") return null;

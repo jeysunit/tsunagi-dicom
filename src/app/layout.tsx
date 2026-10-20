@@ -11,8 +11,9 @@ import { getDb } from "@/lib/db";
 import { DEFAULT_THEME, getTheme } from "@/lib/preferences";
 import "./globals.css";
 
+// ブラウザのタブの題名は頁ごと（「検査一覧 - tsunagi-dicom」。docs/spec.md の 2.3）。頁は metadata の title に頁の名前だけを書く
 export const metadata: Metadata = {
-  title: "tsunagi-dicom",
+  title: { default: "tsunagi-dicom", template: "%s - tsunagi-dicom" },
   description: "Orthanc の前に置く、日本の現場向けの PACS の画面と中継のサーバー",
 };
 

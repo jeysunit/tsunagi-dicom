@@ -4,21 +4,19 @@ import { audit } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { BackendError } from "@/lib/backend/types";
 import type { ReceivedView } from "@/lib/fields";
-import { formatSlashDate } from "@/lib/format/japanese-date";
+import { getConfig } from "@/lib/config";
+import { formatDateTimeIn, formatSlashDate } from "@/lib/format/japanese-date";
 import { RECEIVE_LIMIT, receiveLogView } from "@/lib/receive-log";
 import { cn } from "@/lib/utils";
 
 // 受け取りの記録の頁（docs/spec.md の 3.3。段 4）。Orthanc が受け取った検査を、新しい順に 1 件 1 行で出す。
 // いつ（受け取った時刻）・どの機器から（呼んできた AE タイトル）・何件（画像の数）・どの検査か。
 // 返した検査は、画面の API と同じく記録してから描く（記録に失敗したら描かない）。
+// 時刻は Orthanc から UTC で来るので、サーバーの時間帯（TZ）に直して `2026/10/17 18:01:00` の形で出す。
+
+export const metadata = { title: "受信一覧" };
 
 const CELL = "h-7 px-2 py-0 overflow-hidden text-ellipsis whitespace-nowrap";
-
-/** Orthanc の時刻（時間帯なし）を `2026/10/17 09:01:00` の形にする */
-function timeText(iso: string | undefined): string {
-  const m = iso ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(iso) : null;
-  return m ? `${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}:${m[6]}` : "";
-}
 
 /** 入った道。DICOM の C-STORE 以外（REST で入れたなど）は「取り込み」と分かるようにする */
 function originText(origin: string | null | undefined): string {
@@ -38,6 +36,7 @@ export default async function ReceivedPage() {
     );
   }
   const { session } = access;
+  const { timeZone } = getConfig();
   let items: ReceivedView[];
   let complete: boolean;
   try {
@@ -68,7 +67,7 @@ export default async function ReceivedPage() {
   return (
     <section className="space-y-2" data-testid="received-page">
       <div className="flex flex-wrap items-baseline gap-x-4">
-        <h1 className="font-bold text-value">受け取りの記録</h1>
+        <h1 className="text-lg font-bold text-value">受け取りの記録</h1>
         <p className="text-xs text-label">
           Orthanc の変更の記録から読める範囲の、新しい {RECEIVE_LIMIT} 件まで。古い記録は Orthanc に残らないことがある。
         </p>
@@ -84,14 +83,15 @@ export default async function ReceivedPage() {
         <div className="overflow-auto rounded-md border border-border">
           <table className="w-full min-w-[960px] table-fixed border-collapse" data-testid="received-table">
             <colgroup>
-              <col style={{ width: 160 }} />
+              {/* 受信日時（秒まで）とリンクの列は、値が切れない幅にする */}
+              <col style={{ width: 176 }} />
               <col style={{ width: 140 }} />
               <col style={{ width: 80 }} />
               <col style={{ width: 120 }} />
               <col style={{ width: 120 }} />
               <col style={{ width: 100 }} />
               <col />
-              <col style={{ width: 72 }} />
+              <col style={{ width: 132 }} />
             </colgroup>
             <thead className="bg-surface text-left text-xs text-label">
               <tr className="border-b border-border">
@@ -113,8 +113,8 @@ export default async function ReceivedPage() {
                 const origin = originText(r.origin);
                 return (
                   <tr key={`${r.study.studyInstanceUid ?? "row"}-${i}`} className="border-b border-border last:border-0" data-testid="received-row">
-                    <td className={CELL} title={timeText(r.receivedAt)}>
-                      {timeText(r.receivedAt)}
+                    <td className={CELL} data-testid="received-at">
+                      {formatDateTimeIn(r.receivedAt, timeZone, { seconds: true })}
                     </td>
                     <td className={cn(CELL, "font-mono")} title={r.remoteAet ?? origin}>
                       {r.remoteAet ?? <span className="text-label">{origin || "—"}</span>}
@@ -137,7 +137,7 @@ export default async function ReceivedPage() {
                     </td>
                     <td className={CELL}>
                       {r.study.patientId && (
-                        <Link href={`/?${new URLSearchParams({ q: r.study.patientId })}`} className="text-link hover:underline">
+                        <Link href={`/?${new URLSearchParams({ q: r.study.patientId })}`} className="text-link underline underline-offset-2 hover:decoration-2">
                           一覧で開く
                         </Link>
                       )}

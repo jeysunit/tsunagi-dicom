@@ -194,10 +194,10 @@ export function DeletePanel({
             />
           </label>
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={busy || reason.trim() === ""} className="bg-danger text-background hover:bg-danger" data-testid="delete-submit">
+            <Button type="submit" size="sm" variant="danger" disabled={busy || reason.trim() === ""} data-testid="delete-submit">
               削除
             </Button>
-            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onClose}>
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onClose}>
               やめる
             </Button>
           </div>

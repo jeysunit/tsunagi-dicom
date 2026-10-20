@@ -181,7 +181,7 @@ export function SendPanel({
                 <Button type="button" size="sm" disabled={busy || !target} data-testid="send-submit" onClick={() => void send()}>
                   送る
                 </Button>
-                <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onClose}>
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onClose}>
                   やめる
                 </Button>
               </div>

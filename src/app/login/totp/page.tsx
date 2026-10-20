@@ -4,6 +4,8 @@ import { getAuthState } from "@/lib/auth/session";
 import { STAGE_PATHS } from "@/lib/auth/stage-path";
 
 // ログインの二要素：認証のアプリの確認の番号（TOTP）を入れる。
+export const metadata = { title: "認証コードの入力" };
+
 export default async function TotpPage() {
   const state = await getAuthState();
   if (state.kind !== "pending") redirect(state.kind === "anonymous" ? "/login" : "/");

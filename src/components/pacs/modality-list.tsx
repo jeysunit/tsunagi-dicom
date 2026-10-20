@@ -20,7 +20,7 @@ export function ModalityList({ modalities, csrfToken }: { modalities: ModalityVi
   return (
     <section className="space-y-2" data-testid="modalities-page">
       <div className="flex flex-wrap items-baseline gap-x-4">
-        <h1 className="font-bold text-value">機器</h1>
+        <h1 className="text-lg font-bold text-value">機器</h1>
         <p className="text-xs text-label">Orthanc に登録された受け元・送り先。機器の登録は Orthanc の設定で行う。</p>
       </div>
       {modalities.length === 0 ? (
