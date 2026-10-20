@@ -47,6 +47,13 @@ writeFileSync(usersFile, `${JSON.stringify({ RegisteredUsers: { [orthancUsername
 chmodSync(usersFile, 0o644);
 writeFileSync(path.join(workDir, "backend-password.txt"), `${orthancPassword}\n`, { mode: 0o600 });
 
+const sessionSecret = randomBytes(48).toString("base64");
+
+// GitHub Actions では、作った値を記録の伏せ字に登録する（Playwright の list の報告は、失敗した操作の記録に fill の値を出しうる）
+if (process.env.GITHUB_ACTIONS === "true") {
+  for (const value of [orthancPassword, adminInitial, adminChanged, sessionSecret]) console.log(`::add-mask::${value}`);
+}
+
 const env = {
   ...process.env,
   ITEST_ORTHANC_HTTP_PORT: httpPort,
@@ -56,7 +63,7 @@ const env = {
   ITEST_ORTHANC_PASSWORD: orthancPassword,
   ITEST_ADMIN_INITIAL_PASSWORD: adminInitial,
   ITEST_ADMIN_PASSWORD: adminChanged,
-  ITEST_SESSION_SECRET: randomBytes(48).toString("base64"),
+  ITEST_SESSION_SECRET: sessionSecret,
 };
 
 const compose = (args, stdio = "inherit") => execFileSync("docker", ["compose", "-f", composeFile, ...args], { env, stdio });
