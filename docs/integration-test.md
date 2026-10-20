@@ -93,7 +93,7 @@ node tests/integration/run.mjs
 
 同じ workflow の、もう1つの仕事（`開発用の compose の流れ（TDG → Orthanc → tsunagi-dicom → storescp）`）。この試験と違い、BFF もコンテナ（このリポジトリから作るイメージ）で動かし、配る compose（`deploy/compose.yaml`）の形のまま確かめる。手順は [`round-trip-test.md`](round-trip-test.md)。
 
-- `tests/flow/run.mjs` が `docker/dev/up.sh` で一式を立て、`tests/flow/flow.spec.ts` を流し、片付ける（`FLOW_KEEP=1` なら残す）。
+- `tests/flow/run.mjs` が `docker/dev/up.sh` で一式を立て、`tests/flow/flow.spec.ts` を流し、片付ける（`FLOW_KEEP=1` なら残す）。compose のプロジェクトは `tsunagi-flow`、ポートは画面 13000・DICOM 14242・dicom-test-generator の Web 画面 18081 で、手元で使っている開発用の一式（`tsunagi-dev`）とは volume もポートも分ける。
 - 確かめること：Orthanc の REST（8042）がホストに公開されていない。内部ネットワーク `backend` が `internal: true` で、tsunagi-dicom と Orthanc だけが入る。ホストに公開した DICOM（4242）に C-ECHO が通る。dicom-test-generator の CLI で送った架空の患者が受信一覧に出て、tsunagi-dicom から storescp へ送信すると、同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。
 - CI の記録に `[flow]` の行で、各段の画像の数を出す。
 

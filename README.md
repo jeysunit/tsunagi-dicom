@@ -113,7 +113,7 @@ Orthanc とビューアのソースには手を入れない。つなぎ先はす
 
 ## Orthanc とセットで導入する
 
-`deploy/compose.yaml` で、tsunagi-dicom と Orthanc（`orthancteam/orthanc`。版と digest で固定）を別々のコンテナで動かす。
+`deploy/compose.yaml` で、tsunagi-dicom と Orthanc（`orthancteam/orthanc`。版と digest で固定）を別々のコンテナで動かす。Docker Compose は v2.24 以上を使う。
 
 ```mermaid
 flowchart LR
@@ -153,7 +153,7 @@ docker compose up -d
 
 ### 開発・試験用の一式（Orthanc・dicom-test-generator・storescp）
 
-`docker/dev/compose.yaml` は、上の compose に、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足したもの。架空の患者だけで使う。Docker（Compose v2.20 以上）があれば、リポジトリの直下で次の1行で立つ。
+`docker/dev/compose.yaml` は、上の compose に、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足したもの。架空の患者だけで使う。Docker（Compose v2.24 以上）があれば、リポジトリの直下で次の1行で立つ。
 
 ```sh
 docker/dev/up.sh

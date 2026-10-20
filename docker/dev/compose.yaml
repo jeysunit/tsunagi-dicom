@@ -22,7 +22,7 @@ services:
     # dicom-test-generator の Dockerfile から作る。版は commit で固定する（TDG_GIT_REF で替えられる）
     image: tsunagi-dev-tdg:local
     build:
-      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-a4a55b60fe07a6561ea68242b502bd6905070e41}
+      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-6bd2b3ea8292b60696445d4b0f85069203f691cd}
     environment:
       DTG_WEB_PASSWORD_FILE: /run/secrets/tdg_web_password
     volumes:

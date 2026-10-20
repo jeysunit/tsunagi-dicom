@@ -5,7 +5,8 @@
 //   node tests/flow/run.mjs                      # Docker（compose v2）が要る。tsunagi-dicom のイメージはこのリポジトリから作る
 //
 // secret のファイルは up.sh が docker/dev/secrets/（.gitignore）に作る。値は画面にも記録にも出さない。
-// FLOW_KEEP=1 なら、終わってもコンテナを残す（調べるため）。
+// compose のプロジェクトは tsunagi-flow（開発用の一式の tsunagi-dev とは別。始めと終わりに volume ごと片付ける）。
+// FLOW_KEEP=1 なら、終わってもコンテナを残す（調べるため。次に流すときは片付けてから立てる）。
 import { execFileSync, spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -15,6 +16,17 @@ process.chdir(root);
 
 const composeFile = path.join(root, "docker/dev/compose.yaml");
 const secretsDir = path.join(root, "docker/dev/secrets");
+
+// 試験だけの compose のプロジェクトとポートにする。手元で使っている開発用の一式（プロジェクト tsunagi-dev）の
+// volume を消さず、ポートもぶつけない。tests/flow/flow.spec.ts と playwright.config.ts も、この環境変数を読む
+process.env.COMPOSE_PROJECT_NAME ??= "tsunagi-flow";
+process.env.TSUNAGI_HTTP_PORT ??= "13000";
+process.env.ORTHANC_DICOM_PORT ??= "14242";
+process.env.DEV_TDG_WEB_PORT ??= "18081";
+if (process.env.COMPOSE_PROJECT_NAME === "tsunagi-dev") {
+  console.error("COMPOSE_PROJECT_NAME に tsunagi-dev（開発用の一式）は使えない。試験は終わったときに volume を消すため");
+  process.exit(1);
+}
 
 try {
   execFileSync("docker", ["compose", "version"], { stdio: "ignore" });

@@ -33,7 +33,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 
 ## 用意
 
-1. Docker（Compose v2.20 以上。`include` を使う）を入れる。
+1. Docker（Compose v2.24 以上。`include` と、`env_file` の `required` を使う）を入れる。
 2. リポジトリの直下で `docker/dev/up.sh` を流す。次を行う。
    - secret のファイルを乱数で作る（`docker/dev/secrets/`。リポジトリに入れない。あるファイルは書き換えない）。tsunagi-dicom の `SESSION_SECRET`、Orthanc の利用者 `tsunagi` のパスワード、最初の管理者 `admin` のパスワード、dicom-test-generator の Web 画面のパスワード。
    - tsunagi-dicom のイメージを、このリポジトリから作る（`TSUNAGI_IMAGE` に GHCR のイメージを渡せば作らない）。
