@@ -1,9 +1,9 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, ChevronRight, Search, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
-import { Button } from "@/components/ui/button";
+import { CheckCircle2, ChevronDown, ChevronRight, Inbox, RefreshCw, Search, X } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -99,8 +99,9 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
       data-testid={testId}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm transition-colors last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
-        pressed ? "bg-primary text-primary-foreground active:bg-primary-active" : "text-foreground hover:bg-hover active:bg-pressed",
+        "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
+        pressInset,
+        pressed ? "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active" : "bg-background text-foreground hover:bg-hover active:bg-pressed",
       )}
     >
       {children}
@@ -173,7 +174,10 @@ function FilterBar({
           aria-controls={moreId}
           data-testid="filter-more"
           onClick={() => setMore((v) => !v)}
-          className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-sm text-foreground hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className={cn(
+            "inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-sm text-foreground shadow-xs hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            pressFeedback,
+          )}
         >
           {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
           詳細条件
@@ -268,6 +272,40 @@ function columnsFor(studies: readonly StudyView[]) {
   ] as const;
 }
 
+/**
+ * 一覧を読み直しても、見ていた行の位置を保つ（docs/spec.md の 3.1 の自動更新）。スクロールしているときは、見えている先頭の行を
+ * 印にし、読み直した後に同じ行が同じ高さに来るように戻す（新しい検査が上に足されても、見ていた行が動かない）。
+ * いちばん上にいるときは保たない（新しい検査が上に出て、目に入る）。絞り込みを替えた（listKey が替わった）ときは、印を捨てる
+ */
+function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: readonly StudyView[], listKey: string) {
+  const anchor = useRef<{ uid: string; offset: number; key: string } | null>(null);
+  const measure = useCallback(() => {
+    const box = ref.current;
+    anchor.current = null;
+    if (!box || box.scrollTop === 0) return;
+    const top = box.getBoundingClientRect().top + (box.querySelector("thead")?.getBoundingClientRect().height ?? 0);
+    for (const row of box.querySelectorAll<HTMLElement>("tbody > tr[data-study-uid]")) {
+      const r = row.getBoundingClientRect();
+      if (r.bottom > top && row.dataset.studyUid) {
+        anchor.current = { uid: row.dataset.studyUid, offset: r.top - top, key: listKey };
+        return;
+      }
+    }
+  }, [ref, listKey]);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    const a = anchor.current;
+    // 同じ絞り込みの読み直し（自動更新など）のときだけ戻す
+    if (box && a && a.key === listKey) {
+      const row = box.querySelector<HTMLElement>(`tbody > tr[data-study-uid="${CSS.escape(a.uid)}"]`);
+      const top = box.getBoundingClientRect().top + (box.querySelector("thead")?.getBoundingClientRect().height ?? 0);
+      if (row) box.scrollTop += row.getBoundingClientRect().top - top - a.offset;
+    }
+    measure();
+  }, [ref, studies, measure, listKey]);
+  return measure;
+}
+
 /** 一覧の 1 行の高さ（28px）。14px の文字（行の高さ 20px）に上下 4px */
 const CELL = "h-7 px-2 py-0";
 /** 値が 1 行に収まらないときは `…` で切る（全文は title）。一覧の行だけ。詳細のパネルでは切らない */
@@ -280,7 +318,11 @@ function StudyRows({
   onSelect,
   onChanged,
   dim = false,
+  empty,
+  listKey,
 }: {
+  /** いまの絞り込み（URL の形）。替わったら、見ていた行の位置を保たない */
+  listKey: string;
   studies: StudyView[];
   screen: ScreenInfo;
   selected: string | null;
@@ -289,13 +331,24 @@ function StudyRows({
   onChanged: () => void;
   /** 取り直しの待ちの間、古い行を薄くする（docs/spec.md の 2.3） */
   dim?: boolean;
+  /** 行が無いときに、表の中に出す案内（0 件でも、表の枠と見出しの行は出す。docs/spec.md の 3.1） */
+  empty?: React.ReactNode;
 }) {
   // 矢印で動く（ローヴィングの tabindex）：選んだ行、無ければ先頭の行だけが tab の止まり先
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
   const columns = columnsFor(studies);
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const onScroll = useScrollAnchor(scrollRef, studies, listKey);
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border md:min-h-56" data-testid="study-list-scroll">
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      // 行の位置は useScrollAnchor が保つ（ブラウザのスクロールの寄せと二重に動かさない）。
+      // @container：0 件の案内を、横にスクロールする表の幅ではなく、見えている一覧の幅の中に置くため（100cqw）
+      className="@container min-h-0 flex-1 overflow-auto [overflow-anchor:none] rounded-md border border-border md:min-h-56"
+      data-testid="study-list-scroll"
+    >
       {/* 取り直しの待ちの細い帯は、一覧の上の縁に重ねる（場所を取らない。画面は覆わない） */}
       {dim && (
         <div className="sticky top-0 z-20 h-0">
@@ -329,6 +382,14 @@ function StudyRows({
           </tr>
         </thead>
         <tbody className={cn("transition-opacity", dim && "opacity-60")} data-dim={dim || undefined}>
+          {studies.length === 0 && empty && (
+            <tr>
+              <td colSpan={columns.length} className="p-0 text-label">
+                {/* 表は列の幅の合計より狭くならない（狭い画面では横にスクロールする）。案内は見えている幅の中で中央に置く */}
+                <div className="sticky left-0 flex w-[100cqw] justify-center px-2 py-8 text-center">{empty}</div>
+              </td>
+            </tr>
+          )}
           {studies.map((s, i) => {
             const uid = s.studyInstanceUid ?? "";
             const isOpen = selected !== null && uid === selected;
@@ -438,16 +499,65 @@ function StudyRows({
   );
 }
 
+/**
+ * 一覧の自動更新（docs/spec.md の 3.1）。seconds ごとに一覧の版（/api/studies/version。Orthanc の変更の記録の番号）を読み、
+ * 版が変わったときだけ一覧を読み直す（変わらなければ検査の検索をしない）。選んだ行・スクロール・開いている詳細はそのまま
+ * （詳細は読み直さない。「詳細を開いた」の記録を増やさない）。この読み直しの間は待ちの印を出さない（quiet）。
+ * タブを隠している間は読まず、戻ったらすぐ読む。seconds が 0 なら何もしない。
+ * 読み直しの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）
+ */
+function useListRefresh(seconds: number, initialVersion: string | undefined, autoRef: React.RefObject<boolean>) {
+  const queryClient = useQueryClient();
+  const [quiet, setQuiet] = useState(false);
+  // 基準の版。サーバーが一覧を取る前に読んだ版。無ければ、最初に読んだ版を基準にする
+  const base = useRef(initialVersion);
+  const version = useQuery({
+    queryKey: ["studies-version"],
+    queryFn: async ({ signal }) => {
+      const { version: next } = await getJson<{ version: string }>("/api/studies/version", signal);
+      if (base.current === undefined || base.current === next) {
+        base.current = next;
+        return next;
+      }
+      setQuiet(true);
+      autoRef.current = true;
+      try {
+        // 開いていない絞り込みの一覧は古い印だけを付け、いま出している一覧を読み直す
+        await queryClient.invalidateQueries({ queryKey: ["studies"], refetchType: "none" });
+        const done = queryClient.refetchQueries({ queryKey: ["studies"], type: "active" }, { throwOnError: true });
+        // 要求を出した後に戻す（同じ時に利用者が絞り込みを替えた要求には付けない）
+        autoRef.current = false;
+        await done;
+        base.current = next;
+      } catch {
+        // 一覧を読めなかったときは、誤りを一覧の上に出し、版を進めない（次の間隔で読み直す）
+      } finally {
+        autoRef.current = false;
+        setQuiet(false);
+      }
+      return next;
+    },
+    enabled: seconds > 0,
+    refetchInterval: seconds > 0 ? seconds * 1000 : false,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  });
+  return { quiet, failed: version.isError };
+}
+
 function Browser({
   initialFilter,
   initialData,
   initialDataAt,
+  initialVersion,
   screen,
 }: {
   initialFilter: StudyFilter;
   initialData: StudyListData;
   /** サーバーの側で一覧を取った時刻（ミリ秒）。古くなった最初の値を新しいものとして使わない */
   initialDataAt: number;
+  /** サーバーの側で一覧を取る前に読んだ、一覧の版（自動更新の基準） */
+  initialVersion?: string;
   screen: ScreenInfo;
 }) {
   const [filter, setFilter] = useState<StudyFilter>(initialFilter);
@@ -478,10 +588,17 @@ function Browser({
   const queryClient = useQueryClient();
   const initialKey = filterToSearchParams(initialFilter).toString();
   const params = filterToSearchParams(filter).toString();
+  const autoRefreshRef = useRef(false);
 
   const list = useQuery({
     queryKey: listKey(filter),
-    queryFn: ({ signal }) => getJson<StudyListData>(`/api/studies${params ? `?${params}` : ""}`, signal),
+    queryFn: ({ signal }) => {
+      // 自動更新の読み直しには refresh=auto を付ける（監査の記録で、利用者の検索と分けて追えるように）
+      const query = new URLSearchParams(params);
+      if (autoRefreshRef.current) query.set("refresh", "auto");
+      const qs = query.toString();
+      return getJson<StudyListData>(`/api/studies${qs ? `?${qs}` : ""}`, signal);
+    },
     initialData: params === initialKey ? initialData : undefined,
     initialDataUpdatedAt: initialDataAt,
     placeholderData: (previous) => previous,
@@ -495,8 +612,12 @@ function Browser({
 
   const changed = () => void queryClient.invalidateQueries({ queryKey: ["studies"] });
   const data = list.data;
-  // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」
-  const refetching = useDelayedPending(list.isFetching);
+  const refreshSeconds = screen.refreshSeconds ?? 0;
+  const refresh = useListRefresh(refreshSeconds, initialVersion, autoRefreshRef);
+  // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」。
+  // 自動更新の読み直しには出さない（30 秒ごとに一覧がちらつかないように）
+  const fetching = list.isFetching && !refresh.quiet;
+  const refetching = useDelayedPending(fetching);
 
   // 削除が終わったことの知らせ（docs/spec.md の 3.5「消した後」）。消すと行も詳細も消えるので、一覧の上に出す。
   // 次の操作（絞り込み・行の選び直し）までか、10 秒で消す
@@ -587,7 +708,17 @@ function Browser({
               </span>
               <span className="text-label">件</span>
             </h1>
-            <PendingText pending={list.isFetching} />
+            <PendingText pending={fetching} />
+            {refreshSeconds > 0 && (
+              <span
+                className={cn("inline-flex items-center gap-1 text-xs", refresh.failed ? "text-danger" : "text-label")}
+                data-testid="list-refresh"
+                data-failed={refresh.failed || undefined}
+              >
+                <RefreshCw aria-hidden className="size-3.5" />
+                {refresh.failed ? "自動更新：接続できません" : `自動更新（${refreshSeconds}秒）`}
+              </span>
+            )}
             {notice && (
               <p role="status" className="flex items-center gap-1.5 rounded-md border border-success px-2 text-sm text-success" data-testid="list-notice">
                 <CheckCircle2 aria-hidden className="size-4" />
@@ -603,17 +734,32 @@ function Browser({
           {list.error.message}
         </p>
       )}
-      {data && data.studies.length === 0 && (
-        <p className="flex items-center gap-3 text-label" data-testid="study-list-empty">
-          該当する検査はありません
-          <Button type="button" size="sm" variant="outline" onClick={clearFilter}>
-            条件をクリア
-          </Button>
-        </p>
-      )}
-      {data && data.studies.length > 0 && (
-        <StudyRows studies={data.studies} screen={screen} selected={selected} onSelect={pick} onChanged={changed} dim={refetching} />
-      )}
+      {/* 0 件でも表の枠と見出しの行を出し、一覧の場所が分かるようにする（2026-10-21。空の場所が真っ白だった） */}
+      <StudyRows
+        studies={data?.studies ?? []}
+        // 前の絞り込みの行を出している間（placeholder）は、別の印にする（新しい絞り込みの行で、見ていた行の位置を戻さない）
+        listKey={list.isPlaceholderData ? "placeholder" : `list:${params}`}
+        screen={screen}
+        selected={selected}
+        onSelect={pick}
+        onChanged={changed}
+        dim={refetching}
+        // 0 件の案内は、一覧を読めたときだけ。読み込みの間と読めなかったときは、中身の無い行を作らない（待ちの印は一覧の上の細い帯）
+        empty={
+          data ? (
+            <span className="inline-flex flex-wrap items-center justify-center gap-3" data-testid="study-list-empty">
+              <Inbox aria-hidden className="size-5" />
+              該当する検査はありません
+              {/* 絞り込みが既定のままなら、戻す先が無いのでボタンを出さない */}
+              {params !== "" && (
+                <Button type="button" size="sm" variant="outline" onClick={clearFilter}>
+                  条件をクリア
+                </Button>
+              )}
+            </span>
+          ) : undefined
+        }
+      />
       </div>
 
       {/* 境目：上下に動かせる（矢印のキー・Home・End・ドラッグ）。狭い画面では上下に分けない */}
@@ -673,7 +819,10 @@ function Browser({
               type="button"
               aria-label="詳細を閉じる"
               onClick={closeDetail}
-              className="sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden"
+              className={cn(
+                "sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden",
+                pressFeedback,
+              )}
             >
               <X aria-hidden className="size-5" />
             </button>
@@ -696,7 +845,13 @@ function Browser({
   );
 }
 
-export function StudyBrowser(props: { initialFilter: StudyFilter; initialData: StudyListData; initialDataAt: number; screen: ScreenInfo }) {
+export function StudyBrowser(props: {
+  initialFilter: StudyFilter;
+  initialData: StudyListData;
+  initialDataAt: number;
+  initialVersion?: string;
+  screen: ScreenInfo;
+}) {
   const [client] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: false } } }),
   );

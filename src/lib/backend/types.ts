@@ -58,6 +58,11 @@ export interface Backend {
   /** 検査の件数。Orthanc の /statistics で正確に数える */
   countStudies(): Promise<StudyCount>;
   /**
+   * 検査の一覧の版（docs/spec.md の 3.1 の自動更新）。Orthanc の変更の記録の最後の番号（/changes?last の Last）。
+   * 検査・シリーズ・画像が入る・消える・変わると進む。患者の情報は含まない
+   */
+  studyListVersion(): Promise<string>;
+  /**
    * ビューアが画像を取る道（WADO-RS の読み取り）の中継。検索（QIDO-RS）と書き込みは通さない（docs/spec.md の 3.2）。
    * 宛先は relay-path.ts の wadoRsTarget で確かめたもの
    */
