@@ -107,4 +107,18 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
     expect(row?.actorRole).toBe("general");
     expect(JSON.parse(row!.detail!).returned).toHaveLength(8);
   });
+
+  it("自動更新の読み直し（refresh=auto）は、監査の記録に trigger: auto を残す。絞り込みには使わず、ほかの検索には付けない", async () => {
+    state.role = "general";
+    const { GET } = await import("@/app/api/studies/route");
+    const { getDb } = await import("@/lib/db");
+    const last = async () => JSON.parse((await (await getDb()).auditLog.findFirst({ where: { action: "search" }, orderBy: { seq: "desc" } }))!.detail!);
+    const auto = await GET(new Request("http://127.0.0.1/api/studies?refresh=auto"));
+    expect(((await auto.json()) as { studies: unknown[] }).studies).toHaveLength(8);
+    expect(await last()).toMatchObject({ via: "api", trigger: "auto" });
+    await GET(new Request("http://127.0.0.1/api/studies"));
+    expect(await last()).not.toHaveProperty("trigger");
+    await GET(new Request("http://127.0.0.1/api/studies?refresh=manual"));
+    expect(await last()).not.toHaveProperty("trigger");
+  });
 });

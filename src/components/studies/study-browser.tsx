@@ -271,10 +271,10 @@ function columnsFor(studies: readonly StudyView[]) {
 /**
  * 一覧を読み直しても、見ていた行の位置を保つ（docs/spec.md の 3.1 の自動更新）。スクロールしているときは、見えている先頭の行を
  * 印にし、読み直した後に同じ行が同じ高さに来るように戻す（新しい検査が上に足されても、見ていた行が動かない）。
- * いちばん上にいるときは保たない（新しい検査が上に出て、目に入る）
+ * いちばん上にいるときは保たない（新しい検査が上に出て、目に入る）。絞り込みを替えた（listKey が替わった）ときは、印を捨てる
  */
-function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: readonly StudyView[]) {
-  const anchor = useRef<{ uid: string; offset: number } | null>(null);
+function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: readonly StudyView[], listKey: string) {
+  const anchor = useRef<{ uid: string; offset: number; key: string } | null>(null);
   const measure = useCallback(() => {
     const box = ref.current;
     anchor.current = null;
@@ -283,21 +283,22 @@ function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: r
     for (const row of box.querySelectorAll<HTMLElement>("tbody > tr[data-study-uid]")) {
       const r = row.getBoundingClientRect();
       if (r.bottom > top && row.dataset.studyUid) {
-        anchor.current = { uid: row.dataset.studyUid, offset: r.top - top };
+        anchor.current = { uid: row.dataset.studyUid, offset: r.top - top, key: listKey };
         return;
       }
     }
-  }, [ref]);
+  }, [ref, listKey]);
   useLayoutEffect(() => {
     const box = ref.current;
     const a = anchor.current;
-    if (box && a) {
+    // 同じ絞り込みの読み直し（自動更新など）のときだけ戻す
+    if (box && a && a.key === listKey) {
       const row = box.querySelector<HTMLElement>(`tbody > tr[data-study-uid="${CSS.escape(a.uid)}"]`);
       const top = box.getBoundingClientRect().top + (box.querySelector("thead")?.getBoundingClientRect().height ?? 0);
       if (row) box.scrollTop += row.getBoundingClientRect().top - top - a.offset;
     }
     measure();
-  }, [ref, studies, measure]);
+  }, [ref, studies, measure, listKey]);
   return measure;
 }
 
@@ -313,7 +314,10 @@ function StudyRows({
   onSelect,
   onChanged,
   dim = false,
+  listKey,
 }: {
+  /** いまの絞り込み（URL の形）。替わったら、見ていた行の位置を保たない */
+  listKey: string;
   studies: StudyView[];
   screen: ScreenInfo;
   selected: string | null;
@@ -328,7 +332,7 @@ function StudyRows({
   const columns = columnsFor(studies);
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const onScroll = useScrollAnchor(scrollRef, studies);
+  const onScroll = useScrollAnchor(scrollRef, studies, listKey);
   return (
     <div
       ref={scrollRef}
@@ -483,9 +487,10 @@ function StudyRows({
  * 一覧の自動更新（docs/spec.md の 3.1）。seconds ごとに一覧の版（/api/studies/version。Orthanc の変更の記録の番号）を読み、
  * 版が変わったときだけ一覧を読み直す（変わらなければ検査の検索をしない）。選んだ行・スクロール・開いている詳細はそのまま
  * （詳細は読み直さない。「詳細を開いた」の記録を増やさない）。この読み直しの間は待ちの印を出さない（quiet）。
- * タブを隠している間は読まず、戻ったらすぐ読む。seconds が 0 なら何もしない
+ * タブを隠している間は読まず、戻ったらすぐ読む。seconds が 0 なら何もしない。
+ * 読み直しの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）
  */
-function useListRefresh(seconds: number, initialVersion: string | undefined) {
+function useListRefresh(seconds: number, initialVersion: string | undefined, autoRef: React.RefObject<boolean>) {
   const queryClient = useQueryClient();
   const [quiet, setQuiet] = useState(false);
   // 基準の版。サーバーが一覧を取る前に読んだ版。無ければ、最初に読んだ版を基準にする
@@ -499,14 +504,19 @@ function useListRefresh(seconds: number, initialVersion: string | undefined) {
         return next;
       }
       setQuiet(true);
+      autoRef.current = true;
       try {
         // 開いていない絞り込みの一覧は古い印だけを付け、いま出している一覧を読み直す
         await queryClient.invalidateQueries({ queryKey: ["studies"], refetchType: "none" });
-        await queryClient.refetchQueries({ queryKey: ["studies"], type: "active" }, { throwOnError: true });
+        const done = queryClient.refetchQueries({ queryKey: ["studies"], type: "active" }, { throwOnError: true });
+        // 要求を出した後に戻す（同じ時に利用者が絞り込みを替えた要求には付けない）
+        autoRef.current = false;
+        await done;
         base.current = next;
       } catch {
         // 一覧を読めなかったときは、誤りを一覧の上に出し、版を進めない（次の間隔で読み直す）
       } finally {
+        autoRef.current = false;
         setQuiet(false);
       }
       return next;
@@ -562,10 +572,17 @@ function Browser({
   const queryClient = useQueryClient();
   const initialKey = filterToSearchParams(initialFilter).toString();
   const params = filterToSearchParams(filter).toString();
+  const autoRefreshRef = useRef(false);
 
   const list = useQuery({
     queryKey: listKey(filter),
-    queryFn: ({ signal }) => getJson<StudyListData>(`/api/studies${params ? `?${params}` : ""}`, signal),
+    queryFn: ({ signal }) => {
+      // 自動更新の読み直しには refresh=auto を付ける（監査の記録で、利用者の検索と分けて追えるように）
+      const query = new URLSearchParams(params);
+      if (autoRefreshRef.current) query.set("refresh", "auto");
+      const qs = query.toString();
+      return getJson<StudyListData>(`/api/studies${qs ? `?${qs}` : ""}`, signal);
+    },
     initialData: params === initialKey ? initialData : undefined,
     initialDataUpdatedAt: initialDataAt,
     placeholderData: (previous) => previous,
@@ -580,7 +597,7 @@ function Browser({
   const changed = () => void queryClient.invalidateQueries({ queryKey: ["studies"] });
   const data = list.data;
   const refreshSeconds = screen.refreshSeconds ?? 0;
-  const refresh = useListRefresh(refreshSeconds, initialVersion);
+  const refresh = useListRefresh(refreshSeconds, initialVersion, autoRefreshRef);
   // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」。
   // 自動更新の読み直しには出さない（30 秒ごとに一覧がちらつかないように）
   const fetching = list.isFetching && !refresh.quiet;
@@ -710,7 +727,16 @@ function Browser({
         </p>
       )}
       {data && data.studies.length > 0 && (
-        <StudyRows studies={data.studies} screen={screen} selected={selected} onSelect={pick} onChanged={changed} dim={refetching} />
+        <StudyRows
+          studies={data.studies}
+          // 前の絞り込みの行を出している間（placeholder）は、別の印にする（新しい絞り込みの行で、見ていた行の位置を戻さない）
+          listKey={list.isPlaceholderData ? "placeholder" : `list:${params}`}
+          screen={screen}
+          selected={selected}
+          onSelect={pick}
+          onChanged={changed}
+          dim={refetching}
+        />
       )}
       </div>
 

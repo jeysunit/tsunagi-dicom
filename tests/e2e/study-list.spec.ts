@@ -940,8 +940,10 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   // 一覧の答えを止めておく（読み直しの途中の画面を確かめるため）
   let hold: Promise<void> | null = null;
   let release = () => {};
+  const listUrls: string[] = [];
   await page.route(/\/api\/studies(\?[^/]*)?$/, async (route) => {
     listReads += 1;
+    listUrls.push(route.request().url());
     if (hold) await hold;
     const res = await route.fetch();
     const body = await res.json();
@@ -992,6 +994,8 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   release();
   await expect(rows(page)).toHaveCount(9);
   expect(listReads).toBe(1);
+  // 自動更新の読み直しには refresh=auto を付ける（監査の記録に trigger: "auto" が残る）
+  expect(new URL(listUrls[0]!).searchParams.get("refresh")).toBe("auto");
   await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEW_UID);
   await expect(page.getByTestId("study-count")).toHaveText("9");
   await expect(page.locator(`tr[data-study-uid="${uid}"]`)).toHaveAttribute("aria-selected", "true");
@@ -1008,4 +1012,22 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   versionStatus = 200;
   await page.clock.fastForward(30_000);
   await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
+
+  // タブを隠している間は版を読まない。戻すとすぐ読む
+  const setVisibility = (state: "hidden" | "visible") =>
+    page.evaluate((s) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => s });
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+    }, state);
+  await setVisibility("hidden");
+  const hiddenFrom = versionReads;
+  await page.clock.fastForward(90_000);
+  expect(versionReads).toBe(hiddenFrom);
+  await setVisibility("visible");
+  await expect.poll(() => versionReads).toBeGreaterThan(hiddenFrom);
+
+  // 利用者が絞り込みを替えた読み直しには、refresh=auto を付けない
+  await page.getByTestId("modality-CT").click();
+  await expect.poll(() => listUrls.length).toBeGreaterThan(1);
+  expect(new URL(listUrls.at(-1)!).searchParams.get("refresh")).toBeNull();
 });
