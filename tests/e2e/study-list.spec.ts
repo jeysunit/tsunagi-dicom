@@ -937,8 +937,12 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   const NEW_UID = "1.2.826.0.1.3680043.8.498.999999999";
   let arrived = false;
   let listReads = 0;
+  // 一覧の答えを止めておく（読み直しの途中の画面を確かめるため）
+  let hold: Promise<void> | null = null;
+  let release = () => {};
   await page.route(/\/api\/studies(\?[^/]*)?$/, async (route) => {
     listReads += 1;
+    if (hold) await hold;
     const res = await route.fetch();
     const body = await res.json();
     if (arrived) {
@@ -975,7 +979,17 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   // 版が変わると一覧を読み直し、新しい検査が先頭に出る。選んだ行・詳細・見ていた行の位置はそのまま
   version += 1;
   arrived = true;
+  hold = new Promise<void>((resolve) => (release = resolve));
   await page.clock.fastForward(30_000);
+  await expect.poll(() => listReads).toBe(1);
+  // 読み直しの途中（待ちの印を出す 0.3 秒を過ぎても）：細い帯・薄い行・件数の「—」を出さない
+  await page.clock.runFor(1_000);
+  await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
+  await expect(page.getByTestId("progress-bar")).toHaveCount(0);
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("pending-text")).toHaveCount(0);
+  hold = null;
+  release();
   await expect(rows(page)).toHaveCount(9);
   expect(listReads).toBe(1);
   await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEW_UID);
