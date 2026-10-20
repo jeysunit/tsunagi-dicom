@@ -627,6 +627,7 @@ function Browser({
         onSelect={pick}
         onChanged={changed}
         dim={refetching}
+        // 0 件の案内は、一覧を読めたときだけ。読み込みの間と読めなかったときは、中身の無い行を作らない（待ちの印は一覧の上の細い帯）
         empty={
           data ? (
             <span className="inline-flex flex-wrap items-center justify-center gap-3" data-testid="study-list-empty">
@@ -639,9 +640,7 @@ function Browser({
                 </Button>
               )}
             </span>
-          ) : (
-            !list.isError && <PendingText pending={list.isFetching} />
-          )
+          ) : undefined
         }
       />
       </div>
