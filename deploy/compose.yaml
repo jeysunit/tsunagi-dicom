@@ -56,6 +56,10 @@ services:
       INITIAL_ADMIN_USERNAME: admin
       INITIAL_ADMIN_PASSWORD_FILE: /run/secrets/initial_admin_password
       DATABASE_URL: file:/data/tsunagi.db
+      # 監査の記録の先頭の控え（seq と hash）の追記先。データベースとは別のボリュームに置く。
+      # 同じ控えをコンテナのログ（tsunagi-dicom: audit-anchor …）にも出すので、ログを外の置き場へ送って残す（施設の運用。
+      # docs/security-and-maintenance.md の 5）
+      AUDIT_ANCHOR_FILE: /audit-anchors/audit-anchors.jsonl
     ports:
       - "${TSUNAGI_HTTP_BIND:-127.0.0.1}:${TSUNAGI_HTTP_PORT:-3000}:3000"
     networks:
@@ -63,6 +67,7 @@ services:
       - web
     volumes:
       - tsunagi-data:/data
+      - tsunagi-audit-anchors:/audit-anchors
     secrets:
       - session_secret
       - backend_password
@@ -144,4 +149,6 @@ secrets:
 
 volumes:
   tsunagi-data:
+  # 監査の記録の先頭の控え（tsunagi-data とは別。tsunagi-data の写しを戻しても、控えは戻らない）
+  tsunagi-audit-anchors:
   orthanc-db:

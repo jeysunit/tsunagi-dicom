@@ -17,6 +17,8 @@ if (!url.startsWith("file:")) {
 const dbFile = path.resolve(url.slice("file:".length));
 mkdirSync(path.dirname(dbFile), { recursive: true });
 for (const suffix of ["", "-wal", "-shm", "-journal"]) rmSync(`${dbFile}${suffix}`, { force: true });
+// 監査の記録の先頭の控えも、作り直したデータベースに合わせて消す（前の回の控えと照らさない）
+if (process.env.AUDIT_ANCHOR_FILE) rmSync(process.env.AUDIT_ANCHOR_FILE, { force: true });
 
 execFileSync(path.resolve("node_modules/.bin/prisma"), ["migrate", "deploy"], { stdio: "inherit" });
 

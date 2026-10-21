@@ -19,7 +19,12 @@ export async function checkConfigOrExit(): Promise<void> {
     throw error;
   }
 
-  if (config.auth.mode !== "local") return;
+  if (config.auth.mode !== "local") {
+    // 検証モード（モックだけ）でも、監査の記録の先頭の控えは書き出す（/api/audit/verify が照らせるように）
+    const [{ getDb }, { startAuditAnchors }] = await Promise.all([import("@/lib/db"), import("@/lib/audit-anchor")]);
+    await startAuditAnchors(getDb, config.audit.anchorFile);
+    return;
+  }
   const [{ bootstrapInitialAdmin, BootstrapError }, { createDb, getDb }, { purgeExpiredSessions, flushFailureDigest }] =
     await Promise.all([import("@/lib/auth/bootstrap"), import("@/lib/db"), import("@/lib/auth/local-auth")]);
   const settings = {
@@ -38,6 +43,10 @@ export async function checkConfigOrExit(): Promise<void> {
     reauthMinutes: config.auth.reauthMinutes,
   };
   const source = { sourceAddress: null, sourceAddressUnverified: null };
+  // 監査の記録の先頭の控えを、データベースの外（コンテナのログと AUDIT_ANCHOR_FILE）へ書き出す（docs/adr/0001-audit-chain-mac.md）。
+  // 最初の管理者を作る前に始める（記録も利用者もまだ無い初めての起動のときだけ、控えのファイルを作るため）
+  const { startAuditAnchors } = await import("@/lib/audit-anchor");
+  await startAuditAnchors(getDb, config.audit.anchorFile);
   const db = await createDb(config.databaseUrl);
   try {
     const result = await bootstrapInitialAdmin({ db, settings, source }, config);

@@ -62,6 +62,8 @@ export default defineConfig({
       E2E_INITIAL_ADMIN_PASSWORD: process.env.ITEST_ADMIN_INITIAL_PASSWORD ?? "",
       SESSION_SECRET: process.env.ITEST_SESSION_SECRET ?? "",
       DATABASE_URL: `file:${path.join(ITEST.workDir, "itest.db")}`,
+      // 監査の記録の先頭の控え（試験の 9 で、/api/audit/verify が照らし合わせることを見る）
+      AUDIT_ANCHOR_FILE: path.join(ITEST.workDir, "audit-anchors.jsonl"),
       TZ: "Asia/Tokyo",
       HOSTNAME: "127.0.0.1",
       PORT: String(ITEST.bffPort),
