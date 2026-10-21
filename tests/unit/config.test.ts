@@ -39,6 +39,19 @@ describe("設定の読み込み", () => {
     expect(config.timeZone).toBe("Asia/Tokyo");
   });
 
+  it("監査の記録：前の SESSION_SECRET（1 行に 1 つ）と、先頭の控えのファイル（絶対のパス）を読む", () => {
+    expect(loadConfig(base).audit).toEqual({ anchorFile: undefined, sessionSecretPrevious: [] });
+    const config = loadConfig(
+      { ...base, SESSION_SECRET_PREVIOUS_FILE: "/run/secrets/previous", AUDIT_ANCHOR_FILE: "/audit-anchors/a.jsonl" },
+      { readFile: () => `${"p".repeat(40)}\n\n${"q".repeat(40)}\n` },
+    );
+    expect(config.audit).toEqual({ anchorFile: "/audit-anchors/a.jsonl", sessionSecretPrevious: ["p".repeat(40), "q".repeat(40)] });
+    // 短い値・読めないファイル・相対のパスは起動しない
+    expect(variablesOf({ ...base, SESSION_SECRET_PREVIOUS_FILE: "/p" }, { "/p": "short\n" })).toEqual(["SESSION_SECRET_PREVIOUS_FILE"]);
+    expect(variablesOf({ ...base, SESSION_SECRET_PREVIOUS_FILE: "/missing" })).toEqual(["SESSION_SECRET_PREVIOUS_FILE"]);
+    expect(variablesOf({ ...base, AUDIT_ANCHOR_FILE: "anchors.jsonl" })).toEqual(["AUDIT_ANCHOR_FILE"]);
+  });
+
   it(".env.example の空の値は、設定しないのと同じに扱う", () => {
     const config = loadConfig({ ...base, BACKEND_USERNAME: "", BACKEND_CA_FILE: "", VIEWER_OHIF_URL: "" });
     expect(config.backend.username).toBeUndefined();

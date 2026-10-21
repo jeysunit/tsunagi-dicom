@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
 import { newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
@@ -421,6 +423,13 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
   expect(body.ok).toBe(true);
   expect(body.checked).toBeGreaterThan(auditBefore);
   observe("audit.rowsAdded", body.checked - auditBefore);
+  // 鍵つきのつなぎ（鍵の無い行は無い）と、起動の時に書き出した先頭の控え（AUDIT_ANCHOR_FILE）との照らし合わせ
+  expect(body.legacy).toBe(0);
+  expect(body.anchors.checked).toBeGreaterThanOrEqual(1);
+  const anchorLines = readFileSync(path.join(ITEST.workDir, "audit-anchors.jsonl"), "utf8").trim().split("\n");
+  const firstAnchor = JSON.parse(anchorLines[0]!) as { seq: number; hash: string; keyId: string | null };
+  expect(firstAnchor.keyId).toMatch(/^[0-9a-f]{16}$/);
+  expect(firstAnchor.hash).toMatch(/^[0-9a-f]{64}$/);
 
   // 操作ごとの行：つなぎが正しいだけでなく、書き込みの操作ごとに「求めた」「結果」「終わり」が要求の ID で結ばれている
   const rows = readAudit();

@@ -274,6 +274,15 @@ test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一
   const stored = await compose(["exec", "-T", "orthanc", "sh", "-c", "find /var/lib/orthanc/db -type f | wc -l"]);
   expect(Number(stored.trim())).toBeGreaterThan(0);
 
+  // 監査の記録の先頭の控え：配る compose の形で、コンテナのログと別のボリュームのファイル（AUDIT_ANCHOR_FILE）に書き出し、
+  // /api/audit/verify がファイルの控えと照らし合わせる
+  const verify = (await (await page.request.get("/api/audit/verify")).json()) as { ok: boolean; legacy: number; anchors: { checked: number } };
+  expect(verify).toMatchObject({ ok: true, legacy: 0 });
+  expect(verify.anchors.checked).toBeGreaterThanOrEqual(1);
+  expect(await compose(["logs", "--no-color", "tsunagi"])).toContain("tsunagi-dicom: audit-anchor ");
+  const anchorFile = await compose(["exec", "-T", "tsunagi", "sh", "-c", "wc -l < /audit-anchors/audit-anchors.jsonl"]);
+  expect(Number(anchorFile.trim())).toBeGreaterThanOrEqual(1);
+
   // CI の記録に残す数（名前と数だけ）
   console.log(
     `[flow] DTG が作った画像 ${exam.files.length}・DTG から Orthanc へ送れた画像 ${sent.length}・` +

@@ -66,6 +66,13 @@ export interface AppConfig {
     /** 検査の一覧の自動更新の間隔（秒。0 で止める。docs/spec.md の 3.1） */
     studyListRefreshSeconds: number;
   };
+  /** 監査の記録（docs/adr/0001-audit-chain-mac.md） */
+  audit: {
+    /** 先頭の控えを追記するファイル（AUDIT_ANCHOR_FILE）。無ければコンテナのログ（標準出力）にだけ書く */
+    anchorFile?: string;
+    /** 前に使っていた SESSION_SECRET（SESSION_SECRET_PREVIOUS_FILE）。その鍵で書いた行を確かめるためだけに使う */
+    sessionSecretPrevious: string[];
+  };
   databaseUrl: string;
   sessionSecret: string;
   timeZone: string;
@@ -162,6 +169,14 @@ const envSchema = z.object({
     .refine((v) => Buffer.byteLength(v, "utf8") >= SESSION_SECRET_MIN_BYTES, "32 バイト以上の乱数にする")
     .optional(),
   SESSION_SECRET_FILE: z.string().optional(),
+  // 前に使っていた SESSION_SECRET（1 行に 1 つ）。監査の記録のうち、その鍵で書いた行を確かめるためだけに使う
+  // （docs/adr/0001-audit-chain-mac.md）。セッションや token には使わない
+  SESSION_SECRET_PREVIOUS_FILE: z.string().optional(),
+  // 監査の記録の先頭（seq と hash）の控えを追記するファイル（JSON Lines）。データベースとは別の置き場にする
+  AUDIT_ANCHOR_FILE: z
+    .string()
+    .refine((v) => v.startsWith("/"), "絶対のパスにする（例：/audit-anchors/audit-anchors.jsonl）")
+    .optional(),
   TZ: z
     .string()
     .default("Asia/Tokyo")
@@ -235,6 +250,20 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     Buffer.byteLength(sessionSecret, "utf8") < SESSION_SECRET_MIN_BYTES
   ) {
     problem("SESSION_SECRET_FILE", "32 バイト以上の乱数にする");
+  }
+  // 前の SESSION_SECRET（監査の記録の確かめだけに使う）。空の行は飛ばす。どれも 32 バイト以上
+  let sessionSecretPrevious: string[] = [];
+  if (e.SESSION_SECRET_PREVIOUS_FILE !== undefined) {
+    try {
+      sessionSecretPrevious = readFile(e.SESSION_SECRET_PREVIOUS_FILE)
+        .split(/\r?\n/)
+        .filter((line) => line !== "");
+      if (sessionSecretPrevious.some((s) => Buffer.byteLength(s, "utf8") < SESSION_SECRET_MIN_BYTES)) {
+        problem("SESSION_SECRET_PREVIOUS_FILE", "どの行も 32 バイト以上にする（前に使っていた SESSION_SECRET を 1 行に 1 つ）");
+      }
+    } catch {
+      problem("SESSION_SECRET_PREVIOUS_FILE", "ファイルを読めない");
+    }
   }
   const oidcClientSecret = secret("OIDC_CLIENT_SECRET", e.OIDC_CLIENT_SECRET, e.OIDC_CLIENT_SECRET_FILE);
 
@@ -345,6 +374,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       devAllowWrite: e.DEV_ALLOW_WRITE,
     },
     screen: { studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS },
+    audit: { anchorFile: e.AUDIT_ANCHOR_FILE, sessionSecretPrevious },
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている
     sessionSecret: sessionSecret!,
