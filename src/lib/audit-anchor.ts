@@ -1,5 +1,5 @@
 import "server-only";
-import { appendFile, readFile, stat } from "node:fs/promises";
+import { appendFile, readFile, stat, writeFile } from "node:fs/promises";
 import { appendAudit, type AuditAnchorRef } from "@/lib/audit";
 import type { Db } from "@/lib/db";
 
@@ -39,7 +39,7 @@ const state = (stateHolder[STATE_KEY] ??= { lastSeq: null });
 
 /**
  * いまの最後の行の控えを書き出す。行が無いか、前に書いた控えから変わっていなければ書かない（null を返す）。
- * file への追記に失敗したら投げる（ログには先に書く）
+ * ログ（標準出力）には、控えのファイルの具合に関わらず書く。ファイルに書けなければ、ログに書いた後で投げる
  */
 export async function writeAuditAnchor(
   db: Db,
@@ -49,34 +49,53 @@ export async function writeAuditAnchor(
 ): Promise<AuditAnchor | null> {
   // 控えのファイルが無ければ、初めて書き出すときだけ作る（作ったことを監査の記録に残す）。前に書き出したことがあれば、
   // 作り直さない：消えたファイルや別のボリュームを、いまの（切り詰められたかもしれない）先頭から黙って作り直すと、
-  // /api/audit/verify が照らせないことに気づけないため
-  let create = false;
-  if (file && !(await exists(file))) {
+  // /api/audit/verify が照らせないことに気づけないため。
+  // 作るときは、空のファイルを先に作ってから記録の行を足す（記録の行を足した後にファイルを作れないと、次から
+  // 「前に作った」と見て二度と作れなくなるため。空のファイルができていれば、次からはそこへ追記する）
+  let fileProblem: AuditAnchorFileError | null = null;
+  const size = file ? await sizeOf(file) : null;
+  // 空のファイル（作ったばかり・施設が置き直した）には、先頭が変わっていなくても書く
+  let force = size === 0;
+  if (file && size === null) {
+    force = true;
     if (await db.auditLog.findFirst({ where: { action: "audit_anchor" }, select: { seq: true } })) {
-      throw new AuditAnchorFileError(
+      fileProblem = new AuditAnchorFileError(
         "先頭の控えのファイルが無い（前に書き出したことがある）。作り直さない。外に残したログの控えと照らしてから、続けるなら空のファイルを置く",
       );
+    } else {
+      // ほかのプロセスが同じ時に作っていれば（EEXIST）、そのファイルへ追記する
+      await writeFile(file, "", { mode: 0o600, flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") throw error;
+      });
+      await appendAudit(db, { actorId: "system", actorRole: "system", authMode: "system", action: "audit_anchor", detail: { event: "start" } });
     }
-    await appendAudit(db, { actorId: "system", actorRole: "system", authMode: "system", action: "audit_anchor", detail: { event: "start" } });
-    create = true;
   }
   const last = await db.auditLog.findFirst({ orderBy: { seq: "desc" }, select: { seq: true, hash: true, keyId: true } });
-  if (!last || (!create && state.lastSeq === last.seq)) return null;
+  const unchanged = last !== null && state.lastSeq === last.seq;
+  if (!last || (unchanged && (!force || fileProblem))) {
+    if (fileProblem) throw fileProblem;
+    return null;
+  }
   const anchor: AuditAnchor = { seq: last.seq, hash: last.hash, keyId: last.keyId, at: now.toISOString() };
   const line = JSON.stringify(anchor);
   log(`${AUDIT_ANCHOR_LOG_PREFIX}${line}`);
-  // 作るときは、ほかのプロセスが同じ時に作っていたら失敗させる（wx）
-  if (file) await appendFile(file, `${line}\n`, { encoding: "utf8", mode: 0o600, flag: create ? "wx" : "a" });
+  if (fileProblem) {
+    // ログには書けた。ファイルは作り直さないので、同じ先頭をログに重ねて書かない
+    state.lastSeq = last.seq;
+    throw fileProblem;
+  }
+  // ファイルに書けなければ、次の間隔で同じ先頭をもう一度書く（覚えるのは書けた後）
+  if (file) await appendFile(file, `${line}\n`, { encoding: "utf8", mode: 0o600, flag: "a" });
   state.lastSeq = last.seq;
   return anchor;
 }
 
-async function exists(file: string): Promise<boolean> {
+/** ファイルの大きさ（バイト）。無ければ null */
+async function sizeOf(file: string): Promise<number | null> {
   try {
-    await stat(file);
-    return true;
+    return (await stat(file)).size;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
 }

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -408,7 +408,10 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     await writeAuditAnchor(db, file, () => undefined);
     rmSync(file);
     await appendMany(db, 1);
-    await expect(writeAuditAnchor(db, file, () => undefined)).rejects.toThrow(AuditAnchorFileError);
+    // ログ（標準出力）には書き続け、ファイルは作り直さずに誤りにする
+    const logged: string[] = [];
+    await expect(writeAuditAnchor(db, file, (l) => logged.push(l))).rejects.toThrow(AuditAnchorFileError);
+    expect(logged).toEqual([expect.stringMatching(/^tsunagi-dicom: audit-anchor \{"seq":4,/)]);
     expect(await readAuditAnchors(file)).toEqual([]);
     expect(await verifyAuditChain(db, 1000, { anchors: [], requireAnchors: true })).toMatchObject({ ok: false });
     // 施設が外に残した控えと照らしてから、空のファイルを置いて続ける
@@ -474,6 +477,21 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     });
     // 控えのファイルを設定していなければ、控えとは照らさない（つなぎだけを確かめる）
     expect(await verifyAuditChain(db, 1000, { anchors: missing })).toEqual(okChain(2));
+  });
+
+  it("初めて控えのファイルを作れなかったら、作ったことを記録に残さず、作れるようになった次の回に作る", async () => {
+    resetAuditAnchorState();
+    const db = await freshDb();
+    await appendMany(db, 2);
+    const sub = path.join(anchorDir, `later${++m}`);
+    const file = path.join(sub, "anchors.jsonl");
+    // 置き場のフォルダがまだ無い（ボリュームをつなぎ忘れた、など）
+    await expect(writeAuditAnchor(db, file, () => undefined)).rejects.toThrow();
+    expect(await db.auditLog.count({ where: { action: "audit_anchor" } })).toBe(0);
+    mkdirSync(sub);
+    const first = await writeAuditAnchor(db, file, () => undefined);
+    expect(first?.seq).toBe(3);
+    expect(await readAuditAnchors(file)).toEqual([{ seq: 3, hash: first!.hash }]);
   });
 
   it("控えのファイル：まだ無ければ空。読めない行・同じ seq で食い違う控えは、書き換えとして断る", async () => {
