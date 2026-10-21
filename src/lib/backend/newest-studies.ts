@@ -30,7 +30,11 @@ const DAY_MS = 86_400_000;
 /** `YYYYMMDD` を 1970-01-01 からの日の数にする。形が違えば undefined */
 function dayOf(da: string | undefined): number | undefined {
   const m = da ? /^(\d{4})(\d{2})(\d{2})$/.exec(da) : null;
-  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS : undefined;
+  if (!m) return undefined;
+  // Date.UTC は 0〜99 年を 1900 年代に読み替えるので、年をそのまま入れる
+  const d = new Date(0);
+  d.setUTCFullYear(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.getTime() / DAY_MS;
 }
 
 function daOf(day: number): string {

@@ -170,6 +170,14 @@ describe("検査日の新しい順の上限の数を集める", () => {
     expect(uids(r.studies)).toEqual(uids(sortStudiesNewestFirst(stored).slice(0, 10)));
   });
 
+  it("0〜99 年の日付の範囲も、年を読み替えずに区切る", async () => {
+    const stored = Array.from({ length: 30 }, (_, i) => study(i, `00${String(50 + i).padStart(2, "0")}0101`));
+    const { fetchWindow, calls } = fakeQido(stored, 11);
+    const r = await collectNewestStudies(fetchWindow, 10, { dateFrom: "00010101", dateTo: "00991231" }, TODAY);
+    expect(uids(r.studies)).toEqual(uids(sortStudiesNewestFirst(stored).slice(0, 10)));
+    for (const q of calls) expect(q.dateFrom! >= "00010101" && q.dateTo! <= "00991231").toBe(true);
+  });
+
   it("答えの Warning 299 を「続きがある」と読む（PS3.18 8.3.4.4.1）", () => {
     expect(warnsMoreResults("299 orthanc: There are 5 additional results that can be requested")).toBe(true);
     expect(warnsMoreResults('110 - "Response is Stale", 299 x: There are 1 additional results that can be requested')).toBe(true);
