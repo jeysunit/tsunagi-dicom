@@ -98,7 +98,9 @@ export async function collectNewestStudies(fetchWindow: FetchWindow, limit: numb
   // stopped：読みきれなかった範囲がある（1 日に収まっても続きがある・回数の上限に届いた）。そこより古い範囲へは進まない
   // （進むと、新しい側に読み残しを抱えたまま古い検査を足し、「新しい側から欠けなく並ぶ」が崩れる。
   // 画像サーバーが limit より少ない数で切ることも、規格は認めている（PS3.18 8.3.4.4.1 の maxResults））
-  let complete = true;
+  // 検査日の条件の無い検索では、検査日の無い検査も条件に合うが、区切った問い合わせ（検査日の範囲の条件）では引けない。
+  // 引けたかを確かめられないので、全部を返したとはしない
+  let complete = bounds.from !== undefined || bounds.to !== undefined;
   let stopped = false;
   const collect = async (range: Range, need: number): Promise<StudySummary[]> => {
     const answer = await ask(range);

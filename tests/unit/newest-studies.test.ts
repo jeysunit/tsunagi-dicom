@@ -145,9 +145,21 @@ describe("検査日の新しい順の上限の数を集める", () => {
       const matched = stored.filter((s) => inDateRange(s.studyDate, query));
       return { rows: matched.slice(0, 10), more: matched.length > 10 };
     };
-    const r = await collectNewestStudies(capped, 20, undefined, TODAY);
+    const r = await collectNewestStudies(capped, 20, { dateFrom: "20000101" }, TODAY);
     expect(r.complete).toBe(true);
     expect(uids(r.studies)).toEqual(uids(sortStudiesNewestFirst(stored)));
+  });
+
+  it("検査日の条件の無い検索で問い合わせ直したときは、検査日の無い検査を引けたか分からないので complete にしない", async () => {
+    // 検査日のある 15 件と、検査日の無い 1 件。1 回に 10 件までの画像サーバー
+    const stored = [...Array.from({ length: 15 }, (_, i) => study(i, daysAgo(i * 3))), study(99, "")];
+    const capped = async (query: StudyQuery): Promise<WindowAnswer> => {
+      const matched = stored.filter((s) => inDateRange(s.studyDate, query));
+      return { rows: matched.slice(0, 10), more: matched.length > 10 };
+    };
+    const r = await collectNewestStudies(capped, 20, undefined, TODAY);
+    expect(r.studies).toHaveLength(15);
+    expect(r.complete).toBe(false);
   });
 
   it("上限の数に届いて古い範囲を読まなかったときは complete にしない", async () => {
