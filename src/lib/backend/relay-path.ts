@@ -87,6 +87,54 @@ export function isImageRendition(path: string): boolean {
   return last === "thumbnail" || last === "rendered";
 }
 
+/** Accept に並んだ media type（小文字。q が 0 のものは受け付けないので除く） */
+function acceptedTypes(accept: string): string[] {
+  return accept
+    .split(",")
+    .map((part) => part.split(";").map((s) => s.trim().toLowerCase()))
+    .filter(([name, ...params]) => name && params.every((p) => !p.startsWith("q=") || Number(p.slice(2)) > 0))
+    .map(([name]) => name!);
+}
+
+/** DICOM の media type（PS3.18 8.7.3：DICOM のファイル・メタデータ・bulk data） */
+const DICOM_MEDIA_TYPE = /^(application\/dicom(\+json|\+xml)?|multipart\/related|application\/octet-stream)$/;
+/** 画像などに変換した型（rendered media type。PS3.18 8.7.4：画像・動画・文字・PDF。image/* などの範囲指定も含める） */
+const RENDERED_MEDIA_TYPE = /^((image|video|text)\/[^/]+|application\/pdf)$/;
+
+/**
+ * 中継の要求の Accept が規格に合わなければ、返す状態の番号（PS3.18 8.7.5）。合えば null。
+ * - Accept の無い要求は 406。ブラウザの fetch・<img> はいつも Accept を付けるので、ここでは BFF が型を決める thumbnail・rendered の道だけに当てる
+ *   （ビューアの metadata・frames の取得には、BFF の側で Accept を足さず、そのまま画像サーバーへ渡す）
+ * - DICOM の media type と、画像などに変換した型が混じった Accept は 400
+ */
+export function relayAcceptStatus(path: string, accept: string | null | undefined): 400 | 406 | null {
+  if (!accept?.trim()) return isImageRendition(path) ? 406 : null;
+  const types = acceptedTypes(accept);
+  return types.some((t) => DICOM_MEDIA_TYPE.test(t)) && types.some((t) => RENDERED_MEDIA_TYPE.test(t)) ? 400 : null;
+}
+
+/**
+ * query から accept（PS3.18 8.3.3.1 の Accept Query Parameter）を外す。画像サーバーへの Accept は、BFF が Accept の
+ * ヘッダーで決める（relayAccept）。query の accept をそのまま渡すと、BFF が確かめていない型で答えが返る
+ */
+export function withoutAcceptParam(search: string): string {
+  if (!search.startsWith("?")) return search;
+  const kept = search
+    .slice(1)
+    .split("&")
+    .filter((part) => {
+      const raw = part.split("=")[0] ?? "";
+      let name = raw;
+      try {
+        name = decodeURIComponent(raw);
+      } catch {
+        // 符号の誤りは名前のままで比べる
+      }
+      return part !== "" && name !== "accept";
+    });
+  return kept.length > 0 ? `?${kept.join("&")}` : "";
+}
+
 /** Accept の中で、q が 0 より大きい形で名指しされている media type か（ワイルドカードの範囲指定は名指しにしない） */
 function namesMediaType(accept: string, type: string): boolean {
   return accept.split(",").some((part) => {

@@ -1,5 +1,5 @@
 import type { AuditFields } from "@/lib/auth/session";
-import { wadoRsTarget } from "@/lib/backend/relay-path";
+import { relayAcceptStatus, wadoRsTarget } from "@/lib/backend/relay-path";
 import { BackendError, type Backend } from "@/lib/backend/types";
 
 // BFF の中継（/api/dicom-web/...）の中身。docs/spec.md の 3.2・原則 8。
@@ -30,6 +30,8 @@ export interface RelayDeps {
 export const RELAY_READ_ONLY_MESSAGE = "中継は WADO-RS の読み取り（GET）だけ。書き込みは中継では受けない（操作ごとの画面の API を使う）";
 export const RELAY_NOT_WADO_MESSAGE = "中継は WADO-RS の読み取りだけ。検索は画面の API を使う";
 export const RELAY_FORBIDDEN_MESSAGE = "この役割では画像を取れない";
+export const RELAY_NO_ACCEPT_MESSAGE = "画像の表現（thumbnail・rendered）は、Accept で受け取る型を指定する";
+export const RELAY_MIXED_ACCEPT_MESSAGE = "Accept に、DICOM の型と画像などの型を混ぜられない";
 
 /** 記録に残す path（要求のままの値なので、長さを切る） */
 const pathForAudit = (segments: string[]) => segments.join("/").slice(0, 512);
@@ -87,6 +89,18 @@ export async function relayWadoRs(input: RelayInput, deps: RelayDeps): Promise<R
       ...(target.sopInstanceUid ? { sopInstanceUid: target.sopInstanceUid } : {}),
     },
   };
+
+  // Accept が規格に合わない要求は、画像サーバーへ渡さずに断る（PS3.18 8.7.5）。断ったことも記録する
+  const acceptStatus = relayAcceptStatus(target.path, input.accept);
+  if (acceptStatus) {
+    await deps.record({
+      action: "retrieve",
+      outcome: "denied",
+      ...where,
+      detail: { ...where.detail, status: acceptStatus, reason: acceptStatus === 406 ? "no-accept" : "mixed-accept" },
+    });
+    return Response.json({ error: acceptStatus === 406 ? RELAY_NO_ACCEPT_MESSAGE : RELAY_MIXED_ACCEPT_MESSAGE }, { status: acceptStatus });
+  }
 
   let res: Response;
   try {

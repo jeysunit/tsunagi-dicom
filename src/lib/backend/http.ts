@@ -7,7 +7,6 @@ import {
   seriesFromDicomJson,
   sortInstances,
   sortSeries,
-  sortStudiesNewestFirst,
   stringValue,
   studyDateRange,
   studyFromDicomJson,
@@ -32,7 +31,8 @@ import {
   receptionFromMetadata,
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
-import { isDicomUid, relayAccept, wadoRsTarget } from "@/lib/backend/relay-path";
+import { collectNewestStudies, todayForWindows, warnsMoreResults, type WindowAnswer } from "@/lib/backend/newest-studies";
+import { isDicomUid, relayAccept, wadoRsTarget, withoutAcceptParam } from "@/lib/backend/relay-path";
 import {
   BackendError,
   BackendUnknownError,
@@ -188,8 +188,12 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     return (await res.json()) as T;
   }
 
-  async function qidoStudies(limit: number, studyQuery?: StudyQuery) {
-    const query = new URLSearchParams({ limit: String(clampStudyLimit(limit)) });
+  /**
+   * QIDO-RS の検査の検索を 1 回。ask 件まで求め、答えの行（BFF の側で条件を確かめ直したもの）と、続きがあるか
+   * （返した数が ask に届いたか、Warning 299 があった。PS3.18 8.3.4.4.1）を返す
+   */
+  async function qidoStudies(ask: number, studyQuery?: StudyQuery): Promise<WindowAnswer> {
+    const query = new URLSearchParams({ limit: String(ask) });
     const range = studyDateRange(studyQuery);
     if (range) query.set("StudyDate", range);
     // 詳細条件（生年月日・性別・受付番号・検査名）も Orthanc で絞る（上限 1000 件の外の古い検査も引ける）
@@ -199,7 +203,19 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     query.append("includefield", "00080061");
     query.append("includefield", "00201206");
     query.append("includefield", "00201208");
-    return getJson<DicomJsonDataset[]>(dicomwebUrl!, `studies?${query}`);
+    const res = await call(dicomwebUrl!, `studies?${query}`, { headers: { accept: "application/dicom+json, application/json" } });
+    if (!res.ok) {
+      await res.body?.cancel();
+      throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+    }
+    // 0 件は 200 と空の配列（古い版の規格では 204）
+    const rows = res.status === 204 ? [] : ((await res.json()) as unknown);
+    const datasets = Array.isArray(rows) ? (rows as DicomJsonDataset[]) : [];
+    return {
+      // 範囲と詳細条件は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
+      rows: datasets.map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, studyQuery)),
+      more: datasets.length >= ask || warnsMoreResults(res.headers.get("warning")),
+    };
   }
 
   /** UID は字を確かめてから URL に入れる（画像サーバーの path の外へ出さない） */
@@ -213,9 +229,9 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     mock: false,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
-      // 範囲と詳細条件は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
-      const studies = (await qidoStudies(limit, query)).map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, query));
-      return sortStudiesNewestFirst(studies);
+      // 上限より 1 件多く求め、上限ちょうどの答えを「続きがある」と取り違えない
+      const max = clampStudyLimit(limit);
+      return collectNewestStudies((q) => qidoStudies(max + 1, q), max, query, todayForWindows());
     },
 
     async searchSeries(studyInstanceUid: string) {
@@ -308,7 +324,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       // thumbnail・rendered は BFF が Accept を決める（ブラウザの <img> の Accept は Orthanc が 400 で断る）。ビューアの取得はそのまま渡す
       const accept = relayAccept(target.path, req.accept);
       if (accept) headers.accept = accept;
-      const res = await call(dicomwebUrl!, `${target.path}${req.search}`, { method: req.method, headers });
+      // query の accept（PS3.18 8.3.3.1）は渡さない。受け取る型は、上で決めた Accept のヘッダーだけで求める
+      const res = await call(dicomwebUrl!, `${target.path}${withoutAcceptParam(req.search)}`, { method: req.method, headers });
       // 画像サーバーの中の URL へ飛ばす応答は、ブラウザへそのまま渡さない
       if (res.status >= 300 && res.status < 400) {
         await res.body?.cancel();

@@ -135,7 +135,7 @@ async function delStatus(requestId: string, uid = STUDY) {
 }
 async function listed(uid = STUDY) {
   const { getBackend } = await import("@/lib/backend");
-  return (await getBackend().searchStudies()).some((s) => s.studyInstanceUid === uid);
+  return (await getBackend().searchStudies()).studies.some((s) => s.studyInstanceUid === uid);
 }
 
 describe("書き出し（ZIP）", () => {
