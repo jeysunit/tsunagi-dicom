@@ -64,19 +64,21 @@ flowchart LR
 
 ### 図3　開発・試験のときの構成（本物の患者のデータを使わずに試す）
 
-この図で分かること：試験のときに、検査装置のふりをするソフトと、試験用の送信先（DCMTK の storescp）を組み合わせる構成（開発用の compose `docker/dev/compose.yaml`）。
+この図で分かること：試験のときに、試験用の RIS、検査装置のふりをするソフト、試験用の送信先（DCMTK の storescp）を組み合わせる構成（開発用の compose `docker/dev/compose.yaml`）。
 
-[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator) は、CT などの検査装置のふりをして、試験用に作った架空の患者の画像を Orthanc へ送るソフト。その画像を tsunagi-dicom で見て、tsunagi-dicom から試験用の送信先（DCMTK の storescp）へ送信する。本物の患者のデータは使わない。
+[ris-emulator](https://github.com/jeysunit/ris-emulator) は、試験用の RIS で、架空の患者の検査の予約を作り、ワークリスト（MWL）で返すソフト。[dicom-test-generator](https://github.com/jeysunit/dicom-test-generator)（DTG）は、CT などの検査装置のふりをして、ワークリストの予約（または予約なしの緊急の患者）で試験用の画像を作り、Orthanc へ送るソフト。その画像を tsunagi-dicom で見て、tsunagi-dicom から試験用の送信先（DCMTK の storescp）へ送信する。本物の患者のデータは使わない。
 
 ```mermaid
 flowchart LR
   classDef box fill:#ffffff,stroke:#0969da,stroke-width:2px,color:#1f2328
 
-  DTG["dicom-test-generator<br/>検査装置のふりをする試験用のソフト<br/>架空の患者の画像を作る"]:::box
+  RIS["ris-emulator<br/>試験用の RIS<br/>検査の予約を作る"]:::box
+  DTG["dicom-test-generator（DTG）<br/>検査装置のふりをする試験用のソフト<br/>架空の患者の画像を作る"]:::box
   PACS[("Orthanc（試験用）")]:::box
   TD["tsunagi-dicom<br/>画面と中継のサーバー"]:::box
   SCP["DCMTK storescp<br/>試験用の送信先"]:::box
 
+  DTG -->|"ワークリストを取得する（C-FIND）"| RIS
   DTG -->|"DICOM で画像を送る"| PACS
   TD -->|"検査を検索し、画像を取る<br/>送信を求める"| PACS
   PACS -->|"DICOM で送信する"| SCP
@@ -153,15 +155,15 @@ docker compose up -d
 - **画面を施設のネットワークに公開するとき**：TLS を終端するリバースプロキシを前に置く（cookie は `Secure`）。`TSUNAGI_HTTP_BIND` は、リバースプロキシからだけ届く IP アドレスにする。
 - **tsunagi-dicom の設定**（ビューアの URL など。`.env.example` の変数）：`deploy/tsunagi.env`（リポジトリに入れない）に書く。つなぎ先（Orthanc）と資格情報の渡し方は `deploy/compose.yaml` が決めるので、書かない。
 
-### 開発・試験用の一式（Orthanc・dicom-test-generator・storescp）
+### 開発・試験用の一式（Orthanc・ris-emulator・dicom-test-generator・storescp）
 
-`docker/dev/compose.yaml` は、上の compose に、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足したもの。架空の患者だけで使う。Docker（Compose v2.24 以上）があれば、リポジトリの直下で次の1行で立つ。
+`docker/dev/compose.yaml` は、上の compose に、ris-emulator（ワークリストの提供元）、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足したもの。架空の患者だけで使う。Docker（Compose v2.24 以上）があれば、リポジトリの直下で次の1行で立つ。
 
 ```sh
 docker/dev/up.sh
 ```
 
-secret のファイルを作り（`docker/dev/secrets/`）、tsunagi-dicom のイメージをこのリポジトリから作り、一式を立ててから、開く URL とパスワードのファイルの場所を出す。dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → 送信 → storescp と流す手順は [`docs/round-trip-test.md`](docs/round-trip-test.md) にある。
+secret のファイルを作り（`docker/dev/secrets/`）、tsunagi-dicom のイメージをこのリポジトリから作り、一式を立ててから、開く URL とパスワードのファイルの場所を出す。ris-emulator の予約 → dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → 送信 → storescp と流す手順は [`docs/round-trip-test.md`](docs/round-trip-test.md) にある。
 
 ## 試しに動かす（モック）
 
