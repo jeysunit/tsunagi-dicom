@@ -24,11 +24,16 @@ import type { StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
 import {
+  advancedCount,
   DATE_LABELS,
   DEFAULT_FILTER,
   FACET_DATES,
+  fieldValue,
   filterToSearchParams,
+  MAX_FIELD_LENGTH,
   MAX_QUERY_LENGTH,
+  PATIENT_SEX,
+  type PatientSex,
   type StudyFacets,
   type StudyFilter,
 } from "@/lib/study-filter";
@@ -109,6 +114,41 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
   );
 }
 
+/** 詳細条件の文字の欄で、打っても受けない字（QIDO-RS の値で特別の意味を持つ字。study-filter.ts の fieldValue） */
+const FIELD_STRIP = /[*?\\,]/g;
+
+/** 詳細条件の文字の欄（受付番号・検査名） */
+const TEXT_FIELDS = ["accession", "desc"] as const;
+type TextField = (typeof TEXT_FIELDS)[number];
+
+/** 詳細条件の文字の欄。打った字は絞り込みの部品（FilterBar）が持つ（「詳細条件」を閉じても、打ちかけの字を失わない） */
+function FieldText({
+  label,
+  value,
+  onText,
+  testId,
+  className,
+}: {
+  label: string;
+  value: string;
+  onText: (text: string) => void;
+  testId: string;
+  className?: string;
+}) {
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="shrink-0 text-xs text-label">{label}</span>
+      <Input
+        value={value}
+        maxLength={MAX_FIELD_LENGTH}
+        onChange={(e) => onText(e.target.value.replace(FIELD_STRIP, ""))}
+        className={cn("h-7", className)}
+        data-testid={testId}
+      />
+    </label>
+  );
+}
+
 function FilterBar({
   filter,
   facets,
@@ -121,17 +161,36 @@ function FilterBar({
   trailing?: React.ReactNode;
 }) {
   const [text, setText] = useState(filter.q ?? "");
-  // 使うことの少ない条件（期間の指定）は「詳しく」の中。期間で絞っているときは最初から開く
-  const [more, setMore] = useState(filter.date === "range");
+  // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名）は「詳細条件」の中。どれかで絞っているときは最初から開く
+  const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0);
+  const [more, setMore] = useState(conditions > 0);
   const moreId = useId();
-  // 打つたびに要求を送らない（止まってから 300 ミリ秒）
+  const birthId = useId();
+  // 詳細条件の文字の欄の字もここに持つ（300 ミリ秒の内に「詳細条件」を閉じても失わない）
+  const [fields, setFields] = useState<Record<TextField, string>>({
+    accession: filter.accession ?? "",
+    desc: filter.desc ?? "",
+  });
+  // 打つたびに要求を送らない（横断の検索と詳細条件の文字の欄の、どれかを打ち止めてから 300 ミリ秒。待ちは1本にまとめる）
   useEffect(() => {
     const t = window.setTimeout(() => {
-      const q = text.trim() || undefined;
-      if (q !== filter.q) onChange({ ...filter, q });
+      const next = {
+        q: text.trim() || undefined,
+        ...(Object.fromEntries(TEXT_FIELDS.map((k) => [k, fieldValue(fields[k])])) as Record<TextField, string | undefined>),
+      };
+      if ((["q", ...TEXT_FIELDS] as const).some((k) => next[k] !== filter[k])) onChange({ ...filter, ...next });
     }, 300);
     return () => window.clearTimeout(t);
-  }, [text, filter, onChange]);
+  }, [text, fields, filter, onChange]);
+  const fieldText = (key: TextField, label: string, className: string) => (
+    <FieldText
+      label={label}
+      value={fields[key]}
+      onText={(v) => setFields((f) => ({ ...f, [key]: v }))}
+      testId={`filter-${key}`}
+      className={className}
+    />
+  );
 
   return (
     <div className="shrink-0 space-y-1.5" data-testid="study-filters">
@@ -181,17 +240,20 @@ function FilterBar({
         >
           {more ? <ChevronDown aria-hidden className="size-4" /> : <ChevronRight aria-hidden className="size-4" />}
           詳細条件
+          {/* 閉じていても、詳細条件で絞っていることが分かるように数を添える */}
+          {conditions > 0 && <span data-testid="filter-more-count">（{conditions}）</span>}
         </button>
         {trailing}
       </div>
       {more && (
         <div
           id={moreId}
-          className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5"
+          className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-border bg-surface px-3 py-1.5"
           role="group"
           aria-label="詳細条件"
           data-testid="filter-more-panel"
         >
+          <span className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-label">検査日</span>
           <div className="inline-flex overflow-hidden rounded-md border border-border">
             <Chip pressed={filter.date === "range"} onClick={() => onChange({ ...filter, date: "range" })} testId="date-range">
@@ -217,6 +279,39 @@ function FilterBar({
               />
             </span>
           )}
+          </span>
+          {/* 生年月日・性別・受付番号・検査名は Orthanc の検索（QIDO-RS）の条件にする（docs/spec.md の 3.1）。どれも一覧の列に見える */}
+          <span className="flex items-center gap-1.5">
+            <label htmlFor={birthId} className="shrink-0 text-xs text-label">
+              生年月日
+            </label>
+            <Input
+              id={birthId}
+              type="date"
+              value={filter.birth ?? ""}
+              onChange={(e) => onChange({ ...filter, birth: e.target.value || undefined })}
+              className="h-7 w-40"
+              data-testid="filter-birth"
+            />
+          </span>
+          <label className="flex items-center gap-1.5">
+            <span className="shrink-0 text-xs text-label">性別</span>
+            <select
+              value={filter.sex ?? ""}
+              onChange={(e) => onChange({ ...filter, sex: (PATIENT_SEX as readonly string[]).includes(e.target.value) ? (e.target.value as PatientSex) : undefined })}
+              className="h-7 rounded-md border border-border bg-background px-2 text-sm text-value"
+              data-testid="filter-sex"
+            >
+              <option value="">すべて</option>
+              {PATIENT_SEX.map((s) => (
+                <option key={s} value={s}>
+                  {sexLabel(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {fieldText("accession", "受付番号", "w-32")}
+          {fieldText("desc", "検査名", "w-40")}
         </div>
       )}
     </div>
@@ -253,7 +348,7 @@ const DESC_MIN = 160;
  * 氏名とかなも、いちばん長い値に合わせ、上限を超える値だけを `…` で切る（全文は title）。
  * モダリティ・検査の記述は残りの幅を取る。氏名の漢字とかなは別の列（かなは漢字の右）
  */
-function columnsFor(studies: readonly StudyView[]) {
+function columnsFor(studies: readonly StudyView[], showAccession: boolean) {
   const widest = (pick: (s: StudyView) => string | undefined) => Math.max(0, ...studies.map((s) => textWidth(pick(s))));
   const fit = (pick: (s: StudyView) => string | undefined, min: number, max: number) =>
     Math.min(max, Math.max(min, widest(pick) + CELL_PAD));
@@ -261,6 +356,9 @@ function columnsFor(studies: readonly StudyView[]) {
     { key: "date", width: 148 },
     // 患者 ID は DICOM の LO（64 字まで）。上限を置かずに値に合わせる（切らない）
     { key: "id", width: Math.max(80, widest((s) => s.patientId) + CELL_PAD) },
+    // 受付番号（2026-10-21。詳細条件で絞れる項目を列に見せる）。SH（16 字まで）なので値に合わせ、上限を超える値だけを切る。
+    // 役割の許可の一覧に無い（行に項目が無い）ときは、列ごと出さない
+    ...(showAccession ? [{ key: "accession", width: fit((s) => s.accessionNumber, 88, 160) } as const] : []),
     { key: "name", width: fit((s) => s.patientName, 104, 240) },
     { key: "kana", width: fit((s) => s.patientKana, 96, 200) },
     { key: "birth", width: 104 },
@@ -336,7 +434,9 @@ function StudyRows({
 }) {
   // 矢印で動く（ローヴィングの tabindex）：選んだ行、無ければ先頭の行だけが tab の止まり先
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
-  const columns = columnsFor(studies);
+  // 受付番号の列は、許可の一覧に受付番号がある役割だけ（行に項目がある。0 件のときは見出しを出す）
+  const showAccession = studies.length === 0 || studies.some((s) => Object.hasOwn(s, "accessionNumber"));
+  const columns = columnsFor(studies, showAccession);
   const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const onScroll = useScrollAnchor(scrollRef, studies, listKey);
@@ -367,6 +467,7 @@ function StudyRows({
           <tr className="border-b border-border">
             <th className={cn("px-2 py-1 font-normal", CUT)}>検査日時</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>患者ID</th>
+            {showAccession && <th className={cn("px-2 py-1 font-normal", CUT)}>受付番号</th>}
             <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>カナ</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>
@@ -445,6 +546,11 @@ function StudyRows({
                   <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
                     {s.patientId}
                   </td>
+                  {showAccession && (
+                    <td className={cn(CELL, CUT, "font-mono")} title={s.accessionNumber} data-testid="accession-number">
+                      {s.accessionNumber}
+                    </td>
+                  )}
                   <td className={cn(CELL, CUT)} title={s.patientName}>
                     {s.patientName ? (
                       <span className="font-bold text-value" data-testid="patient-name">

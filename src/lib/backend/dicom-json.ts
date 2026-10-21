@@ -141,6 +141,63 @@ export function inDateRange(studyDate: string, query: StudyQuery | undefined): b
   return (!from || studyDate >= from) && (!to || studyDate <= to);
 }
 
+/** 含むかで比べる詳細条件（QIDO-RS では `*値*`） */
+const CONTAINS_KEYS = ["accessionNumber", "studyDescription"] as const;
+/** QIDO-RS の属性の名前 */
+const QIDO_KEYS = {
+  patientBirthDate: "PatientBirthDate",
+  patientSex: "PatientSex",
+  accessionNumber: "AccessionNumber",
+  studyDescription: "StudyDescription",
+} as const;
+
+/** 文字の条件の語（空白で区切る） */
+const words = (value: string) => value.trim().split(/\s+/).filter(Boolean);
+
+/**
+ * 詳細条件（docs/spec.md の 3.1）を QIDO-RS の検索の値にする。生年月日・性別は一致、受付番号・検査名は値を含むもの
+ * （`*値*`。空白で区切った語は、その順に含むもの：`chest ct` → `*chest*ct*`）。
+ * 値は study-filter.ts で、ワイルドカードの字（`*` `?`）・区切りの字（`\` `,`）・制御文字を含まないことを確かめてある
+ */
+export function studyQueryParams(query: StudyQuery | undefined): [string, string][] {
+  const out: [string, string][] = [];
+  for (const [key, name] of Object.entries(QIDO_KEYS) as [keyof typeof QIDO_KEYS, string][]) {
+    const value = query?.[key];
+    if (!value) continue;
+    out.push([name, (CONTAINS_KEYS as readonly string[]).includes(key) ? `*${words(value).join("*")}*` : value]);
+  }
+  return out;
+}
+
+/** 文字の条件の比べ方：全角と半角・大文字と小文字を区別しない */
+const fold = (s: string) => s.normalize("NFKC").toLowerCase();
+
+/** 語を、その順に含むか */
+function containsInOrder(haystack: string, needle: string): boolean {
+  const text = fold(haystack);
+  let from = 0;
+  for (const word of words(fold(needle))) {
+    const at = text.indexOf(word, from);
+    if (at < 0) return false;
+    from = at + word.length;
+  }
+  return true;
+}
+
+/**
+ * 検査日の範囲と詳細条件に合うか（モックと、画像サーバーの答えの確かめに使う）。文字の条件は、値を含むか
+ * （画像サーバーより緩く比べ、画像サーバーが合うとした検査を落とさない）
+ */
+export function matchesStudyQuery(study: StudySummary, query: StudyQuery | undefined): boolean {
+  if (!inDateRange(study.studyDate, query)) return false;
+  if (query?.patientBirthDate && study.patientBirthDate.trim() !== query.patientBirthDate) return false;
+  if (query?.patientSex && study.patientSex.trim().toUpperCase() !== query.patientSex) return false;
+  return CONTAINS_KEYS.every((key) => {
+    const needle = query?.[key];
+    return !needle || containsInOrder(study[key], needle);
+  });
+}
+
 /** 新しい検査を上に（検査日・時刻の降順。同じなら StudyInstanceUID の順） */
 export function sortStudiesNewestFirst(studies: StudySummary[]): StudySummary[] {
   return [...studies].sort(

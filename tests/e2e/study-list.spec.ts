@@ -704,8 +704,8 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
   await page.getByTestId("date-all").click(); // 押し直しでは読み直さない
   await page.getByTestId("modality-CT").click();
   await expect(rows(page).first()).toBeVisible();
-  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-20 に生年月日を3つの列に分けたので 8 番目）
-  const cell = rows(page).first().locator("td").nth(7);
+  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-20 に生年月日を3つの列に分け、2026-10-21 に受付番号の列を足したので 9 番目）
+  const cell = rows(page).first().locator("td").nth(8);
   await expect(cell).toHaveAttribute("title", new RegExp(long));
   expect(await cell.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
   expect(await cell.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
@@ -843,6 +843,64 @@ test("「詳しく」：期間の指定は、押したときだけ出る。開�
   await page.reload();
   await expect(page.getByTestId("filter-more")).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("date-range")).toHaveAttribute("aria-pressed", "true");
+});
+
+// 検査名は、モックの見本（QIDO-RS の写し）に値が無いので、単体の試験（tests/unit/study-advanced-filter.test.ts）と結合の試験で見る
+test("詳細条件：生年月日・性別・受付番号で絞る。絞った値は一覧の列に見える。URL に残り、閉じても絞っている数が見え、条件をクリアで戻る", async ({ page }) => {
+  await asRole(page, "一般");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  const more = page.getByTestId("filter-more");
+  await more.click();
+  const panel = page.getByTestId("filter-more-panel");
+
+  // 生年月日（一致）
+  await panel.getByLabel("生年月日").fill("1975-05-10");
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page).toHaveURL(/birth=1975-05-10/);
+  for (const id of await rows(page).getByTestId("patient-id").allTextContents()) expect(id).toBe("JP-TEST-0001");
+  // 絞った生年月日は、一覧の生年月日の列に見える
+  for (const b of await rows(page).getByTestId("patient-birth").allTextContents()) expect(b).toBe("1975/05/10");
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（1）");
+
+  // 性別を足す（どちらも当てる）
+  await panel.getByTestId("filter-sex").selectOption({ label: "女" });
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await panel.getByTestId("filter-sex").selectOption({ label: "男" });
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  for (const s of await rows(page).getByTestId("patient-sex").allTextContents()) expect(s).toBe("男");
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（2）");
+  // 閉じても、絞っている数が見える
+  await more.click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（2）");
+  await more.click();
+
+  // 受付番号（含むもの）。ワイルドカードの字は打っても入らない
+  await panel.getByLabel("生年月日").fill("");
+  await panel.getByTestId("filter-sex").selectOption({ label: "すべて" });
+  await panel.getByTestId("filter-accession").fill("0004*");
+  await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
+  // 打ってすぐ（300 ミリ秒の内に）閉じても、打った字は失わずに絞る
+  await more.click();
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page).toHaveURL(/accession=0004/);
+  await more.click();
+  await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
+  // 絞った受付番号は、一覧の受付番号の列に見える
+  for (const a of await rows(page).getByTestId("accession-number").allTextContents()) expect(a).toContain("0004");
+  // 依頼医の条件は持たない（2026-10-21 に承認者が外した）
+  await expect(panel.getByTestId("filter-referring")).toHaveCount(0);
+  await panel.getByTestId("filter-accession").fill("該当しない");
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+
+  // 開き直しても同じ条件で、詳細条件は開いている。条件をクリアで、すべての検査に戻る
+  await page.reload();
+  await expect(page.getByTestId("filter-more")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("filter-accession")).toHaveValue("該当しない");
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("filter-more-count")).toHaveCount(0);
 });
 
 test("狭い画面では絞り込みが折り返し、横にはみ出さない", async ({ page }) => {

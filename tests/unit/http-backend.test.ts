@@ -249,6 +249,23 @@ describe("実の画像サーバーへの接続", () => {
     expect(studiesInRange).toHaveLength(4);
   });
 
+  it("詳細条件は QIDO-RS の条件で求め（文字は `*語*`）、答えの条件に合わない検査は捨てる", async () => {
+    seen.length = 0;
+    const found = await backend({ caPem }).searchStudies(1000, {
+      patientBirthDate: "19750510",
+      patientSex: "M",
+      accessionNumber: "ACC-0001",
+    });
+    const params = new URL(seen[0]!.url, "https://x").searchParams;
+    expect(params.get("PatientBirthDate")).toBe("19750510");
+    expect(params.get("PatientSex")).toBe("M");
+    expect(params.get("AccessionNumber")).toBe("*ACC-0001*");
+    expect(params.has("StudyDescription")).toBe(false);
+    expect(params.has("ReferringPhysicianName")).toBe(false);
+    // 手元のサーバーは条件を見ずに 8 件を返すので、BFF の側で JP-TEST-0001 の 2 件に絞る
+    expect(found.map((s) => s.accessionNumber).sort()).toEqual(["ACC-0001-1", "ACC-0001-2"]);
+  });
+
   it("段 2：シリーズと値の全部は、UID を確かめてから QIDO-RS で求める", async () => {
     seen.length = 0;
     const b = backend({ caPem });
