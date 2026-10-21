@@ -472,3 +472,36 @@ test("10 書き出しの結果が記録に残り、サムネイルがブラウ�
   expect.soft(asImg.status(), "ブラウザの Accept のままのサムネイルが画像で返らない").toBe(200);
   expect.soft(asImg.headers()["content-type"] ?? "", "サムネイルの答えが画像でない").toMatch(/^image\//);
 });
+
+test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像の並びを引き、WADO-RS の metadata で 1 枚の値を読む（2026-10-21）", async () => {
+  const { page } = admin;
+  const base = `/api/studies/${A.studyInstanceUid}/series/${A.seriesInstanceUid}/instances`;
+  const listRes = await page.request.get(base);
+  expect(listRes.status()).toBe(200);
+  const { instances } = (await listRes.json()) as { instances: { sopInstanceUid: string; instanceNumber: string }[] };
+  // 送った 3 枚が、画像の番号の順に並ぶ。画面へ返すのは選ぶのに要る値だけ
+  expect(instances.map((i) => i.sopInstanceUid)).toEqual(A.sopInstanceUids);
+  expect(instances.map((i) => i.instanceNumber)).toEqual(["1", "2", "3"]);
+  expect(Object.keys(instances[0]!).sort()).toEqual(["instanceNumber", "numberOfFrames", "sopClassUid", "sopInstanceUid"]);
+
+  // 1 枚の値の全部。その画像の SOPInstanceUID と画像の番号が入り、ほかの画像のものではない
+  const second = A.sopInstanceUids[1]!;
+  const valuesRes = await page.request.get(`${base}/${second}/values`);
+  expect(valuesRes.status()).toBe(200);
+  const { values } = (await valuesRes.json()) as { values: { tag: string; value: string }[] };
+  const value = (tag: string) => values.find((v) => v.tag === tag)?.value;
+  expect(value("0008,0018")).toBe(second);
+  expect(value("0020,0013")).toBe("2");
+  expect(value("0010,0020")).toBe(A.patientId);
+  // 別のシリーズの下の画像としては返さない
+  expect((await page.request.get(`/api/studies/${A.studyInstanceUid}/series/1.2.3/instances/${second}/values`)).status()).toBe(404);
+
+  // Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID と患者 ID を返すか（BFF が確かめに使う）を記録する
+  const rows = await orthancJson<Record<string, unknown>[]>(
+    `dicom-web/studies/${A.studyInstanceUid}/series/${A.seriesInstanceUid}/instances?includefield=00100020`,
+  );
+  const keys = Object.keys(rows[0] ?? {}).filter((k) => ["0020000D", "0020000E", "00100020"].includes(k));
+  observe("qido.instanceKeys", keys);
+  // BFF は、この 3 つがあることを前提に、求めた検査・シリーズの画像だけを返す（2026-10-21 に Orthanc 26.9.1 で測った）
+  expect.soft(keys.sort(), "Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID か患者 ID を返さなくなった").toEqual(["0020000D", "0020000E", "00100020"].sort());
+});
