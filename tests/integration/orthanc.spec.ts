@@ -367,7 +367,7 @@ test("7 削除：管理者が理由と再認証（パスワード）を通して
   }
 });
 
-test("8（round-trip-test の 7）答えが失われたとき：Orthanc は送るが画面は「結果が分からない」、同じ送り先へは重ねて送れず、管理者が照らす", async () => {
+test("8 答えが失われたとき：Orthanc は送るが画面は「結果が分からない」、同じ送り先へは重ねて送れず、管理者が照らす", async () => {
   test.setTimeout(240_000);
   const { page } = admin;
   const before = new Set((await storeJobs()).map((j) => j.ID));
@@ -462,7 +462,7 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
 });
 
 // 本物の Orthanc で見つけた食い違い（直すまで、この試験は赤のまま）。最後に置き、ほかの試験を止めない。
-// どちらも期待は緩めない（docs/round-trip-test.md の「実測で決めること」）
+// どちらも期待は緩めない（docs/integration-test.md の「Orthanc の実の振る舞いの記録」）
 test("10 書き出しの結果が記録に残り、サムネイルがブラウザの Accept のまま中継から画像で返る", async () => {
   const { page } = admin;
   // 書き出し：流し終えた「結果」の行（求めた行と要求の ID で結ぶ）

@@ -1,8 +1,8 @@
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
 import { ITEST } from "./env";
 
-// BFF と Orthanc の REST の間に置く入口（リバースプロキシの代わり）。docs/round-trip-test.md の 7
-// 「受けた後に答えが失われたとき」を作るために、送る要求（POST /modalities/{id}/store）だけ、
+// BFF と Orthanc の REST の間に置く入口（リバースプロキシの代わり）。docs/integration-test.md の試験の 8
+// 「答えが失われたとき」を作るために、送る要求（POST /modalities/{id}/store）だけ、
 // Orthanc へ渡して答えを最後まで受けてから、BFF には 504 を返す（入口が答えを待ちきれなかった形）。
 // ほかの要求はそのまま渡す。待ち受けは手元（127.0.0.1）だけ。試験の worker の中で動かす。
 

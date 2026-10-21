@@ -3,7 +3,7 @@
 #
 # - orthanc：Orthanc の公式のイメージ（Orthanc の作り手のチーム orthancteam が出すもの。DICOMweb のプラグイン入り）。
 #   版と digest を固定する（26.9.1。multi-arch の digest）。上げるときは、試験を流してから、
-#   docs/round-trip-test.md の「実測で決めること」の版を書き直す。
+#   docs/integration-test.md の「Orthanc の実の振る舞いの記録」の版を書き直す。
 #   設定は orthanc/orthanc.json（秘密は無い）。利用者とパスワードは、run.mjs が試験のたびに乱数で作り、secret のファイルで渡す。
 # - storescp：DCMTK の受け取る側（送り先のダミー）。tsunagi-dicom の「送信」の相手。Orthanc に itest-scp として登録してある。
 # - scu：DCMTK の送る側（profile tools。run.mjs が `docker compose run` で使う）。架空の患者の画像を Orthanc へ送る。
