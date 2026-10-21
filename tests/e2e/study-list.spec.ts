@@ -84,6 +84,45 @@ test("すぐ絞れる見出し：期間の指定・モダリティ・横断の�
   await expect(page.getByTestId("study-count")).toHaveText("8");
 });
 
+test("0 件でも一覧の場所が分かる：表の枠と見出しの行を出し、空の案内は表の中。絞り込みが既定なら「条件をクリア」を出さない", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.goto(`/?${new URLSearchParams({ q: "該当しない語" })}`);
+  const table = page.getByTestId("study-table");
+  await expect(table.getByTestId("study-list-empty")).toBeVisible();
+  await expect(table.locator("thead")).toContainText("患者ID");
+  await expect(table.locator("thead")).toContainText("検査日時");
+  await expect(rows(page)).toHaveCount(0);
+  await expect(table.getByRole("button", { name: "条件をクリア" })).toBeVisible();
+  // 表の枠は一覧の場所の大きさのまま（真っ白の場所にしない）
+  const box = await page.getByTestId("study-list-scroll").boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(200);
+
+  // 画像サーバーに検査が 1 件も無いとき（絞り込みは既定）：案内だけを出し、戻す先の無い「条件をクリア」は出さない
+  await page.route(/\/api\/studies$/, (route) =>
+    route.fulfill({ json: { count: { count: 0, exact: true }, studies: [], facets: { modality: { all: 0 } } } }),
+  );
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await expect(table.getByTestId("study-list-empty")).toBeVisible();
+  await expect(page.getByRole("button", { name: "条件をクリア" })).toHaveCount(0);
+  await expect(table.locator("thead")).toContainText("患者ID");
+});
+
+test("0 件の案内は、狭い画面でも見えている幅の中に出る（表が横にスクロールする幅でも、右の外に隠れない）", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await asRole(page, "一般");
+  await page.goto(`/?${new URLSearchParams({ q: "該当しない語" })}`);
+  const list = (await page.getByTestId("study-list-scroll").boundingBox())!;
+  const empty = page.getByTestId("study-table").getByTestId("study-list-empty");
+  await expect(empty).toBeVisible();
+  for (const target of [empty, page.getByRole("button", { name: "条件をクリア" })]) {
+    const box = (await target.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(list.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(list.x + list.width);
+  }
+});
+
 // 期待の変更（1 件）：一覧の行のサムネイル（写しのある検査は画像・無い検査は印）の確かめを外した。
 // 1 行 28px の一覧ではサムネイルの列を外したため（docs/spec.md の 3.1）。サムネイルは詳細のシリーズの横 1 列で確かめる（下の試験）。
 test("一覧の行：氏名（漢字・かな）・和暦と年齢・シリーズ数と画像数", async ({ page }) => {
@@ -665,8 +704,8 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
   await page.getByTestId("date-all").click(); // 押し直しでは読み直さない
   await page.getByTestId("modality-CT").click();
   await expect(rows(page).first()).toBeVisible();
-  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-20 に生年月日を3つの列に分けたので 8 番目）
-  const cell = rows(page).first().locator("td").nth(7);
+  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-20 に生年月日を3つの列に分け、2026-10-21 に受付番号の列を足したので 9 番目）
+  const cell = rows(page).first().locator("td").nth(8);
   await expect(cell).toHaveAttribute("title", new RegExp(long));
   expect(await cell.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
   expect(await cell.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
@@ -806,6 +845,64 @@ test("「詳しく」：期間の指定は、押したときだけ出る。開�
   await expect(page.getByTestId("date-range")).toHaveAttribute("aria-pressed", "true");
 });
 
+// 検査名は、モックの見本（QIDO-RS の写し）に値が無いので、単体の試験（tests/unit/study-advanced-filter.test.ts）と結合の試験で見る
+test("詳細条件：生年月日・性別・受付番号で絞る。絞った値は一覧の列に見える。URL に残り、閉じても絞っている数が見え、条件をクリアで戻る", async ({ page }) => {
+  await asRole(page, "一般");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  const more = page.getByTestId("filter-more");
+  await more.click();
+  const panel = page.getByTestId("filter-more-panel");
+
+  // 生年月日（一致）
+  await panel.getByLabel("生年月日").fill("1975-05-10");
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page).toHaveURL(/birth=1975-05-10/);
+  for (const id of await rows(page).getByTestId("patient-id").allTextContents()) expect(id).toBe("JP-TEST-0001");
+  // 絞った生年月日は、一覧の生年月日の列に見える
+  for (const b of await rows(page).getByTestId("patient-birth").allTextContents()) expect(b).toBe("1975/05/10");
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（1）");
+
+  // 性別を足す（どちらも当てる）
+  await panel.getByTestId("filter-sex").selectOption({ label: "女" });
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await panel.getByTestId("filter-sex").selectOption({ label: "男" });
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  for (const s of await rows(page).getByTestId("patient-sex").allTextContents()) expect(s).toBe("男");
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（2）");
+  // 閉じても、絞っている数が見える
+  await more.click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（2）");
+  await more.click();
+
+  // 受付番号（含むもの）。ワイルドカードの字は打っても入らない
+  await panel.getByLabel("生年月日").fill("");
+  await panel.getByTestId("filter-sex").selectOption({ label: "すべて" });
+  await panel.getByTestId("filter-accession").fill("0004*");
+  await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
+  // 打ってすぐ（300 ミリ秒の内に）閉じても、打った字は失わずに絞る
+  await more.click();
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page).toHaveURL(/accession=0004/);
+  await more.click();
+  await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
+  // 絞った受付番号は、一覧の受付番号の列に見える
+  for (const a of await rows(page).getByTestId("accession-number").allTextContents()) expect(a).toContain("0004");
+  // 依頼医の条件は持たない（2026-10-21 に承認者が外した）
+  await expect(panel.getByTestId("filter-referring")).toHaveCount(0);
+  await panel.getByTestId("filter-accession").fill("該当しない");
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+
+  // 開き直しても同じ条件で、詳細条件は開いている。条件をクリアで、すべての検査に戻る
+  await page.reload();
+  await expect(page.getByTestId("filter-more")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("filter-accession")).toHaveValue("該当しない");
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("filter-more-count")).toHaveCount(0);
+});
+
 test("狭い画面では絞り込みが折り返し、横にはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await asRole(page, "一般");
@@ -876,7 +973,8 @@ test("詳細の見出しに、毎回見る値を常に出す：受付番号・�
 
 test("詳細の見出し：受付番号が無いときも「受付番号 —」を出す（無いこと自体が照合の手がかり）", async ({ page }) => {
   await page.route("**/api/studies/*", async (route) => {
-    if (route.request().method() !== "GET") return route.continue();
+    // 一覧の版（自動更新の /api/studies/version）は検査の詳細ではないので、そのまま通す
+    if (route.request().method() !== "GET" || route.request().url().endsWith("/api/studies/version")) return route.continue();
     const res = await route.fetch();
     const body = (await res.json()) as { study: Record<string, unknown> };
     body.study.accessionNumber = "";
@@ -916,4 +1014,184 @@ test("詳細の見出しは 1〜2 行：氏名・かな・患者 ID・生年月�
   const pane = (await page.getByTestId("detail-pane").boundingBox())!;
   const strip = (await page.getByTestId("series-strip").boundingBox())!;
   expect(strip.y + Math.min(strip.height, 80)).toBeLessThanOrEqual(pane.y + pane.height);
+});
+
+test("詳細の「DICOM タグ」：開いてもボタンの位置は動かない。既定は検査単位（要約）、画像単位でシリーズ → 画像を選ぶと、その画像の SOPInstanceUID と値が出る", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  const toggle = page.getByTestId("detail-tags-toggle");
+  const uidToggle = page.getByTestId("detail-uid-toggle");
+  // 詳細の中での位置（詳細の場所はスクロールするので、画面の中の位置ではなく詳細の頭からの位置で比べる）
+  const place = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = el.closest("[data-testid=study-detail]")!.getBoundingClientRect();
+      return { x: r.left - top.left, y: r.top - top.top, bottom: r.bottom - top.top };
+    });
+  const before = await place("detail-tags-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const after = await place("detail-tags-toggle");
+  expect([after.x, after.y]).toEqual([before.x, before.y]);
+  // 「UID」のボタンも同じ行のまま
+  expect((await place("detail-uid-toggle")).y).toBe(before.y);
+
+  // 既定は検査単位（要約）。中身はボタンの並びの下
+  const tags = page.getByTestId("dicom-tags");
+  await expect(tags.getByTestId("tags-level-study")).toHaveText("検査単位（要約）");
+  await expect(tags.getByTestId("tags-level-study")).toHaveAttribute("aria-pressed", "true");
+  await expect(tags.getByTestId("all-values")).toContainText("0010,0020");
+  expect((await place("dicom-tags")).y).toBeGreaterThan(after.bottom);
+  await expect(uidToggle).toBeVisible();
+
+  // 画像単位：最初はシリーズと画像の先頭。選んだ画像の SOPInstanceUID と、その画像の値（0008,0018）が出る
+  await tags.getByTestId("tags-level-instance").click();
+  await expect(tags.getByTestId("tags-level-instance")).toHaveAttribute("aria-pressed", "true");
+  await expect(tags.getByTestId("tags-series").locator("option")).toHaveCount(1);
+  await expect(tags.getByTestId("tags-series")).toContainText("#1");
+  const images = tags.getByTestId("tags-instance");
+  await expect(images.locator("option")).toHaveText(["#1", "#2", "#3", "#4"]);
+  const sopLine = tags.getByTestId("uid-line");
+  await expect(sopLine).toContainText("SOPInstanceUID");
+  const first = (await sopLine.locator("code").textContent())!;
+  await expect(tags.getByTestId("instance-values")).toContainText(first);
+  await expect(tags.getByTestId("instance-values")).toContainText("0008,0018");
+
+  // 画像を替えると、その画像の値に替わる（画像ごとに値が違う）
+  const valueReads: string[] = [];
+  page.on("request", (req) => {
+    if (/\/instances\/[\d.]+\/values$/.test(req.url())) valueReads.push(req.url());
+  });
+  await images.selectOption({ label: "#2" });
+  await expect(sopLine.locator("code")).not.toHaveText(first);
+  const second = (await sopLine.locator("code").textContent())!;
+  await expect(tags.getByTestId("instance-values")).toContainText(second);
+  await expect(tags.getByTestId("instance-values")).not.toContainText(first);
+  // 前の画像に戻しても、覚えた中身を出さずに読み直す（読むたびに権限の確かめと操作ログを通す）
+  await images.selectOption({ label: "#1" });
+  await expect(tags.getByTestId("instance-values")).toContainText(first);
+  expect(valueReads.filter((u) => u.includes(`/instances/${first}/values`))).toHaveLength(1);
+  expect(valueReads.filter((u) => u.includes(`/instances/${second}/values`))).toHaveLength(1);
+
+  // 閉じても、ボタンの位置は動かない
+  await toggle.click();
+  await expect(tags).toHaveCount(0);
+  expect((await place("detail-tags-toggle")).y).toBe(before.y);
+});
+
+test("自動更新：30 秒ごとに一覧の版を読み、変わったときだけ一覧を読み直す。選んだ行・スクロール・開いている詳細は残る", async ({ page }) => {
+  // 一覧がスクロールする高さにする
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await asRole(page, "一般");
+  const real = (await (await page.request.get("/api/studies/version")).json()) as { version: string };
+  let version = Number(real.version);
+  let versionStatus = 200;
+  let versionReads = 0;
+  await page.route("**/api/studies/version", (route) => {
+    versionReads += 1;
+    return versionStatus === 200
+      ? route.fulfill({ json: { version: String(version) } })
+      : route.fulfill({ status: versionStatus, json: { error: "画像サーバーに接続できません" } });
+  });
+  // 版が変わった後の一覧には、新しく届いた検査（合成）を先頭に足す
+  const NEW_UID = "1.2.826.0.1.3680043.8.498.999999999";
+  let arrived = false;
+  let listReads = 0;
+  // 一覧の答えを止めておく（読み直しの途中の画面を確かめるため）
+  let hold: Promise<void> | null = null;
+  let release = () => {};
+  const listUrls: string[] = [];
+  await page.route(/\/api\/studies(\?[^/]*)?$/, async (route) => {
+    listReads += 1;
+    listUrls.push(route.request().url());
+    if (hold) await hold;
+    const res = await route.fetch();
+    const body = await res.json();
+    if (arrived) {
+      body.studies.unshift({ ...body.studies[0], studyInstanceUid: NEW_UID, patientId: "JP-TEST-NEW", studyDate: "20261021" });
+      body.count.count += 1;
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.clock.install();
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
+  // 開いたときに版を 1 回読む（サーバーが一覧を取る前に読んだ版と同じなので、一覧は読み直さない）
+  await expect.poll(() => versionReads).toBe(1);
+  expect(listReads).toBe(0);
+
+  // 一覧をいちばん下までスクロールし、最後の行を選んで詳細を開く
+  const list = page.getByTestId("study-list-scroll");
+  await list.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  const target = rows(page).last();
+  const uid = (await target.getAttribute("data-study-uid"))!;
+  await target.click();
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  const scrolled = await list.evaluate((el) => el.scrollTop);
+  expect(scrolled).toBeGreaterThan(0);
+  const rowTop = (await target.boundingBox())!.y;
+
+  // 30 秒たつと版を読む。版が変わらなければ、一覧は読み直さない（検索も監査の記録も増やさない）
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => versionReads).toBe(2);
+  expect(listReads).toBe(0);
+
+  // 版が変わると一覧を読み直し、新しい検査が先頭に出る。選んだ行・詳細・見ていた行の位置はそのまま
+  version += 1;
+  arrived = true;
+  hold = new Promise<void>((resolve) => (release = resolve));
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => listReads).toBe(1);
+  // 読み直しの途中（待ちの印を出す 0.3 秒を過ぎても）：細い帯・薄い行・件数の「—」を出さない
+  await page.clock.runFor(1_000);
+  await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
+  await expect(page.getByTestId("progress-bar")).toHaveCount(0);
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("pending-text")).toHaveCount(0);
+  hold = null;
+  release();
+  await expect(rows(page)).toHaveCount(9);
+  expect(listReads).toBe(1);
+  // 自動更新の読み直しには refresh=auto を付ける（監査の記録に trigger: "auto" が残る）
+  expect(new URL(listUrls[0]!).searchParams.get("refresh")).toBe("auto");
+  await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEW_UID);
+  await expect(page.getByTestId("study-count")).toHaveText("9");
+  await expect(page.locator(`tr[data-study-uid="${uid}"]`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  expect(Math.abs((await page.locator(`tr[data-study-uid="${uid}"]`).boundingBox())!.y - rowTop)).toBeLessThanOrEqual(2);
+  // 自動更新の読み直しでは、古い行を薄くしない
+  await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
+
+  // 版を読めなければ、自動更新が止まっていることを出す。読めるようになれば戻る
+  versionStatus = 502;
+  await page.clock.fastForward(30_000);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新：接続できません");
+  versionStatus = 200;
+  await page.clock.fastForward(30_000);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
+
+  // タブを隠している間は版を読まない。戻すとすぐ読む
+  const setVisibility = (state: "hidden" | "visible") =>
+    page.evaluate((s) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => s });
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+    }, state);
+  await setVisibility("hidden");
+  const hiddenFrom = versionReads;
+  await page.clock.fastForward(90_000);
+  expect(versionReads).toBe(hiddenFrom);
+  await setVisibility("visible");
+  await expect.poll(() => versionReads).toBeGreaterThan(hiddenFrom);
+
+  // 利用者が絞り込みを替えた読み直しには、refresh=auto を付けない
+  // 答えが返るまで待つ（差し替えの途中で試験を終えない）
+  const ct = page.waitForResponse((r) => r.url().includes("/api/studies?") && r.url().includes("modality=CT"));
+  await page.getByTestId("modality-CT").click();
+  const res = await ct;
+  expect(new URL(res.url()).searchParams.get("refresh")).toBeNull();
+  await expect(page.getByTestId("modality-CT")).toHaveAttribute("aria-pressed", "true");
 });

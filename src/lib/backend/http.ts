@@ -2,13 +2,16 @@ import "server-only";
 import { getCACertificates } from "node:tls";
 import { Agent, fetch, type Dispatcher } from "undici";
 import {
-  inDateRange,
+  instanceFromDicomJson,
+  matchesStudyQuery,
   seriesFromDicomJson,
+  sortInstances,
   sortSeries,
   sortStudiesNewestFirst,
   stringValue,
   studyDateRange,
   studyFromDicomJson,
+  studyQueryParams,
   TAG,
   type DicomJsonDataset,
 } from "@/lib/backend/dicom-json";
@@ -36,6 +39,7 @@ import {
   clampStudyLimit,
   STUDY_LIMIT,
   type Backend,
+  type InstanceSummary,
   type ReceivedStudy,
   type RelayRequest,
   type StudyQuery,
@@ -188,6 +192,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     const query = new URLSearchParams({ limit: String(clampStudyLimit(limit)) });
     const range = studyDateRange(studyQuery);
     if (range) query.set("StudyDate", range);
+    // 詳細条件（生年月日・性別・受付番号・検査名）も Orthanc で絞る（上限 1000 件の外の古い検査も引ける）
+    for (const [name, value] of studyQueryParams(studyQuery)) query.set(name, value);
     // 既定で返らないことがある項目を求める
     query.append("includefield", "00081030");
     query.append("includefield", "00080061");
@@ -207,8 +213,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     mock: false,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
-      // 範囲は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
-      const studies = (await qidoStudies(limit, query)).map(studyFromDicomJson).filter((s) => inDateRange(s.studyDate, query));
+      // 範囲と詳細条件は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
+      const studies = (await qidoStudies(limit, query)).map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, query));
       return sortStudiesNewestFirst(studies);
     },
 
@@ -232,9 +238,61 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return rows.find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid) ?? null;
     },
 
+    async searchInstances(studyInstanceUid: string, seriesInstanceUid: string) {
+      const query = new URLSearchParams();
+      query.append("includefield", TAG.InstanceNumber);
+      query.append("includefield", TAG.NumberOfFrames);
+      // 監査の記録の「どの患者」に使う
+      query.append("includefield", TAG.PatientID);
+      const rows = await getJson<DicomJsonDataset[]>(
+        dicomwebUrl!,
+        `studies/${checkedUid(studyInstanceUid)}/series/${checkedUid(seriesInstanceUid)}/instances?${query}`,
+      );
+      // UID の形でない行は落とす（画面で選び、次の要求の path に入るため）。答えをそのまま信じず、
+      // 検査・シリーズの UID が求めたものと同じ行だけを返す（Orthanc 26.9.1 の画像の単位の QIDO-RS は、
+      // 検査・シリーズの UID と患者 ID を返すことを、2026-10-21 に結合の試験の 12 で測った）
+      const sameStudy = (i: InstanceSummary) => i.studyInstanceUid === studyInstanceUid && i.seriesInstanceUid === seriesInstanceUid;
+      return sortInstances(
+        Array.isArray(rows) ? rows.map(instanceFromDicomJson).filter((i) => isDicomUid(i.sopInstanceUid) && sameStudy(i)) : [],
+      );
+    },
+
+    async instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string) {
+      const path = `studies/${checkedUid(studyInstanceUid)}/series/${checkedUid(seriesInstanceUid)}/instances/${checkedUid(sopInstanceUid)}/metadata`;
+      const res = await call(dicomwebUrl!, path, { headers: { accept: "application/dicom+json" } });
+      if (res.status === 404) {
+        await res.body?.cancel();
+        return null;
+      }
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+      }
+      const rows = (await res.json()) as unknown;
+      const ds = Array.isArray(rows) ? (rows[0] as DicomJsonDataset | undefined) : undefined;
+      // 答えをそのまま信じない：求めた検査・シリーズ・画像のものだけを返す
+      if (
+        !ds ||
+        stringValue(ds, TAG.StudyInstanceUID) !== studyInstanceUid ||
+        stringValue(ds, TAG.SeriesInstanceUID) !== seriesInstanceUid ||
+        stringValue(ds, TAG.SOPInstanceUID) !== sopInstanceUid
+      ) {
+        return null;
+      }
+      return ds;
+    },
+
     async countStudies() {
       const stats = await getJson<{ CountStudies: number }>(orthancUrl, "statistics");
       return { count: stats.CountStudies, exact: true };
+    },
+
+    async studyListVersion() {
+      // 変更の記録の最後の1件と番号だけを読む（検査の検索はしない）
+      const json = await restJsonOrNull("changes?last");
+      const last = json && typeof json === "object" ? (json as { Last?: unknown }).Last : undefined;
+      if (typeof last !== "number" || !Number.isSafeInteger(last)) throw new BackendError("画像サーバーの変更の記録を読み込めませんでした");
+      return String(last);
     },
 
     async relayDicomweb(req: RelayRequest) {

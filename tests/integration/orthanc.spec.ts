@@ -472,3 +472,92 @@ test("10 書き出しの結果が記録に残り、サムネイルがブラウ�
   expect.soft(asImg.status(), "ブラウザの Accept のままのサムネイルが画像で返らない").toBe(200);
   expect.soft(asImg.headers()["content-type"] ?? "", "サムネイルの答えが画像でない").toMatch(/^image\//);
 });
+
+test("11 詳細条件：生年月日・性別・受付番号・検査名が、本物の Orthanc の QIDO-RS で引ける（2026-10-21）", async () => {
+  test.setTimeout(180_000);
+  const { page } = admin;
+  // 詳細条件の値だけを替えた、架空の患者の検査を2つ足す（生年月日は同じ、性別・受付番号・検査名は違う）
+  const D = syntheticStudy("adv-d", 21, 1, {
+    patientBirthDate: "19750510",
+    patientSex: "F",
+    accessionNumber: "IT-ADV-0001",
+    studyDescription: "Chest CT plain",
+  });
+  const E = syntheticStudy("adv-e", 22, 1, {
+    patientBirthDate: "19750510",
+    patientSex: "M",
+    accessionNumber: "IT-ADV-0002",
+    studyDescription: "HEAD CT",
+  });
+  for (const study of [D, E]) {
+    writeDumps(study);
+    await storescuToOrthanc(study.batch);
+    await waitFor(`Orthanc に ${study.batch} が入る`, () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  }
+  /** BFF の画面の API で絞った検査（試験で足した2つのうちのどれか） */
+  const found = async (params: Record<string, string>) => {
+    const res = await page.request.get(`/api/studies?${new URLSearchParams(params)}`);
+    expect(res.status()).toBe(200);
+    const { studies } = (await res.json()) as { studies: { studyInstanceUid: string }[] };
+    return [D, E].filter((s) => studies.some((r) => r.studyInstanceUid === s.studyInstanceUid)).map((s) => s.batch);
+  };
+  // Orthanc の QIDO-RS の答え（BFF が後から確かめて捨てる前）。大文字と小文字の扱いを記録する
+  const raw = async (query: Record<string, string>) => {
+    const rows = await orthancJson<Record<string, { Value?: unknown[] }>[]>(`dicom-web/studies?${new URLSearchParams(query)}`);
+    return [D, E].filter((s) => rows.some((r) => r["0020000D"]?.Value?.[0] === s.studyInstanceUid)).map((s) => s.batch);
+  };
+
+  expect(await found({ birth: "1975-05-10" })).toEqual(["adv-d", "adv-e"]);
+  expect(await found({ birth: "1975-05-10", sex: "F" })).toEqual(["adv-d"]);
+  expect(await found({ accession: "ADV-0002" })).toEqual(["adv-e"]);
+  expect(await found({ desc: "Chest CT" })).toEqual(["adv-d"]);
+  // ほかの検査（生年月日 19800101）は、生年月日の条件で出ない
+  const others = await page.request.get(`/api/studies?${new URLSearchParams({ birth: "1975-05-10" })}`);
+  expect(((await others.json()) as { studies: { patientId: string }[] }).studies.every((s) => s.patientId.startsWith("JP-TEST-IT2"))).toBe(true);
+
+  // 大文字と小文字：Orthanc の QIDO-RS の答えと、BFF の答えを並べて残す（仕様の 3.1 に書く）
+  const caseCheck = {
+    descLower: { orthanc: await raw({ StudyDescription: "*chest*" }), bff: await found({ desc: "chest" }) },
+    accessionLower: { orthanc: await raw({ AccessionNumber: "*adv-0001*" }), bff: await found({ accession: "adv-0001" }) },
+  };
+  observe("qido.advancedCase", caseCheck);
+  for (const [key, v] of Object.entries(caseCheck)) {
+    // Orthanc 26.9.1 の QIDO-RS は、大文字と小文字を区別しない（2026-10-21 に測った。仕様の 3.1 はこれを前提に書いた）
+    expect.soft(v.orthanc, `${key}：Orthanc が大文字と小文字を区別するようになった`).toEqual(["adv-d"]);
+    // BFF は Orthanc が合うとした検査を落とさない
+    expect.soft(v.bff, key).toEqual(v.orthanc);
+  }
+});
+
+test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像の並びを引き、WADO-RS の metadata で 1 枚の値を読む（2026-10-21）", async () => {
+  const { page } = admin;
+  const base = `/api/studies/${A.studyInstanceUid}/series/${A.seriesInstanceUid}/instances`;
+  const listRes = await page.request.get(base);
+  expect(listRes.status()).toBe(200);
+  const { instances } = (await listRes.json()) as { instances: { sopInstanceUid: string; instanceNumber: string }[] };
+  // 送った 3 枚が、画像の番号の順に並ぶ。画面へ返すのは選ぶのに要る値だけ
+  expect(instances.map((i) => i.sopInstanceUid)).toEqual(A.sopInstanceUids);
+  expect(instances.map((i) => i.instanceNumber)).toEqual(["1", "2", "3"]);
+  expect(Object.keys(instances[0]!).sort()).toEqual(["instanceNumber", "numberOfFrames", "sopClassUid", "sopInstanceUid"]);
+
+  // 1 枚の値の全部。その画像の SOPInstanceUID と画像の番号が入り、ほかの画像のものではない
+  const second = A.sopInstanceUids[1]!;
+  const valuesRes = await page.request.get(`${base}/${second}/values`);
+  expect(valuesRes.status()).toBe(200);
+  const { values } = (await valuesRes.json()) as { values: { tag: string; value: string }[] };
+  const value = (tag: string) => values.find((v) => v.tag === tag)?.value;
+  expect(value("0008,0018")).toBe(second);
+  expect(value("0020,0013")).toBe("2");
+  expect(value("0010,0020")).toBe(A.patientId);
+  // 別のシリーズの下の画像としては返さない
+  expect((await page.request.get(`/api/studies/${A.studyInstanceUid}/series/1.2.3/instances/${second}/values`)).status()).toBe(404);
+
+  // Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID と患者 ID を返すか（BFF が確かめに使う）を記録する
+  const rows = await orthancJson<Record<string, unknown>[]>(
+    `dicom-web/studies/${A.studyInstanceUid}/series/${A.seriesInstanceUid}/instances?includefield=00100020`,
+  );
+  const keys = Object.keys(rows[0] ?? {}).filter((k) => ["0020000D", "0020000E", "00100020"].includes(k));
+  observe("qido.instanceKeys", keys);
+  // BFF は、この 3 つがあることを前提に、求めた検査・シリーズの画像だけを返す（2026-10-21 に Orthanc 26.9.1 で測った）
+  expect.soft(keys.sort(), "Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID か患者 ID を返さなくなった").toEqual(["0020000D", "0020000E", "00100020"].sort());
+});

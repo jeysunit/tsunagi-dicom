@@ -47,3 +47,28 @@ jobs:
             test-results/integration/**/*.png
           if-no-files-found: ignore
           retention-days: 7
+
+  dev-stack:
+    name: 開発用の compose の流れ（TDG → Orthanc → tsunagi-dicom → storescp）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # docker/dev/up.sh で一式を立て（tsunagi-dicom のイメージはこのリポジトリから作る）、試験を流し、片付ける
+      - run: node tests/flow/run.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: dev-stack-results
+          # 失敗したときの画面の写しだけを上げる（trace と HTML の報告は作らない。入力した資格情報が残りうるため）
+          path: test-results/flow/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
