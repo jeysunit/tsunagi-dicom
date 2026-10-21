@@ -56,8 +56,9 @@ if [ -z "${TSUNAGI_IMAGE:-}" ]; then
   docker build -t "$TSUNAGI_IMAGE" "$root"
 fi
 
-# 3. 立てる（ris-emulator・dicom-test-generator・storescp のイメージも作る）。起きるまで待つ
-docker compose -f "$here/compose.yaml" up -d --build --wait --wait-timeout 600
+# 3. 立てる（ris-emulator・dicom-test-generator・storescp のイメージも作る）。起きるまで待つ。
+#    compose に無くなったサービスのコンテナ（2026-10-21 に dtg へ名前を替える前の tdg など）は消す（ボリュームは消さない）
+docker compose -f "$here/compose.yaml" up -d --build --wait --wait-timeout 600 --remove-orphans
 
 # 4. 開く先
 cat <<EOF

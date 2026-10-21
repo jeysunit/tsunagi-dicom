@@ -41,7 +41,11 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
    - tsunagi-dicom のイメージを、このリポジトリから作る（`TSUNAGI_IMAGE` に GHCR のイメージを渡せば作らない）。
    - DTG と ris-emulator のイメージを、`docker/dev/compose.yaml` で固定した commit から作る（`DTG_GIT_REF`・`RIS_GIT_REF` で替えられる）。
    - 作るイメージの名前には、compose のプロジェクトの名前（`COMPOSE_PROJECT_NAME`。既定は `tsunagi-dev`）を入れる（`tsunagi-dev-tsunagi:local`・`tsunagi-dev-ris:local`・`tsunagi-dev-dtg:local`・`tsunagi-dev-dcmtk:local`）。`COMPOSE_PROJECT_NAME` とポートを替えて一式を2つ立てても、片方を作り直したときに、もう片方のイメージの名前は付け替わらない。
-   - 一式を立て、起動を待ち、開く URL とパスワードのファイルの場所を出す。
+   - 一式を立て、起動を待ち、開く URL とパスワードのファイルの場所を出す。compose に無くなったサービスのコンテナは消す（`--remove-orphans`。ボリュームは消さない）。
+   - 2026-10-21 に、dicom-test-generator の略称を DTG に直し、サービスの名前を `tdg` から `dtg` に替えた。それより前に立てた一式で `up.sh` を流し直すと、次のようになる。
+     - 古い `tdg` のコンテナは消える。
+     - DTG の Web 画面のパスワードは、新しいファイル `dtg_web_password.txt` に作り直す（古い `tdg_web_password.txt` は使わない）。
+     - DTG の状態（送信の履歴など）は、新しいボリューム（`dtg-state`・`dtg-output`）から始まる。古いボリューム（`<プロジェクト>_tdg-state`・`<プロジェクト>_tdg-output`）は残るので、要らなければ `docker volume rm` で消す。Orthanc に届いた検査（`orthanc-db`）と tsunagi-dicom のデータ（`tsunagi-data`）は、そのまま引き継ぐ。
 3. 設定は次のとおり（どれもリポジトリにある）。
    - **Orthanc**：`deploy/orthanc/orthanc.json`（DICOMweb 有効・認証あり・登録した接続先からだけ C-STORE を受ける）と、`docker/dev/orthanc/site.json`（AE タイトル `ORTHANC`、接続先 `dtg`（dicom-test-generator、`DTG_CT01`）と `dev-scp`（storescp、`DEV_SCP`））。
    - **DTG**：`docker/dev/dtg/app_config.yaml`（AE タイトル `DTG_CT01`、ワークリストは ris-emulator（AE タイトル `RIS_EMU`、`ris:11112`）、送信先 `orthanc:4242`）。予約が無いときは、緊急の患者で撮る。MPPS は送らない（ris-emulator はまだ受けない）。
