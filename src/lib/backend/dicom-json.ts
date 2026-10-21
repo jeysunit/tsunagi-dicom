@@ -1,4 +1,4 @@
-import type { SeriesSummary, StudyQuery, StudySummary } from "@/lib/backend/types";
+import type { InstanceSummary, SeriesSummary, StudyQuery, StudySummary } from "@/lib/backend/types";
 
 // DICOM JSON（PS3.18 F.2）の読み取り。QIDO-RS の応答を StudySummary にする。
 
@@ -34,6 +34,10 @@ export const TAG = {
   StudyInstanceUID: "0020000D",
   NumberOfStudyRelatedSeries: "00201206",
   NumberOfStudyRelatedInstances: "00201208",
+  SOPClassUID: "00080016",
+  SOPInstanceUID: "00080018",
+  InstanceNumber: "00200013",
+  NumberOfFrames: "00280008",
 } as const;
 
 function values(ds: DicomJsonDataset, tag: string): DicomJsonValue[] {
@@ -99,6 +103,24 @@ export function seriesFromDicomJson(ds: DicomJsonDataset): SeriesSummary {
 export function sortSeries(series: SeriesSummary[]): SeriesSummary[] {
   const num = (s: SeriesSummary) => (/^-?\d+$/.test(s.seriesNumber.trim()) ? Number(s.seriesNumber) : Number.POSITIVE_INFINITY);
   return [...series].sort((a, b) => num(a) - num(b) || a.seriesInstanceUid.localeCompare(b.seriesInstanceUid));
+}
+
+export function instanceFromDicomJson(ds: DicomJsonDataset): InstanceSummary {
+  return {
+    studyInstanceUid: stringValue(ds, TAG.StudyInstanceUID),
+    seriesInstanceUid: stringValue(ds, TAG.SeriesInstanceUID),
+    patientId: stringValue(ds, TAG.PatientID),
+    sopInstanceUid: stringValue(ds, TAG.SOPInstanceUID),
+    sopClassUid: stringValue(ds, TAG.SOPClassUID),
+    instanceNumber: stringValue(ds, TAG.InstanceNumber),
+    numberOfFrames: numberValue(ds, TAG.NumberOfFrames),
+  };
+}
+
+/** 画像の番号（InstanceNumber）の順（番号が無い・数でないものは後ろ。同じなら SOPInstanceUID の順） */
+export function sortInstances(instances: InstanceSummary[]): InstanceSummary[] {
+  const num = (s: InstanceSummary) => (/^-?\d+$/.test(s.instanceNumber.trim()) ? Number(s.instanceNumber) : Number.POSITIVE_INFINITY);
+  return [...instances].sort((a, b) => num(a) - num(b) || a.sopInstanceUid.localeCompare(b.sopInstanceUid));
 }
 
 /** QIDO-RS の StudyDate の範囲の値（`YYYYMMDD-YYYYMMDD`。片方だけでもよい）。条件が無ければ null */

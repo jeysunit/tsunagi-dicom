@@ -137,6 +137,93 @@ describe("すべての DICOM の値（別の権限）", () => {
   });
 });
 
+describe("画像単位の DICOM タグ（dicom.all_values。docs/spec.md の 3.1）", () => {
+  const seriesParams = (uid: string, series: string) => ({ params: Promise.resolve({ uid, series }) });
+  const sopParams = (uid: string, series: string, sop: string) => ({ params: Promise.resolve({ uid, series, sop }) });
+  async function firstSeries() {
+    const { createMockBackend } = await import("@/lib/backend/mock");
+    return (await createMockBackend().searchSeries(STUDY))[0]!.seriesInstanceUid;
+  }
+
+  it("シリーズの中の画像の並び：選ぶのに要る値だけを画像の番号の順に返し、開いたことを記録する", async () => {
+    state.role = "general";
+    const series = await firstSeries();
+    const { GET } = await import("@/app/api/studies/[uid]/series/[series]/instances/route");
+    const res = await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/series/${series}/instances`), seriesParams(STUDY, series));
+    expect(res.status).toBe(200);
+    const { instances } = await res.json();
+    expect(instances).toHaveLength(4);
+    for (const i of instances) expect(Object.keys(i).sort()).toEqual(["instanceNumber", "numberOfFrames", "sopClassUid", "sopInstanceUid"]);
+    expect(instances.map((i: { instanceNumber: string }) => i.instanceNumber)).toEqual(["1", "2", "3", "4"]);
+    const row = await lastAudit("view_study");
+    expect(row).toMatchObject({ outcome: "success", actorRole: "general", studyInstanceUid: STUDY, patientId: "JP-TEST-0004" });
+    expect(JSON.parse(row!.detail!)).toMatchObject({ allValues: true, level: "instances", seriesInstanceUid: series, count: 4 });
+  });
+
+  it("1枚の画像の値の全部：選んだ画像の SOPInstanceUID と値を返す（画像ごとに値が違う）。開いたことを画像の UID つきで記録する", async () => {
+    state.role = "general";
+    const series = await firstSeries();
+    const list = await import("@/app/api/studies/[uid]/series/[series]/instances/route");
+    const { instances } = await (await list.GET(new Request(`${ORIGIN}/x`), seriesParams(STUDY, series))).json();
+    const { GET } = await import("@/app/api/studies/[uid]/series/[series]/instances/[sop]/values/route");
+    const read = async (sop: string) => {
+      const res = await GET(new Request(`${ORIGIN}/x`), sopParams(STUDY, series, sop));
+      expect(res.status).toBe(200);
+      return (await res.json()).values as { tag: string; vr: string; value: string }[];
+    };
+    const [a, b] = [await read(instances[0].sopInstanceUid), await read(instances[1].sopInstanceUid)];
+    const value = (rows: typeof a, tag: string) => rows.find((r) => r.tag === tag)?.value;
+    expect(value(a, "0008,0018")).toBe(instances[0].sopInstanceUid);
+    expect(value(b, "0008,0018")).toBe(instances[1].sopInstanceUid);
+    expect(value(a, "0010,0020")).toBe("JP-TEST-0004");
+    expect(value(a, "0020,000E")).toBe(series);
+    expect(value(a, "0020,0032")).not.toBe(value(b, "0020,0032"));
+    // 検査の検索だけにある項目（ModalitiesInStudy など）は、画像の値に無い
+    expect(value(a, "0008,0061")).toBeUndefined();
+    const row = await lastAudit("view_study");
+    expect(row).toMatchObject({ outcome: "success", studyInstanceUid: STUDY, patientId: "JP-TEST-0004" });
+    expect(JSON.parse(row!.detail!)).toMatchObject({ allValues: true, level: "instance", seriesInstanceUid: series, sopInstanceUid: instances[1].sopInstanceUid });
+  });
+
+  it("UID の形が誤りなら 400、見つからない画像・ほかのシリーズの画像は 404", async () => {
+    state.role = "admin";
+    const series = await firstSeries();
+    const { GET } = await import("@/app/api/studies/[uid]/series/[series]/instances/[sop]/values/route");
+    expect((await GET(new Request(`${ORIGIN}/x`), sopParams(STUDY, "../x", "1.2"))).status).toBe(400);
+    expect((await GET(new Request(`${ORIGIN}/x`), sopParams(STUDY, series, "1.2;x"))).status).toBe(400);
+    expect((await GET(new Request(`${ORIGIN}/x`), sopParams(STUDY, series, "1.2.3"))).status).toBe(404);
+    const list = await import("@/app/api/studies/[uid]/series/[series]/instances/route");
+    const { instances } = await (await list.GET(new Request(`${ORIGIN}/x`), seriesParams(STUDY, series))).json();
+    // 同じ画像でも、別のシリーズの下としては返さない
+    expect((await GET(new Request(`${ORIGIN}/x`), sopParams(STUDY, "1.2.3", instances[0].sopInstanceUid))).status).toBe(404);
+  });
+});
+
+describe("一覧の版（自動更新。docs/spec.md の 3.1）", () => {
+  it("変更の記録の番号だけを返し、患者の情報を返さないので監査の記録を増やさない。消すと版が進む", async () => {
+    state.role = "general";
+    const { GET } = await import("@/app/api/studies/version/route");
+    const { getDb } = await import("@/lib/db");
+    const before = await (await getDb()).auditLog.count();
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body)).toEqual(["version"]);
+    expect(body.version).toMatch(/^\d+$/);
+    expect(await (await getDb()).auditLog.count()).toBe(before);
+
+    const { createMockBackend, restoreMockStudies } = await import("@/lib/backend/mock");
+    const backend = createMockBackend();
+    const id = await backend.lookupStudy(STUDY);
+    await backend.deleteStudy(id!);
+    try {
+      expect((await (await GET()).json()).version).toBe(String(Number(body.version) + 1));
+    } finally {
+      restoreMockStudies();
+    }
+  });
+});
+
 describe("段 3：検査の状態の印は返さない", () => {
   it("詳細の検査に、状態の印の項目（検像・読影・緊急・ブックマーク）が無い", async () => {
     state.role = "admin";
