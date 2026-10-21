@@ -332,6 +332,87 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   expect(after.checked).toBeGreaterThanOrEqual(before.checked + 5);
 });
 
+test("送信の手応え：押した直後から状態の枠、送っている間は進みと「閉じても送信は続きます」、閉じた後も状態が出て、終わったら「再送信…」", async () => {
+  test.setTimeout(60_000);
+  const { page } = admin;
+  await page.goto("/");
+  await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
+  await page.getByTestId("send-open").click();
+  const panel = page.getByTestId("send-panel");
+  await panel.getByTestId("send-modality").selectOption("dtg");
+  // 送信の要求の答えを止めておき、答えが来る前（押した直後）の画面を見る
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/studies/*/send", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await panel.getByTestId("send-submit").click();
+  // 押した直後から（答えが来る前に）、状態の枠と進みの帯
+  // （前は、答えが来るまで状態の文字が空で、0.3 秒たってから「読み込み中」の印だけが出ていた）
+  const status = panel.getByTestId("send-status");
+  await expect(status).toHaveAttribute("data-state", "Starting");
+  await expect(status).toContainText("送信を開始しています");
+  await expect(status.getByRole("progressbar")).toBeVisible();
+  // 受け付けの前は閉じられない（断られたときの知らせを見せるため）。「閉じても送信は続きます」は、受け付けた後だけ
+  await expect(panel.getByTestId("send-close")).toBeDisabled();
+  await expect(panel.getByTestId("send-continues")).toHaveCount(0);
+  await expect(panel.getByTestId("send-again")).toHaveCount(0);
+  release();
+  await expect(status).toHaveAttribute("data-state", /^(Accepted|Pending|Running)$/);
+  await page.unroute("**/api/studies/*/send");
+  await expect(panel.getByTestId("send-close")).toBeEnabled();
+  await expect(panel.getByTestId("send-continues")).toHaveText("閉じても送信は続きます");
+
+  // 送っている間に閉じる：「送信」の横に送信中を出し、終わると送信完了に変わる（閉じていても状態を読み続ける）
+  await panel.getByTestId("send-close").click();
+  await expect(page.getByTestId("send-panel")).toHaveCount(0);
+  const badge = page.getByTestId("send-badge");
+  await expect(badge).toHaveText("送信中");
+  await expect(badge).toHaveText("送信完了", { timeout: 15_000 });
+
+  // 開き直すと結果が出て、「再送信…」で確かめの画面に戻る（送るのは「送信する」を押したとき）
+  await page.getByTestId("send-open").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success");
+  await expect(panel.getByTestId("send-continues")).toHaveCount(0);
+  await expect(page.getByTestId("send-badge")).toHaveCount(0);
+  await panel.getByTestId("send-again").click();
+  await expect(panel.getByTestId("send-status")).toHaveCount(0);
+  await expect(panel.getByTestId("send-submit")).toBeVisible();
+  await expect(panel.getByTestId("send-confirm")).toContainText("dtg（DTG_SCP）");
+
+  // 送信失敗：印つきの失敗の枠と「再送信…」
+  await panel.getByTestId("send-modality").selectOption("offline");
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Failure", { timeout: 15_000 });
+  await expect(panel.getByTestId("send-status")).toContainText("送信失敗");
+  await expect(panel.getByTestId("send-again")).toBeVisible();
+
+  // ジョブの状態を読めずに止まったときは、閉じた後も「送信中」と見せない。開いて「再読み込み」で続きを読む
+  await panel.getByTestId("send-again").click();
+  await panel.getByTestId("send-modality").selectOption("dtg");
+  await page.route("**/api/jobs/**", (route) => route.fulfill({ status: 502, json: { error: "画像サーバーに接続できません" } }));
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toContainText("状態を取得できませんでした");
+  await panel.getByTestId("send-close").click();
+  await expect(page.getByTestId("send-badge")).toHaveText("状態を取得できません");
+  await page.unroute("**/api/jobs/**");
+  await page.getByTestId("send-open").click();
+  await panel.getByRole("button", { name: "再読み込み" }).click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 15_000 });
+
+  // 受け付けの前に断られた送信（403 など）は、閉じる前に画面に出る（受け付けの前は閉じられない）
+  await panel.getByTestId("send-again").click();
+  await page.route("**/api/studies/*/send", (route) =>
+    route.request().method() === "POST" ? route.fulfill({ status: 403, json: { error: "この操作の権限がありません" } }) : route.continue(),
+  );
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Error");
+  await expect(panel.getByTestId("send-status")).toContainText("権限");
+  await page.unroute("**/api/studies/*/send");
+  await panel.getByTestId("send-close").click();
+});
+
 test("ログインの一時停止：3回続けて失敗したら、正しいパスワードでも止める。管理者は解ける", async ({ browser }) => {
   const { context, page } = await newPage(browser);
   for (let i = 0; i < 3; i++) {
