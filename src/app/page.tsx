@@ -3,6 +3,7 @@ import type { ScreenInfo } from "@/components/studies/screen-info";
 import { pageAccess } from "@/lib/auth/page-session";
 import { can } from "@/lib/auth/roles";
 import { audit } from "@/lib/auth/session";
+import { isDicomUid } from "@/lib/backend/relay-path";
 import { BackendError } from "@/lib/backend/types";
 import { getConfig } from "@/lib/config";
 import { screenDeps } from "@/lib/screen-deps";
@@ -31,7 +32,11 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     );
   }
   const { session } = access;
-  const filter = parseFilter(await searchParams);
+  const params = await searchParams;
+  const filter = parseFilter(params);
+  // 受信一覧の「検査一覧で表示」から開いたとき：その検査を選んだ形で開く（UID の形を確かめ、一覧にあるときだけ選ぶ。
+  // 選ぶと、行をクリックしたときと同じく詳細を読み、「詳細を開いた」を記録する）。URL からは、開いた後に外す
+  const studyUid = typeof params.studyUid === "string" && isDicomUid(params.studyUid) ? params.studyUid : undefined;
   const deps = await screenDeps(session);
   const config = getConfig();
   const refreshSeconds = config.screen.studyListRefreshSeconds;
@@ -83,6 +88,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         initialData={{ count: result.count, studies: result.studies, facets: result.facets }}
         initialDataAt={result.fetchedAt}
         initialVersion={version}
+        initialSelected={studyUid && result.studies.some((s) => s.studyInstanceUid === studyUid) ? studyUid : undefined}
         screen={screen}
       />
     </>

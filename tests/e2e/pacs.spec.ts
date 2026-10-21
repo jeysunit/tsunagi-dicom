@@ -37,6 +37,98 @@ test("受け取りの記録：一般は、受け取った検査を新しい順�
   await expect(page.getByTestId("study-count")).toHaveText("2");
 });
 
+test("受信一覧の「検査一覧で表示」：ボタンの形で、押すとその検査を選び、詳細を開き、その行が見える形で検査一覧を開く", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.goto("/received");
+  const target = page.getByTestId("received-row").nth(3);
+  const open = target.getByRole("link", { name: "検査一覧で表示" });
+  // ボタンの形（枠と地。文字のリンクの下線ではない）
+  expect(await open.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe("none");
+  expect(await open.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("1px");
+  const href = (await open.getAttribute("href"))!;
+  const uid = new URL(href, "http://x").searchParams.get("studyUid")!;
+  expect(uid).toMatch(/^[\d.]+$/);
+  await open.click();
+  const row = page.locator(`[data-testid=study-table] tr[data-study-uid="${uid}"]`);
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  await expect(row).toBeFocused();
+  await expect(row).toBeInViewport();
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  // 選んだ検査は URL に残さない（開き直すと、選ばない一覧になる）
+  await expect(page).not.toHaveURL(/studyUid=/);
+
+  // 形の誤った UID・一覧に無い UID では、何も選ばない
+  await page.goto(`/?${new URLSearchParams({ studyUid: "1.2.3" })}`);
+  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+  await page.goto(`/?${new URLSearchParams({ studyUid: "1.2'3" })}`);
+  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+});
+
+test("受信一覧の絞り込み：送信元 AE・検索で絞り、前に開いた後に受信した行に「新着」を付ける。再読み込みで頁を読み直さずに読み直す", async ({ page }) => {
+  await asRole(page, "一般");
+  // 前に開いたのは 2026-10-17 21:00（JST）とする。見本の受信は 18:01〜22:32 なので、21:00 より後の行が新着
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("seeded")) {
+      localStorage.setItem("tsunagi-dicom.receivedSeen", "2026-10-17T12:00:00Z");
+      sessionStorage.setItem("seeded", "1");
+    }
+  });
+  await page.goto("/received");
+  const rows = page.getByTestId("received-row");
+  await expect(rows).toHaveCount(8);
+  const fresh = await rows.evaluateAll((els) => els.filter((el) => el.hasAttribute("data-new")).length);
+  expect(fresh).toBeGreaterThan(0);
+  expect(fresh).toBeLessThan(8);
+  await expect(page.getByTestId("received-only-new")).toHaveText(`新着のみ（${fresh}）`);
+  await page.getByTestId("received-only-new").click();
+  await expect(rows).toHaveCount(fresh);
+  await expect(page.getByTestId("received-count")).toHaveText(String(fresh));
+  await page.getByTestId("received-only-new").click();
+
+  // 送信元 AE（読んだ行にあるものから選ぶ）と検索
+  await page.getByTestId("received-source").selectOption("インポート");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().getByTestId("received-origin")).toHaveText("インポート");
+  await page.getByTestId("received-source").selectOption("");
+  await page.getByTestId("received-search").fill("JP-TEST-0004");
+  await expect(rows).toHaveCount(2);
+  await page.getByTestId("received-search").fill("該当しない語");
+  await expect(page.getByTestId("received-empty")).toHaveText("該当する受信履歴はありません");
+  await page.getByTestId("received-search").fill("");
+
+  // 再読み込み：画面の API から読み直す（頁は読み直さない）。新しく届いた行（答えに足した合成の行）が出て新着になり、
+  // ほかの行の新着の印は、開いている間は前に開いた時刻のまま
+  await page.route("**/api/receive-log", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { items: { receivedAt: string; remoteAet: string | null; study: Record<string, unknown> }[] };
+    body.items.unshift({ ...body.items[0]!, receivedAt: "2026-10-17T14:00:00Z", remoteAet: "NEW_SCU", study: { ...body.items[0]!.study, patientId: "JP-TEST-NEW" } });
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.getByTestId("received-reload").click();
+  await expect(rows).toHaveCount(9);
+  await expect(rows.first()).toContainText("JP-TEST-NEW");
+  await expect(rows.first()).toHaveAttribute("data-new", "true");
+  expect(await rows.evaluateAll((els) => els.filter((el) => el.hasAttribute("data-new")).length)).toBe(fresh + 1);
+  // 選んだ送信元が、次の再読み込みで読んだ範囲から消えても、選択の欄は替わらず、絞り込みと食い違わない
+  await page.getByTestId("received-source").selectOption("NEW_SCU");
+  await expect(rows).toHaveCount(1);
+  await page.unroute("**/api/receive-log");
+  const reload = page.waitForResponse((r) => r.url().endsWith("/api/receive-log") && r.status() === 200);
+  await page.getByTestId("received-reload").click();
+  await reload;
+  await expect(page.getByTestId("received-source")).toHaveValue("NEW_SCU");
+  await expect(page.getByTestId("received-empty")).toBeVisible();
+  await page.getByTestId("received-source").selectOption("");
+  await expect(rows).toHaveCount(8);
+
+  // 開き直すと、前に見た受信日時はいちばん新しい行になり、新着は無い
+  await page.reload();
+  await expect(rows).toHaveCount(8);
+  await expect(page.getByTestId("received-new")).toHaveCount(0);
+  await expect(page.getByTestId("received-only-new")).toBeDisabled();
+});
+
 test("接続先：一般は名称と AE タイトルを見て接続確認ができ、ホスト:ポートは見えない。管理者には出る", async ({ page }) => {
   await asRole(page, "一般");
   await page.goto("/modalities");
