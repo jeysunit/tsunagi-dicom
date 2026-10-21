@@ -253,6 +253,11 @@ export interface AuditChainOptions {
   keyring?: AuditKeyring;
   /** 照らし合わせる先頭の控え */
   anchors?: readonly AuditAnchorRef[];
+  /**
+   * 控えがあるはずか（控えのファイルを設定しているとき）。行があるのに控えが1つも無ければ、食い違いとして返す
+   * （控えのファイルが消えた・別のファイルを見ているときに、照らさずに通すと、切り詰めや作り直しを見落とすため）
+   */
+  requireAnchors?: boolean;
 }
 
 export type AuditChainResult =
@@ -331,6 +336,14 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
       expectedSeq += 1;
       checked += 1;
     }
+  }
+  if (options.requireAnchors && anchors.size === 0 && checked > 0) {
+    return {
+      ok: false,
+      checked,
+      seq: 1,
+      reason: "行があるのに、先頭の控えが無い（控えのファイルが消えたか、別のファイルを見ている）。照らせないので、切り詰めや作り直しを確かめられない",
+    };
   }
   let latestSeq: number | null = null;
   for (const seq of anchors.keys()) latestSeq = latestSeq === null ? seq : Math.max(latestSeq, seq);

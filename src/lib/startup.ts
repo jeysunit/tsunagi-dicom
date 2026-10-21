@@ -76,7 +76,7 @@ export async function checkConfigOrExit(): Promise<void> {
 
   // 監査の記録の先頭の控えを、データベースの外（コンテナのログと AUDIT_ANCHOR_FILE）へ書き出す（docs/adr/0001-audit-chain-mac.md）
   const { startAuditAnchors } = await import("@/lib/audit-anchor");
-  startAuditAnchors(getDb, config.audit.anchorFile);
+  await startAuditAnchors(getDb, config.audit.anchorFile);
 }
 
 /** 定期の片付けの間隔 */

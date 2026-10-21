@@ -436,6 +436,23 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     });
   });
 
+  it("控えのファイルを設定しているのに控えが無ければ（消えた・別のファイル）、照らさずに通さない", async () => {
+    const db = await freshDb();
+    // 行がまだ無ければ、控えが無くてよい
+    expect(await verifyAuditChain(db, 1000, { anchors: [], requireAnchors: true })).toEqual(okChain(0));
+    await appendMany(db, 3);
+    // 控えのファイルが消えた後に、末尾を消した（つなぎだけでは見つからない）
+    await dropGuards(db);
+    await db.$executeRawUnsafe('DELETE FROM "AuditLog" WHERE "seq" = 3');
+    const missing = await readAuditAnchors(path.join(anchorDir, "lost.jsonl"));
+    expect(await verifyAuditChain(db, 1000, { anchors: missing, requireAnchors: true })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("先頭の控えが無い"),
+    });
+    // 控えのファイルを設定していなければ、控えとは照らさない（つなぎだけを確かめる）
+    expect(await verifyAuditChain(db, 1000, { anchors: missing })).toEqual(okChain(2));
+  });
+
   it("控えのファイル：まだ無ければ空。読めない行・同じ seq で食い違う控えは、書き換えとして断る", async () => {
     expect(await readAuditAnchors(path.join(anchorDir, "none.jsonl"))).toEqual([]);
     const bad = anchorFile();

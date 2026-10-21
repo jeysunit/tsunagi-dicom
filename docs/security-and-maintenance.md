@@ -124,7 +124,7 @@ flowchart LR
 
 - **監査の記録**（[`spec.md`](spec.md) の 3.6）：誰が・いつ・どの患者と検査に・何をしたを、BFF のデータベース（`/data` の SQLite）に追記だけで残す。各行は前の行のハッシュを持つ。ハッシュは鍵つきの HMAC-SHA256 で、鍵は `SESSION_SECRET` から導き、データベースには置かない（設計は [`adr/0001-audit-chain-mac.md`](adr/0001-audit-chain-mac.md)）。データベースの trigger で、更新・削除・置き換えを断る。trigger はアプリの誤りを止めるためのもので、データベースのファイルに書ける者は外せる。
 - **先頭の控え**：最後の行の番号（seq）とハッシュを、起動の時と 10 分ごとに、データベースの外へ書き出す（`AUTH_MODE=local`）。書き出し先は、コンテナのログ（標準出力。`tsunagi-dicom: audit-anchor {…}` の1行）と、`AUDIT_ANCHOR_FILE`（配る compose では、データベースとは別のボリューム `tsunagi-audit-anchors` の `/audit-anchors/audit-anchors.jsonl`）。
-- **確かめ**：`/api/audit/verify`（管理者だけ）で、つなぎを確かめ、`AUDIT_ANCHOR_FILE` の控えと照らし合わせる。壊れていなければ 200 と `{"ok": true, "checked": 行の数, "legacy": 鍵つきにする前の行の数, "anchors": {"checked": 照らした控えの数, "latestSeq": いちばん新しい控えの番号}}`。壊れていれば 409 と `{"ok": false, "checked": …, "seq": 壊れた行の番号, "reason": 理由}` で、このときの `checked` は壊れた所の前までに確かめた行の数（全部の行の数ではない）。
+- **確かめ**：`/api/audit/verify`（管理者だけ）で、つなぎを確かめ、`AUDIT_ANCHOR_FILE` の控えと照らし合わせる。壊れていなければ 200 と `{"ok": true, "checked": 行の数, "legacy": 鍵つきにする前の行の数, "anchors": {"checked": 照らした控えの数, "latestSeq": いちばん新しい控えの番号}}`。壊れていれば 409 と `{"ok": false, "checked": …, "seq": 壊れた行の番号, "reason": 理由}` で、このときの `checked` は壊れた所の前までに確かめた行の数（全部の行の数ではない）。`AUDIT_ANCHOR_FILE` を設定しているのに、行があって控えが1つも無いとき（控えのファイルが消えた・別のボリュームを見ている）も 409 にする。
 - **見つけられること**：
   - 鍵（`SESSION_SECRET`）を持たない者が、鍵つきの行を書き換える・差し込む・途中を消すこと。データベースのファイルに書けても、ハッシュを作り直せない。
   - 末尾の削除（切り詰め）と、鍵を持つ者による作り直し。どちらも、先頭の控えより前の行について見つかる。

@@ -97,13 +97,16 @@ export async function readAuditAnchors(file: string): Promise<AuditAnchorRef[]> 
   return [...bySeq].map(([seq, hash]) => ({ seq, hash }));
 }
 
-/** 起動の時に1回と、その後は一定の間隔で控えを書き出す。失敗しても次の間隔でやり直す */
-export function startAuditAnchors(getDb: () => Promise<Db>, file: string | undefined): void {
+/**
+ * 起動の時に1回と、その後は一定の間隔で控えを書き出す。起動の時の1回は、要求を受ける前に書き終える
+ * （/api/audit/verify は、行があるのに控えが無いことを食い違いとして返すため）。失敗しても次の間隔でやり直す
+ */
+export async function startAuditAnchors(getDb: () => Promise<Db>, file: string | undefined): Promise<void> {
   const tick = () =>
-    void (async () => writeAuditAnchor(await getDb(), file))().catch((error: unknown) =>
+    (async () => writeAuditAnchor(await getDb(), file))().catch((error: unknown) =>
       console.error("tsunagi-dicom: 監査の記録の先頭の控えを書き出せなかった", error instanceof Error ? error.message : error),
     );
-  tick();
-  const timer = setInterval(tick, AUDIT_ANCHOR_INTERVAL_MS);
+  await tick();
+  const timer = setInterval(() => void tick(), AUDIT_ANCHOR_INTERVAL_MS);
   timer.unref();
 }

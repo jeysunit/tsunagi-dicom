@@ -20,7 +20,8 @@ export async function GET() {
       }
       throw error;
     }
-    const result = await verifyAuditChain(await getDb(), 1000, { anchors });
+    // 控えのファイルを設定しているのに、控えが1つも無ければ（消えた・別のファイル）、照らさずに通さない
+    const result = await verifyAuditChain(await getDb(), 1000, { anchors, requireAnchors: !!file });
     return Response.json(result, { status: result.ok ? 200 : 409 });
   } catch (error) {
     if (error instanceof AuthError && error.status === 403) {
