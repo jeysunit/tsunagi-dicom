@@ -656,6 +656,7 @@ function Browser({
   initialData,
   initialDataAt,
   initialVersion,
+  initialSelected,
   screen,
 }: {
   initialFilter: StudyFilter;
@@ -664,12 +665,25 @@ function Browser({
   initialDataAt: number;
   /** サーバーの側で一覧を取る前に読んだ、一覧の版（自動更新の基準） */
   initialVersion?: string;
+  /** 開いたときに選んでおく検査（受信一覧の「検査一覧で表示」から。最初の一覧にある検査だけ） */
+  initialSelected?: string;
   screen: ScreenInfo;
 }) {
   const [filter, setFilter] = useState<StudyFilter>(initialFilter);
-  const [selected, setSelected] = useState<string | null>(null);
-  // 詳細を実際に取る検査。クリックならすぐ、矢印で移るときは止まってから（通り過ぎた行の「詳細を開いた」を記録しない）
-  const [loadedUid, setLoadedUid] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
+  // 詳細を実際に取る検査。クリックならすぐ、矢印で移るときは止まってから（通り過ぎた行の「詳細を開いた」を記録しない）。
+  // 開いたときに選んだ検査は、クリックと同じくすぐ取る（「詳細を開いた」を記録する）
+  const [loadedUid, setLoadedUid] = useState<string | null>(initialSelected ?? null);
+  // 開いたときに選んだ検査の行を、一覧の見える所に入れ、フォーカスを置く（矢印のキーでそのまま続けて動ける）
+  const openedWith = useRef(initialSelected);
+  useEffect(() => {
+    const uid = openedWith.current;
+    if (!uid) return;
+    const row = document.querySelector<HTMLElement>(`[data-testid=study-table] tr[data-study-uid="${CSS.escape(uid)}"]`);
+    if (!row) return;
+    revealRow(row);
+    row.focus({ preventScroll: true });
+  }, []);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const select = useCallback((uid: string | null, how: "click" | "key") => {
@@ -956,6 +970,7 @@ export function StudyBrowser(props: {
   initialData: StudyListData;
   initialDataAt: number;
   initialVersion?: string;
+  initialSelected?: string;
   screen: ScreenInfo;
 }) {
   const [client] = useState(
