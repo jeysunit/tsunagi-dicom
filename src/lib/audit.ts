@@ -53,6 +53,8 @@ export const AUDIT_ACTIONS = [
   "export",
   // つなぎの鍵が替わった（鍵つきにした・SESSION_SECRET を替えた）。detail の from（前の行の keyId。鍵の無い行なら sha256）と to
   "audit_key",
+  // 先頭の控えのファイル（AUDIT_ANCHOR_FILE）を初めて作った（detail の event は start。src/lib/audit-anchor.ts）
+  "audit_anchor",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 /**
@@ -154,7 +156,12 @@ export function computeAuditMac(row: AuditHashInput, key: AuditKey): string {
   return createHmac("sha256", key.key).update(payload, "utf8").digest("hex");
 }
 
-const sameText = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+/** 長さの違う値（書き換えで 16 進でない字を入れられた値を含む）は、比べずに違うとする */
+function sameText(a: string, b: string): boolean {
+  const x = Buffer.from(a, "utf8");
+  const y = Buffer.from(b, "utf8");
+  return x.length === y.length && timingSafeEqual(x, y);
+}
 
 // 1つのプロセスの中で追記を一列に並べる（前の行の hash を読んでから書くため）。
 // ほかのプロセスと競ったときは prevHash の一意の制約で失敗し、つなぎは枝分かれしない。

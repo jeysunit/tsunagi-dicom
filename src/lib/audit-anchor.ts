@@ -1,6 +1,6 @@
 import "server-only";
-import { appendFile, readFile } from "node:fs/promises";
-import type { AuditAnchorRef } from "@/lib/audit";
+import { appendFile, readFile, stat } from "node:fs/promises";
+import { appendAudit, type AuditAnchorRef } from "@/lib/audit";
 import type { Db } from "@/lib/db";
 
 // 監査の記録の先頭の控え（docs/adr/0001-audit-chain-mac.md）。
@@ -47,14 +47,38 @@ export async function writeAuditAnchor(
   log: (line: string) => void = (line) => console.info(line),
   now: Date = new Date(),
 ): Promise<AuditAnchor | null> {
+  // 控えのファイルが無ければ、初めて書き出すときだけ作る（作ったことを監査の記録に残す）。前に書き出したことがあれば、
+  // 作り直さない：消えたファイルや別のボリュームを、いまの（切り詰められたかもしれない）先頭から黙って作り直すと、
+  // /api/audit/verify が照らせないことに気づけないため
+  let create = false;
+  if (file && !(await exists(file))) {
+    if (await db.auditLog.findFirst({ where: { action: "audit_anchor" }, select: { seq: true } })) {
+      throw new AuditAnchorFileError(
+        "先頭の控えのファイルが無い（前に書き出したことがある）。作り直さない。外に残したログの控えと照らしてから、続けるなら空のファイルを置く",
+      );
+    }
+    await appendAudit(db, { actorId: "system", actorRole: "system", authMode: "system", action: "audit_anchor", detail: { event: "start" } });
+    create = true;
+  }
   const last = await db.auditLog.findFirst({ orderBy: { seq: "desc" }, select: { seq: true, hash: true, keyId: true } });
-  if (!last || state.lastSeq === last.seq) return null;
+  if (!last || (!create && state.lastSeq === last.seq)) return null;
   const anchor: AuditAnchor = { seq: last.seq, hash: last.hash, keyId: last.keyId, at: now.toISOString() };
   const line = JSON.stringify(anchor);
   log(`${AUDIT_ANCHOR_LOG_PREFIX}${line}`);
-  if (file) await appendFile(file, `${line}\n`, { encoding: "utf8", mode: 0o600, flag: "a" });
+  // 作るときは、ほかのプロセスが同じ時に作っていたら失敗させる（wx）
+  if (file) await appendFile(file, `${line}\n`, { encoding: "utf8", mode: 0o600, flag: create ? "wx" : "a" });
   state.lastSeq = last.seq;
   return anchor;
+}
+
+async function exists(file: string): Promise<boolean> {
+  try {
+    await stat(file);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 /** 試験で、前に書いた控えの覚えを消す */
