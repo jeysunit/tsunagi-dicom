@@ -122,6 +122,42 @@ describe("検査日の新しい順の上限の数を集める", () => {
     expect(uids(r.studies)).toEqual(uids(sortStudiesNewestFirst(stored).slice(0, r.studies.length)));
   });
 
+  it("画像サーバーが求めた数より少なく切っても（maxResults）、読み残しのある日より古い検査を足さない", async () => {
+    // 1 回に 100 件までしか返さない画像サーバー（続きは Warning 299 で知らせる）。今日 200 件・昨日 1 件
+    const stored = [study(1, daysAgo(1)), ...Array.from({ length: 200 }, (_, i) => study(100 + i, daysAgo(0)))];
+    const calls: StudyQuery[] = [];
+    const capped = async (query: StudyQuery): Promise<WindowAnswer> => {
+      calls.push(query);
+      const matched = stored.filter((s) => inDateRange(s.studyDate, query));
+      return { rows: matched.slice(0, 100), more: matched.length > 100 };
+    };
+    const r = await collectNewestStudies(capped, 1000, undefined, TODAY);
+    expect(r.complete).toBe(false);
+    // 今日の 100 件だけ（今日を読み残したまま、昨日の検査を足さない）
+    expect(r.studies).toHaveLength(100);
+    expect(r.studies.every((s) => s.studyDate === daysAgo(0))).toBe(true);
+  });
+
+  it("最初の答えに続きがあっても、区切った範囲を全部読みきれば complete（上限で切った画像サーバーと Warning 299）", async () => {
+    // 1 回に 10 件までの画像サーバー。検査は 15 件（1 日に 1 件）。上限 20 件で求めると、最初は 10 件と Warning 299
+    const stored = Array.from({ length: 15 }, (_, i) => study(i, daysAgo(i * 3)));
+    const capped = async (query: StudyQuery): Promise<WindowAnswer> => {
+      const matched = stored.filter((s) => inDateRange(s.studyDate, query));
+      return { rows: matched.slice(0, 10), more: matched.length > 10 };
+    };
+    const r = await collectNewestStudies(capped, 20, undefined, TODAY);
+    expect(r.complete).toBe(true);
+    expect(uids(r.studies)).toEqual(uids(sortStudiesNewestFirst(stored)));
+  });
+
+  it("上限の数に届いて古い範囲を読まなかったときは complete にしない", async () => {
+    const stored = Array.from({ length: 30 }, (_, i) => study(i, daysAgo(i)));
+    const { fetchWindow } = fakeQido(stored, 11);
+    const r = await collectNewestStudies(fetchWindow, 10, undefined, TODAY);
+    expect(r.complete).toBe(false);
+    expect(uids(r.studies)).toEqual(uids(sortStudiesNewestFirst(stored).slice(0, 10)));
+  });
+
   it("答えの Warning 299 を「続きがある」と読む（PS3.18 8.3.4.4.1）", () => {
     expect(warnsMoreResults("299 orthanc: There are 5 additional results that can be requested")).toBe(true);
     expect(warnsMoreResults('110 - "Response is Stale", 299 x: There are 1 additional results that can be requested')).toBe(true);

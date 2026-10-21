@@ -8,9 +8,10 @@ import type { StudyQuery, StudySearch, StudySummary } from "@/lib/backend/types"
 // 1. まず条件のまま 1 回問い合わせる。続きが無ければ（返した数が求めた数に届かず、Warning 299 も無い）、それで全部。
 // 2. 続きがあれば、検査日の範囲を新しい側から区切って問い合わせ直す（明日より後 → 今日までの 7 日 → 30 日 → 1 年 → 5 年 → それより前）。
 //    区切った範囲でも続きがあれば、その範囲を半分に分けて、新しい側から問い合わせる。1 日に収まっても続きがあれば、
-//    その日の中は全部とは限らない（どの検査を返すかは画像サーバーが決める）。
+//    その日の中は全部とは限らない（どの検査を返すかは画像サーバーが決める）ので、その日で止める（古い日へ進まない）。
 // 3. 新しい側から上限の数に届いたら止める。問い合わせの回数にも上限（MAX_WINDOW_QUERIES）を置き、届いたら、
 //    そこまでに集めた検査を返す（新しい側から欠けなく並ぶ。上限の数より少ないことがある）。
+// 区切った範囲を全部読みきり、上限で切り捨てた検査も無ければ、全部を返した（complete）とする。
 // 検査日の無い検査は、2 の問い合わせ（検査日の範囲の条件）には合わない。続きがあるときは、一覧に出ないことがある。
 
 /** 1 回の問い合わせの答え。more：求めた数に届いたか、Warning 299 があった（画像サーバーに続きがある） */
@@ -93,28 +94,58 @@ export async function collectNewestStudies(fetchWindow: FetchWindow, limit: numb
       dateTo: range.to === undefined ? undefined : daOf(range.to),
     });
   };
+  // complete：区切ったどの範囲も読みきり、上限で切り捨てた検査も無い。
+  // stopped：読みきれなかった範囲がある（1 日に収まっても続きがある・回数の上限に届いた）。そこより古い範囲へは進まない
+  // （進むと、新しい側に読み残しを抱えたまま古い検査を足し、「新しい側から欠けなく並ぶ」が崩れる。
+  // 画像サーバーが limit より少ない数で切ることも、規格は認めている（PS3.18 8.3.4.4.1 の maxResults））
+  let complete = true;
+  let stopped = false;
   const collect = async (range: Range, need: number): Promise<StudySummary[]> => {
     const answer = await ask(range);
-    if (!answer) return [];
+    if (!answer) {
+      complete = false;
+      stopped = true;
+      return [];
+    }
     const halves = answer.more ? split(range) : null;
-    if (!halves) return newest(answer.rows, need);
+    if (!halves) {
+      if (answer.more) {
+        complete = false;
+        stopped = true;
+      } else if (answer.rows.length > need) {
+        complete = false;
+      }
+      return newest(answer.rows, need);
+    }
     const upper = await collect(halves.upper, need);
-    if (upper.length >= need) return upper.slice(0, need);
+    if (stopped) return upper.slice(0, need);
+    if (upper.length >= need) {
+      // 古い側の半分は読んでいない
+      complete = false;
+      return upper.slice(0, need);
+    }
     return [...upper, ...(await collect(halves.lower, need - upper.length))];
   };
 
+  const ranges = windowsFrom(dayOf(today) ?? Math.floor(Date.now() / DAY_MS))
+    .map(
+      (w): Range => ({
+        from: w.from === undefined ? bounds.from : bounds.from === undefined ? w.from : Math.max(w.from, bounds.from),
+        to: w.to === undefined ? bounds.to : bounds.to === undefined ? w.to : Math.min(w.to, bounds.to),
+      }),
+    )
+    .filter((r) => r.from === undefined || r.to === undefined || r.from <= r.to);
   const studies: StudySummary[] = [];
-  for (const w of windowsFrom(dayOf(today) ?? Math.floor(Date.now() / DAY_MS))) {
-    const range: Range = {
-      from: w.from === undefined ? bounds.from : bounds.from === undefined ? w.from : Math.max(w.from, bounds.from),
-      to: w.to === undefined ? bounds.to : bounds.to === undefined ? w.to : Math.min(w.to, bounds.to),
-    };
-    if (range.from !== undefined && range.to !== undefined && range.from > range.to) continue;
+  for (const range of ranges) {
     const need = limit - studies.length;
-    if (need <= 0 || queries >= MAX_WINDOW_QUERIES) break;
+    if (need <= 0 || stopped) {
+      // 読んでいない範囲が残る
+      complete = false;
+      break;
+    }
     studies.push(...(await collect(range, need)));
   }
-  return { studies: newest(studies, limit), complete: false };
+  return { studies: newest(studies, limit), complete };
 }
 
 /** 区切りの基準の日（UTC の今日。区切りの位置を決めるだけで、どの範囲も漏らさない） */
