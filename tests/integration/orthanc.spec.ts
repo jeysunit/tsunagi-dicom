@@ -425,6 +425,7 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
   observe("audit.rowsAdded", body.checked - auditBefore);
   // 鍵つきのつなぎ（鍵の無い行は無い）と、起動の時に書き出した先頭の控え（AUDIT_ANCHOR_FILE）との照らし合わせ
   expect(body.legacy).toBe(0);
+  expect(body.anchors.status).toBe("checked");
   expect(body.anchors.checked).toBeGreaterThanOrEqual(1);
   const anchorLines = readFileSync(path.join(ITEST.workDir, "audit-anchors.jsonl"), "utf8").trim().split("\n");
   const firstAnchor = JSON.parse(anchorLines[0]!) as { seq: number; hash: string; keyId: string | null };

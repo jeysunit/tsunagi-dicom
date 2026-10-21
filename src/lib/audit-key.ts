@@ -24,6 +24,11 @@ export interface AuditKeyring {
   current: AuditKey;
   /** 確かめに使える鍵（いまのものと、前に使っていたもの） */
   byId: ReadonlyMap<string, AuditKey>;
+  /**
+   * 鍵の古さの順（小さいほど古い）。SESSION_SECRET_PREVIOUS_FILE の行の順（上が古い）で、いまの鍵がいちばん新しい。
+   * 鍵の切り替えは、新しい鍵へだけ受ける（前の鍵へ戻す行を作られても通さない）
+   */
+  rank: ReadonlyMap<string, number>;
 }
 
 export function deriveAuditKey(secret: string): AuditKey {
@@ -35,12 +40,15 @@ export function deriveAuditKey(secret: string): AuditKey {
 export function auditKeyringFrom(sessionSecret: string, previous: readonly string[] = []): AuditKeyring {
   const current = deriveAuditKey(sessionSecret);
   const byId = new Map<string, AuditKey>();
-  for (const secret of previous) {
+  const rank = new Map<string, number>();
+  previous.forEach((secret, i) => {
     const key = deriveAuditKey(secret);
     byId.set(key.id, key);
-  }
+    rank.set(key.id, i);
+  });
   byId.set(current.id, current);
-  return { current, byId };
+  rank.set(current.id, previous.length);
+  return { current, byId, rank };
 }
 
 let cached: { secret: string; previous: readonly string[]; ring: AuditKeyring } | undefined;

@@ -2,6 +2,7 @@ import "server-only";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { auditKeyring, type AuditKey, type AuditKeyring } from "@/lib/audit-key";
+import { getConfig } from "@/lib/config";
 import type { Db } from "@/lib/db";
 
 // 監査の記録（docs/spec.md の 3.6「監査の記録」、第7.0版 17 遵守事項①②。設計は docs/adr/0001-audit-chain-mac.md）。
@@ -220,6 +221,7 @@ export function appendAuditIf<T>(
   db: Db,
   write: (tx: Tx) => Promise<{ value: T; input: AuditEntryInput | null }>,
 ): Promise<{ value: T; row: AuditRow | null }> {
+  let switched = false;
   const run = queue.tail.then(() =>
     db.$transaction(async (tx) => {
       const { value, input } = await write(tx);
@@ -228,6 +230,7 @@ export function appendAuditIf<T>(
       let last: AuditRow | null = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
       // 前の行と鍵が違えば（鍵つきにする前の行・SESSION_SECRET を替えた後）、先に鍵が替わったことを1行書く
       if (last && last.keyId !== key.id) {
+        switched = true;
         last = await createRow(
           tx,
           last,
@@ -246,7 +249,22 @@ export function appendAuditIf<T>(
     }),
   );
   queue.tail = run.catch(() => undefined);
-  return run;
+  // 鍵が替わったことの行を書いたら、すぐに先頭の控えを書き出す（次の定期の書き出しを待たない）。
+  // 切り替えの位置をデータベースの外に残し、切り替えの後の行を鍵の無い形に作り直されても見つけるため。
+  // 控えの書き出しは並びの外で行う（控えの側が記録を足すことがあるので、並びの中で待つと止まる）
+  return run.then(async (result) => {
+    if (switched) await anchorAfterKeySwitch(db);
+    return result;
+  });
+}
+
+async function anchorAfterKeySwitch(db: Db): Promise<void> {
+  try {
+    const { writeAuditAnchor } = await import("@/lib/audit-anchor");
+    await writeAuditAnchor(db, getConfig().audit?.anchorFile);
+  } catch (error) {
+    console.error("tsunagi-dicom: 鍵が替わった後の先頭の控えを書き出せなかった", error instanceof Error ? error.message : error);
+  }
 }
 
 /** データベースの外に書き出した先頭の控え（src/lib/audit-anchor.ts） */
@@ -262,10 +280,17 @@ export interface AuditChainOptions {
   anchors?: readonly AuditAnchorRef[];
   /**
    * 控えがあるはずか（控えのファイルを設定しているとき）。行があるのに控えが1つも無ければ、食い違いとして返す
-   * （控えのファイルが消えた・別のファイルを見ているときに、照らさずに通すと、切り詰めや作り直しを見落とすため）
+   * （控えのファイルが消えた・別のファイルを見ているときに、照らさずに通すと、切り詰めや作り直しを見落とすため）。
+   * 控えを1つ以上渡したときも、設定しているとみなす
    */
   requireAnchors?: boolean;
 }
+
+/**
+ * 先頭の控えと照らした結果。checked：照らした（控えの seq の行が全部合った）。not-configured：控えのファイルを
+ * 設定していないので照らしていない（末尾の削除と、鍵を持つ者による作り直しは確かめていない）。no-rows：行がまだ無い
+ */
+export type AuditAnchorStatus = "checked" | "not-configured" | "no-rows";
 
 export type AuditChainResult =
   | {
@@ -273,27 +298,37 @@ export type AuditChainResult =
       checked: number;
       /** 鍵つきにする前の、鍵の無い SHA-256 の行の数（作り直しを見つけられない行） */
       legacy: number;
-      /** 照らし合わせた先頭の控えの数と、いちばん新しい控えの seq（控えが無ければ 0 と null） */
-      anchors: { checked: number; latestSeq: number | null };
+      /** 先頭の控えと照らしたか、照らした控えの数と、いちばん新しい控えの seq（控えが無ければ 0 と null） */
+      anchors: { status: AuditAnchorStatus; checked: number; latestSeq: number | null };
     }
   | { ok: false; checked: number; seq: number; reason: string };
 
 /**
  * つなぎを頭から確かめる。最初に見つかった食い違いを返す。
- * 鍵つきの行は、行の鍵の印の鍵で hash を確かめる（鍵が無ければ確かめられないので、食い違いとして返す）。
- * 鍵つきの行の後に鍵の無い行があれば、作り直しとして返す。
- * 先頭の控えを渡せば、控えの seq の行の hash が控えと同じか、控えより行が少なくないか（末尾の削除）も確かめる。
+ * - 鍵つきの行は、行の鍵の印の鍵で hash を確かめる。受け付ける鍵は設定で決まる（SESSION_SECRET と
+ *   SESSION_SECRET_PREVIOUS_FILE）。知らない鍵の印の行は、確かめられないので食い違いとして返す。
+ * - 鍵の印が替わってよいのは、鍵が替わったことの行（audit_key）だけ。その行は、新しい鍵で書かれ、detail の from が
+ *   前の行の鍵の印（鍵の無い行なら sha256）、to が自分の鍵の印と同じでなければならない。前に使い終えた鍵へは戻れない。
+ *   そのため、前の鍵（漏れたかもしれない）を名乗って、取り替えの後に行を書き足したり、取り替えの行を作ったりできない。
+ * - 鍵の無い行（前の版の形）は、最初の鍵つきの行より前だけで受ける。鍵つきの行の後に鍵の無い行があれば、作り直しとして返す。
+ *   鍵の無い行を前から全部作り直された（鍵つきの行を消した）ときは、つなぎだけでは見つからず、先頭の控えで見つける。
+ * - 先頭の控えを渡せば、控えの seq の行の hash が控えと同じか、控えより行が少なくないか（末尾の削除）も確かめる
+ *   （鍵つきの hash には鍵の印も入るので、鍵の印を書き換えると hash も変わる）。結果の anchors.status で、控えと照らしたかが分かる。
  */
 export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditChainOptions = {}): Promise<AuditChainResult> {
   const keyring = options.keyring ?? auditKeyring();
   const anchors = new Map<number, string>();
   for (const a of options.anchors ?? []) anchors.set(a.seq, a.hash);
+  let firstAnchorSeq: number | null = null;
+  for (const seq of anchors.keys()) firstAnchorSeq = firstAnchorSeq === null ? seq : Math.min(firstAnchorSeq, seq);
   let anchorsChecked = 0;
   let prevHash = GENESIS_HASH;
   let expectedSeq = 1;
   let checked = 0;
   let legacy = 0;
-  let keyed = false;
+  /** いまの鍵の印（null は鍵の無い行の間）と、使い終えた鍵の印 */
+  let currentKeyId: string | null = null;
+  const retired = new Set<string>();
   for (;;) {
     const rows = await db.auditLog.findMany({
       where: { seq: { gte: expectedSeq } },
@@ -310,15 +345,38 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
       }
       const { hash, ...rest } = row;
       if (row.keyId === null) {
-        if (keyed) {
+        if (currentKeyId !== null) {
           return { ok: false, checked, seq: row.seq, reason: "鍵つきの行の後に、鍵の無い行がある（作り直された）" };
+        }
+        // 控えはこの版だけが書き、この版は鍵の無い行を書かない。控えより後の鍵の無い行は、作り直されたもの
+        // （切り替えの後の控えを書けなかったときも、切り替えの前の控えで見つける）
+        if (firstAnchorSeq !== null && row.seq > firstAnchorSeq) {
+          return { ok: false, checked, seq: row.seq, reason: "先頭の控えより後に、鍵の無い行がある（作り直された）" };
         }
         if (!sameText(computeAuditHash(rest), hash)) {
           return { ok: false, checked, seq: row.seq, reason: "行の中身が hash と合わない（書き換えられた）" };
         }
         legacy += 1;
       } else {
-        keyed = true;
+        // 鍵の印が替わってよいのは、鍵が替わったことの行だけ（最初の行が鍵つきなら、その行から始まる）
+        if (row.keyId !== currentKeyId) {
+          const switching = row.action === "audit_key";
+          const firstRow = row.seq === 1 && currentKeyId === null;
+          if (!switching && !firstRow) {
+            return { ok: false, checked, seq: row.seq, reason: "鍵が替わったことの行が無いのに、鍵の印が替わっている（作り直された）" };
+          }
+          if (retired.has(row.keyId)) {
+            return { ok: false, checked, seq: row.seq, reason: `使い終えた鍵（${row.keyId}）に戻っている（作り直された）` };
+          }
+          // 切り替えは新しい鍵へだけ（設定の順で古い鍵へ戻す行は、鎖にまだ出ていない鍵でも通さない）
+          const toRank = keyring.rank.get(row.keyId);
+          const fromRank = currentKeyId === null ? -1 : keyring.rank.get(currentKeyId);
+          if (toRank !== undefined && fromRank !== undefined && toRank <= fromRank) {
+            return { ok: false, checked, seq: row.seq, reason: `前の鍵（${row.keyId}）へ切り替えている（作り直された）` };
+          }
+        } else if (row.action === "audit_key") {
+          return { ok: false, checked, seq: row.seq, reason: "鍵が替わったことの行なのに、鍵の印が前の行と同じ" };
+        }
         const key = keyring.byId.get(row.keyId);
         if (!key) {
           return {
@@ -330,6 +388,22 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
         }
         if (!sameText(computeAuditMac(rest, key), hash)) {
           return { ok: false, checked, seq: row.seq, reason: "行の中身が hash と合わない（書き換えられた）" };
+        }
+        // 鍵が替わったことの行は、前の鍵と新しい鍵を detail に書く（hash で守られている）。書いた中身が鎖と合うか
+        if (row.keyId !== currentKeyId && row.action === "audit_key") {
+          let detail: { from?: unknown; to?: unknown } | null = null;
+          try {
+            detail = row.detail ? (JSON.parse(row.detail) as { from?: unknown; to?: unknown }) : null;
+          } catch {
+            detail = null;
+          }
+          if (detail?.from !== (currentKeyId ?? "sha256") || detail?.to !== row.keyId) {
+            return { ok: false, checked, seq: row.seq, reason: "鍵が替わったことの行の、前の鍵と新しい鍵が鎖と合わない" };
+          }
+        }
+        if (row.keyId !== currentKeyId) {
+          if (currentKeyId !== null) retired.add(currentKeyId);
+          currentKeyId = row.keyId;
         }
       }
       const anchored = anchors.get(row.seq);
@@ -344,7 +418,8 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
       checked += 1;
     }
   }
-  if (options.requireAnchors && anchors.size === 0 && checked > 0) {
+  const configured = !!options.requireAnchors || anchors.size > 0;
+  if (configured && anchors.size === 0 && checked > 0) {
     return {
       ok: false,
       checked,
@@ -362,5 +437,6 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
       reason: `先頭の控え（seq ${latestSeq}）より行が少ない（末尾が消された）`,
     };
   }
-  return { ok: true, checked, legacy, anchors: { checked: anchorsChecked, latestSeq } };
+  const status: AuditAnchorStatus = checked === 0 ? "no-rows" : configured ? "checked" : "not-configured";
+  return { ok: true, checked, legacy, anchors: { status, checked: anchorsChecked, latestSeq } };
 }

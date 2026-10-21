@@ -79,7 +79,12 @@ describe("検査ごとのビューアの覚え", () => {
       input: { actorId: "alice", actorRole: "doctor", authMode: "dev", action: "study_state" },
     }));
     expect(await db.studyViewer.count()).toBe(1);
-    expect(await verifyAuditChain(db)).toEqual({ ok: true, checked: 1, legacy: 0, anchors: { checked: 0, latestSeq: null } });
+    expect(await verifyAuditChain(db)).toEqual({
+      ok: true,
+      checked: 1,
+      legacy: 0,
+      anchors: { status: "not-configured", checked: 0, latestSeq: null },
+    });
   });
 });
 

@@ -27,11 +27,14 @@ vi.mock("@/lib/config", async (importOriginal) => (await import("./helpers/audit
 const SECRET = auditTestConfig.sessionSecret;
 const key = () => deriveAuditKey(auditTestConfig.sessionSecret);
 /** 書き換えの無いつなぎの確かめの結果（鍵の無い行の数と、照らした控え） */
-const okChain = (checked: number, legacy = 0, anchors = { checked: 0, latestSeq: null as number | null }) => ({
+const okChain = (checked: number, legacy = 0, anchors?: { checked: number; latestSeq: number }) => ({
   ok: true,
   checked,
   legacy,
-  anchors,
+  // 控えを渡さなければ、照らしていないことが分かる（行が無ければ no-rows）
+  anchors: anchors
+    ? { status: "checked", ...anchors }
+    : { status: checked === 0 ? "no-rows" : "not-configured", checked: 0, latestSeq: null },
 });
 
 let dir: string;
@@ -378,25 +381,43 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     const db = await freshDb();
     const file = anchorFile();
     const lines: string[] = [];
-    await appendMany(db, 3);
-    // 初めて控えのファイルを作るときは、作ったこと（audit_anchor）を1行書いてから、その行を控える
+    // 初めての起動（記録も利用者もまだ無い）：控えのファイルを作り、作ったこと（audit_anchor）を1行書いてから、その行を控える
     const first = await writeAuditAnchor(db, file, (l) => lines.push(l), new Date("2026-10-21T00:00:00Z"));
-    const start = await db.auditLog.findUniqueOrThrow({ where: { seq: 4 } });
+    const start = await db.auditLog.findUniqueOrThrow({ where: { seq: 1 } });
     expect(start).toMatchObject({ action: "audit_anchor", actorId: "system", keyId: key().id });
     expect(JSON.parse(start.detail!)).toEqual({ event: "start" });
-    expect(first).toEqual({ seq: 4, hash: start.hash, keyId: key().id, at: "2026-10-21T00:00:00.000Z" });
+    expect(first).toEqual({ seq: 1, hash: start.hash, keyId: key().id, at: "2026-10-21T00:00:00.000Z" });
     expect(await writeAuditAnchor(db, file, (l) => lines.push(l))).toBeNull();
-    await appendMany(db, 1);
+    await appendMany(db, 3);
     await writeAuditAnchor(db, file, (l) => lines.push(l));
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(/^tsunagi-dicom: audit-anchor \{"seq":4,/);
+    expect(lines[0]).toMatch(/^tsunagi-dicom: audit-anchor \{"seq":1,/);
     expect(await readAuditAnchors(file)).toEqual([
-      { seq: 4, hash: start.hash },
-      { seq: 5, hash: (await db.auditLog.findUniqueOrThrow({ where: { seq: 5 } })).hash },
+      { seq: 1, hash: start.hash },
+      { seq: 4, hash: (await db.auditLog.findUniqueOrThrow({ where: { seq: 4 } })).hash },
     ]);
     // 控えと照らして通る
     expect(await verifyAuditChain(db, 1000, { anchors: await readAuditAnchors(file), requireAnchors: true })).toEqual(
-      okChain(5, 0, { checked: 2, latestSeq: 5 }),
+      okChain(4, 0, { checked: 2, latestSeq: 4 }),
+    );
+  });
+
+  it("記録があるのに控えのファイルが無ければ、作らない（データベースを書き換えて初めてを装わせない）。空のファイルを置けば始める", async () => {
+    resetAuditAnchorState();
+    const db = await freshDb();
+    const file = anchorFile();
+    await appendMany(db, 3);
+    const logged: string[] = [];
+    await expect(writeAuditAnchor(db, file, (l) => logged.push(l))).rejects.toThrow("作らない");
+    // 作らなかったことを記録に残し、ログには書く
+    expect(await db.auditLog.findUniqueOrThrow({ where: { seq: 4 } })).toMatchObject({ action: "audit_anchor", outcome: "denied" });
+    expect(logged).toEqual([expect.stringMatching(/^tsunagi-dicom: audit-anchor \{"seq":4,/)]);
+    expect(await readAuditAnchors(file)).toEqual([]);
+    // 前の版から上げたときなど：施設が空のファイルを置くと、そこへ書く
+    writeFileSync(file, "");
+    expect((await writeAuditAnchor(db, file, () => undefined))?.seq).toBe(4);
+    expect(await verifyAuditChain(db, 1000, { anchors: await readAuditAnchors(file), requireAnchors: true })).toEqual(
+      okChain(4, 0, { checked: 1, latestSeq: 4 }),
     );
   });
 
@@ -404,6 +425,8 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     resetAuditAnchorState();
     const db = await freshDb();
     const file = anchorFile();
+    // 初めての起動で控えのファイルを作り（1 行目が作ったことの行）、記録を足して控える
+    await writeAuditAnchor(db, file, () => undefined);
     await appendMany(db, 2);
     await writeAuditAnchor(db, file, () => undefined);
     rmSync(file);
@@ -425,6 +448,8 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     resetAuditAnchorState();
     const db = await freshDb();
     const file = anchorFile();
+    // 施設が置いた空の控えのファイルへ書く（作ったことの行は足さない）
+    writeFileSync(file, "");
     await appendMany(db, 5);
     await writeAuditAnchor(db, file, () => undefined);
     await dropGuards(db);
@@ -442,22 +467,22 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     resetAuditAnchorState();
     const db = await freshDb();
     const file = anchorFile();
+    writeFileSync(file, "");
     await appendMany(db, 5);
-    // 控えは 6 行目（控えのファイルを作ったことの行）
     await writeAuditAnchor(db, file, () => undefined);
     await dropGuards(db);
     let prevHash = (await db.auditLog.findUniqueOrThrow({ where: { seq: 3 } })).hash;
-    for (let seq = 4; seq <= 6; seq++) {
+    for (let seq = 4; seq <= 5; seq++) {
       const { hash: _hash, ...row } = await db.auditLog.findUniqueOrThrow({ where: { seq } });
       const forged = { ...row, action: "search", prevHash };
       prevHash = computeAuditMac(forged, key());
       await db.auditLog.update({ where: { seq }, data: { action: "search", prevHash: forged.prevHash, hash: prevHash } });
     }
 
-    expect(await verifyAuditChain(db)).toEqual(okChain(6));
+    expect(await verifyAuditChain(db)).toEqual(okChain(5));
     expect(await verifyAuditChain(db, 1000, { anchors: await readAuditAnchors(file) })).toMatchObject({
       ok: false,
-      seq: 6,
+      seq: 5,
       reason: expect.stringContaining("控え"),
     });
   });
@@ -482,18 +507,22 @@ describe("先頭の控え（データベースの外）と照らす", () => {
   it("初めて控えのファイルを作れなかったら、作ったことを記録に残さず、作れるようになった次の回に作る", async () => {
     resetAuditAnchorState();
     const db = await freshDb();
-    await appendMany(db, 2);
     const sub = path.join(anchorDir, `later${++m}`);
     const file = path.join(sub, "anchors.jsonl");
-    // 置き場のフォルダがまだ無い（ボリュームをつなぎ忘れた、など）。ログ（標準出力）には書く
+    // 初めての起動で、置き場のフォルダがまだ無い（ボリュームをつなぎ忘れた、など）
+    await expect(writeAuditAnchor(db, file, () => undefined)).rejects.toThrow();
+    expect(await db.auditLog.count()).toBe(0);
+    mkdirSync(sub);
+    const first = await writeAuditAnchor(db, file, () => undefined);
+    expect(first?.seq).toBe(1);
+    expect(await readAuditAnchors(file)).toEqual([{ seq: 1, hash: first!.hash }]);
+    // 置き場の書き込みに失敗しても、ログ（標準出力）には書く
+    rmSync(file);
+    mkdirSync(file);
+    await appendMany(db, 1);
     const logged: string[] = [];
     await expect(writeAuditAnchor(db, file, (l) => logged.push(l))).rejects.toThrow();
     expect(logged).toEqual([expect.stringMatching(/^tsunagi-dicom: audit-anchor \{"seq":2,/)]);
-    expect(await db.auditLog.count({ where: { action: "audit_anchor" } })).toBe(0);
-    mkdirSync(sub);
-    const first = await writeAuditAnchor(db, file, () => undefined);
-    expect(first?.seq).toBe(3);
-    expect(await readAuditAnchors(file)).toEqual([{ seq: 3, hash: first!.hash }]);
   });
 
   it("控えのファイル：まだ無ければ空。読めない行・同じ seq で食い違う控えは、書き換えとして断る", async () => {
@@ -591,3 +620,212 @@ describe("鍵つきにする前の行からの移り方と、鍵の取り替え"
     expect(await verifyAuditChain(db, 1000, { keyring: auditKeyringFrom("z".repeat(48), [SECRET]) })).toEqual(okChain(4));
   });
 });
+
+/** 鍵を持つ者の真似：末尾に1行を、その鍵で書き足す（trigger は外してある前提） */
+async function forgeAppend(db: Db, key: ReturnType<typeof deriveAuditKey>, extra: Partial<AuditRow> = {}) {
+  const last = await db.auditLog.findFirstOrThrow({ orderBy: { seq: "desc" } });
+  const base = {
+    seq: last.seq + 1,
+    occurredAt: new Date(),
+    actorId: "intruder",
+    actorRole: "admin",
+    authMode: "local",
+    action: "view_study",
+    outcome: "success",
+    patientId: "JP-TEST-0001",
+    studyInstanceUid: null,
+    sourceAddress: null,
+    detail: null,
+    prevHash: last.hash,
+    sourceAddressUnverified: null,
+    keyId: key.id,
+    ...extra,
+  };
+  await db.auditLog.create({ data: { ...base, hash: computeAuditMac(base, key) } });
+}
+
+describe("鍵の取り替えと、鍵の無い形への作り直しを悪用させない", () => {
+  afterEach(() => {
+    auditTestConfig.sessionSecret = SECRET;
+    auditTestConfig.audit.sessionSecretPrevious = [];
+  });
+
+  /** 鍵 A で 2 行、鍵 B に替えて 1 行（と鍵が替わったことの行）。確かめる側は A を前の鍵として受ける */
+  async function rotated() {
+    const db = await freshDb();
+    await appendMany(db, 2);
+    const a = key();
+    auditTestConfig.sessionSecret = "b".repeat(48);
+    await appendMany(db, 1);
+    auditTestConfig.audit.sessionSecretPrevious = [SECRET];
+    expect(await verifyAuditChain(db)).toEqual(okChain(4));
+    await dropGuards(db);
+    return { db, a, b: key() };
+  }
+
+  it("取り替えた後に、前の鍵（漏れたかもしれない）を名乗って行を書き足すと見つかる", async () => {
+    const { db, a } = await rotated();
+    await forgeAppend(db, a);
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 5, reason: expect.stringContaining("鍵が替わったことの行が無い") });
+  });
+
+  it("前の鍵で「鍵が替わった」行を作って、前の鍵に戻すと見つかる", async () => {
+    const { db, a, b } = await rotated();
+    await forgeAppend(db, a, { actorId: "system", action: "audit_key", detail: JSON.stringify({ from: b.id, to: a.id }) });
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 5, reason: expect.stringContaining("使い終えた鍵") });
+  });
+
+  it("鎖にまだ出ていない、設定で古い鍵へ切り替える行を作っても見つかる（前の鍵が漏れていても）", async () => {
+    // いまの鍵 B だけで書いた鎖。設定には前の鍵 A（この鎖では使っていない）が残っている
+    auditTestConfig.sessionSecret = "b".repeat(48);
+    const db = await freshDb();
+    await appendMany(db, 2);
+    const b = key();
+    const a = deriveAuditKey(SECRET);
+    auditTestConfig.audit.sessionSecretPrevious = [SECRET];
+    expect(await verifyAuditChain(db)).toEqual(okChain(2));
+    await dropGuards(db);
+    await forgeAppend(db, a, { actorId: "system", action: "audit_key", detail: JSON.stringify({ from: b.id, to: a.id }) });
+    await forgeAppend(db, a);
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 3, reason: expect.stringContaining("前の鍵") });
+  });
+
+  it("鍵が替わったことの行の、前の鍵と新しい鍵が鎖と合わなければ見つかる（鍵を持つ者が作っても）", async () => {
+    const { db, b } = await rotated();
+    const c = deriveAuditKey("c".repeat(48));
+    // c をいまの鍵（いちばん新しい）にし、a・b を前の鍵として渡す
+    auditTestConfig.sessionSecret = "c".repeat(48);
+    auditTestConfig.audit.sessionSecretPrevious = [SECRET, "b".repeat(48)];
+    // from が前の行の鍵（b）でない
+    await forgeAppend(db, c, { actorId: "system", action: "audit_key", detail: JSON.stringify({ from: "sha256", to: c.id }) });
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 5, reason: expect.stringContaining("鎖と合わない") });
+    expect(b.id).not.toBe(c.id);
+  });
+
+  it("鍵の印が替わったのに、鍵が替わったことの行でなければ見つかる（受け付ける鍵でも）", async () => {
+    const db = await freshDb();
+    await appendMany(db, 2);
+    await dropGuards(db);
+    const other = deriveAuditKey("o".repeat(48));
+    auditTestConfig.audit.sessionSecretPrevious = ["o".repeat(48)];
+    await forgeAppend(db, other);
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 3, reason: expect.stringContaining("鍵が替わったことの行が無い") });
+  });
+
+  it("鍵つきにした後の行の前にある、鍵の無い行（前の版の行）を作り直すと、鍵が替わったことの行で見つかる", async () => {
+    const db = await freshDb();
+    // 前の版の行の真似（鍵の無い SHA-256）を 2 行、その後に鍵つきの追記（鍵が替わったことの行と、その行）
+    await dropGuards(db);
+    let prevHash = GENESIS_HASH;
+    for (let seq = 1; seq <= 2; seq++) {
+      const row = { ...legacyRow(seq), prevHash };
+      prevHash = computeAuditHash(row);
+      await db.auditLog.create({ data: { ...row, hash: prevHash } });
+    }
+    await appendAudit(db, entry(0));
+    expect(await verifyAuditChain(db)).toEqual(okChain(4, 2));
+    // 前の版の行を書き換え、鍵の無い行どうしのつなぎを作り直す（鍵は要らない）
+    prevHash = GENESIS_HASH;
+    for (let seq = 1; seq <= 2; seq++) {
+      const row = { ...legacyRow(seq), actorId: "intruder", prevHash };
+      prevHash = computeAuditHash(row);
+      await db.auditLog.update({ where: { seq }, data: { actorId: "intruder", prevHash: row.prevHash, hash: prevHash } });
+    }
+    // 鍵が替わったことの行（鍵つき）は、前の版の最後の行の hash を prevHash に持つので、作り直しが見つかる
+    expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 3, reason: expect.stringContaining("prevHash") });
+  });
+
+  it("前の版から上げた一式：鍵が替わったらすぐ控えを書き出すので、切り替えの後を鍵の無い形に作り直しても見つかる", async () => {
+    resetAuditAnchorState();
+    const anchorDir = mkdtempSync(path.join(tmpdir(), "tsunagi-upgrade-"));
+    try {
+      const db = await freshDb();
+      const file = path.join(anchorDir, "anchors.jsonl");
+      // 前の版の行（鍵の無い SHA-256）が 2 行。施設が空の控えのファイルを置き、起動の時の控え（前の版の末尾）を書く
+      await dropGuards(db);
+      let prevHash = GENESIS_HASH;
+      for (let seq = 1; seq <= 2; seq++) {
+        const row = { ...legacyRow(seq), prevHash };
+        prevHash = computeAuditHash(row);
+        await db.auditLog.create({ data: { ...row, hash: prevHash } });
+      }
+      writeFileSync(file, "");
+      auditTestConfig.audit.anchorFile = file;
+      await writeAuditAnchor(db, file, () => undefined);
+      // 最初の追記で鍵が替わる（3 行目が鍵が替わったことの行）。その直後に控えを書き出す
+      await appendAudit(db, entry(0));
+      expect((await readAuditAnchors(file)).map((a) => a.seq)).toEqual([2, 4]);
+      // 次の定期の書き出しの前に、切り替えの後の行を鍵の無い形に作り直す
+      prevHash = (await db.auditLog.findUniqueOrThrow({ where: { seq: 2 } })).hash;
+      for (let seq = 3; seq <= 4; seq++) {
+        const { hash: _hash, ...row } = await db.auditLog.findUniqueOrThrow({ where: { seq } });
+        const forged = { ...row, prevHash, keyId: null };
+        prevHash = computeAuditHash(forged);
+        await db.auditLog.update({ where: { seq }, data: { prevHash: forged.prevHash, keyId: null, hash: prevHash } });
+      }
+      expect(await verifyAuditChain(db)).toEqual(okChain(4, 4));
+      expect(await verifyAuditChain(db, 1000, { anchors: await readAuditAnchors(file), requireAnchors: true })).toMatchObject({
+        ok: false,
+        seq: 3,
+        reason: expect.stringContaining("控えより後に、鍵の無い行"),
+      });
+      // 切り替えの後の控えを書けなかった（前の版の末尾の控えしか無い）ときも、控えより後の鍵の無い行として見つかる
+      expect(await verifyAuditChain(db, 1000, { anchors: [{ seq: 2, hash: (await db.auditLog.findUniqueOrThrow({ where: { seq: 2 } })).hash }] })).toMatchObject({
+        ok: false,
+        seq: 3,
+        reason: expect.stringContaining("控えより後に、鍵の無い行"),
+      });
+    } finally {
+      auditTestConfig.audit.anchorFile = undefined;
+      rmSync(anchorDir, { recursive: true, force: true });
+    }
+  });
+
+  it("鍵つきの行を消して、全部を鍵の無い形に作り直すと、つなぎだけでは通るが、控えと照らすと見つかる（照らしていないことも分かる）", async () => {
+    resetAuditAnchorState();
+    const anchorDir = mkdtempSync(path.join(tmpdir(), "tsunagi-downgrade-"));
+    try {
+      const db = await freshDb();
+      const file = path.join(anchorDir, "anchors.jsonl");
+      // 初めての起動で控えのファイルを作り（1 行目）、記録を足して控える（4 行目）
+      await writeAuditAnchor(db, file, () => undefined);
+      await appendMany(db, 3);
+      await writeAuditAnchor(db, file, () => undefined);
+      await dropGuards(db);
+      let prevHash = GENESIS_HASH;
+      for (let seq = 1; seq <= 4; seq++) {
+        const { hash: _hash, ...row } = await db.auditLog.findUniqueOrThrow({ where: { seq } });
+        const forged = { ...row, prevHash, keyId: null };
+        prevHash = computeAuditHash(forged);
+        await db.auditLog.update({ where: { seq }, data: { prevHash: forged.prevHash, keyId: null, hash: prevHash } });
+      }
+      // 控えと照らさなければ通るが、照らしていないこと（not-configured）が答えに出る
+      expect(await verifyAuditChain(db)).toEqual(okChain(4, 4));
+      expect(await verifyAuditChain(db, 1000, { anchors: await readAuditAnchors(file), requireAnchors: true })).toMatchObject({
+        ok: false,
+        seq: 1,
+        reason: expect.stringContaining("控え"),
+      });
+    } finally {
+      rmSync(anchorDir, { recursive: true, force: true });
+    }
+  });
+});
+
+/** 前の版の形の行（鍵の無い SHA-256 の元） */
+function legacyRow(seq: number) {
+  return {
+    seq,
+    occurredAt: new Date(Date.UTC(2026, 9, 18, 0, 0, seq)),
+    actorId: "dev",
+    actorRole: "viewer",
+    authMode: "dev",
+    action: "search",
+    outcome: "success",
+    patientId: null,
+    studyInstanceUid: null,
+    sourceAddress: null,
+    detail: null,
+    prevHash: GENESIS_HASH,
+  };
+}

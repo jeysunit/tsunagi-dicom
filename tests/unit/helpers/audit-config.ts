@@ -8,7 +8,7 @@ import type * as ConfigModule from "@/lib/config";
 
 export const auditTestConfig = {
   sessionSecret: "tsunagi-dicom-audit-test-secret-0123456789",
-  audit: { sessionSecretPrevious: [] as string[] },
+  audit: { sessionSecretPrevious: [] as string[], anchorFile: undefined as string | undefined },
 };
 
 export function withAuditKey(real: typeof ConfigModule): typeof ConfigModule {

@@ -93,8 +93,8 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 | 取り込み | `IMPORT_MAX_MB` | 取り込みで受けるファイルの大きさの上限（段 6。値と既定はその段で決める） |
 | データ | `DATABASE_URL` | 既定 `file:/data/tsunagi.db` |
 | | `SESSION_SECRET`・`SESSION_SECRET_FILE` | 秘密。必須。32 バイト以上の乱数。どちらも空なら起動しない。ファイルでも渡せる（`compose.yaml` の例は secret のファイル）。監査の記録のつなぎの鍵も、ここから導く（3.6。[`adr/0001-audit-chain-mac.md`](adr/0001-audit-chain-mac.md)） |
-| | `SESSION_SECRET_PREVIOUS_FILE` | 秘密。省ける。前に使っていた `SESSION_SECRET` を 1 行に 1 つ書いたファイル。監査の記録のうち、その値の鍵で書いた行を確かめるためだけに使う（セッションや token には使わない）。どの行も 32 バイト以上 |
-| | `AUDIT_ANCHOR_FILE` | 省ける。監査の記録の先頭の控え（最後の行の seq と hash）を追記するファイル（絶対のパス。JSON Lines）。データベースとは別の置き場にする（配る compose は別のボリュームの `/audit-anchors/audit-anchors.jsonl`）。`/api/audit/verify` は、この控えと照らし合わせる。控えは、設定に関わらずコンテナのログ（標準出力）にも出す |
+| | `SESSION_SECRET_PREVIOUS_FILE` | 秘密。省ける。前に使っていた `SESSION_SECRET` を 1 行に 1 つ、古い順（上が古い）に書いたファイル。監査の記録のうち、その値の鍵で書いた行を確かめるためだけに使う（セッションや token には使わない）。鍵の切り替えは、この順で新しい鍵へだけ受ける。どの行も 32 バイト以上 |
+| | `AUDIT_ANCHOR_FILE` | 省ける。監査の記録の先頭の控え（最後の行の seq と hash）を追記するファイル（絶対のパス。JSON Lines）。データベースとは別の置き場にする（配る compose は別のボリュームの `/audit-anchors/audit-anchors.jsonl`）。`/api/audit/verify` は、この控えと照らし合わせる。設定しないと照らせないので、記録があれば `/api/audit/verify` は 409（`anchors.status` が `not-configured`）。控えは、設定に関わらずコンテナのログ（標準出力）にも出す |
 | | `TZ` | 既定 `Asia/Tokyo` |
 
 秘密を値と `*_FILE`（`BACKEND_PASSWORD` と `BACKEND_PASSWORD_FILE`、`SESSION_SECRET` と `SESSION_SECRET_FILE`、`OIDC_CLIENT_SECRET` と `OIDC_CLIENT_SECRET_FILE`）で同時に指定したら誤りとし、起動しない。

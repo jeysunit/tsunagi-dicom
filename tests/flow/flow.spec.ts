@@ -276,8 +276,12 @@ test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一
 
   // 監査の記録の先頭の控え：配る compose の形で、コンテナのログと別のボリュームのファイル（AUDIT_ANCHOR_FILE）に書き出し、
   // /api/audit/verify がファイルの控えと照らし合わせる
-  const verify = (await (await page.request.get("/api/audit/verify")).json()) as { ok: boolean; legacy: number; anchors: { checked: number } };
-  expect(verify).toMatchObject({ ok: true, legacy: 0 });
+  const verify = (await (await page.request.get("/api/audit/verify")).json()) as {
+    ok: boolean;
+    legacy: number;
+    anchors: { status: string; checked: number };
+  };
+  expect(verify).toMatchObject({ ok: true, legacy: 0, anchors: { status: "checked" } });
   expect(verify.anchors.checked).toBeGreaterThanOrEqual(1);
   expect(await compose(["logs", "--no-color", "tsunagi"])).toContain("tsunagi-dicom: audit-anchor ");
   const anchorFile = await compose(["exec", "-T", "tsunagi", "sh", "-c", "wc -l < /audit-anchors/audit-anchors.jsonl"]);
