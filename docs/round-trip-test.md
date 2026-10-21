@@ -44,6 +44,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
    - 一式を立て、起動を待ち、開く URL とパスワードのファイルの場所を出す。compose に無くなったサービスのコンテナは消す（`--remove-orphans`。ボリュームは消さない）。
    - 2026-10-21 に、dicom-test-generator の略称を DTG に直し、サービスの名前を `tdg` から `dtg` に替えた。それより前に立てた一式で `up.sh` を流し直すと、次のようになる。
      - 古い `tdg` のコンテナは消える。
+     - 環境変数の名前も替えた（`DEV_TDG_WEB_PORT` は `DEV_DTG_WEB_PORT`、`TDG_GIT_REF` は `DTG_GIT_REF`）。古い名前は読まないので、指定していたときは新しい名前で指定し直す（指定し直さないと、既定のポート 18080・既定の commit に戻る）。
      - DTG の Web 画面のパスワードは、新しいファイル `dtg_web_password.txt` に作り直す（古い `tdg_web_password.txt` は使わない）。
      - DTG の状態（送信の履歴など）は、新しいボリューム（`dtg-state`・`dtg-output`）から始まる。古いボリューム（`<プロジェクト>_tdg-state`・`<プロジェクト>_tdg-output`）は残るので、要らなければ `docker volume rm` で消す。Orthanc に届いた検査（`orthanc-db`）と tsunagi-dicom のデータ（`tsunagi-data`）は、そのまま引き継ぐ。
 3. 設定は次のとおり（どれもリポジトリにある）。
