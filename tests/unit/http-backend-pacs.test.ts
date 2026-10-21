@@ -36,6 +36,8 @@ let storeMode: "ok" | "drop" | "missing-id" | number = "ok";
 let deleteMode: "ok" | number = "ok";
 const DUP_UID = "1.2.826.0.1.3680043.8.498.777";
 let changesMode: "ok" | "empty" | "stuck" = "ok";
+/** /changes?last の Last を数でない形で返す（壊れた答え） */
+let lastBroken = false;
 
 function body(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -55,7 +57,9 @@ beforeAll(async () => {
       res.end(JSON.stringify(value));
     };
     const m = req.method === "GET" ? /^\/studies\/([0-9a-f-]+)(\/series)?$/.exec(url) : null;
-    if (url === "/changes?last") return json(200, { Changes: allChanges.slice(-1), Done: true, Last: lastSeq() });
+    if (url === "/changes?last") {
+      return json(200, { Changes: allChanges.slice(-1), Done: true, Last: lastBroken ? "17" : lastSeq() });
+    }
     if (url.startsWith("/changes?")) {
       const q = new URL(url, "http://x").searchParams;
       const since = Number(q.get("since") ?? 0);
@@ -176,6 +180,17 @@ describe("実の Orthanc の REST（段 4）", () => {
       expect(seen.filter((s) => s.url.startsWith("/changes?since")), mode).toHaveLength(2);
     }
     changesMode = "ok";
+  });
+
+  it("一覧の版（自動更新）：変更の記録の最後の番号だけを、読む資格情報で読む。検査の検索はしない。壊れた答えは誤り", async () => {
+    allChanges = withNoise(250);
+    seen.length = 0;
+    expect(await backend().studyListVersion()).toBe(String(lastSeq()));
+    expect(seen.map((s) => `${s.method} ${s.url}`)).toEqual(["GET /changes?last"]);
+    expect(seen[0]!.authorization).toBe(basic("reader", "read-secret"));
+    lastBroken = true;
+    await expect(backend().studyListVersion()).rejects.toBeInstanceOf(BackendError);
+    lastBroken = false;
   });
 
   it("readChanges：読み切ったとするのは Done のときだけ（いまの記録が空で Done なら、読み切った）", async () => {

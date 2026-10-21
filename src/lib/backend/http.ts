@@ -284,6 +284,14 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return { count: stats.CountStudies, exact: true };
     },
 
+    async studyListVersion() {
+      // 変更の記録の最後の1件と番号だけを読む（検査の検索はしない）
+      const json = await restJsonOrNull("changes?last");
+      const last = json && typeof json === "object" ? (json as { Last?: unknown }).Last : undefined;
+      if (typeof last !== "number" || !Number.isSafeInteger(last)) throw new BackendError("画像サーバーの変更の記録を読み込めませんでした");
+      return String(last);
+    },
+
     async relayDicomweb(req: RelayRequest) {
       // 呼ぶ側でも確かめるが、ここでも読み取りの WADO-RS だけにする（二重の確かめ）
       if (req.method !== "GET" && req.method !== "HEAD") throw new BackendError("中継は読み取りだけ", 405);

@@ -315,6 +315,12 @@ export function createMockBackend(): Backend {
       return { count: stats.CountStudies - mockDeleted.size, exact: true };
     },
 
+    async studyListVersion() {
+      // 見本の変更の記録の最後の番号に、このプロセスで消した検査の数を足す（消すと、実の Orthanc の Deleted の出来事と同じく進む）
+      const { last } = parseChanges(await readJson<unknown>("made", "changes.json"));
+      return String(last + mockDeleted.size);
+    },
+
     async searchSeries(studyInstanceUid: string) {
       const series = (await restSeriesByStudy()).get(studyInstanceUid) ?? [];
       return sortSeries(

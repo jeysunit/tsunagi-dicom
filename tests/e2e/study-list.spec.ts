@@ -84,6 +84,45 @@ test("すぐ絞れる見出し：期間の指定・モダリティ・横断の�
   await expect(page.getByTestId("study-count")).toHaveText("8");
 });
 
+test("0 件でも一覧の場所が分かる：表の枠と見出しの行を出し、空の案内は表の中。絞り込みが既定なら「条件をクリア」を出さない", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.goto(`/?${new URLSearchParams({ q: "該当しない語" })}`);
+  const table = page.getByTestId("study-table");
+  await expect(table.getByTestId("study-list-empty")).toBeVisible();
+  await expect(table.locator("thead")).toContainText("患者ID");
+  await expect(table.locator("thead")).toContainText("検査日時");
+  await expect(rows(page)).toHaveCount(0);
+  await expect(table.getByRole("button", { name: "条件をクリア" })).toBeVisible();
+  // 表の枠は一覧の場所の大きさのまま（真っ白の場所にしない）
+  const box = await page.getByTestId("study-list-scroll").boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(200);
+
+  // 画像サーバーに検査が 1 件も無いとき（絞り込みは既定）：案内だけを出し、戻す先の無い「条件をクリア」は出さない
+  await page.route(/\/api\/studies$/, (route) =>
+    route.fulfill({ json: { count: { count: 0, exact: true }, studies: [], facets: { modality: { all: 0 } } } }),
+  );
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await expect(table.getByTestId("study-list-empty")).toBeVisible();
+  await expect(page.getByRole("button", { name: "条件をクリア" })).toHaveCount(0);
+  await expect(table.locator("thead")).toContainText("患者ID");
+});
+
+test("0 件の案内は、狭い画面でも見えている幅の中に出る（表が横にスクロールする幅でも、右の外に隠れない）", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await asRole(page, "一般");
+  await page.goto(`/?${new URLSearchParams({ q: "該当しない語" })}`);
+  const list = (await page.getByTestId("study-list-scroll").boundingBox())!;
+  const empty = page.getByTestId("study-table").getByTestId("study-list-empty");
+  await expect(empty).toBeVisible();
+  for (const target of [empty, page.getByRole("button", { name: "条件をクリア" })]) {
+    const box = (await target.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(list.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(list.x + list.width);
+  }
+});
+
 // 期待の変更（1 件）：一覧の行のサムネイル（写しのある検査は画像・無い検査は印）の確かめを外した。
 // 1 行 28px の一覧ではサムネイルの列を外したため（docs/spec.md の 3.1）。サムネイルは詳細のシリーズの横 1 列で確かめる（下の試験）。
 test("一覧の行：氏名（漢字・かな）・和暦と年齢・シリーズ数と画像数", async ({ page }) => {
@@ -876,7 +915,8 @@ test("詳細の見出しに、毎回見る値を常に出す：受付番号・�
 
 test("詳細の見出し：受付番号が無いときも「受付番号 —」を出す（無いこと自体が照合の手がかり）", async ({ page }) => {
   await page.route("**/api/studies/*", async (route) => {
-    if (route.request().method() !== "GET") return route.continue();
+    // 一覧の版（自動更新の /api/studies/version）は検査の詳細ではないので、そのまま通す
+    if (route.request().method() !== "GET" || route.request().url().endsWith("/api/studies/version")) return route.continue();
     const res = await route.fetch();
     const body = (await res.json()) as { study: Record<string, unknown> };
     body.study.accessionNumber = "";
@@ -980,4 +1020,120 @@ test("詳細の「DICOM タグ」：開いてもボタンの位置は動かな�
   await toggle.click();
   await expect(tags).toHaveCount(0);
   expect((await place("detail-tags-toggle")).y).toBe(before.y);
+});
+
+test("自動更新：30 秒ごとに一覧の版を読み、変わったときだけ一覧を読み直す。選んだ行・スクロール・開いている詳細は残る", async ({ page }) => {
+  // 一覧がスクロールする高さにする
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await asRole(page, "一般");
+  const real = (await (await page.request.get("/api/studies/version")).json()) as { version: string };
+  let version = Number(real.version);
+  let versionStatus = 200;
+  let versionReads = 0;
+  await page.route("**/api/studies/version", (route) => {
+    versionReads += 1;
+    return versionStatus === 200
+      ? route.fulfill({ json: { version: String(version) } })
+      : route.fulfill({ status: versionStatus, json: { error: "画像サーバーに接続できません" } });
+  });
+  // 版が変わった後の一覧には、新しく届いた検査（合成）を先頭に足す
+  const NEW_UID = "1.2.826.0.1.3680043.8.498.999999999";
+  let arrived = false;
+  let listReads = 0;
+  // 一覧の答えを止めておく（読み直しの途中の画面を確かめるため）
+  let hold: Promise<void> | null = null;
+  let release = () => {};
+  const listUrls: string[] = [];
+  await page.route(/\/api\/studies(\?[^/]*)?$/, async (route) => {
+    listReads += 1;
+    listUrls.push(route.request().url());
+    if (hold) await hold;
+    const res = await route.fetch();
+    const body = await res.json();
+    if (arrived) {
+      body.studies.unshift({ ...body.studies[0], studyInstanceUid: NEW_UID, patientId: "JP-TEST-NEW", studyDate: "20261021" });
+      body.count.count += 1;
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.clock.install();
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
+  // 開いたときに版を 1 回読む（サーバーが一覧を取る前に読んだ版と同じなので、一覧は読み直さない）
+  await expect.poll(() => versionReads).toBe(1);
+  expect(listReads).toBe(0);
+
+  // 一覧をいちばん下までスクロールし、最後の行を選んで詳細を開く
+  const list = page.getByTestId("study-list-scroll");
+  await list.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  const target = rows(page).last();
+  const uid = (await target.getAttribute("data-study-uid"))!;
+  await target.click();
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  const scrolled = await list.evaluate((el) => el.scrollTop);
+  expect(scrolled).toBeGreaterThan(0);
+  const rowTop = (await target.boundingBox())!.y;
+
+  // 30 秒たつと版を読む。版が変わらなければ、一覧は読み直さない（検索も監査の記録も増やさない）
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => versionReads).toBe(2);
+  expect(listReads).toBe(0);
+
+  // 版が変わると一覧を読み直し、新しい検査が先頭に出る。選んだ行・詳細・見ていた行の位置はそのまま
+  version += 1;
+  arrived = true;
+  hold = new Promise<void>((resolve) => (release = resolve));
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => listReads).toBe(1);
+  // 読み直しの途中（待ちの印を出す 0.3 秒を過ぎても）：細い帯・薄い行・件数の「—」を出さない
+  await page.clock.runFor(1_000);
+  await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
+  await expect(page.getByTestId("progress-bar")).toHaveCount(0);
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("pending-text")).toHaveCount(0);
+  hold = null;
+  release();
+  await expect(rows(page)).toHaveCount(9);
+  expect(listReads).toBe(1);
+  // 自動更新の読み直しには refresh=auto を付ける（監査の記録に trigger: "auto" が残る）
+  expect(new URL(listUrls[0]!).searchParams.get("refresh")).toBe("auto");
+  await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEW_UID);
+  await expect(page.getByTestId("study-count")).toHaveText("9");
+  await expect(page.locator(`tr[data-study-uid="${uid}"]`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  expect(Math.abs((await page.locator(`tr[data-study-uid="${uid}"]`).boundingBox())!.y - rowTop)).toBeLessThanOrEqual(2);
+  // 自動更新の読み直しでは、古い行を薄くしない
+  await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
+
+  // 版を読めなければ、自動更新が止まっていることを出す。読めるようになれば戻る
+  versionStatus = 502;
+  await page.clock.fastForward(30_000);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新：接続できません");
+  versionStatus = 200;
+  await page.clock.fastForward(30_000);
+  await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
+
+  // タブを隠している間は版を読まない。戻すとすぐ読む
+  const setVisibility = (state: "hidden" | "visible") =>
+    page.evaluate((s) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => s });
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+    }, state);
+  await setVisibility("hidden");
+  const hiddenFrom = versionReads;
+  await page.clock.fastForward(90_000);
+  expect(versionReads).toBe(hiddenFrom);
+  await setVisibility("visible");
+  await expect.poll(() => versionReads).toBeGreaterThan(hiddenFrom);
+
+  // 利用者が絞り込みを替えた読み直しには、refresh=auto を付けない
+  // 答えが返るまで待つ（差し替えの途中で試験を終えない）
+  const ct = page.waitForResponse((r) => r.url().includes("/api/studies?") && r.url().includes("modality=CT"));
+  await page.getByTestId("modality-CT").click();
+  const res = await ct;
+  expect(new URL(res.url()).searchParams.get("refresh")).toBeNull();
+  await expect(page.getByTestId("modality-CT")).toHaveAttribute("aria-pressed", "true");
 });
