@@ -52,39 +52,49 @@ export async function writeAuditAnchor(
   // /api/audit/verify が照らせないことに気づけないため。
   // 作るときは、空のファイルを先に作ってから記録の行を足す（記録の行を足した後にファイルを作れないと、次から
   // 「前に作った」と見て二度と作れなくなるため。空のファイルができていれば、次からはそこへ追記する）
-  let fileProblem: AuditAnchorFileError | null = null;
-  const size = file ? await sizeOf(file) : null;
+  // ファイルの側の失敗は、ログ（標準出力）に書いた後で投げる。lost は「前に作ったのに無い」（作り直さない）
+  let fileProblem: unknown = null;
+  let lost = false;
   // 空のファイル（作ったばかり・施設が置き直した）には、先頭が変わっていなくても書く
-  let force = size === 0;
-  if (file && size === null) {
-    force = true;
-    if (await db.auditLog.findFirst({ where: { action: "audit_anchor" }, select: { seq: true } })) {
-      fileProblem = new AuditAnchorFileError(
-        "先頭の控えのファイルが無い（前に書き出したことがある）。作り直さない。外に残したログの控えと照らしてから、続けるなら空のファイルを置く",
-      );
-    } else {
-      // ほかのプロセスが同じ時に作っていれば（EEXIST）、そのファイルへ追記する
-      await writeFile(file, "", { mode: 0o600, flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "EEXIST") throw error;
-      });
-      await appendAudit(db, { actorId: "system", actorRole: "system", authMode: "system", action: "audit_anchor", detail: { event: "start" } });
+  let force = false;
+  if (file) {
+    try {
+      const size = await sizeOf(file);
+      force = size === 0;
+      if (size === null) {
+        force = true;
+        if (await db.auditLog.findFirst({ where: { action: "audit_anchor" }, select: { seq: true } })) {
+          lost = true;
+          fileProblem = new AuditAnchorFileError(
+            "先頭の控えのファイルが無い（前に書き出したことがある）。作り直さない。外に残したログの控えと照らしてから、続けるなら空のファイルを置く",
+          );
+        } else {
+          // ほかのプロセスが同じ時に作っていれば（EEXIST）、そのファイルへ追記する
+          await writeFile(file, "", { mode: 0o600, flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== "EEXIST") throw error;
+          });
+          await appendAudit(db, { actorId: "system", actorRole: "system", authMode: "system", action: "audit_anchor", detail: { event: "start" } });
+        }
+      }
+    } catch (error) {
+      fileProblem = error;
     }
   }
   const last = await db.auditLog.findFirst({ orderBy: { seq: "desc" }, select: { seq: true, hash: true, keyId: true } });
   const unchanged = last !== null && state.lastSeq === last.seq;
-  if (!last || (unchanged && (!force || fileProblem))) {
+  if (!last || (unchanged && (!force || lost))) {
     if (fileProblem) throw fileProblem;
     return null;
   }
   const anchor: AuditAnchor = { seq: last.seq, hash: last.hash, keyId: last.keyId, at: now.toISOString() };
   const line = JSON.stringify(anchor);
   log(`${AUDIT_ANCHOR_LOG_PREFIX}${line}`);
-  if (fileProblem) {
+  if (lost) {
     // ログには書けた。ファイルは作り直さないので、同じ先頭をログに重ねて書かない
     state.lastSeq = last.seq;
-    throw fileProblem;
   }
-  // ファイルに書けなければ、次の間隔で同じ先頭をもう一度書く（覚えるのは書けた後）
+  // ほかのファイルの失敗（置き場が無い・権限など）は、次の間隔で同じ先頭をもう一度書く（覚えるのは書けた後）
+  if (fileProblem) throw fileProblem;
   if (file) await appendFile(file, `${line}\n`, { encoding: "utf8", mode: 0o600, flag: "a" });
   state.lastSeq = last.seq;
   return anchor;

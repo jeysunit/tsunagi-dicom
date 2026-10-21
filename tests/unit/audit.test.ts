@@ -485,8 +485,10 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     await appendMany(db, 2);
     const sub = path.join(anchorDir, `later${++m}`);
     const file = path.join(sub, "anchors.jsonl");
-    // 置き場のフォルダがまだ無い（ボリュームをつなぎ忘れた、など）
-    await expect(writeAuditAnchor(db, file, () => undefined)).rejects.toThrow();
+    // 置き場のフォルダがまだ無い（ボリュームをつなぎ忘れた、など）。ログ（標準出力）には書く
+    const logged: string[] = [];
+    await expect(writeAuditAnchor(db, file, (l) => logged.push(l))).rejects.toThrow();
+    expect(logged).toEqual([expect.stringMatching(/^tsunagi-dicom: audit-anchor \{"seq":2,/)]);
     expect(await db.auditLog.count({ where: { action: "audit_anchor" } })).toBe(0);
     mkdirSync(sub);
     const first = await writeAuditAnchor(db, file, () => undefined);
