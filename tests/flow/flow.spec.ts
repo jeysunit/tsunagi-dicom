@@ -12,9 +12,11 @@ import { expect, test, type Page } from "@playwright/test";
 //    （internal: true）に入り、Orthanc はそれと DICOM のネットワークのほかに入らない。DICOM（4242）はホストから届く。
 //    Orthanc の守り：REST は認証なしでも、イメージの既定の利用者（orthanc:orthanc）でも 401。登録していない AE タイトルからの
 //    C-STORE は断る（DicomAlwaysAllowStore: false）。起動の確かめが DICOM につながず、ログに「invalid AET」が出ない。
-// 2. 流れ：dicom-test-generator の CLI で架空の患者を Orthanc へ送る → tsunagi-dicom の受信一覧に出る →
+// 2. 流れ：dicom-test-generator（DTG）の CLI で架空の患者を Orthanc へ送る → tsunagi-dicom の受信一覧に出る →
 //    tsunagi-dicom の「送信」で storescp へ送る → storescp に同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。
-// 前の試験に依らないが、順に流す。
+// 3. 予約から：ris-emulator の CLI で予約を作る → DTG がワークリスト（MWL）を取得し、その予約で撮って Orthanc へ送る →
+//    tsunagi-dicom の検査の一覧に、予約の StudyInstanceUID・受付番号・患者 ID で出る。
+// 前の試験の結果に依らないが、順に流す（管理者のパスワードは 2 で変え、3 はそのパスワードでログインする）。
 
 test.describe.configure({ mode: "serial" });
 
@@ -24,8 +26,8 @@ const composeFile = path.join(root, "docker/dev/compose.yaml");
 const secretsDir = path.join(root, "docker/dev/secrets");
 /** docker/dev/orthanc/site.json に登録した送信先（storescp） */
 const SCP = { id: "dev-scp", aet: "DEV_SCP" };
-/** docker/dev/tdg/app_config.yaml の dicom-test-generator の AE タイトル */
-const TDG_AET = "DTG_CT01";
+/** docker/dev/dtg/app_config.yaml の dicom-test-generator（DTG）の AE タイトル（ris-emulator の CT の予約の予定の AE タイトルと同じ） */
+const DTG_AET = "DTG_CT01";
 const dicomPort = process.env.ORTHANC_DICOM_PORT ?? "4242";
 
 async function docker(args: string[], timeoutMs = 120_000): Promise<string> {
@@ -95,14 +97,26 @@ async function storescpReceived(): Promise<{ studyInstanceUid: string; sopInstan
   return files;
 }
 
-/** 最初の管理者（up.sh が作った secret のファイルのパスワード）でログインし、試験だけのパスワードに変える */
+/** 試験だけのパスワードに変えた後の、管理者のパスワード（次の試験は、これでログインする） */
+let adminPassword: string | null = null;
+
+/**
+ * 管理者でログインする。最初は、up.sh が作った secret のファイルのパスワードでログインし、試験だけのパスワードに変える。
+ * 変えた後は、変えたパスワードでログインする
+ */
 async function loginAsInitialAdmin(page: Page) {
-  const initial = readFileSync(path.join(secretsDir, "initial_admin_password.txt"), "utf8").replace(/\r?\n$/, "");
-  const changed = `Flow-${randomBytes(12).toString("base64url").replace(/[-_]/g, "x")}-9k`;
-  if (process.env.GITHUB_ACTIONS === "true") console.log(`::add-mask::${changed}`);
   await page.goto("/login");
   const form = page.getByRole("form", { name: "ログイン" });
   await form.getByLabel("ユーザーID").fill("admin");
+  if (adminPassword) {
+    await form.getByLabel("パスワード").fill(adminPassword);
+    await form.getByRole("button", { name: "ログイン" }).click();
+    await expect(page).toHaveURL(/\/$/);
+    return;
+  }
+  const initial = readFileSync(path.join(secretsDir, "initial_admin_password.txt"), "utf8").replace(/\r?\n$/, "");
+  const changed = `Flow-${randomBytes(12).toString("base64url").replace(/[-_]/g, "x")}-9k`;
+  if (process.env.GITHUB_ACTIONS === "true") console.log(`::add-mask::${changed}`);
   await form.getByLabel("パスワード").fill(initial);
   await form.getByRole("button", { name: "ログイン" }).click();
   await expect(page).toHaveURL(/\/login\/password$/);
@@ -111,6 +125,7 @@ async function loginAsInitialAdmin(page: Page) {
   await change.locator('input[name="confirm"]').fill(changed);
   await change.getByRole("button", { name: "変更" }).click();
   await expect(page).toHaveURL(/\/$/);
+  adminPassword = changed;
 }
 
 test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi-dicom と Orthanc だけが internal のネットワークに入る", async () => {
@@ -124,9 +139,15 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   const dcmtkImage = `${project}-dcmtk:local`;
 
   // 作るイメージの名前は一式ごと（プロジェクトの名前が入る）。ほかの一式（tsunagi-dev など）の作り直しが及ばない
-  expect((await inspect(await containerId("tdg"))).Config.Image).toBe(`${project}-tdg:local`);
+  const ris = await inspect(await containerId("ris"));
+  expect(ris.Config.Image).toBe(`${project}-ris:local`);
+  expect((await inspect(await containerId("dtg"))).Config.Image).toBe(`${project}-dtg:local`);
   expect((await inspect(await containerId("storescp"))).Config.Image).toBe(dcmtkImage);
   expect(tsunagi.Config.Image).toBe(process.env.TSUNAGI_IMAGE || `${project}-tsunagi:local`);
+
+  // ris-emulator：ホストへは Web 画面（8081）だけを 127.0.0.1 に出し、MWL（11112）は出さない。入るのは dicom のネットワークだけ
+  expect(ris.HostConfig.PortBindings).toEqual({ "8081/tcp": [{ HostIp: "127.0.0.1", HostPort: process.env.DEV_RIS_WEB_PORT ?? "18081" }] });
+  expect(Object.keys(ris.NetworkSettings.Networks)).toEqual([net("dicom")]);
 
   // ホストへの公開：Orthanc は DICOM（4242）だけ。REST（8042）は出さない
   expect(Object.keys(orthanc.HostConfig.PortBindings ?? {})).toEqual(["4242/tcp"]);
@@ -200,7 +221,7 @@ test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一
   // 架空の患者（患者 ID は試験ごとに変える）
   const patientId = `DEVFLOW${randomBytes(4).toString("hex").toUpperCase()}`;
   const out = await compose(
-    ["exec", "-T", "tdg", "python", "-m", "app.cli", "exam", "--emergency", "--patient-id", patientId, "--patient-name", "FLOW^TEST", "-s", "2", "-i", "2,3", "--send", "--json"],
+    ["exec", "-T", "dtg", "python", "-m", "app.cli", "exam", "--emergency", "--patient-id", patientId, "--patient-name", "FLOW^TEST", "-s", "2", "-i", "2,3", "--send", "--json"],
     300_000,
   );
   const exam = JSON.parse(out) as {
@@ -224,7 +245,7 @@ test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一
     (body) => body.items.some((i) => i.study.studyInstanceUid === uid && i.receivedInstances === sent.length),
   );
   const item = log.items.find((i) => i.study.studyInstanceUid === uid)!;
-  expect(item).toMatchObject({ remoteAet: TDG_AET, receivedInstances: sent.length });
+  expect(item).toMatchObject({ remoteAet: DTG_AET, receivedInstances: sent.length });
   expect(item.study.patientId).toBe(patientId);
 
   // 検査の一覧から開き、詳細のパネルの「送信」で storescp（dev-scp）へ送る
@@ -255,7 +276,55 @@ test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一
 
   // CI の記録に残す数（名前と数だけ）
   console.log(
-    `[flow] TDG が作った画像 ${exam.files.length}・TDG から Orthanc へ送れた画像 ${sent.length}・` +
+    `[flow] DTG が作った画像 ${exam.files.length}・DTG から Orthanc へ送れた画像 ${sent.length}・` +
       `tsunagi-dicom の受信一覧の画像 ${item.receivedInstances}（送り元 ${item.remoteAet}）・storescp に届いた画像 ${received.length}`,
   );
+});
+
+test("3 予約から：ris-emulator で予約を作る → DTG がワークリストを取得して撮る → Orthanc に届き、tsunagi-dicom の一覧に予約の値で出る", async ({ page }) => {
+  // ris-emulator の CLI で、今日の CT の予約を 1 件作る（架空の患者。予定の AE タイトルは DTG の DTG_CT01）
+  const [order] = JSON.parse(await compose(["exec", "-T", "ris", "python", "-m", "app.cli", "create", "CT=1", "--json"])) as {
+    accession_number: string;
+    study_instance_uid: string;
+    patient: { patient_id: string };
+    scheduled_station_ae_title: string;
+  }[];
+  expect(order).toBeDefined();
+  expect(order!.scheduled_station_ae_title).toBe(DTG_AET);
+
+  // DTG がワークリスト（ris-emulator の MWL。C-FIND）を引く。予約が、同じ受付番号・StudyInstanceUID・患者 ID で返る
+  const query = JSON.parse(
+    await compose(["exec", "-T", "dtg", "python", "-m", "app.cli", "worklist", "query", "--accession", order!.accession_number, "--json"]),
+  ) as { worklist: string; items: { key: string; accession_number: string; study_instance_uid: string; patient_id: string; modality: string }[] };
+  expect(query.worklist).toBe("RIS_EMU");
+  expect(query.items).toHaveLength(1);
+  const wl = query.items[0]!;
+  expect(wl).toMatchObject({
+    accession_number: order!.accession_number,
+    study_instance_uid: order!.study_instance_uid,
+    patient_id: order!.patient.patient_id,
+    modality: "CT",
+  });
+
+  // その予約で撮って、Orthanc へ送る
+  const exam = JSON.parse(
+    await compose(["exec", "-T", "dtg", "python", "-m", "app.cli", "exam", "--from-worklist", wl.key, "-s", "1", "-i", "2", "--send", "--json"], 300_000),
+  ) as { study_instance_uid: string; files: string[]; send: { status: string; destination: string } };
+  expect(exam.study_instance_uid).toBe(order!.study_instance_uid);
+  expect(exam.files).toHaveLength(2);
+  expect(exam.send).toMatchObject({ status: "sent", destination: "ORTHANC" });
+
+  // tsunagi-dicom の検査の一覧（受付番号で絞る）に、予約の StudyInstanceUID・受付番号・患者 ID の検査が出る
+  await loginAsInitialAdmin(page);
+  type StudyList = { studies: { studyInstanceUid: string; accessionNumber?: string; patientId?: string }[] };
+  const list = await waitFor(
+    "検査の一覧に出る",
+    async () => (await (await page.request.get(`/api/studies?${new URLSearchParams({ accession: order!.accession_number })}`)).json()) as StudyList,
+    (body) => body.studies.some((s) => s.studyInstanceUid === order!.study_instance_uid),
+  );
+  const study = list.studies.find((s) => s.studyInstanceUid === order!.study_instance_uid)!;
+  expect(study).toMatchObject({ accessionNumber: order!.accession_number, patientId: order!.patient.patient_id });
+
+  // CI の記録に残す数（名前と数だけ）
+  console.log(`[flow] 予約から：ワークリストの件数 ${query.items.length}・DTG が作った画像 ${exam.files.length}・一覧に出た検査 1`);
 });

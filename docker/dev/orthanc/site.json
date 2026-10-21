@@ -5,7 +5,7 @@
   "DicomModalities": {
     "dtg": {
       "AET": "DTG_CT01",
-      "Host": "tdg",
+      "Host": "dtg",
       "Port": 11113,
       "Manufacturer": "Generic"
     },

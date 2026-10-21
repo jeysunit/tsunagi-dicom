@@ -49,7 +49,7 @@ jobs:
           retention-days: 7
 
   dev-stack:
-    name: 開発用の compose の流れ（TDG → Orthanc → tsunagi-dicom → storescp）
+    name: 開発用の compose の流れ（RIS → DTG → Orthanc → tsunagi-dicom → storescp）
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:

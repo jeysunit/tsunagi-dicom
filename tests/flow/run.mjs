@@ -1,4 +1,4 @@
-// 開発用の compose の流れの試験を流す：docker/dev/up.sh で一式（tsunagi-dicom・Orthanc・dicom-test-generator・storescp）を立て、
+// 開発用の compose の流れの試験を流す：docker/dev/up.sh で一式（tsunagi-dicom・Orthanc・ris-emulator・dicom-test-generator・storescp）を立て、
 // Playwright（tests/flow/playwright.config.ts）を流し、終わったら片付ける。
 //
 //   npm ci && npx playwright install chromium   # 先に一度
@@ -22,7 +22,9 @@ const secretsDir = path.join(root, "docker/dev/secrets");
 process.env.COMPOSE_PROJECT_NAME ??= "tsunagi-flow";
 process.env.TSUNAGI_HTTP_PORT ??= "13000";
 process.env.ORTHANC_DICOM_PORT ??= "14242";
-process.env.DEV_TDG_WEB_PORT ??= "18081";
+// （開発用の一式の DTG 18080・ris-emulator 18081 とぶつけない）
+process.env.DEV_DTG_WEB_PORT ??= "18180";
+process.env.DEV_RIS_WEB_PORT ??= "18181";
 if (process.env.COMPOSE_PROJECT_NAME === "tsunagi-dev") {
   console.error("COMPOSE_PROJECT_NAME に tsunagi-dev（開発用の一式）は使えない。試験は終わったときに volume を消すため");
   process.exit(1);

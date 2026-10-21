@@ -1,5 +1,6 @@
-# docker/dev の dicom-test-generator の設定（dicom-test-generator の config/app_config.yaml の形）。
-# 送信先は同じ compose の Orthanc（orthanc:4242）。架空の患者だけを送る。
+# docker/dev の dicom-test-generator（DTG）の設定（dicom-test-generator の config/app_config.yaml の形）。
+# ワークリストは同じ compose の ris-emulator（ris:11112）から取り、送信先は同じ compose の Orthanc（orthanc:4242）。
+# 架空の患者だけを送る。AE タイトル DTG_CT01 は、ris-emulator の CT の予約の予定の AE タイトルの既定と同じ。
 profiles:
   search_paths: []
 
@@ -17,12 +18,12 @@ modality:
   default_profile: null
   default_hospital: null
   default_pixel_mode: "ct_realistic"
-  worklist:                       # この compose の Orthanc にはワークリストが無い（緊急の患者で撮る）
-    ae_title: "ORTHANC"
-    host: "orthanc"
-    port: 4242
+  worklist:                       # ris-emulator の MWL。予約が無いときは緊急の患者で撮る
+    ae_title: "RIS_EMU"
+    host: "ris"
+    port: 11112
     timeout_seconds: 30
-  mpps: null
+  mpps: null                      # ris-emulator は MPPS をまだ受けない
   destinations:
     - name: "ORTHANC"
       ae_title: "ORTHANC"

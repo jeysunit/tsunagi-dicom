@@ -1,25 +1,28 @@
 # 開発・試験用の一式：配る compose（deploy/compose.yaml の tsunagi-dicom と Orthanc）に、
-# dicom-test-generator（検査装置のふりをして架空の患者の画像を送る）と、DCMTK の storescp（送信の相手）を足す。
+# ris-emulator（架空の患者の検査の予約を作り、MWL で返す RIS）、dicom-test-generator（DTG。検査装置のふりをして、
+# ワークリストの予約か緊急の患者で撮り、画像を送る）と、DCMTK の storescp（送信の相手）を足す。
 # 架空の患者だけで使う。施設の画像サーバーにはつながない。
 #
 #   docker/dev/up.sh        # secret を作り、tsunagi-dicom のイメージを作り、一式を立てる（docs/round-trip-test.md）
 #
-# 流れ：dicom-test-generator →（C-STORE）→ Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の「送信」→ Orthanc →（C-STORE）→ storescp
+# 流れ：ris-emulator の予約 →（C-FIND MWL）→ DTG →（C-STORE）→ Orthanc → tsunagi-dicom の受信一覧 →
+#       tsunagi-dicom の「送信」→ Orthanc →（C-STORE）→ storescp
 #
 # - deploy/compose.yaml の変数は dev.env で与える（相対のパスは deploy/ から数える）。シェルの環境変数があれば、そちらが先に効く。
-# - dicom-test-generator と storescp は、Orthanc の DICOM のネットワーク（dicom）に入る。tsunagi-dicom と Orthanc だけの
+# - ris-emulator・DTG・storescp は、Orthanc の DICOM のネットワーク（dicom）に入る。tsunagi-dicom と Orthanc だけの
 #   内部ネットワーク（backend）には入らない。dicom のコンテナどうしの通信は、dev.env の ORTHANC_DICOM_ICC=true で許す
-#   （配る compose の既定は止める）。そのため、この compose では dicom-test-generator と storescp から Orthanc の REST に届く（認証は要る）。
+#   （配る compose の既定は止める）。そのため、この compose では DTG と storescp から Orthanc の REST に届く（認証は要る）。
 # - Orthanc は送り元の IP アドレスを確かめない（docker/dev/orthanc/site.json の DicomCheckModalityHost: false。接続先の Host が
 #   コンテナの名前のため）。
-# - dicom-test-generator の Web 画面は 127.0.0.1:${DEV_TDG_WEB_PORT:-18080} に公開する（利用者 dtg、HTTP Basic）。
-# - dicom-test-generator の時間帯は Asia/Tokyo（Orthanc と同じ）。コンテナの既定の UTC のままだと、検査日・時刻（StudyDate・StudyTime）を
-#   UTC の時刻で書き、検査一覧の検査日時が 9 時間ずれる（2026-10-21 に承認者が見つけた）。
-# - 4 つのサービス（tsunagi-dicom・Orthanc は deploy/compose.yaml、dicom-test-generator・storescp はここ）は restart: unless-stopped。
+# - DTG の Web 画面は 127.0.0.1:${DEV_DTG_WEB_PORT:-18080}（利用者 dtg）、ris-emulator の Web 画面は
+#   127.0.0.1:${DEV_RIS_WEB_PORT:-18081}（利用者 ris）に公開する（どちらも HTTP Basic）。MWL（ris:11112）はホストに出さない。
+# - DTG と ris-emulator の時間帯は Asia/Tokyo（Orthanc と同じ）。コンテナの既定の UTC のままだと、検査日・時刻（StudyDate・StudyTime）を
+#   UTC の時刻で書き、検査一覧の検査日時が 9 時間ずれる（2026-10-21 に承認者が見つけた）。予約の「今日」も同じ時間帯で決まる。
+# - 5 つのサービス（tsunagi-dicom・Orthanc は deploy/compose.yaml、ris-emulator・DTG・storescp はここ）は restart: unless-stopped。
 #   Docker が起き直したときに、一式がそろって立つ（止めたものは止めたまま）。
 # - 作るイメージの名前には compose のプロジェクトの名前（COMPOSE_PROJECT_NAME。既定は下の name の tsunagi-dev）を入れる
-#   （<プロジェクト>-tdg:local・<プロジェクト>-dcmtk:local。tsunagi-dicom は up.sh が <プロジェクト>-tsunagi:local で作る）。
-#   一式を2つ立てても、片方を作り直したときに、もう片方のイメージの名前が付け替わらない。
+#   （<プロジェクト>-ris:local・<プロジェクト>-dtg:local・<プロジェクト>-dcmtk:local。tsunagi-dicom は up.sh が
+#   <プロジェクト>-tsunagi:local で作る）。一式を2つ立てても、片方を作り直したときに、もう片方のイメージの名前が付け替わらない。
 
 name: tsunagi-dev
 
@@ -28,29 +31,81 @@ include:
     env_file: ./dev.env
 
 services:
-  tdg:
-    # dicom-test-generator の Dockerfile から作る。版は commit で固定する（TDG_GIT_REF で替えられる）
-    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-tdg:local
+  ris:
+    # ris-emulator の Dockerfile から作る。版は commit で固定する（RIS_GIT_REF で替えられる）
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-ris:local
+    build:
+      # 既定は main の 6a173b9
+      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-6a173b923e00b0295ba957f204adfb27ecef1ee8}
+    environment:
+      RIS_WEB_PASSWORD_FILE: /run/secrets/ris_web_password
+      # Web 画面と MWL を、コンテナの中では 0.0.0.0 で待ち受ける（イメージの既定と同じ。設定ファイルより先に効く）
+      RIS_WEB_BIND_ADDRESS: 0.0.0.0
+      RIS_MWL_BIND_ADDRESS: 0.0.0.0
+      # 予約の「今日」と予定の時刻を日本の時刻で決める（DTG の TZ と同じ）
+      TZ: Asia/Tokyo
+    volumes:
+      # 予約は SQLite（/app/state）に残る
+      - ris-state:/app/state
+    secrets:
+      - ris_web_password
+    ports:
+      - "127.0.0.1:${DEV_RIS_WEB_PORT:-18081}:8081"
+    networks:
+      - dicom
+    healthcheck:
+      # Web 画面の待ち受けと、MWL の C-ECHO（AE タイトル RIS_EMU。相手の AE タイトルを確かめる設定のため名指しする）
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import socket
+          from pynetdicom import AE
+          socket.create_connection(("127.0.0.1", 8081), 3).close()
+          ae = AE(ae_title="RIS_HEALTH")
+          ae.add_requested_context("1.2.840.10008.1.1")
+          assoc = ae.associate("127.0.0.1", 11112, ae_title="RIS_EMU")
+          ok = assoc.is_established and assoc.send_c_echo().Status == 0
+          if assoc.is_established:
+              assoc.release()
+          raise SystemExit(0 if ok else 1)
+      # 起動の間は 2 秒ごと、起きた後は 30 秒ごと（C-ECHO の接続の記録を増やしすぎない）
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  dtg:
+    # dicom-test-generator の Dockerfile から作る。版は commit で固定する（DTG_GIT_REF で替えられる）
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-dtg:local
     build:
       # 既定は main の 52380eb（#19 のマージの後）
-      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-52380eb2c294309fa7a607696114ee4406c42e0e}
+      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-52380eb2c294309fa7a607696114ee4406c42e0e}
     environment:
-      DTG_WEB_PASSWORD_FILE: /run/secrets/tdg_web_password
+      DTG_WEB_PASSWORD_FILE: /run/secrets/dtg_web_password
       # 検査日・時刻を日本の時刻で書く（Orthanc の TZ と同じ）
       TZ: Asia/Tokyo
     volumes:
-      # 送信先は Orthanc（orthanc:4242）。Web 画面はコンテナの中で 0.0.0.0 に bind する
-      - ./tdg/app_config.yaml:/app/config/app_config.yaml:ro
-      - tdg-state:/app/modality_state
-      - tdg-output:/app/output
+      # ワークリストは ris-emulator（ris:11112）、送信先は Orthanc（orthanc:4242）。Web 画面はコンテナの中で 0.0.0.0 に bind する
+      - ./dtg/app_config.yaml:/app/config/app_config.yaml:ro
+      - dtg-state:/app/modality_state
+      - dtg-output:/app/output
     secrets:
-      - tdg_web_password
+      - dtg_web_password
     ports:
-      - "127.0.0.1:${DEV_TDG_WEB_PORT:-18080}:8080"
+      - "127.0.0.1:${DEV_DTG_WEB_PORT:-18080}:8080"
     networks:
       - dicom
     depends_on:
       orthanc:
+        condition: service_healthy
+      ris:
         condition: service_healthy
     init: true
     security_opt:
@@ -85,10 +140,13 @@ services:
     restart: unless-stopped
 
 secrets:
-  tdg_web_password:
-    file: ./secrets/tdg_web_password.txt
+  ris_web_password:
+    file: ./secrets/ris_web_password.txt
+  dtg_web_password:
+    file: ./secrets/dtg_web_password.txt
 
 volumes:
-  tdg-state:
-  tdg-output:
+  ris-state:
+  dtg-state:
+  dtg-output:
   storescp-received:
