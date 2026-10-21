@@ -28,12 +28,16 @@ export function formatSlashDate(value: unknown): string {
   return d ? `${d.year}/${pad(d.month)}/${pad(d.day)}` : "";
 }
 
-/** DICOM の TM（`HHMMSS.FFFFFF`）を `09:30` にする。読めなければ空 */
+/**
+ * DICOM の TM を `09:30` にする。TM は `HH`・`HHMM`・`HHMMSS`・`HHMMSS.F…`（小数は 1〜6 桁）のどれか（PS3.5 6.2）。
+ * 時だけの値（`07`）は分が分からないので `07:--` にする（`07:00` と書くと、無い値を足すことになる）。
+ * 古い形の `HH:MM:SS`（ACR-NEMA）も読む。読めなければ空
+ */
 export function formatDicomTime(value: unknown): string {
   if (typeof value !== "string") return "";
-  const m = /^(\d{2}):?(\d{2})/.exec(value.trim());
-  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return "";
-  return `${m[1]}:${m[2]}`;
+  const m = /^(\d{2})(?::?(\d{2})(?::?\d{2}(?:\.\d{1,6})?)?)?$/.exec(value.trim());
+  if (!m || Number(m[1]) > 23 || (m[2] !== undefined && Number(m[2]) > 59)) return "";
+  return `${m[1]}:${m[2] ?? "--"}`;
 }
 
 /** 年号と、その始まりの日（改元の日。グレゴリオ暦） */

@@ -66,8 +66,12 @@ export interface StudyQuery {
 export interface Backend {
   readonly kind: "orthanc";
   readonly mock: boolean;
-  /** QIDO-RS の検査の検索（新しい順に limit 件まで。検査日の範囲で絞れる） */
-  searchStudies(limit?: number, query?: StudyQuery): Promise<StudySummary[]>;
+  /**
+   * QIDO-RS の検査の検索（検査日の範囲で絞れる）。検査日の新しい順に limit 件まで。
+   * QIDO-RS は返す順を決めていない（PS3.18 8.3.4.4）ので、limit を超える検査があれば、検査日の範囲で区切って
+   * 新しい側から問い合わせる（docs/spec.md の 3.1「上限に届いたとき」）
+   */
+  searchStudies(limit?: number, query?: StudyQuery): Promise<StudySearch>;
   /** 検査の中のシリーズ（QIDO-RS。シリーズの番号の順）。検査が無ければ空 */
   searchSeries(studyInstanceUid: string): Promise<SeriesSummary[]>;
   /**
@@ -201,6 +205,17 @@ export class BackendUnknownError extends Error {
 export interface StudyCount {
   count: number;
   exact: boolean;
+}
+
+/** 検査の検索の答え */
+export interface StudySearch {
+  /** 検査日の新しい順に、上限の数まで */
+  studies: StudySummary[];
+  /**
+   * 条件に合う検査を全部返したか。false なら、返していない検査が画像サーバーにある（件数は「以上」）。
+   * 返した検査は、検査日の新しい側から欠けなく並ぶ（いちばん古い検査日の中だけは、全部とは限らない）
+   */
+  complete: boolean;
 }
 
 /** 一覧と件数で、一度に QIDO-RS から受ける検査の上限 */

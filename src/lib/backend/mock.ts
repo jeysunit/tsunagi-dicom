@@ -224,6 +224,7 @@ interface PreviewImage {
   studyInstanceUid: string;
   seriesInstanceUid: string;
   sopInstanceUid: string;
+  /** PNG の写し（同じ名前の .jpg が JPEG の写し） */
   file: string;
 }
 
@@ -308,7 +309,8 @@ export function createMockBackend(): Backend {
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
       // 検査日の範囲と詳細条件は、実の Orthanc の QIDO-RS の代わりに、ここで当てる
       const studies = (await qidoStudies()).map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, query));
-      return sortStudiesNewestFirst(studies).slice(0, clampStudyLimit(limit));
+      const max = clampStudyLimit(limit);
+      return { studies: sortStudiesNewestFirst(studies).slice(0, max), complete: studies.length <= max };
     },
 
     async countStudies() {
@@ -372,8 +374,10 @@ export function createMockBackend(): Backend {
             (!target.sopInstanceUid || p.sopInstanceUid === target.sopInstanceUid),
         );
         if (image) {
-          const body = await readFile(image.file);
-          return new Response(req.method === "HEAD" ? null : body, { status: 200, headers: { "content-type": "image/png" } });
+          // 求めた型で返す（image/png には PNG、image/jpeg と Accept の無い要求には、rendered の既定の JPEG。PS3.18 8.7.4）
+          const png = req.accept === "image/png";
+          const body = await readFile(png ? image.file : image.file.replace(/\.png$/, ".jpg"));
+          return new Response(req.method === "HEAD" ? null : body, { status: 200, headers: { "content-type": png ? "image/png" : "image/jpeg" } });
         }
       }
       return Response.json({ error: "見本に無い" }, { status: 404 });

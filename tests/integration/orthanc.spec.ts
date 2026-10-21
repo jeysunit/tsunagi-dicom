@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
-import { syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
+import { newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
 import { readAudit, requestTrails } from "./support/audit-db";
 import { startGate, type Gate } from "./support/gate";
@@ -560,4 +560,84 @@ test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像�
   observe("qido.instanceKeys", keys);
   // BFF は、この 3 つがあることを前提に、求めた検査・シリーズの画像だけを返す（2026-10-21 に Orthanc 26.9.1 で測った）
   expect.soft(keys.sort(), "Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID か患者 ID を返さなくなった").toEqual(["0020000D", "0020000E", "00100020"].sort());
+});
+
+test("13 上限を超えたとき：検査が 1000 件を超えても、いちばん新しい検査が一覧に出て、件数は「以上」になる（2026-10-21）", async () => {
+  // 最後の試験に置く（Orthanc に 1000 件を超える検査を足すので、ほかの試験の一覧に混ざらないように）
+  test.setTimeout(600_000);
+  const { page } = admin;
+  // 古い検査（2020-01-01 から 1 日に 1 件、1001 日分）を先に入れ、いちばん新しい検査を最後に入れる。
+  // Orthanc の REST（tools/create-dicom）で 1 枚ずつ作る（架空の患者。画像は無い）
+  const BULK_DAYS = 1001;
+  const bulk = Array.from({ length: BULK_DAYS }, (_, i) => ({
+    uid: newUid(),
+    date: new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString().slice(0, 10).replaceAll("-", ""),
+  }));
+  const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const latest = { uid: newUid(), date: today };
+  const create = async (s: { uid: string; date: string }, time: string) => {
+    const res = await orthanc("tools/create-dicom", {
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify({
+        Force: true,
+        Tags: {
+          SpecificCharacterSet: "ISO_IR 192",
+          PatientID: "JP-TEST-IT90",
+          PatientName: "ITEST^LIMIT",
+          StudyInstanceUID: s.uid,
+          SeriesInstanceUID: newUid(),
+          SOPInstanceUID: newUid(),
+          StudyDate: s.date,
+          StudyTime: time,
+          Modality: "CT",
+        },
+      }),
+    });
+    expect(res.status, `検査 ${s.date} を作る`).toBe(200);
+    await res.body?.cancel();
+  };
+  for (let i = 0; i < bulk.length; i += 8) await Promise.all(bulk.slice(i, i + 8).map((s) => create(s, "090000")));
+  await create(latest, "235959");
+  const total = (await orthancJson<{ CountStudies: number }>("statistics")).CountStudies;
+  expect(total).toBeGreaterThan(1001);
+
+  // Orthanc の QIDO-RS が limit で切ったときに返す順と、続きの知らせ（Warning 299）を記録する（PS3.18 8.3.4.4 は順を決めていない）
+  const rawRes = await orthanc("dicom-web/studies?limit=1000");
+  expect(rawRes.status).toBe(200);
+  const raw = (await rawRes.json()) as Record<string, { Value?: unknown[] }>[];
+  const rawUids = raw.map((r) => String(r["0020000D"]?.Value?.[0] ?? ""));
+  const rawDates = raw.map((r) => String(r["00080020"]?.Value?.[0] ?? ""));
+  const sortedDesc = [...rawDates].sort().reverse();
+  const askMore = await orthanc("dicom-web/studies?limit=1001");
+  const askMoreRows = ((await askMore.json()) as unknown[]).length;
+  observe("qido.limitOrder", {
+    total,
+    returned: raw.length,
+    warning: rawRes.headers.get("warning"),
+    warningLimit1001: askMore.headers.get("warning"),
+    returnedLimit1001: askMoreRows,
+    includesLatest: rawUids.includes(latest.uid),
+    newestFirst: rawDates.join() === sortedDesc.join(),
+    oldestFirst: rawDates.join() === [...sortedDesc].reverse().join(),
+    firstDates: rawDates.slice(0, 3),
+    lastDates: rawDates.slice(-3),
+  });
+
+  // BFF：いちばん新しい検査が一覧の先頭に出る。件数は確定にしない。新しい順の 1000 件（古い側の検査だけが外れる）
+  const res = await page.request.get("/api/studies");
+  expect(res.status()).toBe(200);
+  const list = (await res.json()) as { count: { count: number; exact: boolean }; studies: { studyInstanceUid: string }[] };
+  expect(list.studies[0]?.studyInstanceUid).toBe(latest.uid);
+  expect(list.count).toEqual({ count: 1000, exact: false });
+  const shown = new Set(list.studies.map((s) => s.studyInstanceUid));
+  const left = total - 1000;
+  expect(bulk.slice(0, left).filter((s) => shown.has(s.uid)), "外れるのは古い側の検査だけ").toEqual([]);
+  expect(bulk.slice(left).filter((s) => !shown.has(s.uid)), "新しい側の検査は全部出る").toEqual([]);
+
+  // 範囲の中が上限に届かなければ、件数は確定
+  const january = await page.request.get(`/api/studies?${new URLSearchParams({ date: "range", from: "2020-01-01", to: "2020-01-31" })}`);
+  const jan = (await january.json()) as { count: { count: number; exact: boolean }; studies: { studyInstanceUid: string }[] };
+  expect(jan.count).toEqual({ count: 31, exact: true });
+  expect(jan.studies.map((s) => s.studyInstanceUid).sort()).toEqual(bulk.slice(0, 31).map((s) => s.uid).sort());
 });

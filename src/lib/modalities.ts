@@ -12,8 +12,9 @@ const MEMBERS: Record<ModalityGroup, readonly string[]> = {
   US: ["US"],
   ES: ["ES"],
   MG: ["MG"],
-  // 文書（Encapsulated PDF など）。Modality に DOC を使う装置と、OT を使う装置がある
-  DOC: ["DOC", "OT"],
+  // 文書（Encapsulated PDF など）。Modality の定義語で文書は DOC（Document）。OT は「Other」で、文書とは限らないので
+  // どの群にも入れない（PS3.3 C.7.3.1.1.1。2026d で確かめた）
+  DOC: ["DOC"],
   SR: ["SR"],
 };
 

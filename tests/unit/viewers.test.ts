@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { primaryGroup } from "@/lib/modalities";
+import { modalityGroupOf, primaryGroup, studyInGroup } from "@/lib/modalities";
 import { availableViewers, resolveDefaultViewer, viewerUrl } from "@/lib/viewers";
 
 // ビューアの選び分け（docs/spec.md の 3.2）。
@@ -65,5 +65,12 @@ describe("検査の主なモダリティ", () => {
     expect(primaryGroup(["DX"])).toBe("CR/DX");
     expect(primaryGroup(["SR"])).toBe("SR");
     expect(primaryGroup(["XA"])).toBeNull();
+  });
+
+  it("文書の群（DOC）は Modality の DOC だけ。OT（Other）は文書とは限らないので、どの群にも入れない（PS3.3 C.7.3.1.1.1）", () => {
+    expect(modalityGroupOf("DOC")).toBe("DOC");
+    expect(modalityGroupOf("OT")).toBeNull();
+    expect(studyInGroup(["OT"], "DOC")).toBe(false);
+    expect(primaryGroup(["OT", "DOC"])).toBe("DOC");
   });
 });

@@ -31,12 +31,13 @@ function summary(i: number, date: string, extra: Partial<StudySummary> = {}): St
   };
 }
 
-/** 新しい順に並べた検査から、日付の範囲で絞って limit 件まで返す偽の画像サーバー */
+/** 新しい順に並べた検査から、日付の範囲で絞って limit 件まで返す偽の画像サーバー（全部を返したかも返す） */
 function fakeBackend(all: StudySummary[], behavior: (call: number, query: StudyQuery | undefined) => void = () => undefined) {
   let calls = 0;
   const searchStudies = vi.fn(async (limit?: number, query?: StudyQuery) => {
     behavior(++calls, query);
-    return all.filter((s) => inDateRange(s.studyDate, query)).slice(0, limit);
+    const matched = all.filter((s) => inDateRange(s.studyDate, query));
+    return { studies: matched.slice(0, limit), complete: limit === undefined || matched.length <= limit };
   });
   return { backend: { searchStudies }, searchStudies };
 }

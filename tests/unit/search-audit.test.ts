@@ -6,7 +6,7 @@ import { searchAuditFields } from "@/lib/search-audit";
 
 describe("検索の監査の記録", () => {
   it("返した検査の組を、返した順にすべて残す", async () => {
-    const studies = await createMockBackend().searchStudies();
+    const { studies } = await createMockBackend().searchStudies();
     const fields = searchAuditFields("api", studies);
     expect(fields.action).toBe("search");
     const detail = fields.detail as { via: string; results: number; returned: [string, string][] };
@@ -19,7 +19,9 @@ describe("検索の監査の記録", () => {
   });
 
   it("1人の患者・1件の検査だけを返したときは、行の欄にも入れる", async () => {
-    const [first] = await createMockBackend().searchStudies(1);
+    const {
+      studies: [first],
+    } = await createMockBackend().searchStudies(1);
     const fields = searchAuditFields("page", [first!]);
     expect(fields).toMatchObject({ patientId: first!.patientId, studyInstanceUid: first!.studyInstanceUid });
   });

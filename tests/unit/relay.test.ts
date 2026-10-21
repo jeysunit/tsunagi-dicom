@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { AuditFields } from "@/lib/auth/session";
 import { BackendError, type RelayRequest } from "@/lib/backend/types";
 import { can, ROLES } from "@/lib/auth/roles";
+import { withoutAcceptParam } from "@/lib/backend/relay-path";
 import {
   relayWadoRs,
   RELAY_FORBIDDEN_MESSAGE,
+  RELAY_MIXED_ACCEPT_MESSAGE,
+  RELAY_NO_ACCEPT_MESSAGE,
   RELAY_NOT_WADO_MESSAGE,
   RELAY_READ_ONLY_MESSAGE,
   type RelayDeps,
@@ -168,5 +171,72 @@ describe("中継", () => {
     const f = fakes();
     await relayWadoRs(input(["x".repeat(2000)]), f.deps);
     expect((f.records[0]!.detail as { path: string }).path).toHaveLength(512);
+  });
+});
+
+describe("中継の Accept（PS3.18 8.7.5）", () => {
+  const thumbnail = ["studies", STUDY, "series", SERIES, "thumbnail"];
+  const rendered = ["studies", STUDY, "series", SERIES, "instances", INSTANCE, "rendered"];
+  const withAccept = (segments: readonly string[], accept: string | null) => ({ method: "GET", segments: [...segments], search: "", accept });
+
+  it("Accept の無い thumbnail・rendered の要求は 406。画像サーバーへ渡さず、断ったことを記録する", async () => {
+    for (const segments of [thumbnail, rendered]) {
+      for (const accept of [null, "", "  "]) {
+        const f = fakes();
+        const res = await relayWadoRs(withAccept(segments, accept), f.deps);
+        expect(res.status).toBe(406);
+        expect(await res.json()).toEqual({ error: RELAY_NO_ACCEPT_MESSAGE });
+        expect(f.relayed).toHaveLength(0);
+        expect(f.records[0]).toMatchObject({
+          action: "retrieve",
+          outcome: "denied",
+          studyInstanceUid: STUDY,
+          detail: { path: segments.join("/"), status: 406, reason: "no-accept" },
+        });
+      }
+    }
+  });
+
+  it("DICOM の型と画像などの型が混じった Accept は 400（画像サーバーへ渡さない）", async () => {
+    const mixed: [readonly string[], string][] = [
+      [thumbnail, "image/jpeg, application/dicom"],
+      [rendered, 'image/png, multipart/related; type="application/octet-stream"'],
+      [["studies", STUDY, "metadata"], "application/dicom+json, image/*"],
+    ];
+    for (const [segments, accept] of mixed) {
+      const f = fakes();
+      const res = await relayWadoRs(withAccept(segments, accept), f.deps);
+      expect(res.status, accept).toBe(400);
+      expect(await res.json()).toEqual({ error: RELAY_MIXED_ACCEPT_MESSAGE });
+      expect(f.relayed).toHaveLength(0);
+      expect(f.records[0]).toMatchObject({ outcome: "denied", detail: { status: 400, reason: "mixed-accept" } });
+    }
+  });
+
+  it("規格に合う Accept は通す（ブラウザの <img> の Accept・q=0 で外した型・ビューアの取得・Accept の無い metadata）", async () => {
+    const ok: [readonly string[], string | null][] = [
+      [thumbnail, "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+      [rendered, "image/jpeg, application/dicom;q=0"],
+      [["studies", STUDY, "metadata"], "application/dicom+json"],
+      [["studies", STUDY, "series", SERIES, "instances", INSTANCE, "frames", "1"], 'multipart/related; type="application/octet-stream"; transfer-syntax=*'],
+      [["studies", STUDY, "metadata"], null],
+    ];
+    for (const [segments, accept] of ok) {
+      const f = fakes();
+      expect((await relayWadoRs(withAccept(segments, accept), f.deps)).status, String(accept)).toBe(200);
+      expect(f.relayed).toHaveLength(1);
+    }
+  });
+});
+
+describe("中継の query の accept（PS3.18 8.3.3.1）", () => {
+  it("query の accept は画像サーバーへ渡さない（ほかの query は残す）", () => {
+    expect(withoutAcceptParam("?accept=image/png")).toBe("");
+    expect(withoutAcceptParam("?quality=80&accept=image%2Fpng&viewport=64,64")).toBe("?quality=80&viewport=64,64");
+    expect(withoutAcceptParam("?%61ccept=image/png&x=1")).toBe("?x=1");
+    // 名前は大文字と小文字を区別する（accept-name は %s"accept"）
+    expect(withoutAcceptParam("?Accept=image/png")).toBe("?Accept=image/png");
+    expect(withoutAcceptParam("?quality=80")).toBe("?quality=80");
+    expect(withoutAcceptParam("")).toBe("");
   });
 });
