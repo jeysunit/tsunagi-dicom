@@ -32,8 +32,8 @@ services:
     # dicom-test-generator の Dockerfile から作る。版は commit で固定する（TDG_GIT_REF で替えられる）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-tdg:local
     build:
-      # 既定は main の 09e95a6（#17・#18 のマージの後）
-      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-09e95a6054a649a43301d95cde5a86c322ecd059}
+      # 既定は main の 52380eb（#19 のマージの後）
+      context: https://github.com/jeysunit/dicom-test-generator.git#${TDG_GIT_REF:-52380eb2c294309fa7a607696114ee4406c42e0e}
     environment:
       DTG_WEB_PASSWORD_FILE: /run/secrets/tdg_web_password
       # 検査日・時刻を日本の時刻で書く（Orthanc の TZ と同じ）
