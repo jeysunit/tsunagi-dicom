@@ -17,6 +17,9 @@ export default defineConfig([
     "playwright-report/**",
     "test-results/**",
     "docker/**",
+    // openspec init・update が作るファイル。手で直すと次の update で上書きされる
+    ".claude/commands/opsx/**",
+    ".claude/skills/openspec-*/**",
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,
