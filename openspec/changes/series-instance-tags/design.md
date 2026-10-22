@@ -74,33 +74,35 @@
 
 画像の確認（どの画像か・いつ撮ったか・位置と向き・大きさと画素・表示の値・圧縮）に普通使うもの。
 
-| タグ | タグ名 | 見るもの |
-|---|---|---|
-| (0008,0018) | SOPInstanceUID | どの画像か |
-| (0008,0016) | SOPClassUID | 画像の種類 |
-| (0020,0013) | InstanceNumber | 画像の番号 |
-| (0008,0008) | ImageType | ORIGINAL・DERIVED など |
-| (0020,0012) | AcquisitionNumber | 撮影の番号 |
-| (0008,0022) | AcquisitionDate | 撮影の日 |
-| (0008,0032) | AcquisitionTime | 撮影の時刻 |
-| (0008,0023) | ContentDate | 画像を作った日 |
-| (0008,0033) | ContentTime | 画像を作った時刻 |
-| (0020,0032) | ImagePositionPatient | 位置 |
-| (0020,0037) | ImageOrientationPatient | 向き |
-| (0020,1041) | SliceLocation | スライスの位置 |
-| (0018,0050) | SliceThickness | スライス厚 |
-| (0028,0010) | Rows | 行の数 |
-| (0028,0011) | Columns | 列の数 |
-| (0028,0030) | PixelSpacing | 画素の間隔 |
-| (0028,0008) | NumberOfFrames | フレームの数 |
-| (0028,0004) | PhotometricInterpretation | MONOCHROME2・RGB など |
-| (0028,0100) | BitsAllocated | 画素のビット数 |
-| (0028,0101) | BitsStored | 使うビット数 |
-| (0028,1050) | WindowCenter | ウィンドウレベル |
-| (0028,1051) | WindowWidth | ウィンドウ幅 |
-| (0028,1052) | RescaleIntercept | CT 値などへの変換 |
-| (0028,1053) | RescaleSlope | 同上 |
-| (0028,2110) | LossyImageCompression | 非可逆の圧縮の有無 |
+「タグ名」は画面に出す日本語の名前の案（7 を見る）。* は参考の訳（7 の出典）から変えたもの。
+
+| タグ | keyword | タグ名 | 見るもの |
+|---|---|---|---|
+| (0008,0018) | SOPInstanceUID | SOPインスタンスUID | どの画像か |
+| (0008,0016) | SOPClassUID | SOPクラスUID | 画像の種類 |
+| (0020,0013) | InstanceNumber | 画像番号 * | 画像の番号 |
+| (0008,0008) | ImageType | 画像タイプ | ORIGINAL・DERIVED など |
+| (0020,0012) | AcquisitionNumber | 収集番号 | 撮影の番号 |
+| (0008,0022) | AcquisitionDate | 収集日 * | 撮影の日 |
+| (0008,0032) | AcquisitionTime | 収集時刻 | 撮影の時刻 |
+| (0008,0023) | ContentDate | 画像作成日 * | 画像を作った日 |
+| (0008,0033) | ContentTime | 画像作成時刻 * | 画像を作った時刻 |
+| (0020,0032) | ImagePositionPatient | 画像位置（患者） | 位置 |
+| (0020,0037) | ImageOrientationPatient | 画像方向（患者） | 向き |
+| (0020,1041) | SliceLocation | スライス位置 | スライスの位置 |
+| (0018,0050) | SliceThickness | スライス厚 * | スライスの厚さ |
+| (0028,0010) | Rows | 行数 * | 行の数 |
+| (0028,0011) | Columns | 列数 * | 列の数 |
+| (0028,0030) | PixelSpacing | 画素間隔 | 画素の間隔 |
+| (0028,0008) | NumberOfFrames | フレーム数 * | フレームの数 |
+| (0028,0004) | PhotometricInterpretation | 光度測定解釈 | MONOCHROME2・RGB など |
+| (0028,0100) | BitsAllocated | 割当ビット | 画素のビット数 |
+| (0028,0101) | BitsStored | 格納ビット | 使うビット数 |
+| (0028,1050) | WindowCenter | ウィンドウ中心 | ウィンドウレベル |
+| (0028,1051) | WindowWidth | ウィンドウ幅 | ウィンドウ幅 |
+| (0028,1052) | RescaleIntercept | リスケール切片 * | CT 値などへの変換 |
+| (0028,1053) | RescaleSlope | リスケール傾き * | 同上 |
+| (0028,2110) | LossyImageCompression | 非可逆画像圧縮 | 非可逆の圧縮の有無 |
 
 - 患者・検査・シリーズの単位の値（氏名・検査日など）は既定に入れない。見出しとサムネイルの並びに出ている。
 - 転送構文（(0002,0010)）はファイルのメタ情報で、WADO-RS の `metadata` に入るとは限らないので既定に入れない。施設が足したときに値が無ければ「—」になる。
@@ -108,7 +110,7 @@
 
 ### 6. 画面の API：`GET /api/studies/{uid}/series/{series}/instances/{sop}/tags`
 
-答えは `{ tags: [{ tag: "0008,0018", name: "SOPInstanceUID", vr: "UI", value: "…" | null, length?: number }] }`。設定の順に、画像に無いタグも `vr: ""`・`value: null` で返す。値が 1024 文字を超えたときだけ `length`（全体の文字数）を付け、`value` は先頭の 1024 文字にする。
+答えは `{ tags: [{ tag: "0008,0018", name: "SOPインスタンスUID", vr: "UI", value: "…" | null, length?: number }] }`。設定の順に、画像に無いタグも `vr: ""`・`value: null` で返す。値が 1024 文字を超えたときだけ `length`（全体の文字数）を付け、`value` は先頭の 1024 文字にする。
 
 - 値の組み立ては、いまの `src/lib/all-values.ts` の `valueText`（バイナリ・SQ・PN・複数の値）を使い、設定のタグの選び出し・タグ名・長さの切り方を足す。「すべてのタグ」はいまの `…/values` を使い、同じ表の部品でタグ名の列も出す（名前の分かるものだけ）。
 - 文字数は Unicode の符号位置で数える（サロゲートの組を割らない）。
@@ -116,7 +118,16 @@
 
 ### 7. タグ名
 
-タグ名は DICOM の属性の名前（keyword。画面にそのまま出してよい。`docs/spec.md` の 2.2）を、BFF の小さな表（既定の 25 と、患者・検査・シリーズの主なタグ）から引く。表に無いタグはタグ名を空にする。DICOM の辞書の依存（ライブラリ）は足さない。
+タグ名は日本語で出す。BFF の小さな表（既定の 25 と、患者・検査・シリーズの主なタグ）に、タグごとの日本語の名前と DICOM の keyword を持ち、日本語の名前を返す。表に無いタグはタグ名を空にする（私的タグを含む）。DICOM の辞書の依存（ライブラリ）は足さない。
+
+- 訳は次の 2 つを参考にして決め、表を丸ごとは写さない。
+  - リベルワークス「標準DICOM画像タグセット一覧」 <https://www.liberworks.co.jp/know/know_dicomTag.html>（タグごとの日本語の属性名。2026-10-23 に読んだ）
+  - Sonic DICOM「DICOM用語集」 <https://ja.sonicdicom.com/dicom-glossary/>（タグの例と属性名。2026-10-23 に読んだ）
+- 参考の訳と画面の用語集（`docs/spec.md` の 2.2）が違うときは、用語集を先にする。同じものを画面の別の場所で別の言葉にしないため。
+  - 例：Instance は画面で「画像」と呼ぶので「インスタンス番号」でなく「画像番号」。Study Description は「検査記述」でなく「検査名」、Series Description は「シリーズ名」、Referring Physician's Name は「依頼医」、Patient's Name は「氏名」、Patient ID は「患者ID」。
+- 日付は用語集の「検査日」に合わせて「〜日付」でなく「〜日」にし、数は「〜の数」「行」でなく「〜数」にする。
+- 参考に無い訳（RescaleIntercept・RescaleSlope）と、参考の訳では意味が伝わりにくいもの（ContentDate の「内容日付」）は、ここで決めた（5 の表の *）。
+- 決めた訳は、`docs/spec.md` の 2.2 の用語集に「タグ名」の表として足し、承認者が確かめてから画面に出す。
 
 ### 8. 日本語の値
 
