@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
-import { useId, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { PendingText, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -129,21 +129,19 @@ interface TagRow {
 }
 
 /**
- * DICOM タグの表。url の画面の API から読み（読んだことは BFF が操作ログに残す）、pick で行にする。
- * withName のときはタグ名の列も出す。値は文字として出す（HTML として解かない）
+ * DICOM タグの表（タグ・タグ名・VR・値）。url の画面の API から読み（読んだことは BFF が操作ログに残す）、pick で行にする。
+ * 列の幅は決めておき（table-fixed）、表を替えても列の境目を動かさない。値は文字として出す（HTML として解かない）
  */
 function TagTable<T>({
   url,
   queryKey,
   pick,
-  withName = false,
   testId,
   className,
 }: {
   url: string;
   queryKey: readonly unknown[];
   pick: (body: T) => TagRow[];
-  withName?: boolean;
   testId: string;
   className?: string;
 }) {
@@ -162,30 +160,34 @@ function TagTable<T>({
         </p>
       )}
       {rows && (
-        <table className="w-full text-xs">
-          {withName && (
-            <thead className="sticky top-0 bg-surface text-left text-label">
-              <tr>
-                <th scope="col" className="px-2 py-1 font-normal">
-                  タグ
-                </th>
-                <th scope="col" className="px-2 py-1 font-normal">
-                  タグ名
-                </th>
-                <th scope="col" className="px-2 py-1 font-normal">
-                  VR
-                </th>
-                <th scope="col" className="px-2 py-1 font-normal">
-                  値
-                </th>
-              </tr>
-            </thead>
-          )}
+        <table className="w-full table-fixed text-xs">
+          <colgroup>
+            <col className="w-[5.5rem]" />
+            <col className="w-[7.5rem]" />
+            <col className="w-[2.5rem]" />
+            <col />
+          </colgroup>
+          <thead className="sticky top-0 bg-surface text-left text-label">
+            <tr>
+              <th scope="col" className="px-2 py-1 font-normal">
+                タグ
+              </th>
+              <th scope="col" className="px-2 py-1 font-normal">
+                タグ名
+              </th>
+              <th scope="col" className="px-2 py-1 font-normal">
+                VR
+              </th>
+              <th scope="col" className="px-2 py-1 font-normal">
+                値
+              </th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.tag} className="border-b border-border align-top last:border-0" data-tag={row.tag}>
                 <td className="px-2 py-1 font-mono whitespace-nowrap text-label">{row.tag}</td>
-                {withName && <td className="px-2 py-1 text-label">{row.name}</td>}
+                <td className="px-2 py-1 break-words text-label">{row.name}</td>
                 <td className="px-2 py-1 font-mono text-label">{row.vr}</td>
                 <td className="px-2 py-1 break-all" data-testid="tag-value">
                   {row.value === null ? (
@@ -206,7 +208,8 @@ function TagTable<T>({
   );
 }
 
-const valueRows = (body: { values: DicomValueRow[] }): TagRow[] => body.values;
+/** 値の全部の行に、タグ名を添える（表に無いタグは空） */
+const valueRows = (body: { values: DicomValueRow[] }): TagRow[] => body.values.map((row) => ({ ...row, name: tagName(row.tag) }));
 
 interface InstanceItem {
   sopInstanceUid: string;
@@ -274,8 +277,21 @@ function SeriesImages({
     items.findIndex((i) => i.sopInstanceUid === sopPick),
   );
   const sop = items[index]?.sopInstanceUid ?? "";
+  // 値を読む画像。矢印のキーで通り過ぎる画像の値は読まない（読むたびに操作ログに残るため）。キーで選んだ画像は 0.3 秒止まってから読み、
+  // クリックで選んだ画像はすぐ読む（一覧の行の詳細の取り方と同じ考え）
+  const [settledPick, setSettledPick] = useState("");
+  useEffect(() => {
+    if (sopPick === settledPick) return;
+    const timer = window.setTimeout(() => setSettledPick(sopPick), 300);
+    return () => window.clearTimeout(timer);
+  }, [sopPick, settledPick]);
+  const readSop = sopPick === settledPick ? sop : "";
+  const choose = (next: string) => {
+    setSopPick(next);
+    setSettledPick(next);
+  };
   const optionId = (i: number) => `${listId}-${i}`;
-  const base = `/api/studies/${encodeURIComponent(uid)}/series/${encodeURIComponent(seriesUid)}/instances/${encodeURIComponent(sop)}`;
+  const base = `/api/studies/${encodeURIComponent(uid)}/series/${encodeURIComponent(seriesUid)}/instances/${encodeURIComponent(readSop)}`;
   const title = [series.seriesNumber ? `#${series.seriesNumber}` : "", series.seriesDescription ?? ""].filter(Boolean).join(" ");
 
   return (
@@ -284,14 +300,17 @@ function SeriesImages({
         <h3 className="text-sm font-bold break-words text-value">{title || <span className="font-normal text-label">（シリーズ名なし）</span>}</h3>
         {series.instanceCount != null && <span className="text-xs text-label">{series.instanceCount} 画像</span>}
         <PendingText pending={instances.isFetching} />
-        <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="タグ">
-          <SegmentButton pressed={tagSet === "configured"} onClick={() => onTagSet("configured")} testId="tag-set-configured">
-            主なタグ
-          </SegmentButton>
-          <SegmentButton pressed={tagSet === "all"} onClick={() => onTagSet("all")} testId="tag-set-all">
-            すべてのタグ
-          </SegmentButton>
-        </div>
+        {/* 切り替えは、出す画像があるときだけ */}
+        {items.length > 0 && (
+          <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="タグの表示">
+            <SegmentButton pressed={tagSet === "configured"} onClick={() => onTagSet("configured")} testId="tag-set-configured">
+              主なタグ
+            </SegmentButton>
+            <SegmentButton pressed={tagSet === "all"} onClick={() => onTagSet("all")} testId="tag-set-all">
+              すべてのタグ
+            </SegmentButton>
+          </div>
+        )}
       </div>
       {instances.isError && !instances.isFetching && (
         <p role="alert" className="text-danger">
@@ -304,7 +323,7 @@ function SeriesImages({
           {/* 画像の一覧。フォーカスは一覧に置き、上下の矢印のキーで選ぶ画像を替える（選んだ行は aria-activedescendant） */}
           <ul
             role="listbox"
-            aria-label="画像"
+            aria-label="画像の一覧"
             tabIndex={0}
             aria-activedescendant={optionId(index)}
             className="max-h-40 overflow-auto rounded border border-border bg-background py-1 text-sm focus-visible:outline-2 focus-visible:outline-ring md:max-h-80"
@@ -326,7 +345,7 @@ function SeriesImages({
                 id={optionId(i)}
                 role="option"
                 aria-selected={i === index}
-                onClick={() => setSopPick(item.sopInstanceUid)}
+                onClick={() => choose(item.sopInstanceUid)}
                 className={cn(
                   "cursor-pointer border-l-[3px] px-2 py-0.5 break-all",
                   i === index ? "border-primary bg-selected font-bold text-value" : "border-transparent hover:bg-hover",
@@ -339,22 +358,24 @@ function SeriesImages({
           </ul>
           <div className="min-w-0 space-y-1">
             <UidLine label="SOPInstanceUID" uid={sop} />
-            {tagSet === "configured" ? (
+            {readSop === "" ? (
+              <p className="p-2">
+                <PendingText pending />
+              </p>
+            ) : tagSet === "configured" ? (
               <TagTable<{ tags: TagRow[] }>
-                key={`configured-${sop}`}
+                key={`configured-${readSop}`}
                 url={`${base}/tags`}
-                queryKey={["instance-tags", uid, seriesUid, sop]}
+                queryKey={["instance-tags", uid, seriesUid, readSop]}
                 pick={(body) => body.tags}
-                withName
                 testId="instance-tags"
               />
             ) : (
               <TagTable<{ values: DicomValueRow[] }>
-                key={`all-${sop}`}
+                key={`all-${readSop}`}
                 url={`${base}/values`}
-                queryKey={["instance-values", uid, seriesUid, sop]}
-                pick={(body) => body.values.map((row) => ({ ...row, name: tagName(row.tag) }))}
-                withName
+                queryKey={["instance-values", uid, seriesUid, readSop]}
+                pick={valueRows}
                 testId="instance-values"
               />
             )}
@@ -544,7 +565,8 @@ export function StudyDetailPanel({
                       className={cn(
                         "w-full cursor-pointer space-y-1 rounded border bg-surface p-1.5 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                         pressFeedback,
-                        pressed ? "border-primary ring-2 ring-primary" : "border-border hover:border-label hover:bg-hover",
+                        // 選んだ形は枠と地の色で示す（フォーカスの輪と見分ける）
+                        pressed ? "border-primary bg-selected" : "border-border hover:border-label hover:bg-hover",
                       )}
                       data-testid="series-open"
                     >

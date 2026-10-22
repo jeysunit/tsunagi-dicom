@@ -26,12 +26,12 @@
 
 ## 5. 結合の試験（本物の Orthanc）
 
-- [x] 5.1 試験の画像（dump）に、SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の画像を書けるようにし（`tests/integration/support/dicom.ts`）、結合の試験の 14 で、`…/tags` が `INSTANCE_TAGS` の順に設定のタグだけを返すこと・漢字とかなの氏名と検査名が崩れないこと・画面の表にも出ることを確かめる。`node tests/integration/run.mjs` が通ることを確かめ、`docs/integration-test.md` に 14 の行を、`docs/round-trip-test.md` の「実測で決めること」に結果を書く
+- [x] 5.1 試験の画像（dump）に、SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の画像を書けるようにし（`tests/integration/support/dicom.ts`）、結合の試験の 14 で、`…/tags` が `INSTANCE_TAGS` の順に設定のタグだけを返すこと・漢字とかなの氏名と検査名が崩れないこと・画面の表にも出ることを確かめる。`node tests/integration/run.mjs` が通ることを確かめ、`docs/integration-test.md` に 14 の行を、`docs/round-trip-test.md` の「結合の試験で測った結果（2026-10-23）」に結果を書く
 - [x] 5.2 5.1 で Orthanc が返した ISO 2022 IR 87 の画像の `metadata`（文字の集合・検査名・氏名）を `tests/fixtures/orthanc/dicom-web/iso2022-instance-metadata.json` に写し、単体の試験で、そのまま返すことを確かめる（モックの画面の e2e では、ISO_IR 192 の見本の日本語の氏名を確かめる）
 
 ## 6. まとめの確かめ
 
-- [ ] 6.1 `npm run lint`・`npm run typecheck`・`npm test`・`npm run build` と `npm run test:e2e` がすべて通り、`openspec validate series-instance-tags --strict` が通ることを確かめる
+- [x] 6.1 `npm run lint`・`npm run typecheck`・`npm test`・`npm run build` と `npm run test:e2e` がすべて通り、`openspec validate series-instance-tags --strict` が通ることを確かめる
 
 ## Workflow follow-up
 

@@ -118,11 +118,11 @@
 
 ### 7. タグ名
 
-タグ名は日本語で出す。BFF の小さな表（既定の 25 と、患者・検査・シリーズの主なタグ）に、タグごとの日本語の名前と DICOM の keyword を持ち、日本語の名前を返す。表に無いタグはタグ名を空にする（私的タグを含む）。DICOM の辞書の依存（ライブラリ）は足さない。
+タグ名は日本語で出す。BFF の小さな表（既定の 25 と、患者・検査・シリーズの主なタグ）に、タグごとの日本語の名前を持ち、それを返す。表に無いタグはタグ名を空にする（私的タグを含む）。DICOM の辞書の依存（ライブラリ）は足さない。
 
 - 訳は次の 2 つを参考にして決め、表を丸ごとは写さない。
-  - リベルワークス「標準DICOM画像タグセット一覧」 <https://www.liberworks.co.jp/know/know_dicomTag.html>（タグごとの日本語の属性名。2026-10-23 に読んだ）
-  - Sonic DICOM「DICOM用語集」 <https://ja.sonicdicom.com/dicom-glossary/>（タグの例と属性名。2026-10-23 に読んだ）
+  - 「標準DICOM画像タグセット一覧」 <https://www.liberworks.co.jp/know/know_dicomTag.html>（タグごとの日本語の属性名）
+  - 「DICOM用語集」 <https://ja.sonicdicom.com/dicom-glossary/>（タグの例と属性名）
 - 参考の訳と画面の用語集（`docs/spec.md` の 2.2）が違うときは、用語集を先にする。同じものを画面の別の場所で別の言葉にしないため。
   - 例：Instance は画面で「画像」と呼ぶので「インスタンス番号」でなく「画像番号」。Study Description は「検査記述」でなく「検査名」、Series Description は「シリーズ名」、Patient's Name は「氏名」、Patient ID は「患者ID」。
   - Referring Physician's Name は「紹介医」にする（参考の訳「照会医師の名前」を短くした）。

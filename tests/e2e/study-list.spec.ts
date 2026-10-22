@@ -1118,6 +1118,13 @@ test("画像の場所：上下の矢印のキーで画像を替える（検査�
   const area = page.getByTestId("series-images");
   const list = area.getByTestId("instance-list");
   await expect(list.getByRole("option")).toHaveCount(4);
+  await expect(area.getByTestId("instance-tags").locator("tbody tr")).toHaveCount(25);
+  const first = (await area.getByTestId("uid-line").locator("code").textContent())!;
+  // キーで通り過ぎた画像の値は読まない（読むたびに操作ログに残る）。止まった画像だけを 0.3 秒後に読む
+  const tagReads: string[] = [];
+  page.on("request", (req) => {
+    if (/\/instances\/[\d.]+\/tags$/.test(req.url())) tagReads.push(req.url());
+  });
   await list.focus();
   await page.keyboard.press("ArrowDown");
   await expect(list.getByRole("option", { name: "#2" })).toHaveAttribute("aria-selected", "true");
@@ -1125,6 +1132,11 @@ test("画像の場所：上下の矢印のキーで画像を替える（検査�
   await page.keyboard.press("ArrowUp");
   await expect(list.getByRole("option", { name: "#2" })).toHaveAttribute("aria-selected", "true");
   await expect(list).toBeFocused();
+  const second = (await area.getByTestId("uid-line").locator("code").textContent())!;
+  expect(second).not.toBe(first);
+  await expect(area.getByTestId("instance-tags").locator('tr[data-tag="0008,0018"]')).toContainText(second);
+  expect(tagReads).toHaveLength(1);
+  expect(tagReads[0]).toContain(`/instances/${second}/tags`);
   // 検査一覧で選んだ行は替わらない
   await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", STUDY);
 

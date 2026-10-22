@@ -35,7 +35,7 @@ export const INSTANCE_TAGS_MAX = 100;
 
 /**
  * タグ名（画面に出す日本語の名前）。既定の一覧と、患者・検査・シリーズの主なタグ。表に無いタグ（私的タグを含む）はタグ名を空にする。
- * 訳は公開の資料（リベルワークス「標準DICOM画像タグセット一覧」・Sonic DICOM「DICOM用語集」）を参考にし、
+ * 訳は公開の資料（docs/spec.md の 3.1 に出典の URL）を参考にし、
  * 画面の用語集（docs/spec.md の 2.2）にある言葉はそちらを先にする（画像番号・検査名・シリーズ名・氏名・患者ID など）。
  */
 export const TAG_NAMES: Readonly<Record<string, string>> = {
