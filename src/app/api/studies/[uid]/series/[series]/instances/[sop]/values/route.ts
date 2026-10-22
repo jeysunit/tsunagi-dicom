@@ -5,7 +5,7 @@ import { stringValue, TAG } from "@/lib/backend/dicom-json";
 import { audit, requirePermission, requireSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 
-// すべての DICOM の値（画像単位。詳細のパネルの「DICOM タグ」の画像単位。docs/spec.md の 3.1）。
+// すべての DICOM の値（画像単位。詳細のパネルのサムネイルから開く画像の場所の「すべてのタグ」。docs/spec.md の 3.1）。
 // 検査単位の値（/api/studies/{uid}/values）は QIDO-RS の検査の検索の1行の要約で、どの画像の値かが分からない
 // （画像ごとに値が違う検査もある）。ここは選んだ1枚の画像の値の全部（WADO-RS の metadata）を返す。
 // 検査単位と同じ明示の権限（dicom.all_values）のときだけ返し、断ったものも記録する。開いたことを監査の記録に残す。
@@ -20,7 +20,7 @@ export async function GET(_request: Request, { params }: Context) {
     const uid = studyUidParam(p.uid);
     const series = uidParam(p.series, "SeriesInstanceUID");
     const sop = uidParam(p.sop, "SOPInstanceUID");
-    const detail = { allValues: true, level: "instance", seriesInstanceUid: series, sopInstanceUid: sop };
+    const detail = { allValues: true, level: "instance", set: "all", seriesInstanceUid: series, sopInstanceUid: sop };
     await requirePermission(session, "dicom.all_values", { action: "view_study", studyInstanceUid: uid, detail });
     const dataset = await getBackend().instanceDataset(uid, series, sop);
     if (!dataset) return Response.json({ error: "画像が見つかりません" }, { status: 404 });

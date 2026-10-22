@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { isValidUsername, USERNAME_HINT } from "@/lib/auth/username";
+import { parseInstanceTags } from "@/lib/instance-tags";
 
 // 設定の読み込み（docs/spec.md の 2.1。正本は .env.example）。
 // 足りない・誤った値があれば、どの変数かを並べて ConfigError を投げる。値そのものは文言に出さない（秘密を漏らさない）。
@@ -65,6 +66,8 @@ export interface AppConfig {
   screen: {
     /** 検査の一覧の自動更新の間隔（秒。0 で止める。docs/spec.md の 3.1） */
     studyListRefreshSeconds: number;
+    /** 画像ごとの「主なタグ」に出すタグ（8 桁の大文字の 16 進。設定の順。INSTANCE_TAGS。docs/spec.md の 3.1） */
+    instanceTags: string[];
   };
   /** 監査の記録（docs/adr/0001-audit-chain-mac.md） */
   audit: {
@@ -152,6 +155,8 @@ const envSchema = z.object({
   REAUTH_MINUTES: int(5, 1, 60),
   // 検査の一覧の自動更新（既定 30 秒。2026-10-21 に承認者が決めた）。0 で止める。画像サーバーへ問い合わせすぎないよう 5 秒より短くしない
   STUDY_LIST_REFRESH_SECONDS: int(30, 0, 3600).refine((v) => v === 0 || v >= 5, "0（止める）か 5〜3600 の整数にする"),
+  // 画像ごとの「主なタグ」に出すタグの番号（空白で区切る）。空なら既定の一覧（src/lib/instance-tags.ts）。誤りは loadConfig で出す
+  INSTANCE_TAGS: z.string().optional(),
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
@@ -329,6 +334,9 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   }
 
+  const instanceTags = parseInstanceTags(e.INSTANCE_TAGS);
+  if (!instanceTags.ok) problem("INSTANCE_TAGS", instanceTags.message);
+
   if (e.DEV_ALLOW_WRITE && e.AUTH_MODE !== "dev") {
     // 検証モード（モックだけ）のときだけ効く。ほかで書いても書き込みが通るように見えないよう、誤りにする
     problem("DEV_ALLOW_WRITE", "AUTH_MODE=dev のときだけ使える（ほかの認証では役割の割り当てで書き込みを決める）");
@@ -373,7 +381,8 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       initialAdmin,
       devAllowWrite: e.DEV_ALLOW_WRITE,
     },
-    screen: { studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS },
+    // 誤りは上で problem にして投げている
+    screen: { studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS, instanceTags: instanceTags.ok ? instanceTags.tags : [] },
     audit: { anchorFile: e.AUDIT_ANCHOR_FILE, sessionSecretPrevious },
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている

@@ -65,6 +65,8 @@ export default defineConfig({
       // 監査の記録の先頭の控え（試験の 9 で、/api/audit/verify が照らし合わせることを見る）
       AUDIT_ANCHOR_FILE: path.join(ITEST.workDir, "audit-anchors.jsonl"),
       TZ: "Asia/Tokyo",
+      // 画像ごとの「主なタグ」（試験の 14）：3 つの書き方を混ぜ、患者の値・画像に無いタグ・ファイルのメタ情報も入れる
+      INSTANCE_TAGS: "(0020,0013) 0008,0018 00100010 (0008,1030) (0028,0010) (0018,0050) (0002,0010)",
       HOSTNAME: "127.0.0.1",
       PORT: String(ITEST.bffPort),
       CHECKPOINT_DISABLE: "1",

@@ -210,6 +210,20 @@ function instanceDatasetOf(study: DicomJsonDataset, instance: MockInstance): Dic
   ds[TAG.InstanceNumber] = { vr: "IS", Value: [summary.instanceNumber] };
   ds["00200012"] = { vr: "IS", Value: [tags.AcquisitionNumber ?? "1"] };
   ds["00200032"] = { vr: "DS", Value: position.split("\\") };
+  // 画像ごとの「主なタグ」（docs/spec.md の 3.1）の見本：画像の形と表示の値（合成の値。どの画像も同じ）
+  ds["00080008"] = { vr: "CS", Value: ["ORIGINAL", "PRIMARY", "AXIAL"] };
+  ds["00200037"] = { vr: "DS", Value: ["1", "0", "0", "0", "1", "0"] };
+  ds["00280010"] = { vr: "US", Value: [512] };
+  ds["00280011"] = { vr: "US", Value: [512] };
+  ds["00280030"] = { vr: "DS", Value: ["0.625", "0.625"] };
+  ds["00280004"] = { vr: "CS", Value: ["MONOCHROME2"] };
+  ds["00280100"] = { vr: "US", Value: [16] };
+  ds["00280101"] = { vr: "US", Value: [12] };
+  ds["00281050"] = { vr: "DS", Value: ["40"] };
+  ds["00281051"] = { vr: "DS", Value: ["400"] };
+  // 値の出し方の見本（ImageComments）：3 枚目は HTML の形の値（文字のまま出す）、4 枚目は長い値（1024 文字で切る）
+  if (summary.instanceNumber === "3") ds["00204000"] = { vr: "LT", Value: ["<b>x</b>"] };
+  if (summary.instanceNumber === "4") ds["00204000"] = { vr: "LT", Value: ["試験の画像の注記。".repeat(500)] };
   ds["7FE00010"] = { vr: "OW", BulkDataURI: "bulk" };
   return ds;
 }

@@ -1,0 +1,26 @@
+[
+  {
+    "00080005": {
+      "Value": [
+        "ISO 2022 IR 87"
+      ],
+      "vr": "CS"
+    },
+    "00081030": {
+      "Value": [
+        "頭部単純"
+      ],
+      "vr": "LO"
+    },
+    "00100010": {
+      "Value": [
+        {
+          "Alphabetic": "ITEST^HANAKO",
+          "Ideographic": "試験^花子",
+          "Phonetic": "しけん^はなこ"
+        }
+      ],
+      "vr": "PN"
+    }
+  }
+]
