@@ -1037,47 +1037,170 @@ test("詳細の「DICOM タグ」：開いてもボタンの位置は動かな�
   // 「UID」のボタンも同じ行のまま
   expect((await place("detail-uid-toggle")).y).toBe(before.y);
 
-  // 既定は検査単位（要約）。中身はボタンの並びの下
+  // 中身は検査単位（要約）だけ。ボタンの並びの下に出す。画像単位の切り替えは無い（画像ごとの値はサムネイルから開く。下の試験）
   const tags = page.getByTestId("dicom-tags");
-  await expect(tags.getByTestId("tags-level-study")).toHaveText("検査単位（要約）");
-  await expect(tags.getByTestId("tags-level-study")).toHaveAttribute("aria-pressed", "true");
+  await expect(tags).toContainText("検査単位（要約）");
   await expect(tags.getByTestId("all-values")).toContainText("0010,0020");
+  await expect(tags.getByRole("button")).toHaveCount(0);
+  await expect(tags.getByText("画像単位")).toHaveCount(0);
   expect((await place("dicom-tags")).y).toBeGreaterThan(after.bottom);
   await expect(uidToggle).toBeVisible();
-
-  // 画像単位：最初はシリーズと画像の先頭。選んだ画像の SOPInstanceUID と、その画像の値（0008,0018）が出る
-  await tags.getByTestId("tags-level-instance").click();
-  await expect(tags.getByTestId("tags-level-instance")).toHaveAttribute("aria-pressed", "true");
-  await expect(tags.getByTestId("tags-series").locator("option")).toHaveCount(1);
-  await expect(tags.getByTestId("tags-series")).toContainText("#1");
-  const images = tags.getByTestId("tags-instance");
-  await expect(images.locator("option")).toHaveText(["#1", "#2", "#3", "#4"]);
-  const sopLine = tags.getByTestId("uid-line");
-  await expect(sopLine).toContainText("SOPInstanceUID");
-  const first = (await sopLine.locator("code").textContent())!;
-  await expect(tags.getByTestId("instance-values")).toContainText(first);
-  await expect(tags.getByTestId("instance-values")).toContainText("0008,0018");
-
-  // 画像を替えると、その画像の値に替わる（画像ごとに値が違う）
-  const valueReads: string[] = [];
-  page.on("request", (req) => {
-    if (/\/instances\/[\d.]+\/values$/.test(req.url())) valueReads.push(req.url());
-  });
-  await images.selectOption({ label: "#2" });
-  await expect(sopLine.locator("code")).not.toHaveText(first);
-  const second = (await sopLine.locator("code").textContent())!;
-  await expect(tags.getByTestId("instance-values")).toContainText(second);
-  await expect(tags.getByTestId("instance-values")).not.toContainText(first);
-  // 前の画像に戻しても、覚えた中身を出さずに読み直す（読むたびに権限の確かめと操作ログを通す）
-  await images.selectOption({ label: "#1" });
-  await expect(tags.getByTestId("instance-values")).toContainText(first);
-  expect(valueReads.filter((u) => u.includes(`/instances/${first}/values`))).toHaveLength(1);
-  expect(valueReads.filter((u) => u.includes(`/instances/${second}/values`))).toHaveLength(1);
 
   // 閉じても、ボタンの位置は動かない
   await toggle.click();
   await expect(tags).toHaveCount(0);
   expect((await place("detail-tags-toggle")).y).toBe(before.y);
+});
+
+// 移した試験：前は「DICOM タグ」の画像単位で、シリーズと画像を選ぶ欄から確かめていた（2026-10-21）。
+// 画像ごとの値はサムネイルから開く画像の場所へまとめた（change series-instance-tags）ので、同じ確かめ（画像を替えると値が替わり、
+// 前の値が残らず、戻しても読み直す）を、サムネイルから開く流れで行う
+test("サムネイルを押すと、下に画像の場所を開く：画像の一覧（番号の順）と、選んだ画像の SOPInstanceUID・主なタグ（タグ名つき）。画像を替えると値が替わる", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  const strip = page.getByTestId("series-strip");
+  await expect(strip).toHaveAttribute("data-loaded", "true");
+  await expect(page.getByTestId("series-images")).toHaveCount(0);
+  const thumb = strip.getByTestId("series-open");
+  await expect(thumb).toHaveAttribute("aria-pressed", "false");
+
+  const tagReads: string[] = [];
+  page.on("request", (req) => {
+    if (/\/instances\/[\d.]+\/tags$/.test(req.url())) tagReads.push(req.url());
+  });
+  await thumb.click();
+  await expect(thumb).toHaveAttribute("aria-pressed", "true");
+  const area = page.getByTestId("series-images");
+  await expect(area).toContainText("#1 Chest Axial 5mm");
+  // 画像の一覧：画像の番号の順。最初は先頭を選ぶ
+  const list = area.getByTestId("instance-list");
+  await expect(list.getByRole("option")).toHaveText(["#1", "#2", "#3", "#4"]);
+  await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "true");
+  // 既定は「主なタグ」：既定の 25 のタグを、タグ・タグ名・VR・値で出す
+  await expect(area.getByTestId("tag-set-configured")).toHaveAttribute("aria-pressed", "true");
+  const table = area.getByTestId("instance-tags");
+  const sopLine = area.getByTestId("uid-line");
+  await expect(sopLine).toContainText("SOPInstanceUID");
+  const first = (await sopLine.locator("code").textContent())!;
+  await expect(table.locator("tbody tr")).toHaveCount(25);
+  await expect(table.locator("thead")).toHaveText(/タグ\s*タグ名\s*VR\s*値/);
+  await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(`SOPインスタンスUID`);
+  await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(first);
+  await expect(table.locator('tr[data-tag="0020,0013"]')).toContainText("画像番号");
+  await expect(table.locator('tr[data-tag="0028,0010"]')).toContainText("行数");
+  // 画像に無いタグも行を出し、値は「—」
+  await expect(table.locator('tr[data-tag="0018,0050"] [data-testid=tag-value]')).toHaveText("—");
+  // 設定に無いタグ（患者の値）は出ない
+  await expect(table.locator('tr[data-tag="0010,0020"]')).toHaveCount(0);
+
+  // 画像を替えると、その画像の値に替わる（画像ごとに値が違う）
+  await list.getByRole("option", { name: "#2" }).click();
+  await expect(sopLine.locator("code")).not.toHaveText(first);
+  const second = (await sopLine.locator("code").textContent())!;
+  await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(second);
+  await expect(table).not.toContainText(first);
+  // 前の画像に戻しても、覚えた中身を出さずに読み直す（読むたびに権限の確かめと操作ログを通す）
+  await list.getByRole("option", { name: "#1" }).click();
+  await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(first);
+  expect(tagReads.filter((u) => u.includes(`/instances/${first}/tags`))).toHaveLength(2);
+  expect(tagReads.filter((u) => u.includes(`/instances/${second}/tags`))).toHaveLength(1);
+
+  // 同じサムネイルをもう一度押すと閉じる
+  await thumb.click();
+  await expect(thumb).toHaveAttribute("aria-pressed", "false");
+  await expect(area).toHaveCount(0);
+});
+
+test("画像の場所：上下の矢印のキーで画像を替える（検査一覧の行は動かない）。「すべてのタグ」は値の全部で、画像を替えても保つ", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.getByTestId("series-open").click();
+  const area = page.getByTestId("series-images");
+  const list = area.getByTestId("instance-list");
+  await expect(list.getByRole("option")).toHaveCount(4);
+  await list.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(list.getByRole("option", { name: "#2" })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await expect(list.getByRole("option", { name: "#2" })).toHaveAttribute("aria-selected", "true");
+  await expect(list).toBeFocused();
+  // 検査一覧で選んだ行は替わらない
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", STUDY);
+
+  // すべてのタグ：その画像の値の全部（患者の値も）。タグ名の分かるものは日本語で出す
+  await area.getByTestId("tag-set-all").click();
+  await expect(area.getByTestId("tag-set-all")).toHaveAttribute("aria-pressed", "true");
+  const all = area.getByTestId("instance-values");
+  await expect(all.locator('tr[data-tag="0010,0020"]')).toContainText("患者ID");
+  await expect(all.locator('tr[data-tag="0010,0020"]')).toContainText("JP-TEST-0004");
+  // 日本語の値（ISO_IR 192 の見本）は崩れない
+  await expect(all.locator('tr[data-tag="0010,0010"]')).toContainText("Shiken^Takako=試験^髙子=しけん^たかこ");
+  // 画像を替えても「すべてのタグ」のまま
+  await list.getByRole("option", { name: "#1" }).click();
+  await expect(area.getByTestId("tag-set-all")).toHaveAttribute("aria-pressed", "true");
+  await expect(all.locator('tr[data-tag="0020,0013"] [data-testid=tag-value]')).toHaveText("1");
+  await area.getByTestId("tag-set-configured").click();
+  await expect(area.getByTestId("instance-tags").locator("tbody tr")).toHaveCount(25);
+});
+
+test("画像の場所の値：HTML の形の値は文字のまま。長い値は 1024 文字で切り、全体の文字数を添える。バイナリは中身を出さない", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.getByTestId("series-open").click();
+  const area = page.getByTestId("series-images");
+  await area.getByTestId("tag-set-all").click();
+  const all = area.getByTestId("instance-values");
+  await area.getByTestId("instance-list").getByRole("option", { name: "#3" }).click();
+  const comments = all.locator('tr[data-tag="0020,4000"] [data-testid=tag-value]');
+  await expect(comments).toHaveText("<b>x</b>");
+  await expect(comments.locator("b")).toHaveCount(0);
+  await expect(all.locator('tr[data-tag="7FE0,0010"] [data-testid=tag-value]')).toHaveText("（バイナリ）");
+  await expect(all.locator('tr[data-tag="7FE0,0010"]')).toContainText("画素データ");
+  await area.getByTestId("instance-list").getByRole("option", { name: "#4" }).click();
+  await expect(comments).toContainText("…（全 4,500 文字）");
+  // 1024 文字と、後ろの添え書き
+  expect(((await comments.textContent()) ?? "").replace(/…（全 4,500 文字）$/, "")).toHaveLength(1024);
+});
+
+test("画像の場所：別のサムネイルを押すと、そのシリーズに替わる。Enter でも開く。行を替えると閉じる", async ({ page }) => {
+  await asRole(page, "一般");
+  // シリーズが 2 つの検査（一覧の「2 / 6」の行）
+  const twoSeries = page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first();
+  await twoSeries.click();
+  const thumbs = page.getByTestId("series-strip").getByTestId("series-open");
+  await expect(thumbs).toHaveCount(2);
+  await thumbs.nth(1).click();
+  const area = page.getByTestId("series-images");
+  const secondSeries = await area.getAttribute("data-series-uid");
+  await expect(thumbs.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(area.getByTestId("instance-list").getByRole("option").first()).toHaveAttribute("aria-selected", "true");
+  await thumbs.nth(0).focus();
+  await page.keyboard.press("Enter");
+  await expect(thumbs.nth(0)).toHaveAttribute("aria-pressed", "true");
+  await expect(thumbs.nth(1)).toHaveAttribute("aria-pressed", "false");
+  await expect(area).not.toHaveAttribute("data-series-uid", secondSeries!);
+  await page.keyboard.press(" ");
+  await expect(area).toHaveCount(0);
+  await page.keyboard.press(" ");
+  await expect(page.getByTestId("series-images")).toHaveCount(1);
+  // 別の行を選ぶと閉じる
+  await row(page).click();
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", STUDY);
+  await expect(page.getByTestId("series-images")).toHaveCount(0);
+});
+
+test("画像の場所：狭い幅（600px）では、画像の一覧を上、タグの表を下に重ね、横にはみ出さない", async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 900 });
+  await asRole(page, "一般");
+  await row(page).click({ position: { x: 100, y: 12 } });
+  await page.getByTestId("series-open").click();
+  const area = page.getByTestId("series-images");
+  const list = (await area.getByTestId("instance-list").boundingBox())!;
+  const table = (await area.getByTestId("instance-tags").boundingBox())!;
+  expect(table.y).toBeGreaterThanOrEqual(list.y + list.height);
+  const box = (await area.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(600);
 });
 
 test("自動更新：30 秒ごとに一覧の版を読み、変わったときだけ一覧を読み直す。選んだ行・スクロール・開いている詳細は残る", async ({ page }) => {

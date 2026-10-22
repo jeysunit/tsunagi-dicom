@@ -22,6 +22,7 @@
 | `rest/statistics.json` | `GET /statistics`（下の置き換えの規則 4） |
 | `dicom-web/studies.json` | `GET /dicom-web/studies?PatientID=JP-TEST-*`（QIDO-RS、`Accept: application/dicom+json`） |
 | `dicom-web/studies/{StudyInstanceUID}/series.json` | `GET /dicom-web/studies/{StudyInstanceUID}/series`（上の1件目の検査） |
+| `dicom-web/iso2022-instance-metadata.json` | `GET /dicom-web/studies/{study}/series/{series}/instances/{sop}/metadata` の答えのうち、SpecificCharacterSet・StudyDescription・PatientName の 3 つだけ。SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の画像を、結合の試験の 14 で Orthanc 26.9.1 に入れて写した（2026-10-23） |
 
 JSON は読みやすいように、キーを並べ替えて字下げした（値は変えていない。置き換えたものを除く）。
 

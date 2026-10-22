@@ -113,7 +113,7 @@
 答えは `{ tags: [{ tag: "0008,0018", name: "SOPインスタンスUID", vr: "UI", value: "…" | null, length?: number }] }`。設定の順に、画像に無いタグも `vr: ""`・`value: null` で返す。値が 1024 文字を超えたときだけ `length`（全体の文字数）を付け、`value` は先頭の 1024 文字にする。
 
 - 値の組み立ては、いまの `src/lib/all-values.ts` の `valueText`（バイナリ・SQ・PN・複数の値）を使い、設定のタグの選び出し・タグ名・長さの切り方を足す。「すべてのタグ」はいまの `…/values` を使い、同じ表の部品でタグ名の列も出す（名前の分かるものだけ）。
-- 文字数は Unicode の符号位置で数える（サロゲートの組を割らない）。
+- 文字数は Unicode の符号位置で数える（サロゲートの組を割らない）。長い値の切り方は、値の全部の `…/values`（すべてのタグと「DICOM タグ」の検査単位）にも同じく当てる（spec の「長い値とバイナリの値」は画面の API の全部に掛かる）。
 - 権限・UID の確かめ・操作ログは、いまの `…/values` と同じ形にし、`detail` に `set: "configured"` を足す。`…/values` の `detail` には `set: "all"` を足す。
 
 ### 7. タグ名
@@ -124,10 +124,11 @@
   - リベルワークス「標準DICOM画像タグセット一覧」 <https://www.liberworks.co.jp/know/know_dicomTag.html>（タグごとの日本語の属性名。2026-10-23 に読んだ）
   - Sonic DICOM「DICOM用語集」 <https://ja.sonicdicom.com/dicom-glossary/>（タグの例と属性名。2026-10-23 に読んだ）
 - 参考の訳と画面の用語集（`docs/spec.md` の 2.2）が違うときは、用語集を先にする。同じものを画面の別の場所で別の言葉にしないため。
-  - 例：Instance は画面で「画像」と呼ぶので「インスタンス番号」でなく「画像番号」。Study Description は「検査記述」でなく「検査名」、Series Description は「シリーズ名」、Referring Physician's Name は「依頼医」、Patient's Name は「氏名」、Patient ID は「患者ID」。
+  - 例：Instance は画面で「画像」と呼ぶので「インスタンス番号」でなく「画像番号」。Study Description は「検査記述」でなく「検査名」、Series Description は「シリーズ名」、Patient's Name は「氏名」、Patient ID は「患者ID」。
+  - Referring Physician's Name は「紹介医」にする（参考の訳「照会医師の名前」を短くした）。
 - 日付は用語集の「検査日」に合わせて「〜日付」でなく「〜日」にし、数は「〜の数」「行」でなく「〜数」にする。
 - 参考に無い訳（RescaleIntercept・RescaleSlope）と、参考の訳では意味が伝わりにくいもの（ContentDate の「内容日付」）は、ここで決めた（5 の表の *）。
-- 決めた訳は、`docs/spec.md` の 2.2 の用語集に「タグ名」の表として足し、承認者が確かめてから画面に出す。
+- 決めた訳は、`docs/spec.md` の 2.2 の用語集に「タグ名」の表として足す。
 
 ### 8. 日本語の値
 

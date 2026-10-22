@@ -572,6 +572,58 @@ test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像�
   expect.soft(keys.sort(), "Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID か患者 ID を返さなくなった").toEqual(["0020000D", "0020000E", "00100020"].sort());
 });
 
+// 13（検査を 1001 件足す）より前に流す
+test("14 画像ごとの主なタグ：ISO 2022 IR 87 の検査の氏名と検査名が、本物の Orthanc の WADO-RS の metadata から崩れずに返る（2026-10-23）", async () => {
+  test.setTimeout(120_000);
+  const { page } = admin;
+  // 文字の集合が ISO 2022 IR 87（JIS X 0208）の、架空の患者の検査
+  const J = syntheticStudy("study-jp", 23, 2, {
+    charset: "\\ISO 2022 IR 87",
+    patientName: "ITEST^HANAKO=試験^花子=しけん^はなこ",
+    studyDescription: "頭部単純",
+  });
+  writeDumps(J);
+  await storescuToOrthanc(J.batch);
+  await waitFor(`Orthanc に ${J.batch} が入る`, () => lookupStudy(J.studyInstanceUid), (ids) => ids.length === 1);
+
+  const sop = J.sopInstanceUids[1]!;
+  const res = await page.request.get(`/api/studies/${J.studyInstanceUid}/series/${J.seriesInstanceUid}/instances/${sop}/tags`);
+  expect(res.status()).toBe(200);
+  const { tags } = (await res.json()) as { tags: { tag: string; name: string; vr: string; value: string | null }[] };
+  // INSTANCE_TAGS（playwright.config.ts）の順に、設定のタグだけ
+  expect(tags.map((t) => t.tag)).toEqual(["0020,0013", "0008,0018", "0010,0010", "0008,1030", "0028,0010", "0018,0050", "0002,0010"]);
+  const byTag = (tag: string) => tags.find((t) => t.tag === tag)!;
+  expect(byTag("0020,0013")).toMatchObject({ name: "画像番号", value: "2" });
+  expect(byTag("0008,0018").value).toBe(sop);
+  // 漢字とかなが崩れない（BFF は文字コードを読み替えず、Orthanc が直した値をそのまま返す）
+  expect(byTag("0010,0010")).toMatchObject({ name: "氏名", vr: "PN", value: "ITEST^HANAKO=試験^花子=しけん^はなこ" });
+  expect(byTag("0008,1030")).toMatchObject({ name: "検査名", value: "頭部単純" });
+  expect(byTag("0028,0010").value).toBe("8");
+  // 画像に無いタグは null
+  expect(byTag("0018,0050")).toMatchObject({ vr: "", value: null });
+  // ファイルのメタ情報（転送構文）が WADO-RS の metadata に入るかを記録する（既定の一覧に入れなかった理由）
+  observe("metadata.transferSyntax", byTag("0002,0010"));
+  // 設定に無いタグ（患者ID）は返らない
+  expect(JSON.stringify(tags)).not.toContain(J.patientId);
+
+  // Orthanc の WADO-RS の metadata の答えの、文字の集合と日本語の値（モックの見本に写す）
+  const metadata = await orthancJson<Record<string, { vr: string; Value?: unknown[] }>[]>(
+    `dicom-web/studies/${J.studyInstanceUid}/series/${J.seriesInstanceUid}/instances/${sop}/metadata`,
+  );
+  observe("metadata.iso2022", {
+    "00080005": metadata[0]?.["00080005"],
+    "00081030": metadata[0]?.["00081030"],
+    "00100010": metadata[0]?.["00100010"],
+  });
+
+  // 画面：サムネイルから開き、主なタグの表に日本語の氏名が出る
+  await openStudy(page, J);
+  await page.getByTestId("series-open").click();
+  const table = page.getByTestId("series-images").getByTestId("instance-tags");
+  await expect(table.locator('tr[data-tag="0010,0010"]')).toContainText("試験^花子=しけん^はなこ");
+  await expect(table.locator('tr[data-tag="0008,1030"]')).toContainText("頭部単純");
+});
+
 test("13 上限を超えたとき：検査が 1000 件を超えても、いちばん新しい検査が一覧に出て、件数は「以上」になる（2026-10-21）", async () => {
   // 最後の試験に置く（Orthanc に 1000 件を超える検査を足すので、ほかの試験の一覧に混ざらないように）
   test.setTimeout(600_000);
