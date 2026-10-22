@@ -1,0 +1,38 @@
+schema: spec-driven
+
+context: |
+  成果物（proposal・specs・design・tasks）は日本語で書く。
+  tsunagi-dicom は、画像サーバーの Orthanc の前に置く、日本の現場向けの PACS の画面（Next.js の画面と BFF）。
+  Orthanc は改造せずに使い、検査の一覧・ビューアの選び分け・PACS の運用の操作を1つの画面で行えるようにする。
+  決まりは AGENTS.md、仕様は docs/spec.md にある。成果物もこれに従う（公開リポジトリに入れないもの・言葉の決まり・設計の決まり）。
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+# Example:
+#   context: |
+#     Designs and tasks must cover Windows, macOS, and Linux
+#     Write all artifacts in Spanish
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
