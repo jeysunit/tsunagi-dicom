@@ -20,8 +20,10 @@ import {
 /** A40・ORM の覚えを使う期間。受理から 24 時間（design.md §15） */
 export const REMEMBER_TTL_MS = 24 * 60 * 60 * 1000;
 
-type Alias = Extract<Remembered, { kind: "alias" }>;
-type Order = Extract<Remembered, { kind: "order" }>;
+/** 覚えに、受理した順（監査の記録の並び）と受理の時刻を添えたもの。前後は順で決め、時刻は期限だけに使う */
+type Ordered<T> = T & { seq: number; time: number };
+type Alias = Ordered<Extract<Remembered, { kind: "alias" }>>;
+type Order = Ordered<Extract<Remembered, { kind: "order" }>>;
 
 export interface SweepResult {
   /** 書き換えた検査の数 */
@@ -32,28 +34,36 @@ export interface SweepResult {
   blocked?: string;
 }
 
-/** 期限の中の覚えを、受理した順に取り出す。ack の行の AA だけを見る。 */
-export function activeMemory(rows: HistoryRow[], now: number): { aliases: Alias[]; orders: Order[] } {
+/**
+ * 覚えを、受理した順に全部取り出す（ack の行の AA だけ）。期限はここでは切らない。統合の段と前後は全部の覚えで
+ * 決めてから、最初の段の時刻で期限を見る（期限で古い A40 だけが落ちて、送り直しが新しい段に見えることを防ぐ）。
+ */
+export function memory(rows: HistoryRow[]): { aliases: Alias[]; orders: Order[] } {
   const remembered = rows
     .filter(r => r.detail?.event === "ack" && r.detail?.code === "AA" && r.detail?.remember)
-    .map(r => r.detail!.remember as Remembered)
-    .filter(m => {
-      const at = Date.parse(m.at);
-      // 時計の小さな巻き戻り（5 分まで）は許す。それより先の時刻の覚えは使わない
-      return Number.isFinite(at) && at - now <= 5 * 60 * 1000 && now - at <= REMEMBER_TTL_MS;
-    });
+    .map((r, seq) => {
+      const m = r.detail!.remember as Remembered;
+      return { ...m, seq, time: Date.parse(m.at) };
+    })
+    .filter(m => Number.isFinite(m.time));
   return {
     aliases: remembered.filter((m): m is Alias => m.kind === "alias"),
     orders: remembered.filter((m): m is Order => m.kind === "order"),
   };
 }
 
+/** 統合の最初の段の A40 が、期限（受理から 24 時間）の中か。時計の小さな巻き戻り（5 分まで）は許す */
+export function withinTtl(link: { time: number }, now: number): boolean {
+  return link.time - now <= 5 * 60 * 1000 && now - link.time <= REMEMBER_TTL_MS;
+}
+
 /** 統合の 1 段。同じ旧い患者 ID から同じ先への A40（送り直しを含む）をまとめたもの */
 export interface Link {
   from: string;
   to: string;
-  /** その段の最初の A40 の受理の時刻 */
-  since: number;
+  /** その段の最初の A40 の受理の順と時刻 */
+  seq: number;
+  time: number;
   studies: string[];
   fromNames: string[];
   fromBirthDates: string[];
@@ -74,7 +84,7 @@ export function resolveAlias(aliases: Alias[], start: string): Link[] | null {
   let current = start;
   let since = Number.NEGATIVE_INFINITY;
   for (;;) {
-    const next = aliases.filter(a => a.from === current && Date.parse(a.at) >= since);
+    const next = aliases.filter(a => a.from === current && a.seq > since);
     const targets = new Set(next.map(a => a.to));
     if (!targets.size) {
       break;
@@ -90,7 +100,8 @@ export function resolveAlias(aliases: Alias[], start: string): Link[] | null {
     const link: Link = {
       from: current,
       to,
-      since: Math.min(...next.map(a => Date.parse(a.at))),
+      seq: next[0]!.seq,
+      time: next[0]!.time,
       studies: union(a => a.studies),
       fromNames: union(a => a.fromNames),
       fromBirthDates: union(a => a.fromBirthDates).filter(Boolean),
@@ -100,20 +111,20 @@ export function resolveAlias(aliases: Alias[], start: string): Link[] | null {
     seen.add(to);
     links.push(link);
     current = to;
-    since = link.since;
+    since = link.seq;
   }
   return links.length ? links : null;
 }
 
 /**
  * 統合の先の患者の ORM のうち、使ってよいもの。その段の最初の A40 の後で、次の段（その患者がさらに別の患者に
- * 統合された）の最初の A40 より前に受理したものだけ。統合された後の患者 ID の ORM は、別の患者のものでありうる。
+ * 統合された）の最初の A40 より前に受理したものだけ（前後は受理した順で決める）。統合された後の患者 ID の ORM は、
+ * 別の患者のものでありうる。
  */
 export function ordersForChain(links: Link[], orders: Order[]): Order[] {
   return orders.filter(o => links.some((link, i) => {
-    const at = Date.parse(o.at);
-    const until = links[i + 1]?.since ?? Number.POSITIVE_INFINITY;
-    return o.patientId === link.to && at >= link.since && at < until;
+    const until = links[i + 1]?.seq ?? Number.POSITIVE_INFINITY;
+    return o.patientId === link.to && o.seq > link.seq && o.seq < until;
   }));
 }
 
@@ -140,7 +151,7 @@ export async function sweepArrivals(
     return { count: 0, skipped: 0, blocked: "結果の分からない書き換えがある" };
   }
   const now = (options.now ?? Date.now)();
-  const { aliases, orders } = activeMemory(rows, now);
+  const { aliases, orders } = memory(rows);
   const sweepId = randomUUID();
   const row: AuditRow = (event, outcome, detail = {}, patientId, studyInstanceUid) => audit({
     actorId: "hl7-receiver",
@@ -161,9 +172,15 @@ export async function sweepArrivals(
   for (const source of [...new Set(aliases.map(a => a.from))]) {
     const links = resolveAlias(aliases, source);
     if (!links) {
-      for (const id of await backend.findStudiesByPatientId(source)) {
-        skip("統合の先を決められない", source, id);
+      // 期限の中の A40 があるときだけ知らせる（古い覚えのたびに Orthanc を探さない）
+      if (aliases.some(a => a.from === source && withinTtl(a, now))) {
+        for (const id of await backend.findStudiesByPatientId(source)) {
+          skip("統合の先を決められない", source, id);
+        }
       }
+      continue;
+    }
+    if (!withinTtl(links[0]!, now)) {
       continue;
     }
     const target = links.at(-1)!.to;

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditEntryInput } from "@/lib/audit";
 import { enqueue, processMessage } from "@/lib/hl7/apply";
-import { REMEMBER_TTL_MS, resolveAlias, sweepArrivals } from "@/lib/hl7/sweep";
+import { REMEMBER_TTL_MS, memory, ordersForChain, resolveAlias, sweepArrivals, withinTtl } from "@/lib/hl7/sweep";
 import { createFakeOrthanc, type FakeOrthanc } from "./helpers/fake-orthanc";
 
 // 照合の後に仮の患者 ID で届いた画像の書き換え（IHE PIR の Case 6）と、ORM の CA・DC・XO（design.md §15・§16）。
@@ -155,6 +155,41 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     warn.mockRestore();
   });
 
+  it("期限で最初の A40 が古くなっても、送り直しを新しい段として使わない", () => {
+    const day = REMEMBER_TTL_MS;
+    const now = Date.parse("2026-10-26T12:00:00Z");
+    const ack = (remember: Record<string, unknown>, ago: number): AuditEntryInput => ({
+      actorId: "hl7-receiver", actorRole: "system", authMode: "hl7", action: "hl7", outcome: "success",
+      detail: { event: "ack", code: "AA", remember: { ...remember, at: new Date(now - ago).toISOString() } }
+    });
+    const a = (from: string, to: string) => ({ kind: "alias", from, to, studies: [], fromNames: [], attributes: {} });
+    const { aliases, orders } = memory([
+      ack(a("T", "P1"), day + 60_000),
+      ack(a("P1", "P2"), day + 30_000),
+      ack(a("T", "P1"), 60_000),
+      ack({ kind: "order", patientId: "P1", uid: "2.25.5", accession: "OTHER", control: "NW" }, 30_000)
+    ]);
+    const links = resolveAlias(aliases, "T")!;
+    // 送り直しは最初の段にまとまり、統合の先は P2 のまま。最初の段は期限の外なので使わない
+    expect(links.map(l => l.to)).toEqual(["P1", "P2"]);
+    expect(withinTtl(links[0]!, now)).toBe(false);
+    // 統合された後の P1 の ORM は使わない
+    expect(ordersForChain(links, orders)).toEqual([]);
+  });
+
+  it("同じ時刻に受理した ORM と次の A40 は、受理した順で前後を決める", () => {
+    const at = "2026-10-26T12:00:00.000Z";
+    const ack = (remember: Record<string, unknown>): AuditEntryInput => ({
+      actorId: "hl7-receiver", actorRole: "system", authMode: "hl7", action: "hl7", outcome: "success",
+      detail: { event: "ack", code: "AA", remember: { ...remember, at } }
+    });
+    const a = (from: string, to: string) => ({ kind: "alias", from, to, studies: [], fromNames: [], attributes: {} });
+    const o = (uid: string) => ({ kind: "order", patientId: "P1", uid, accession: uid, control: "NW" });
+    const { aliases, orders } = memory([ack(a("T", "P1")), ack(o("2.25.1")), ack(a("P1", "P2")), ack(o("2.25.2"))]);
+    const links = resolveAlias(aliases, "T")!;
+    expect(ordersForChain(links, orders).map(x => x.uid)).toEqual(["2.25.1"]);
+  });
+
   it("同じ StudyInstanceUID の検査が別の患者にあれば書き換えない", async () => {
     const warn = quietly();
     temp();
@@ -196,7 +231,8 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
 
   it("同じ仮の患者 ID から 2 つの先がある・輪になっているときは書き換えない", async () => {
     const at = new Date().toISOString();
-    const alias = (from: string, to: string) => ({ kind: "alias" as const, from, to, studies: [STUDY], fromNames: [], attributes: {}, at });
+    let n = 0;
+    const alias = (from: string, to: string) => ({ kind: "alias" as const, from, to, studies: [STUDY], fromNames: [], attributes: {}, at, seq: n++, time: Date.parse(at) });
     expect(resolveAlias([alias("T", "P1"), alias("T", "P3")], "T")).toBeNull();
     expect(resolveAlias([alias("T", "P1"), alias("P1", "T")], "T")).toBeNull();
     expect(resolveAlias([alias("T", "P1"), alias("P1", "P2")], "T")?.map(l => l.to)).toEqual(["P1", "P2"]);
