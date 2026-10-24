@@ -98,7 +98,7 @@ H1〜H5 を、ris-emulator の 3573572、Orthanc 1.13.0（`OverwriteInstances: t
 
 ### 照合（H6）を開発の一式で測った結果（2026-10-25）
 
-ris-emulator の 5fe0be9（照合のある版）、DTG の 52380eb（`use_mpps: true`）で、`tests/flow/flow.spec.ts` の 5 を流した（compose のプロジェクトは `tsunagi-flow`）。期待どおりだった。緊急の患者（画像 2 枚）の MPPS が `reconcile list` に出て（状態は `COMPLETED`、撮影の StudyInstanceUID）、`reconcile run` の ADT^A40・ORM^O01 がどちらも AA。一覧には同じ StudyInstanceUID の検査が 1 件だけ、正式な患者 ID・生年月日・性別・受付番号・氏名（漢字）で出て、画像の数は同じ、元の患者 ID の検査は残らなかった。ris-emulator の予約は撮影の StudyInstanceUID の完了になり、`reconcile list` から消えた。
+ris-emulator の ae71765（照合のある版。#24 のマージ。測ったのは同じ内容の 5fe0be9）、DTG の 52380eb（`use_mpps: true`）で、`tests/flow/flow.spec.ts` の 5 を流した（compose のプロジェクトは `tsunagi-flow`）。期待どおりだった。緊急の患者（画像 2 枚）の MPPS が `reconcile list` に出て（状態は `COMPLETED`、撮影の StudyInstanceUID）、`reconcile run` の ADT^A40・ORM^O01 がどちらも AA。一覧には同じ StudyInstanceUID の検査が 1 件だけ、正式な患者 ID・生年月日・性別・受付番号・氏名（漢字）で出て、画像の数は同じ、元の患者 ID の検査は残らなかった。ris-emulator の予約は撮影の StudyInstanceUID の完了になり、`reconcile list` から消えた。
 
 ## 実測で決めること（段 4 の残り）
 
