@@ -23,22 +23,26 @@ fi
 
 # 1. secret のファイル（tsunagi-dicom と Orthanc の分は配る compose と同じ作り方）
 "$root/deploy/init-secrets.sh" "$secrets"
-# Web 画面のパスワード（dicom-test-generator と ris-emulator）。壊れた symlink もあると見なし、その先に書かない
+# Web 画面のパスワード（dicom-test-generator と ris-emulator）と、HL7 の受け口と tsunagi-dicom の間の token。
+# 2 つめの引数は字の数（既定 24）。壊れた symlink もあると見なし、その先に書かない
 web_password() {
   file="$secrets/$1"
+  length=${2:-24}
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then
     (
       umask 077
-      LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24 > "$file"
+      LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$length" > "$file"
       printf '\n' >> "$file"
     )
-    # コンテナの中の利用者（どちらも uid 10001）が読めるようにする（置き場は 0700）
+    # コンテナの中の利用者（DTG・ris-emulator は uid 10001、tsunagi-dicom と受け口は uid 1000）が読めるようにする（置き場は 0700）
     chmod 0644 "$file"
     echo "作った：$file"
   fi
 }
 web_password dtg_web_password.txt
 web_password ris_web_password.txt
+# 英数字 48 字（約 285 bit。乱数 32 バイトより多い）
+web_password hl7_receiver_token.txt 48
 
 # 2. tsunagi-dicom のイメージ。名前に compose のプロジェクトの名前を入れ、一式ごとに分ける（compose.yaml の ris・dtg・storescp と同じ）。
 #    プロジェクトの名前は compose が決めたもの（環境変数・.env・compose.yaml の name）を、dtg のイメージの名前から取る
@@ -81,6 +85,8 @@ ris-emulator で今日の CT の予約を 3 件作る（dicom-test-generator の
   docker compose -f $here/compose.yaml exec dtg python -m app.cli exam --from-worklist KEY -s 1 -i 3 --send
 架空の患者を、予約なし（緊急の患者）で送る：
   docker compose -f $here/compose.yaml exec dtg python -m app.cli exam --emergency --patient-id DEV0001 --patient-name "DEV^TARO" -s 1 -i 3 --send
+緊急の患者の検査を、ris-emulator から HL7 で正式な患者に統合する（受け口 hl7-receiver を通って Orthanc が書き換わる）：
+  docker compose -f $here/compose.yaml exec ris python -m app.cli pir send --host hl7-receiver --kind a40 --patient-id P000001 --prior-patient-id DEV0001 --name "TANAKA^HIROSHI"
 storescp（送信先 dev-scp）に届いたファイル：
   docker compose -f $here/compose.yaml exec storescp find /received -type f
 止める：

@@ -30,8 +30,8 @@
 ## 6. 結合の試験と開発の一式
 
 - [x] 6.1 結合の試験の Orthanc を `OverwriteInstances: true` にし（いまの場面が送り直しの無視に頼っていないことを先に確かめる）、A40 の後に UID が同じまま患者 ID が替わり元の検査が残らないこと、A08 で氏名が替わること、ORM で受付番号が入ること、替え先の患者がすでにある A40（属性が同じなら通り、違えば AE で両方の検査が変わらない）を、画像ごとの UID の組・値・件数・元の検査の有無まで確かめる場面を足す。仕事の途中の失敗（`partial`）は、実の Orthanc で起こす手段が無いので、モックの試験で確かめる（PR に書く）
-- [ ] 6.2 開発の一式に受け口を足し（`hl7` と `backend` のネットワーク、ホストにポートを出さない。design.md の 2）、Orthanc を `OverwriteInstances: true` にし、ris-emulator の版を上げ、`up.sh` で token を作る
-- [ ] 6.3 開発の一式で、ris-emulator の `pir send`（A40・A08・ORM）から受け口を通して Orthanc が書き換わることを確かめ、`docs/round-trip-test.md` に手順と結果を書く
+- [x] 6.2 開発の一式に受け口を足し（`hl7` と `backend` のネットワーク、ホストにポートを出さない。design.md の 2）、Orthanc を `OverwriteInstances: true` にし、ris-emulator の版を上げ、`up.sh` で token を作る
+- [x] 6.3 開発の一式で、ris-emulator の `pir send`（A40・A08・ORM）から受け口を通して Orthanc が書き換わることを確かめ、`docs/round-trip-test.md` に手順と結果を書く
 
 ## 7. まとめの確かめ
 
@@ -43,6 +43,6 @@
 
 ## 2026-10-24 実装と検証の補足
 
-- 2〜5 と 6.1 は実装と試験を終えた。6.1 の結合の試験は、手元の Docker で 17 件が通った。6.2・6.3 は続く PR で出す。
+- 2〜5 と 6.1 は実装と試験を終えた。6.1 の結合の試験は、手元の Docker で 17 件が通った。6.2・6.3 は開発の一式の PR で終えた（`docs/round-trip-test.md` の H1〜H5）。
 - OverwriteInstances の根拠：結合の試験で Orthanc へ画像を入れる箇所（共通の準備・詳細の条件・日本語のタグ・HL7）は、どれも新しい UID の検査を 1 回入れるだけで、送り直しの無視に頼っていない。
 - この change の途中で書いた HL7 の試験のうち、設計の直し（発番元・明示の削除・MSH-18 が空の日本語・替え先の患者の値・不正な CIDR）に合わせて期待を替えたものがある。main にあった試験の期待は替えていない。

@@ -73,6 +73,26 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 | 8 | **操作ログが書けないとき**：試しの環境だけで、tsunagi-dicom の `/data` を読み取りだけにしてから、4 を流す（施設の本番の環境では行わない） | 「求めた」を記録できないので、Orthanc を呼ばずにエラーになる（Orthanc の `/jobs` にジョブができない・storescp に届かない） | Orthanc の `/jobs` に新しいジョブが無いこと。`/data` を戻してから、9 で記録のつなぎが壊れていないこと |
 | 9 | 管理者で `/api/audit/verify` を開く | `ok` が `true`。`checked` が 4 の手順の前より増えている | 増えた行の数。送るの記録が、要求の ID で「求めた」「結果」「終わり」の3行（7 の送信は「求めた」「結果（unknown）」「照らした」）につながっていること |
 
+## HL7 による患者情報の更新（PIR）
+
+ris-emulator が HL7 v2.3.1 で送る患者の統合（A40）・属性の更新（A08）・予約（ORM）を、受け口 `hl7-receiver` が受け、tsunagi-dicom が Orthanc の検査を書き換える（[`spec.md`](spec.md) の 3.5「HL7 による患者情報の更新」）。受け口は ris-emulator だけと共有するネットワークの中で待ち受け、ホストには出していない。
+
+| # | すること | 期待すること |
+|---|---|---|
+| H1 | 緊急の患者で撮って送る：`dc exec dtg python -m app.cli exam --emergency --patient-id DEV0001 --patient-name "DEV^TARO" -s 2 -i 2,2 --send` | 患者 ID `DEV0001`、受付番号が空の検査が 1 件できる |
+| H2 | 正式な患者に統合する：`dc exec ris python -m app.cli pir send --host hl7-receiver --kind a40 --patient-id P000001 --prior-patient-id DEV0001 --name "TANAKA^HIROSHI=田中^博=タナカ^ヒロシ" --birth-date 19980312 --sex M` | ris-emulator が「受理されました（AA）」と出す。検査は患者 ID `P000001` と漢字・かなの氏名になり、StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID は H1 と同じ。患者 ID `DEV0001` の検査は残らない |
+| H3 | 氏名を直す：`dc exec ris python -m app.cli pir send --host hl7-receiver --kind a08 --patient-id P000001 --name "TANAKA^HIROSHI=田中^浩=タナカ^ヒロシ" --visit-number V20261024001` | AA。全部の画像の氏名が替わり、患者 ID・生年月日・UID と画像の数は変わらない |
+| H4 | 予約（ORM の NW）を送る。ZDS に H1 の StudyInstanceUID を入れた ORM を送る（ris-emulator の照合の画面（PIR の順 3）ができるまでは、ris-emulator のコンテナの中から手で組んだメッセージを送る） | AA。全部の画像に受付番号が入る。患者 ID の違う ORM、別の受付番号の ORM は AE で、検査は変わらない |
+| H5 | tsunagi-dicom のコンテナ（`backend` のネットワーク）から受け口の 2575 につなぐ | 何も返さずに閉じる。受け口のログに `refused` が出る |
+
+### 開発の一式で測った結果（2026-10-24）
+
+H1〜H5 を、ris-emulator の 3573572、Orthanc 1.13.0（`OverwriteInstances: true`）で流した。どれも期待どおりだった。画像は 2 シリーズ・4 枚。
+
+- H2：4 枚とも UID の組が H1 と同じまま、患者 ID・氏名・生年月日・性別が替わった。Orthanc の中の検査の ID は替わり、元の検査は消えた。
+- H3・H4：同じ Orthanc の中の ID のまま、4 枚とも値が替わった。同じ MSH-10・同じ本文の ORM を 2 回送ると、2 回とも AA で、2 回目は Orthanc を呼ばなかった。同じ MSH-10 で本文（MSH-7）の違う ORM は AR になった。
+- 最初の実装では、H3 の A08 で検査が消えた。患者 ID の変わらない書き換えに `KeepSource: false` を渡したため、Orthanc が `OverwriteInstances` で置き換えた画像を、元の ID ごと消した。画像ごとの確かめが `partial` を出して後のメッセージを止めた。`KeepSource: false` を患者 ID の変わる A40 だけに直し、流し直して上の結果を得た。
+
 ## 実測で決めること（段 4 の残り）
 
 ### 結合の試験で測った結果（2026-10-20）
