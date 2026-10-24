@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 // シリーズの並びは画面の API から後で足す）。
 // 業務で毎回見る値は見出しの 2 行に常に出す（2026-10-20 に「すべての項目」を開け閉めする形から直した。UX のレビューの H8）：
 //   1 行目：氏名・カナ・英字氏名・患者ID・生年月日と和暦・年齢・性別
-//   2 行目：検査日時・モダリティ・検査名・受付番号・依頼医・Study ID・シリーズ数と画像数
+//   2 行目：検査日時・モダリティ・検査名・受付番号・紹介医・Study ID・シリーズ数と画像数
 // 値の無い項目は省く。受付番号だけは、無いときも「受付番号 —」を出す（無いこと自体が照合の手がかりになる）。
 // その下にシリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。DICOM の値を見る権限のある役割では、
 // サムネイルを押すと、その下にシリーズの画像の場所（画像の一覧と、画像ごとのタグ）を開く。もう一度押すと閉じる。
@@ -496,14 +496,14 @@ export function StudyDetailPanel({
             <HeadValue label="年齢" value={formatAge(study.patientBirthDate, study.studyDate)} />
             <HeadValue label="性別" value={sexLabel(study.patientSex)} />
           </p>
-          {/* 2 行目：検査（毎回見る値。前は「すべての項目」の中にあった受付番号・依頼医・Study ID・シリーズ数と画像数もここ） */}
+          {/* 2 行目：検査（毎回見る値。前は「すべての項目」の中にあった受付番号・紹介医・Study ID・シリーズ数と画像数もここ） */}
           <p className="flex flex-wrap items-baseline gap-x-3" data-testid="detail-head-study">
             <HeadValue label="検査日時" value={`${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim()} />
             <HeadValue label="モダリティ" value={study.modalities?.join("・")} className="font-bold text-value" />
             <HeadValue label="検査名" value={study.studyDescription} className="text-label" />
             {/* 受付番号は、値が空でも「受付番号 —」を出す。役割の許可の一覧に無い（項目ごと返らない）ときは出さない（空と見分ける） */}
             <HeadItem label="受付番号" value={study.accessionNumber} keepEmpty={Object.hasOwn(study, "accessionNumber")} testId="detail-accession" />
-            <HeadItem label="依頼医" value={study.referringPhysicianName} testId="detail-referring" />
+            <HeadItem label="紹介医" value={study.referringPhysicianName} testId="detail-referring" />
             <HeadItem label="Study ID" value={study.studyId} />
             <HeadItem
               label="Se/Im"
