@@ -178,6 +178,7 @@ HL7 の更新は UID を保つ。患者 ID の変わる A40 は元の検査を�
 
 - **Dependabot**：週に1回、npm（直下と `docker/prisma-cli`）・GitHub Actions・Docker（土台のイメージ）の更新の PR を出す（`.github/dependabot.yml`）。PR は CI が緑になってから取り込む。
 - **依存の確かめ**：CI で `npm audit --audit-level=high`（深刻度が高い以上で落とす）を、直下とイメージの中の Prisma の CLI の両方に流す。
+- **公開の起こり方**：イメージを GHCR へ出すのは、版のタグの push・手動（`main` を選ぶ）・週の作り直しのときだけ。`main` への merge では出さない（出した後に気づく誤りを減らし、公開を人の操作に結ぶため）。
 - **週の作り直し**：毎週、`main` のイメージを層の cache 無しで作り直し、土台のイメージの包みの更新を取り込む（`rebuild-YYYYMMDD` のタグ）。**作り直しは版のタグを付けず、上書きしない。** 版のタグのイメージに包みの更新を入れるには、新しい `Z` の版を出す。
 - **SBOM と来歴**：出したイメージには、SBOM と provenance（来歴）を付けている。
   ```sh

@@ -202,13 +202,27 @@ BACKEND_MOCK=true AUTH_MODE=local docker compose up --build
 
 ## イメージ（GHCR）
 
-配備では、GHCR のイメージ（`ghcr.io/jeysunit/tsunagi-dicom`）を版のタグ（`vX.Y.Z`）か digest で指定する（`deploy/compose.yaml` と `compose.yaml` の `TSUNAGI_IMAGE`）。イメージは CI が通ってから出す（`.github/workflows/image.yml`）。
+配備では、GHCR のイメージ（`ghcr.io/jeysunit/tsunagi-dicom`）を版のタグ（`vX.Y.Z`）か digest で指定する（`deploy/compose.yaml` と `compose.yaml` の `TSUNAGI_IMAGE`）。イメージは CI が通ってから出す（`.github/workflows/image.yml`）。**`main` への merge では出さない**（`main` では試験だけを流す）。出すのは、次の3つのときだけ。
+
+1. 版のタグ（`vX.Y.Z`）の push（リリース）
+2. 手動（Actions の Image を `main` で実行する。試しのイメージが要るとき）
+3. 週に1回の作り直し
 
 | タグ | いつ付くか |
 |---|---|
-| `vX.Y.Z` | 版のタグの push のときだけ。**作り直しでは付けず、片付けでは消さない。** 同じ版のタグがもう GHCR にあれば（実行のやり直しなど）、出さずに止める |
-| `sha-<短い hash>` | `main` への merge・版のタグ・週の作り直し。同じ commit を作り直すと、新しいイメージへ移る |
-| `rebuild-YYYYMMDD` | 週に1回（月曜 03:17 UTC）と手動の、`main` の作り直し（日付は UTC）。イメージの中で apt で入れる包みの更新を取り込む |
+| `vX.Y.Z` | 版のタグの push のときだけ。**手動と作り直しでは付けず、片付けでは消さない。** 同じ版のタグがもう GHCR にあれば（実行のやり直しなど）、出さずに止める |
+| `sha-<短い hash>` | 版のタグ・手動（`main`）・週の作り直し。同じ commit を作り直すと、新しいイメージへ移る |
+| `rebuild-YYYYMMDD` | 週に1回（月曜 03:17 UTC）の、`main` の作り直し（日付は UTC）。イメージの中で apt で入れる包みの更新を取り込む |
+
+**リリースの手順。** `main` が出したい状態で、CI が緑であることを確かめてから、版のタグを付けて push する。
+
+```sh
+git switch main && git pull --ff-only
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+push すると Image が走り、CI が通ってからイメージを出して、digest に署名する。**同じ版のタグは出し直せない**（上書きしない）。直すなら新しい `Z` の版を出す。
 
 **署名の確かめ。** 出したイメージの digest には、GitHub Actions の OIDC による cosign の鍵の要らない署名が付いている。配備の前に、digest を調べて確かめる：
 
