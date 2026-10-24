@@ -1000,6 +1000,12 @@ test("詳細：受付番号はバナーに常に出し、英字氏名・和暦�
   await tabs.getByRole("tab", { name: "検査の情報" }).press("ArrowLeft");
   await expect(tabs.getByRole("tab", { name: "シリーズ" })).toHaveAttribute("aria-selected", "true");
   await expect(detail.getByTestId("series-strip")).toBeVisible();
+  // 押せる物の無い「検査の情報」も、Tab キーでフォーカスを受ける（キーボードで読み・スクロールできる）。見えていないパネルには移らない
+  await tabs.getByRole("tab", { name: "検査の情報" }).click();
+  await page.keyboard.press("Tab");
+  await expect(detail.getByRole("tabpanel", { name: "検査の情報" })).toBeFocused();
+  await tabs.getByRole("tab", { name: "シリーズ" }).click();
+  await expect(detail.getByRole("tabpanel", { name: "検査の情報", includeHidden: true })).toBeHidden();
   // 見出しは、バナー（氏名とかなの 2 行）と UID の 1 行に収まる
   expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(BANNER_HEAD_MAX);
 });

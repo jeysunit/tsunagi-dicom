@@ -11,6 +11,8 @@ export interface TabItem {
   id: string;
   label: string;
   content: ReactNode;
+  /** 中にフォーカスを受ける物が無い（読むだけの）パネル。見えている間、パネルがフォーカスを受ける */
+  readOnly?: boolean;
 }
 
 export function Tabs({ items, label, className }: { items: readonly TabItem[]; label: string; className?: string }) {
@@ -60,6 +62,9 @@ export function Tabs({ items, label, className }: { items: readonly TabItem[]; l
           role="tabpanel"
           aria-labelledby={`${base}-tab-${item.id}`}
           hidden={item.id !== current}
+          // 中にフォーカスを受ける物が無いパネル（検査の情報）は、キーボードで読み・スクロールできるように、見えている間だけフォーカスを受ける
+          tabIndex={item.readOnly && item.id === current ? 0 : undefined}
+          className="focus-visible:outline-2 focus-visible:outline-ring"
         >
           {item.content}
         </div>

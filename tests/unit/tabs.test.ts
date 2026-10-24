@@ -24,6 +24,18 @@ describe("タブ", () => {
     expect(tabs[1]).toContain('tabindex="-1"');
   });
 
+  it("読むだけのパネル（readOnly）は、見えている間だけフォーカスを受ける。押せる物のあるパネルには足さない", () => {
+    const readOnly = [items[0]!, { ...items[1]!, readOnly: true }];
+    const panelsOf = (h: string) => [...h.matchAll(/<div[^>]*role="tabpanel"[^>]*>/g)].map((m) => m[0]);
+    // 最初のタブ（押せる物のあるパネル）が見えている間：どちらのパネルにも tabindex は無い
+    for (const p of panelsOf(renderToStaticMarkup(createElement(Tabs, { items: readOnly, label: "検査の内容" })))) expect(p).not.toContain("tabindex");
+    // 読むだけのパネルが最初に見えている間は、そのパネルだけが tabindex="0"
+    const first = renderToStaticMarkup(createElement(Tabs, { items: [{ ...items[0]!, readOnly: true }, items[1]!], label: "検査の内容" }));
+    const [a, b] = panelsOf(first);
+    expect(a).toContain('tabindex="0"');
+    expect(b).not.toContain("tabindex");
+  });
+
   it("選ばれていないタブの中身も描き、hidden にする（中の状態を失わない）。タブと中身は aria-controls・aria-labelledby で結ぶ", () => {
     const panels = [...html.matchAll(/<div[^>]*role="tabpanel"[^>]*>/g)].map((m) => m[0]);
     expect(panels).toHaveLength(2);

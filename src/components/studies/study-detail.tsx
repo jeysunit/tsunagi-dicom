@@ -609,7 +609,7 @@ export function StudyDetailPanel({
           label="検査の内容"
           items={[
             { id: "series", label: "シリーズ", content: seriesPanel },
-            { id: "info", label: "検査の情報", content: <StudyInfo rows={infoRows} /> },
+            { id: "info", label: "検査の情報", content: <StudyInfo rows={infoRows} />, readOnly: true },
           ]}
         />
       ) : (
