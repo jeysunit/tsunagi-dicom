@@ -35,7 +35,7 @@
 
 ## 7. まとめの確かめ
 
-- [ ] 7.1 `npm run lint`・`npm run typecheck`・`npm test`・`npm run build`・`npm run test:e2e` がすべて通ることを確かめる
+- [x] 7.1 `npm run lint`・`npm run typecheck`・`npm test`・`npm run build`・`npm run test:e2e` がすべて通ることを確かめる
 
 ## Workflow follow-up
 
