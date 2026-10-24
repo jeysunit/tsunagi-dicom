@@ -575,7 +575,7 @@ export function StudyDetailPanel({
   );
 
   return (
-    <section aria-label="検査の詳細" className="space-y-2 px-3 py-2" data-testid="study-detail" data-study-uid={uid}>
+    <section aria-label="検査の詳細" className="space-y-1.5 px-3 py-2" data-testid="study-detail" data-study-uid={uid}>
       {/* 見出し：左に患者バナーと検査の UID、右にビューア */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         {/* 左の縦線は、一覧で選んだ行の縦線と同じ（どの行の詳細かを示す。docs/spec.md の 3.1） */}

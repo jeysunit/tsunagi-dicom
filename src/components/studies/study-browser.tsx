@@ -201,17 +201,6 @@ function FilterBar({
             </Chip>
           ))}
         </Segmented>
-        <Segmented label="モダリティ">
-          <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all">
-            {withCount("すべて", facets?.modality?.all, facets?.atLeast?.list)}
-          </Chip>
-          {MODALITY_GROUPS.map((m) => (
-            <Chip key={m} pressed={filter.modality === m} onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })} testId={`modality-${m}`}>
-              <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
-              {withCount(m, facets?.modality?.[m], facets?.atLeast?.list)}
-            </Chip>
-          ))}
-        </Segmented>
         <div className="relative w-56 max-w-full">
           <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-label" />
           <Input
@@ -242,6 +231,18 @@ function FilterBar({
           {/* 閉じていても、詳細条件で絞っていることが分かるように数を添える */}
           {conditions > 0 && <span data-testid="filter-more-count">（{conditions}）</span>}
         </button>
+        {/* モダリティは、検索と詳細条件の後に置く。本文が狭いとき（左のナビを開いた 1280px）、検査日・検索・詳細条件が 1 段、モダリティが 1 段の 2 段に収まる */}
+        <Segmented label="モダリティ">
+          <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all">
+            {withCount("すべて", facets?.modality?.all, facets?.atLeast?.list)}
+          </Chip>
+          {MODALITY_GROUPS.map((m) => (
+            <Chip key={m} pressed={filter.modality === m} onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })} testId={`modality-${m}`}>
+              <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
+              {withCount(m, facets?.modality?.[m], facets?.atLeast?.list)}
+            </Chip>
+          ))}
+        </Segmented>
       </div>
       {more && (
         <div

@@ -32,7 +32,7 @@ export function PatientBanner({
     <section
       aria-label="患者"
       data-slot="patient-banner"
-      className={cn("flex flex-wrap items-start gap-x-6 gap-y-2 rounded-md border border-border bg-surface px-3 py-2", className)}
+      className={cn("flex flex-wrap items-start gap-x-6 gap-y-2 rounded-md border border-border bg-surface px-3 py-1.5", className)}
       {...props}
     >
       <div className="min-w-0">
