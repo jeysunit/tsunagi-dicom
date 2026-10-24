@@ -505,8 +505,9 @@ export function createMockBackend(): Backend {
       if (options.removeSource !== patientChanged) {
         throw new Error(`モック：KeepSource の指定が患者 ID の変化と合わない（removeSource=${options.removeSource}）`);
       }
+      // Orthanc の ID の形（16 進 40 字を 8 字ずつ 5 つ）にそろえる。SHA-256 の先頭の 40 字を使う
       const newId = patientChanged
-        ? createHash("sha1").update(`${uid}:${patientId}`).digest("hex").match(/.{8}/g)!.join("-") : id;
+        ? createHash("sha256").update(`${uid}:${patientId}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-") : id;
       mockTest.revision++;
       mockUpdates.set(uid, { id: newId, replace: { ...mockUpdates.get(uid)?.replace, ...replace } });
       const jobId = crypto.randomUUID();
