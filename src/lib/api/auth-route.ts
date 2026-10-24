@@ -54,7 +54,7 @@ export async function checkedState(request: Request): Promise<AuthState> {
   const row = state.kind === "pending" ? state.row : state.kind === "anonymous" ? null : state.session.local?.row;
   if (!row) throw new AuthError(401, "ログインしていません。再度ログインしてください");
   if (!csrfMatches(row.csrfToken, request.headers.get("x-csrf-token"))) {
-    throw new RequestError(403, "画面の確認用の token（x-csrf-token）が一致しません。頁を開き直してください");
+    throw new RequestError(403, "画面の確認用の token（x-csrf-token）が一致しません。ページを開き直してください");
   }
   return state;
 }

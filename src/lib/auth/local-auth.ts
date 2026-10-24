@@ -827,7 +827,7 @@ export async function changePassword(
   });
   if (res.count !== 1) {
     await record(ctx, actorOf(user), { action: "password_change", outcome: "denied", detail: { reason: "changed_during_change" } });
-    throw new AuthFailure(409, "パスワードを変更できませんでした（ほかの画面で先に変更したか、このセッションが無効です）。頁を開き直してください");
+    throw new AuthFailure(409, "パスワードを変更できませんでした（ほかの画面で先に変更したか、このセッションが無効です）。ページを開き直してください");
   }
   // 変えた人のいまのセッションは新しい世代に合わせ、前に通した再認証は消す（パスワードを変えた後に持ち越さない）
   if (session.stage === "active") await followVersion(ctx, session, user.credentialVersion);
