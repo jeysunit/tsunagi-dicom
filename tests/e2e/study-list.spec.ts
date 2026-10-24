@@ -1228,6 +1228,9 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   // 一覧がスクロールする高さにする
   await page.setViewportSize({ width: 1280, height: 520 });
   await asRole(page, "一般");
+  // 役割を選ぶために開いた頁の版の要求が、この下で足す route に入って数えられないよう、その頁を閉じてから始める
+  // （混んだ CI では、その頁の最初の要求が遅れて出る）
+  await page.goto("about:blank");
   const real = (await (await page.request.get("/api/studies/version")).json()) as { version: string };
   let version = Number(real.version);
   let versionStatus = 200;
