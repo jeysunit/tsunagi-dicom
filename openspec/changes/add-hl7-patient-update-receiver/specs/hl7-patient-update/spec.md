@@ -84,6 +84,11 @@ BFF の `POST /api/hl7/messages` は、`HL7_RECEIVER_TOKEN_FILE` を設定した
 - **WHEN** `content-length` を偽って 2 MiB を超える本文を送るか、base64 を戻すと 1 MiB を超える本文を送る
 - **THEN** 400 が返り、Orthanc は呼ばれない
 
+#### Scenario: まとめた知らせ
+
+- **WHEN** 受け口が `{ "peer": "192.0.2.10", "event": "busy", "count": 3, "since": …, "until": … }` を送る
+- **THEN** 200 が返り、監査の記録に数と期間つきの `busy` の行が残る。`count` の無い `busy` は 400
+
 #### Scenario: 検証モードで書き込みを止めている
 
 - **WHEN** `AUTH_MODE=dev` で `DEV_ALLOW_WRITE` が `true` でない BFF に、正しい token で A40 を送る
@@ -110,7 +115,7 @@ BFF は、MSH が読めない、区切りが `|^~\&` でない、版が 2.3.1 �
 
 #### Scenario: 欄の繰り返しが多い
 
-- **WHEN** PID-8 に `M~F` の繰り返しがある A08、または MSH-10 が空のメッセージを受ける
+- **WHEN** PID-8 に `M~F` の繰り返しか `M&F` の下位成分がある A08、または MSH-10 が空のメッセージを受ける
 - **THEN** AR の ACK が返り、Orthanc は変わらない
 
 #### Scenario: 氏名のグループが長すぎる
@@ -259,6 +264,11 @@ BFF は、解析を通ったメッセージを Orthanc を読む前に `received
 
 - **WHEN** 書き換えの仕事が `Success` になったが、検査の画像のうち 1 枚の PatientID が前の値のまま
 - **THEN** `result` は `partial` になって AE の ACK が返り、管理者が解くまで次のメッセージにも AE を返す
+
+#### Scenario: 仕事が途中で失敗した
+
+- **WHEN** 書き換えの仕事が、検査の画像の一部を書き換えた後に `Failure` になる
+- **THEN** `result` は `partial` になって AE の ACK が返り、管理者が解くまで次のメッセージにも AE を返す。全部の画像が前の値のままなら `failed` になり、次のメッセージは止めない
 
 #### Scenario: 途中で止まったメッセージの送り直し
 

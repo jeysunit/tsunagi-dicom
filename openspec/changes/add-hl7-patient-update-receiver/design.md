@@ -62,7 +62,8 @@ ris-emulator ──MLLP（hl7 のネットワーク）──> hl7-receiver ─�
   開発の一式の token は、`up.sh` が乱数 32 バイトから作る。
 - 要求は `Authorization: Bearer <token>`。token は SHA-256 にしてから定数時間で比べる。違えば 401 を返し、ログに 1 行残す（token は出さない）。監査の記録には残さない（受け口を名乗る者の誤りで、つなぎを埋めないため）。
   画面の利用者のセッションの cookie があっても、token が無ければ 401。
-- 本文は JSON：`{ "peer": "<住所>", "message": "<HL7 の本文の base64>" }` か、`{ "peer": "<住所>", "event": "refused" | "oversize" | "timeout" | "framing" }`。
+- 本文は JSON：`{ "peer": "<住所>", "message": "<HL7 の本文の base64>" }` か、`{ "peer": "<住所>", "event": "refused" | "oversize" | "timeout" | "framing" | "busy" | "dropped", "count"?: 1〜1000000 の整数, "since"?: ISO 8601, "until"?: ISO 8601 }`。
+  `count`・`since`・`until` は `busy`（まとめた数と期間）と `dropped`（落とした知らせの数と期間）で必須、ほかでは付けない。`dropped` の `peer` は受け口自身の名前（`hl7-receiver`）。受け口は `dropped` を、届いた次の知らせの直後に別の要求で送る。
   本文は読みながら 2 MiB で打ち切る（`content-length` を信じない）。base64 は字と長さを確かめ、戻した後が 1 MiB を超えれば 400。形が違えば 400。
 - 答えは `{ "ack": "<ACK の本文の base64>" }`。`event` の知らせには `{ "ok": true }`。
 - **人のセッションと別の、機械の主体として扱う。** 役割の表（`src/lib/auth/roles.ts`）には足さない（役割は画面の利用者のもの）。CSRF の対策は cookie で動く要求のためのもので、この道は cookie を使わず token だけで通すので当てない。代わりに、token の誤り・設定の無いとき・セッションだけの要求を断る試験を付ける。`AGENTS.md` の設計の決まりに、この例外を 1 行足す。
@@ -84,7 +85,8 @@ POST /studies/{Orthanc の検査の ID}/modify
 - **Orthanc の仕事（job）として流す**（`Asynchronous: true`）。答えの仕事の ID を `dispatch` の行に残し、`/jobs/{id}` を読んで `Success`・`Failure` になるまで待つ（120 秒まで）。
   時間切れの後も Orthanc の中で処理が続きうるので、仕事が終わったと読めるまでは結果を決めない（10）。
 - **終わった後に、画像ごとに確かめる。** 書き換えの前に、検査の画像の SOP Instance UID の一覧を `request` に残す。仕事が `Success` になったら、StudyInstanceUID で検査を引き当て（ちょうど 1 件）、`/studies/{id}/instances-tags` で全部の画像の SOPInstanceUID・PatientID・PatientName・PatientBirthDate・PatientSex・AccessionNumber を読み、
-  SOP Instance UID の一覧と件数が前と同じで、全部の画像が予定の値になっていれば成功とする。1 枚でも違えば失敗（`result` の `partial`）として AE を返し、後のメッセージを止める（10）。
+  SOP Instance UID の一覧と件数が前と同じで、全部の画像が予定の値になっていれば成功とする。1 枚でも違えば `partial` として AE を返し、後のメッセージを止める（10）。
+- 仕事が `Failure` になったとき・Orthanc が書き換えを断った（400 など）ときも、同じ読み方で全部の画像を確かめる。全部が前の値のままなら失敗（`failed`）として決め、AE を返す。そうでなければ `partial` にして後のメッセージを止める。
 - `KeepSource: false` を必ず付ける。省くと同じ StudyInstanceUID の検査が 2 件並び、tsunagi-dicom の引き当てが 409 になる。
 - 替え先の患者 ID がすでに Orthanc にあると、患者のタグを全部 `Replace` に入れないと 400 になる。そのため、患者の 4 つのタグ（PatientID・PatientName・PatientBirthDate・PatientSex）をいつも入れる。
 - 書き換えると Orthanc の中の検査の ID が変わる（患者 ID が ID の元に入るため）。引き当て直した ID を新しい ID として監査の記録に残す。
@@ -123,7 +125,7 @@ POST /studies/{Orthanc の検査の ID}/modify
 
 6. セグメントの数：MSH・PID はちょうど 1 つ。A40 は MRG がちょうど 1 つ。ORM は ORC・OBR・ZDS がちょうど 1 つずつ。ほかのセグメント（EVN・PV1 など）は読まずに受ける。数が合わなければ AR（変更の前に断る）。
 7. ORM の ORC-1 は `NW` だけ。ほかは AR。
-8. 使う欄の形：下の表より多い繰り返し・成分があれば AR。表に無い欄は読まない。
+8. 使う欄の形：下の表より多い繰り返し・成分があれば AR。下位成分（`&`）は CX の 4 つめ（3 つまで）のほかは 1 つだけで、2 つ以上なら AR（`M&F` は AR、エスケープした `M\T\F` は 1 つの値 `M&F` として 8 の値の確かめへ進む）。表に無い欄は読まない。
 
    | 欄 | 繰り返し | 成分 |
    |---|---|---|
@@ -177,7 +179,7 @@ POST /studies/{Orthanc の検査の ID}/modify
   - 前の行があり、本文の SHA-256 が違えば AR（同じ MSH-10 の別の中身）。
   - 本文が同じで、そのメッセージの `ack` の行があれば、Orthanc を呼ばずに前と同じ ACK のコードを返す。古い A08 の送り直しで、新しい A08 の値が巻き戻らないようにするため。
   - 本文が同じで `ack` の行が無い（処理の途中で BFF が止まった）ときは、下の「途中で止まったメッセージ」として扱う。
-- **解いていない書き換え**：`request` の行があり、`result` の結果が決まっていない（`result` が無い・`unknown`・`partial`）書き換え。新しいメッセージを処理する前に、全部を照らす。
+- **解いていない書き換え**：`request` の行があり、`result` の結果が決まっていない（`result` が無い・`unknown`・`partial`）書き換え。`failed` は、4 のとおり全部の画像が前の値のままと確かめたときだけ付けるので、解いたものとして扱う。新しいメッセージを処理する前に、全部を照らす。
   - 仕事の ID がある（`dispatch` の行がある）：`/jobs/{id}` を読む。`Success` なら 4 の画像ごとの確かめをして、`reconcile` の行で成功か `partial` を足す。`Failure` なら、4 と同じ確かめで前の値のままなら「書き換わらなかった」として解く。まだ動いている・読めないときは解かない。
   - 仕事の ID が無い（Orthanc に送ったが答えが来なかった）：仕事が作られたかが分からないので、自動では解かない。
   - `partial` は自動では解かない（画像の一部だけが書き換わっている）。
