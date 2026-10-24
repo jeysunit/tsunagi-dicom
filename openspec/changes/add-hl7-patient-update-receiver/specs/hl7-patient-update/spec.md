@@ -33,7 +33,22 @@ HL7 v2.3.1 の患者の統合（ADT^A40）・患者の属性の更新（ADT^A08�
 #### Scenario: 大きすぎるメッセージ
 
 - **WHEN** 許可した送り手が、枠の終わりの無いまま 1 MiB を超えるバイトを送る
-- **THEN** 受け口は ACK を返さずに接続を閉じ、BFF には何も渡さない
+- **THEN** 受け口は ACK を返さずに接続を閉じ、BFF には HL7 の本文を渡さず `oversize` の知らせだけを送る
+
+#### Scenario: IPv4 を写した IPv6 の住所
+
+- **WHEN** 許可の一覧に `127.0.0.1` だけを書き、相手の住所が `::ffff:127.0.0.1` の接続が来る
+- **THEN** 受け口は `127.0.0.1` として比べ、通す
+
+#### Scenario: 名前を引けない
+
+- **WHEN** 許可の一覧の名前を 2 秒で引けない
+- **THEN** 受け口はその接続を断る
+
+#### Scenario: BFF が答えない
+
+- **WHEN** BFF が 60 秒で答えないか、200 でない答えを返す
+- **THEN** 受け口は ACK を返さずに接続を閉じる
 
 #### Scenario: 途中で止まる送り手
 
@@ -54,9 +69,19 @@ BFF の `POST /api/hl7/messages` は、`HL7_RECEIVER_TOKEN_FILE` を設定した
 - **WHEN** 違う token か token の無い要求を送る（管理者のセッションの cookie があっても）
 - **THEN** 401 が返り、Orthanc は呼ばれない
 
+#### Scenario: 大きすぎる本文
+
+- **WHEN** `content-length` を偽って 2 MiB を超える本文を送るか、base64 を戻すと 1 MiB を超える本文を送る
+- **THEN** 400 が返り、Orthanc は呼ばれない
+
+#### Scenario: 検証モードで書き込みを止めている
+
+- **WHEN** `AUTH_MODE=dev` で `DEV_ALLOW_WRITE` が `true` でない BFF に、正しい token で A40 を送る
+- **THEN** AE の ACK が返り、Orthanc は変わらない
+
 ### Requirement: 壊れたメッセージ・扱わないメッセージには AR を返す
 
-BFF は、MSH が読めない、区切りが `|^~\&` でない、版が 2.3.1 でない、MSH-18 が空か `UNICODE UTF-8` でない、UTF-8 として正しくない、知らないエスケープがある、値に制御文字がある、扱わない種類（A40・A08・ORM の NW のほか）のメッセージに、AR の ACK を返さなければならない（SHALL）。Orthanc は変えない（SHALL NOT）。
+BFF は、MSH が読めない、区切りが `|^~\&` でない、版が 2.3.1 でない、MSH-18 が空か `UNICODE UTF-8` でない、MSH-18 が空なのに ASCII でない字がある、UTF-8 として正しくない、知らないエスケープがある、値に制御文字がある、扱わない種類と構造の名前の組（design.md の 7）、セグメントの数が合わない（PID が 2 つなど）、のどれかに当たるメッセージに、AR の ACK を返さなければならない（SHALL）。Orthanc は変えない（SHALL NOT）。エスケープは区切りで分けた後に戻し、戻した字を区切りとして読み直してはならない（SHALL NOT）。
 
 #### Scenario: 形式が壊れたメッセージ
 
@@ -67,6 +92,21 @@ BFF は、MSH が読めない、区切りが `|^~\&` でない、版が 2.3.1 �
 
 - **WHEN** ADT^A03 や、ORC-1 が CA の ORM を受ける
 - **THEN** AR の ACK が返り、Orthanc は変わらない
+
+#### Scenario: エスケープした区切りの字
+
+- **WHEN** PID-5 の姓が `O\S\BRIEN` の A08 を受ける
+- **THEN** 姓は `O^BRIEN` の 1 つの成分として読まれ、DICOM の PN の区切りにならないので、AE の ACK が返る（PN の成分に `^` は入れられない）
+
+#### Scenario: PID が 2 つ
+
+- **WHEN** PID セグメントが 2 つある A40 を受ける
+- **THEN** AR の ACK が返り、Orthanc は変わらない
+
+#### Scenario: MSH-18 が空で日本語がある
+
+- **WHEN** MSH-18 が空で、PID-5 に漢字がある A08 を受ける
+- **THEN** AR の ACK が返る
 
 #### Scenario: 値に制御文字
 
@@ -94,8 +134,18 @@ BFF は ADT^A40 を受けたら、MRG-1 の旧い患者 ID の検査を全部、
 
 #### Scenario: 替え先の患者がすでにある
 
-- **WHEN** PID-3 の患者 ID の検査が Orthanc にすでにあり、PID-7 が空の A40 を受ける
-- **THEN** 書き換えた検査の生年月日は、元の検査のいまの値のままで、Orthanc は 400 を返さない
+- **WHEN** PID-3 の患者 ID の検査が Orthanc にすでにあり、PID-5 が替え先と同じ氏名で、PID-7 が空の A40 を受ける
+- **THEN** AA の ACK が返り、書き換えた検査の生年月日は替え先の患者のいまの値になる。替え先の患者の検査は変わらない
+
+#### Scenario: 替え先の患者と属性が違う
+
+- **WHEN** PID-3 の患者 ID の検査が Orthanc にすでにあり、PID-7 がその患者のいまの生年月日と違う A40 を受ける
+- **THEN** AE の ACK が返り、旧い患者の検査も替え先の患者の検査も変わらない
+
+#### Scenario: 発番元の違う患者 ID
+
+- **WHEN** PID-3 の発番元（CX の 4 つめ）が `HL7_PATIENT_ID_ISSUER` と違う A40 を受ける
+- **THEN** AE の ACK が返り、Orthanc は変わらない
 
 ### Requirement: A08 で患者の属性を書き換え、患者 ID は変えない
 
@@ -144,10 +194,40 @@ BFF は Orthanc の書き換えを呼ぶ前に `hl7` の `request` の行を残�
 - **WHEN** A40 で 1 件の検査を書き換える
 - **THEN** 監査の記録に `request` と `result` の行が同じ要求の ID で残り、`result` に前と後の患者 ID・氏名と、元と新しい Orthanc の ID が入る
 
+#### Scenario: 書き換えた後に記録できない
+
+- **WHEN** Orthanc の書き換えが成功した後に、`result` の行の追記が失敗する
+- **THEN** AE の ACK が返り、その書き換えは結果の分からない書き換えとして残る（次のメッセージの前に照らす）
+
 #### Scenario: Orthanc が答えない
 
 - **WHEN** 書き換えの要求が時間切れになる
 - **THEN** `result` の行は `unknown` になり、AE の ACK が返る
+
+### Requirement: 同じメッセージを重ねず、結果の分からない書き換えを照らす
+
+BFF は、同じ送り手（MSH-3・MSH-4）と同じ MSH-10 のメッセージを直近 7 日に受けていれば、Orthanc を呼ばずに前と同じ ACK のコードを返さなければならない（SHALL）。本文が違えば AR を返す（SHALL）。
+新しいメッセージを処理する前に、結果の分からない書き換えを Orthanc と照らし、照らせなければ Orthanc を変えずに AE を返さなければならない（SHALL）。
+
+#### Scenario: 同じメッセージの送り直し
+
+- **WHEN** AA を返した A08 と同じ MSH-3・MSH-4・MSH-10・本文の A08 を、別の A08 で氏名を直した後にもう一度受ける
+- **THEN** 前と同じ AA が返り、Orthanc は呼ばれず、氏名は後の A08 の値のまま
+
+#### Scenario: 同じ MSH-10 で中身が違う
+
+- **WHEN** 前に受けたメッセージと同じ MSH-3・MSH-4・MSH-10 で、本文の違うメッセージを受ける
+- **THEN** AR の ACK が返り、Orthanc は変わらない
+
+#### Scenario: 結果の分からない書き換えが照らせる
+
+- **WHEN** 前の A40 の書き換えが時間切れで `unknown` になり、Orthanc では予定の値に書き換わっている。そこへ次のメッセージを受ける
+- **THEN** BFF は `reconcile` の行を足してその書き換えを成功として解き、次のメッセージを処理する
+
+#### Scenario: 結果の分からない書き換えが照らせない
+
+- **WHEN** `unknown` の書き換えの StudyInstanceUID の検査が Orthanc で 2 件見つかる。そこへ次のメッセージを受ける
+- **THEN** AE の ACK が返り、Orthanc は変わらない
 
 ### Requirement: 外から来た値の制御文字を見える形にして出す
 

@@ -99,7 +99,8 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 | | `SESSION_SECRET`・`SESSION_SECRET_FILE` | 秘密。必須。32 バイト以上の乱数。どちらも空なら起動しない。ファイルでも渡せる（`compose.yaml` の例は secret のファイル）。監査の記録のつなぎの鍵も、ここから導く（3.6。[`adr/0001-audit-chain-mac.md`](adr/0001-audit-chain-mac.md)） |
 | | `SESSION_SECRET_PREVIOUS_FILE` | 秘密。省ける。前に使っていた `SESSION_SECRET` を 1 行に 1 つ、古い順（上が古い）に書いたファイル。監査の記録のうち、その値の鍵で書いた行を確かめるためだけに使う（セッションや token には使わない）。鍵の切り替えは、この順で新しい鍵へだけ受ける。どの行も 32 バイト以上 |
 | | `AUDIT_ANCHOR_FILE` | 省ける。監査の記録の先頭の控え（最後の行の seq と hash）を追記するファイル（絶対のパス。JSON Lines）。データベースとは別の置き場にする（配る compose は別のボリュームの `/audit-anchors/audit-anchors.jsonl`）。`/api/audit/verify` は、この控えと照らし合わせる。設定しないと照らせないので、記録があれば `/api/audit/verify` は 409（`anchors.status` が `not-configured`）。控えは、設定に関わらずコンテナのログ（標準出力）にも出す |
-| HL7 の受け口 | `HL7_RECEIVER_TOKEN_FILE` | 秘密。省ける。HL7 の受け口（3.5 の「HL7 による患者情報の更新」）と BFF の間の token のファイル（32 文字以上）。設定したときだけ `/api/hl7/messages` を開く。無ければ 404 |
+| HL7 の受け口 | `HL7_RECEIVER_TOKEN_FILE` | 秘密。省ける。HL7 の受け口（3.5 の「HL7 による患者情報の更新」）と BFF の間の token のファイル（32 文字以上）。次の `HL7_PATIENT_ID_ISSUER` と組で設定したときだけ `/api/hl7/messages` を開く。どちらも無ければ 404。片方だけは起動しない |
+| | `HL7_PATIENT_ID_ISSUER` | 省ける。受ける患者 ID の発番元（HL7 の CX の 4 つめ。例 `RIS_EMU`）を 1 つ。ほかの発番元の患者 ID は書き換えない |
 | | `TZ` | 既定 `Asia/Tokyo` |
 
 秘密を値と `*_FILE`（`BACKEND_PASSWORD` と `BACKEND_PASSWORD_FILE`、`SESSION_SECRET` と `SESSION_SECRET_FILE`、`OIDC_CLIENT_SECRET` と `OIDC_CLIENT_SECRET_FILE`）で同時に指定したら誤りとし、起動しない。
@@ -455,9 +456,10 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 **HL7 による患者情報の更新**（段の外。IHE の PIR を試すため。2026-10-24 に承認者が決めた。設計は `openspec/changes/add-hl7-patient-update-receiver/design.md`）：
 - RIS が送る HL7 v2.3.1 の ADT^A40（患者の統合）・ADT^A08（患者の属性の更新）・ORM^O01 の NW（予約の知らせ）を受け、Orthanc の検査の患者 ID・氏名・生年月日・性別・受付番号を書き換える。RAD-13（ORM の CA・DC・XO）と HL7 v2.5.1 は扱わない。
 - **待ち受けは別の小さなコンテナ（HL7 の受け口）に置き、BFF の公開の面に足さない。** MLLP には認証が無いので、受け口は開発の一式の内側だけで待ち受け、送り手の住所を許可の一覧で絞り、1 通の大きさ（1 MiB）と読む時間（30 秒）に上限を置く。配る compose には入れない。
-- 受け口は中身を読まずに、BFF の内部の道（`/api/hl7/messages`。`HL7_RECEIVER_TOKEN_FILE` の token で受け口だけを通す）へ渡す。解析・Orthanc の書き換え・ACK（AA・AE・AR）・監査の記録は BFF が行う。画面の利用者の役割には割り当てない。
-- **UID を保つ。** PIR では Study Instance UID が照合の鍵になるため。Orthanc の `/studies/{id}/modify` に `Keep`（Study・Series・SOP の UID）・`Force`・`KeepSource: false` を渡し、元の検査を残さない（同じ UID の検査が 2 件並ぶと、引き当てが 409 になる）。患者 ID を変えない書き換え（A08・ORM）には、Orthanc の設定 `OverwriteInstances: true` が要る（開発の一式だけで入れる）。
-- 旧い患者が Orthanc に無い A40・患者の無い A08・検査の無い ORM は、何もせずに AA を返す。ORM の患者 ID が検査と違うとき、別の受付番号がすでに入っているときは、書き換えずに AE を返す。
+- 受け口は中身を読まずに、BFF の内部の道（`/api/hl7/messages`。`HL7_RECEIVER_TOKEN_FILE` の token で受け口だけを通す）へ渡す。解析・Orthanc の書き換え・ACK（AA・AE・AR）・監査の記録は BFF が行う。この道は画面の利用者と別の機械の主体として扱い、役割には割り当てない。cookie を使わず token だけで通すので、CSRF の対策は当てない。`AUTH_MODE=dev` では `DEV_ALLOW_WRITE=true` のときだけ書き換える。
+- **UID を保つ。** PIR では Study Instance UID が照合の鍵になるため。Orthanc の `/studies/{id}/modify` に `Keep`（Study・Series・SOP の UID）・`Force`・`KeepSource: false` を渡し、元の検査を残さない（同じ UID の検査が 2 件並ぶと、引き当てが 409 になる）。患者 ID を変えない書き換え（A08・ORM）には、Orthanc の設定 `OverwriteInstances: true` が要る（開発の一式と結合の試験の Orthanc だけで入れる。配る compose は変えない）。
+- 旧い患者が Orthanc に無い A40・患者の無い A08・検査の無い ORM は、何もせずに AA を返す。ORM の患者 ID が検査と違うとき、別の受付番号がすでに入っているとき、A40 の替え先の患者がすでにあって属性が違うときは、書き換えずに AE を返す。患者 ID は、設定した 1 つの発番元のものだけを受ける。
+- 同じ送り手・同じ MSH-10 のメッセージの送り直しには、Orthanc を呼ばずに前と同じ ACK を返す（古い更新で値を巻き戻さない）。結果の分からない書き換えは、次のメッセージの前に Orthanc と照らし、照らせなければ新しいメッセージに AE を返して止める（書き込みの操作の共通の決まりの「結果不明」と同じ考え）。
 - 監査の記録（`hl7`）に、断った接続・AR・Orthanc を呼ぶ前と後（前と後の値、元と新しい Orthanc の ID）を残す。外から来た値は、ログと記録の理由に出す前に、制御文字を見える形（`\uXXXX`）にする。
 
 **結合・分割**（段 7）：
