@@ -18,6 +18,9 @@ import { expect, test, type Page } from "@playwright/test";
 //    tsunagi-dicom の検査の一覧に、予約の StudyInstanceUID・受付番号・患者 ID で出る。
 // 4. HL7：DTG で緊急の患者を撮る → ris-emulator の pir send（A40）を HL7 の受け口が受ける → 同じ StudyInstanceUID の検査が
 //    1 件だけ、正式な患者 ID で一覧に出る。
+// 5. 照合（PIR）：DTG で緊急の患者を撮る（MPPS だけが ris-emulator に残る）→ ris-emulator の reconcile list に出る →
+//    reconcile run で正式な患者と予約を結ぶ（A40・ORM を受け口が受ける）→ 同じ StudyInstanceUID の検査が 1 件だけ、
+//    正式な患者 ID・氏名・受付番号で一覧に出て、ris-emulator の予約は同じ StudyInstanceUID の完了になる。
 // 前の試験の結果に依らないが、順に流す（管理者のパスワードは 2 で変え、3 はそのパスワードでログインする）。
 
 test.describe.configure({ mode: "serial" });
@@ -389,4 +392,67 @@ test("4 HL7：緊急の患者で撮る → ris-emulator の pir send（A40）→
   expect(after.studies.some((s) => s.patientId === priorId)).toBe(false);
 
   console.log(`[flow] HL7：A40 で統合した検査 1・画像 ${exam.files.length}`);
+});
+
+test("5 照合：緊急の患者で撮る → ris-emulator の未照合に出る → 照合（A40・ORM）→ 同じ UID のまま、正式な患者・受付番号で一覧に出る", async ({ page }) => {
+  const suffix = Date.now().toString().slice(-8);
+  const priorId = `EP${suffix}`;
+  const patientId = `PR${suffix}`;
+  const ris = (...args: string[]) => compose(["exec", "-T", "ris", "python", "-m", "app.cli", ...args], 120_000);
+
+  // 緊急の患者（予約なし）で撮って送る。DTG は MPPS（予約の項目が空）を ris-emulator に送る
+  const exam = JSON.parse(
+    await compose(
+      ["exec", "-T", "dtg", "python", "-m", "app.cli", "exam", "--emergency", "--patient-id", priorId, "--patient-name", "FLOW^UNKNOWN",
+        "-s", "1", "-i", "2", "--send", "--json"],
+      300_000,
+    ),
+  ) as { study_instance_uid: string; files: string[]; send: { status: string } };
+  expect(exam.send).toMatchObject({ status: "sent" });
+
+  await loginAsInitialAdmin(page);
+  type StudyList = {
+    studies: { studyInstanceUid: string; patientId?: string; patientName?: string; patientBirthDate?: string; patientSex?: string; accessionNumber?: string; instanceCount?: number }[];
+  };
+  const listed = async () => (await (await page.request.get("/api/studies")).json()) as StudyList;
+  await waitFor("緊急の検査が一覧に出る", listed, (body) => body.studies.some((s) => s.studyInstanceUid === exam.study_instance_uid));
+
+  // ris-emulator の未照合に、仮の患者 ID と撮影の StudyInstanceUID で出る（予約どおりでない撮影の MPPS）
+  type Unreconciled = { sop_instance_uid: string; status: string; patient_id: string; study_instance_uid: string; modality: string; problem: string };
+  const unreconciled = await waitFor(
+    "未照合に出る",
+    async () => JSON.parse(await ris("reconcile", "list", "--json")) as Unreconciled[],
+    (items) => items.some((i) => i.patient_id === priorId),
+  );
+  const item = unreconciled.find((i) => i.patient_id === priorId)!;
+  expect(item).toMatchObject({ study_instance_uid: exam.study_instance_uid, status: "COMPLETED", modality: "CT", problem: "" });
+
+  // 正式な患者で照合する。ADT^A40 と ORM^O01 を受け口が受け、どちらも受理（AA）される（受理されなければ終了コードが 0 でなく、ここで失敗する）
+  const result = JSON.parse(
+    await ris("reconcile", "run", item.sop_instance_uid, "--patient-id", patientId, "--name", "FLOW^PIR=流れ^照合=ナガレ^ショウゴウ",
+      "--birth-date", "19980312", "--sex", "M", "--json"),
+  ) as { accession_number: string; deliveries: { message_type: string; outcome: string }[] };
+  expect(result.deliveries.map((d) => [d.message_type, d.outcome])).toEqual([
+    ["ADT^A40", "accepted"],
+    ["ORM^O01", "accepted"],
+  ]);
+  const accession = result.accession_number;
+
+  // 同じ StudyInstanceUID の検査が 1 件だけ、正式な患者 ID・生年月日・性別・受付番号で出る。元の患者 ID の検査は残らない。画像の数は変わらない
+  const after = await waitFor("正式な患者・受付番号で出る", listed, (body) =>
+    body.studies.some((s) => s.studyInstanceUid === exam.study_instance_uid && s.patientId === patientId && s.accessionNumber === accession),
+  );
+  const same = after.studies.filter((s) => s.studyInstanceUid === exam.study_instance_uid);
+  expect(same).toHaveLength(1);
+  expect(same[0]).toMatchObject({ patientId, patientBirthDate: "19980312", patientSex: "M", accessionNumber: accession, instanceCount: exam.files.length });
+  expect(same[0]!.patientName).toContain("流れ");
+  expect(after.studies.some((s) => s.patientId === priorId)).toBe(false);
+
+  // ris-emulator の予約は、撮影の StudyInstanceUID で、撮影が完了しているので完了になる。照合済みは未照合から外れる
+  const orders = JSON.parse(await ris("list", "--json")) as { accession_number: string; study_instance_uid: string; status: string }[];
+  expect(orders.find((o) => o.accession_number === accession)).toMatchObject({ study_instance_uid: exam.study_instance_uid, status: "completed" });
+  const rest = JSON.parse(await ris("reconcile", "list", "--json")) as Unreconciled[];
+  expect(rest.some((i) => i.sop_instance_uid === item.sop_instance_uid)).toBe(false);
+
+  console.log(`[flow] 照合：A40・ORM を受理 2・照合した検査 1・画像 ${exam.files.length}`);
 });
