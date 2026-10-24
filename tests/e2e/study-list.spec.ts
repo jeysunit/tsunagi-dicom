@@ -20,6 +20,9 @@ async function asRole(page: Page, label: "管理者" | "一般") {
   }
 }
 
+/** 詳細の見出し（患者バナーと UID の 1 行）の高さの上限（px）。バナーは氏名とかなの 2 行（約 58px）、UID の行は 24px のボタンを含む */
+const BANNER_HEAD_MAX = 96;
+
 const rows = (page: Page) => page.getByTestId("study-table").locator("tbody > tr[data-study-uid]");
 const row = (page: Page, uid = STUDY) => page.locator(`tr[data-study-uid="${uid}"]`);
 
@@ -204,19 +207,23 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   await row(page).click();
   const detail = page.getByTestId("study-detail");
   await expect(detail).toBeVisible();
-  // 見出し（2 行）：氏名・カナ・英字氏名・患者ID・生年月日と和暦・年齢・性別／検査日時・モダリティ・検査名・受付番号・紹介医など
+  // 期待の変更（患者バナー。docs/design-system/components.md）：見出しは患者バナーにした。
+  // バナー：氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名。和暦・紹介医などは「検査の情報」へ移した
   const head = detail.getByTestId("detail-head");
-  await expect(head).toContainText("試験 髙子");
-  await expect(head).toContainText("しけん たかこ");
-  await expect(head).toContainText("JP-TEST-0004");
-  await expect(head).toContainText("1960/07/15（昭和35年）");
-  await expect(head).toContainText("65歳");
-  await expect(head).toContainText("女");
-  await expect(head).toContainText("2026/04/10");
-  await expect(head).toContainText("CT");
-  await expect(head).toContainText("試験 医師");
-  // 期待の変更（#57）：UID は下のボタンの中から、見出しの 3 行目に上げた。高さは 3 行ぶん
-  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(3 * 24 + 8);
+  const banner = head.getByRole("region", { name: "患者" });
+  await expect(banner).toContainText("試験 髙子");
+  await expect(banner).toContainText("しけん たかこ");
+  await expect(banner).toContainText("JP-TEST-0004");
+  await expect(banner).toContainText("1960/07/15（65歳） 女");
+  await expect(banner).toContainText("2026/04/10");
+  await expect(banner).toContainText("CT");
+  await expect(banner).not.toContainText("試験 医師");
+  await expect(banner).not.toContainText("昭和35年");
+  // バナーの項目は、見出しの並び（氏名・患者ID・生年月日・受付番号・検査日時・モダリティ）のとおり
+  const labels = await banner.locator("dt").allTextContents();
+  expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
+  // UID は、バナーの下の 1 行。高さは、バナー（氏名とかなの 2 行）と UID の 1 行ぶん
+  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(BANNER_HEAD_MAX);
   // StudyInstanceUID は見出しに常に出る（開け閉めしない）。下の「UID」「DICOM タグ」のボタンは無い
   await expect(detail.getByTestId("detail-uid-toggle")).toHaveCount(0);
   await expect(detail.getByTestId("detail-tags-toggle")).toHaveCount(0);
@@ -964,19 +971,37 @@ test("詳細の「検査のタグ」：画像の一覧が読めなくても、�
   await page.unroute("**/series/*/instances");
 });
 
-test("詳細の見出しに、毎回見る値を常に出す：受付番号・紹介医・英字氏名・Study ID・シリーズ数と画像数（UX のレビューの H8）", async ({ page }) => {
+// 期待の変更（患者バナー）：英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数は、見出し（バナー）に足さず「検査の情報」のタブに置く。
+// 受付番号はバナーに常に出る（UX のレビューの H8 のうち、毎回見る値）
+test("詳細：受付番号はバナーに常に出し、英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数は「検査の情報」のタブに置く", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
-  const head = page.getByTestId("detail-head");
+  const detail = page.getByTestId("study-detail");
+  const head = detail.getByTestId("detail-head");
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
-  // 開け閉めを押さなくても出ている
   await expect(page.getByTestId("detail-uid")).toHaveCount(0);
   await expect(head.getByTestId("detail-accession")).toContainText("受付番号");
-  await expect(head.getByTestId("detail-referring")).toHaveText(/紹介医\s*試験 医師/);
-  await expect(head.getByTestId("detail-alphabetic")).toContainText("Shiken Takako");
-  await expect(head.getByTestId("detail-counts")).toHaveText(/Se\/Im\s*1 \/ 4/);
-  // 見出しは、患者と検査の 2 行に UID の 1 行を足した 3 行に収まる（期待の変更。#57）
-  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(3 * 24 + 8);
+  // バナーには足さない
+  for (const id of ["detail-referring", "detail-alphabetic", "detail-counts"]) await expect(head.getByTestId(id)).toHaveCount(0);
+  // 「検査の情報」のタブ：最初はシリーズのタブが開いている。押すと、バナーに足さない値が出る
+  const tabs = detail.getByRole("tablist", { name: "検査の内容" });
+  await expect(tabs.getByRole("tab", { name: "シリーズ" })).toHaveAttribute("aria-selected", "true");
+  await expect(detail.getByTestId("detail-info")).toBeHidden();
+  await tabs.getByRole("tab", { name: "検査の情報" }).click();
+  await expect(tabs.getByRole("tab", { name: "検査の情報" })).toHaveAttribute("aria-selected", "true");
+  const info = detail.getByTestId("detail-info");
+  await expect(info).toBeVisible();
+  await expect(detail.getByTestId("series-strip")).toBeHidden();
+  await expect(info.getByTestId("detail-referring")).toHaveText(/紹介医\s*試験 医師/);
+  await expect(info.getByTestId("detail-alphabetic")).toContainText("Shiken Takako");
+  await expect(info).toContainText("1960/07/15（昭和35年）");
+  await expect(info.getByTestId("detail-counts")).toHaveText(/シリーズ \/ 画像\s*1 \/ 4/);
+  // 左右の矢印のキーでタブを移す。シリーズに戻ると、サムネイルがまた出る
+  await tabs.getByRole("tab", { name: "検査の情報" }).press("ArrowLeft");
+  await expect(tabs.getByRole("tab", { name: "シリーズ" })).toHaveAttribute("aria-selected", "true");
+  await expect(detail.getByTestId("series-strip")).toBeVisible();
+  // 見出しは、バナー（氏名とかなの 2 行）と UID の 1 行に収まる
+  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(BANNER_HEAD_MAX);
 });
 
 test("詳細の見出し：受付番号が無いときも「受付番号 —」を出す（無いこと自体が照合の手がかり）", async ({ page }) => {
@@ -1004,20 +1029,19 @@ test("詳細の見出し：受付番号が無いときも「受付番号 —」�
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   const head = page.getByTestId("detail-head");
   await expect(head.getByTestId("detail-accession")).toHaveText(/受付番号\s*—/);
-  // ほかの値の無い項目は、項目ごと省く
-  await expect(head.getByTestId("detail-referring")).toHaveCount(0);
+  // ほかの値の無い項目は、項目ごと省く（「検査の情報」にも出ない）
+  await expect(page.getByTestId("study-detail").getByTestId("detail-referring")).toHaveCount(0);
 });
 
-test("詳細の見出しは 1〜2 行：氏名・かな・患者 ID・生年月日と和暦・年齢・性別・検査日・モダリティ・検査の記述", async ({ page }) => {
+test("詳細の見出しは患者バナー：氏名・かな・患者 ID・生年月日と年齢・性別・検査日・モダリティ・検査名が、2 行（氏名とかな）に収まる", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await asRole(page, "一般");
   await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click();
   const head = page.getByTestId("detail-head");
   await expect(head).toContainText("JP-TEST-0004");
-  const lines = await head.locator("> p").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
-  expect(lines).toHaveLength(2);
-  // 1 行ずつ（14px の文字の行の高さ 20px。1 行に収まる幅）
-  for (const h of lines) expect(h).toBeLessThanOrEqual(24);
+  const banner = head.getByRole("region", { name: "患者" });
+  // 1280px の幅では、バナーの項目は氏名と同じ段に並ぶ（氏名 24px＋かな 18px＋内側の余白 16px 程度）
+  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(64);
   // 下のシリーズのサムネイルが、同じ画面に見えている（詳細の場所の中。スクロールしなくても）
   const pane = (await page.getByTestId("detail-pane").boundingBox())!;
   const strip = (await page.getByTestId("series-strip").boundingBox())!;

@@ -52,7 +52,8 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 |---|---|---|
 | 上の帯 | `src/components/layout/site-header.tsx` | あり。ナビの開閉・製品名・表示・ユーザーのメニューを持つ。項目の置き方は [menu.md](menu.md) の「現状との差」 |
 | 左のナビ | `src/components/layout/side-nav.tsx`（項目は `nav-items.ts`、開閉は `nav-toggle.tsx`） | あり |
-| 患者バナー | `src/components/ui/patient-banner.tsx` | 部品はある。詳細の見出し（`study-detail.tsx`）は別の作りのまま。バナーに替えると決まったので、替える PR で試験を移す |
+| 患者バナー | `src/components/ui/patient-banner.tsx` | あり。検査の詳細の見出し（`study-detail.tsx`）が使う。和暦・紹介医などは「検査の情報」のタブへ置いた |
+| タブ | `src/components/ui/tabs.tsx` | あり。検査の詳細（シリーズ・検査の情報）が使う |
 | 検索の帯 | `src/components/studies/study-browser.tsx` の `FilterBar` | あり |
 | 件数の行 | `src/components/ui/count-row.tsx` | あり。検査の一覧が使う |
 | 一覧の表 | `src/components/ui/table.tsx` | あり |
