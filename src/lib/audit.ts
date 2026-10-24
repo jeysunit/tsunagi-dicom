@@ -15,6 +15,7 @@ import type { Db } from "@/lib/db";
 // このモジュールには追記と確かめだけを置き、更新・削除の関数は作らない。
 
 export const AUDIT_ACTIONS = [
+  "hl7",
   "login",
   "logout",
   "search",

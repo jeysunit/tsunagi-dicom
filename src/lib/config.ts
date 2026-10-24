@@ -76,6 +76,8 @@ export interface AppConfig {
     /** 前に使っていた SESSION_SECRET（SESSION_SECRET_PREVIOUS_FILE）。その鍵で書いた行を確かめるためだけに使う */
     sessionSecretPrevious: string[];
   };
+  hl7ReceiverToken?: string;
+  hl7PatientIdIssuer?: string;
   databaseUrl: string;
   sessionSecret: string;
   timeZone: string;
@@ -120,6 +122,8 @@ const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で�
 
 const envSchema = z.object({
   // 省ける（orthanc だけ）。前の設定の dicomweb は、黙って Orthanc として動かさずに断る
+  HL7_RECEIVER_TOKEN_FILE: z.string().optional(),
+  HL7_PATIENT_ID_ISSUER: z.string().optional(),
   BACKEND_KIND: z
     .enum(["orthanc"], { error: "orthanc だけにする（汎用の DICOMweb の dicomweb は外した）。省いてもよい" })
     .default("orthanc"),
@@ -248,6 +252,21 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   };
 
+  // 片方だけの設定で、認証や発番元の確認を欠いた道を開かない（design.md §3・§6）。
+  const hl7ReceiverToken = secret("HL7_RECEIVER_TOKEN", undefined, e.HL7_RECEIVER_TOKEN_FILE);
+  if (hl7ReceiverToken !== undefined && [...hl7ReceiverToken].length < 32) {
+    problem("HL7_RECEIVER_TOKEN_FILE", "32 文字以上の乱数にする");
+  }
+  const hl7PatientIdIssuer = e.HL7_PATIENT_ID_ISSUER?.trim();
+  if (e.HL7_PATIENT_ID_ISSUER !== undefined && !hl7PatientIdIssuer) {
+    problem("HL7_PATIENT_ID_ISSUER", "namespace ID は空にできない");
+  }
+  if (Boolean(e.HL7_RECEIVER_TOKEN_FILE) !== Boolean(hl7PatientIdIssuer)) {
+    problem("HL7_PATIENT_ID_ISSUER", "token ファイルと発番元は両方を設定する");
+  }
+  if (hl7PatientIdIssuer && /[|^~\\&\s]/u.test(hl7PatientIdIssuer)) {
+    problem("HL7_PATIENT_ID_ISSUER", "namespace ID を指定する");
+  }
   const sessionSecret = secret("SESSION_SECRET", e.SESSION_SECRET, e.SESSION_SECRET_FILE);
   if (
     e.SESSION_SECRET_FILE !== undefined &&
@@ -384,6 +403,8 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     // 誤りは上で problem にして投げている
     screen: { studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS, instanceTags: instanceTags.ok ? instanceTags.tags : [] },
     audit: { anchorFile: e.AUDIT_ANCHOR_FILE, sessionSecretPrevious },
+    hl7ReceiverToken,
+    hl7PatientIdIssuer,
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている
     sessionSecret: sessionSecret!,

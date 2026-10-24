@@ -53,6 +53,8 @@ export default defineConfig({
       BACKEND_USERNAME: process.env.ITEST_ORTHANC_USERNAME ?? "",
       BACKEND_PASSWORD_FILE: path.join(ITEST.workDir, "backend-password.txt"),
       AUTH_MODE: "local",
+      HL7_PATIENT_ID_ISSUER: "RIS_EMU",
+      HL7_RECEIVER_TOKEN_FILE: path.join(ITEST.workDir, "hl7-receiver-token"),
       // 管理者は TOTP を登録しない（再認証はパスワードだけ）。ログインの細かい振る舞いはモックの試験（tests/e2e）で見る
       MFA_REQUIRED: "false",
       SCREEN_LOCK_MINUTES: "0",

@@ -267,6 +267,9 @@ test("CSRF の対策：token の無い要求・別の Origin の要求は断る"
   const origin = LOCAL_BASE_URL;
   const noToken = await page.request.post("/api/auth/lock", { headers: { origin }, data: { reason: "manual" } });
   expect(noToken.status()).toBe(403);
+  for (const headers of [{origin}, {origin,"x-csrf-token":"forged"}, {origin:"https://attacker.example"}] as Record<string,string>[]) {
+    expect((await page.request.post("/api/hl7/resolve", { headers, data: { writeId: crypto.randomUUID(), note: "試験" } })).status()).toBe(403);
+  }
   const wrongToken = await page.request.post("/api/auth/lock", {
     headers: { origin, "x-csrf-token": "forged" },
     data: { reason: "manual" },
@@ -445,6 +448,7 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("screen-lock")).toHaveCount(0);
   const patient = await patientValues(page);
 
+  const lockRequest=page.waitForRequest("**/api/auth/lock");
   // SCREEN_LOCK_MINUTES=1
   await page.clock.fastForward("01:10");
   const lock = page.getByTestId("screen-lock");
@@ -455,6 +459,11 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("study-table")).toHaveCount(0);
   // 頁を読み直すので、頁の HTML（描画の元のデータ・RSC の payload を含む）にも患者の値が残らない
   await expectNoPatientValues(page, patient);
+  const lockCsrf=(await lockRequest).headers()["x-csrf-token"]!;
+  expect((await page.request.post("/api/hl7/resolve", {
+    headers: { origin: LOCAL_BASE_URL, "x-csrf-token": lockCsrf },
+    data: { writeId: crypto.randomUUID(), note: "試験" }
+  })).status()).toBe(423);
   // サーバーの側もロックしている：画面の API と中継は 423、開き直しても中身を描かない
   await expect.poll(async () => (await page.request.get("/api/studies")).status()).toBe(423);
   expect((await page.request.get(`/api/dicom-web/studies/${STUDY}/metadata`)).status()).toBe(423);

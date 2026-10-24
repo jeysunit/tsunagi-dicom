@@ -1,3 +1,4 @@
+/* eslint-disable no-control-regex -- 制御文字そのものを見つけるための式。 */
 import { BackendError, type JobState, type JobStatus, type ModalityEntry, type OrthancStudyInfo, type StudySummary } from "@/lib/backend/types";
 
 // Orthanc の REST の応答の読み取り（docs/spec.md の 3.3・3.4）。実の Orthanc（http.ts）とモック（mock.ts）で同じものを使う。
@@ -212,3 +213,29 @@ export function studyInfoFromRest(json: unknown): OrthancStudyInfo | null {
 
 /** 仕事が終わったか（成功か失敗） */
 export const jobFinished = (state: JobState) => state === "Success" || state === "Failure";
+
+/** HL7 の患者の検索に、当てはめや複数の値を渡さない。 */
+export function checkedPatientId(id: string): string {
+  if (!id || /[\\*?\u0000-\u001f\u007f-\u009f]/.test(id)) {
+    throw new BackendError("患者 ID が正しくありません", 400);
+  }
+  return id;
+}
+
+/** A40 の空欄を補うため、患者の現在値だけを取り出す（design.md §9）。 */
+export function studyPatientFromRest(json: unknown): import("./types").StudyPatient | null {
+  const s = obj(json);
+  if (!isOrthancId(s.ID)) {
+    return null;
+  }
+  const p = obj(s.PatientMainDicomTags);
+  const m = obj(s.MainDicomTags);
+  return {
+    PatientID: str(p.PatientID),
+    PatientName: str(p.PatientName),
+    PatientBirthDate: str(p.PatientBirthDate),
+    PatientSex: str(p.PatientSex),
+    AccessionNumber: str(m.AccessionNumber),
+    StudyInstanceUID: str(m.StudyInstanceUID)
+  };
+}

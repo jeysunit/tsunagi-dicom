@@ -755,3 +755,68 @@ describe("削除：違う検査を消さない", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("HL7 の管理者による照らし合わせ", () => {
+  const resolveHl7 = async (body: unknown, origin = ORIGIN) => {
+    const { POST } = await import("@/app/api/hl7/resolve/route");
+    return POST(new Request(`${ORIGIN}/api/hl7/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin, host: new URL(ORIGIN).host },
+      body: JSON.stringify(body)
+    }));
+  };
+  it("一般は断り、断ったことを記録する", async () => {
+    state.role = "general";
+    const writeId = crypto.randomUUID();
+    expect((await resolveHl7({ writeId, note: "試験" })).status).toBe(403);
+    expect(detailOf(await lastAudit("hl7"))).toMatchObject({ writeId, permission: "pacs.reconcile", reason: "forbidden" });
+  });
+  it("別 Origin を断り、確認内容は必須", async () => {
+    state.role = "admin";
+    expect((await resolveHl7({ writeId: crypto.randomUUID(), note: "試験" }, "https://attacker.example")).status).toBe(403);
+    expect((await resolveHl7({ writeId: crypto.randomUUID(), note: "" })).status).toBe(400);
+  });
+  it("管理者は画像を読み直して manual の記録だけを足す", async () => {
+    state.role = "admin";
+    const { getBackend } = await import("@/lib/backend");
+    const { appendAudit } = await import("@/lib/audit");
+    const backend = getBackend();
+    const id = (await backend.lookupStudyIds(STUDY))[0]!;
+    const tags = await backend.studyInstanceTags(id);
+    const writeId = crypto.randomUUID();
+    await appendAudit(await db(), {
+      actorId: "hl7-receiver",
+      actorRole: "system",
+      authMode: "hl7",
+      action: "hl7",
+      outcome: "success",
+      studyInstanceUid: STUDY,
+      detail: {
+        event: "request",
+        writeId,
+        messageId: crypto.randomUUID(),
+        oldOrthancId: id,
+        StudyInstanceUID: STUDY,
+        before: tags,
+        after: tags
+      }
+    });
+    // 仕事の ID が無い要求は、人が確かめるまでは次の受信も止める（design.md §10）。
+    const { processMessage } = await import("@/lib/hl7/apply");
+    const { readFileSync } = await import("node:fs");
+    const message = readFileSync("tests/fixtures/hl7/a08.hl7", "utf8");
+    const options = { issuer: "RIS_EMU", allowWrite: true };
+    const beforeResolve = await processMessage(Buffer.from(message), "192.0.2.1", backend, undefined, options);
+    expect(beforeResolve).toContain("MSA|AE|");
+    const modify = vi.spyOn(backend, "modifyStudyKeepingUids");
+    const read = vi.spyOn(backend, "studyInstanceTags");
+    expect((await resolveHl7({ writeId, note: "Orthanc の仕事とログで処理が終わったことを確認した（試験）" })).status).toBe(200);
+    expect(modify).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalled();
+    expect(detailOf(await lastAudit("hl7"))).toMatchObject({ event: "reconcile", writeId, manual: true, matchesAfter: true });
+    const nextMessage = message.replace("20261024201531A08A", "AFTER-MANUAL");
+    expect(nextMessage).not.toBe(message);
+    expect(await processMessage(Buffer.from(nextMessage), "192.0.2.1", backend, undefined, options)).toContain("MSA|AA|");
+    expect((await resolveHl7({ writeId, note: "再度" })).status).toBe(409);
+  });
+});
