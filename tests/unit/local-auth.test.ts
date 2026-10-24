@@ -658,6 +658,24 @@ describe("セッション", () => {
     expect((await auditRows(db)).at(-1)).toMatchObject({ action: "logout", actorId: "sato", sourceAddressUnverified: "198.51.100.7" });
   });
 
+  it("画面のロックの画面からのログアウトは、セッションを消し、記録の detail に from: screen_lock を残す。ふつうのログアウトには残さない", async () => {
+    const { ctx, db } = await setup({ mfaRequired: false });
+    await createUser(ctx, { username: "sato", displayName: "佐藤", role: "general", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
+    const first = await login(ctx, "sato", "kq7vz2mw-long1");
+    await logout(ctx, (await sessionOf(db, first.token)).session, (await sessionOf(db, first.token)).user);
+    expect((await auditRows(db)).at(-1)!.detail).toBeNull();
+
+    const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
+    const s = await sessionOf(db, token);
+    await lockScreen(ctx, s.session, s.user, "manual");
+    expect((await resolveSession(ctx, token)).kind).toBe("locked");
+    await logout(ctx, s.session, s.user, { fromScreenLock: true });
+    expect((await resolveSession(ctx, token)).kind).toBe("anonymous");
+    const row = (await auditRows(db)).at(-1)!;
+    expect(row).toMatchObject({ action: "logout", outcome: "success", actorId: "sato" });
+    expect(JSON.parse(row.detail!)).toEqual({ from: "screen_lock" });
+  });
+
   it("途中のセッションは 10 分、ログインしたセッションは 12 時間で切れる", async () => {
     const { ctx, clock } = await setup({ screenLockMinutes: 0 });
     await enrolledUser(ctx, clock);

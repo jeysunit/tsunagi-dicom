@@ -663,6 +663,114 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await fresh.context.close();
 });
 
+test("画面のロック：ロックの画面からログアウトでき、確認の窓を挟む。前の利用者の情報は画面に残らず、監査の記録の鎖は保たれる", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const fresh = await newPage(browser);
+  const { page } = fresh;
+  const login = async () => {
+    await submitLogin(page, E2E_ADMIN.username, ADMIN_PASSWORD);
+    await expect(page).toHaveURL(/\/login\/totp$/);
+    const totp = page.getByRole("form", { name: "認証" });
+    await totp.getByLabel(/認証コード/).fill(await nextCode(adminSecret));
+    await totp.getByRole("button", { name: "認証" }).click();
+    await expect(page).toHaveURL(/\/$/);
+    // 前の試験で検査を 2 件消してあるので、件数の値は決めない
+    await expect(page.getByTestId("study-count")).toBeVisible();
+  };
+  await login();
+  const patient = await patientValues(page);
+  const before = (await (await page.request.get("/api/audit/verify")).json()) as { ok: boolean; checked: number };
+  expect(before.ok).toBe(true);
+
+  await page.getByRole("button", { name: "画面ロック", exact: true }).click();
+  const lock = page.getByTestId("screen-lock");
+  await expect(lock).toBeVisible();
+  const confirm = page.getByTestId("logout-confirm");
+  const logoutButton = lock.getByRole("button", { name: "ログアウト" });
+  await expect(logoutButton).toBeVisible();
+  await expect(confirm).toBeHidden();
+
+  // 押すと確認の窓が出る。初期のフォーカスはキャンセル。キャンセルでも Esc でも、ロックのまま
+  await logoutButton.click();
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText("ロックの前に入力して保存していない内容は残りません");
+  await expect(confirm.getByRole("button", { name: "キャンセル" })).toBeFocused();
+  // ロックの画面（画面いっぱいの覆い）の中央に出る。窓の位置を、覆いの大きさとの比べで見る（スクロールバーの幅に左右されない）
+  const box = (await confirm.boundingBox())!;
+  const cover = (await lock.boundingBox())!;
+  expect(Math.abs(box.x + box.width / 2 - (cover.x + cover.width / 2))).toBeLessThanOrEqual(1);
+  expect(Math.abs(box.y + box.height / 2 - (cover.y + cover.height / 2))).toBeLessThanOrEqual(1);
+  // 窓の説明（本文）が窓に結び付いている
+  await expect(confirm).toHaveAccessibleDescription(/保存していない内容は残りません/);
+  // Tab・Shift+Tab で、フォーカスがロックの画面の入力欄・ボタンへ出ない（標準の機構では、窓の外の頁は操作できない。
+  // 窓の端を越えるとブラウザの枠へ出ることはあるが、頁のどの要素にも移らない）
+  for (const key of ["Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"]) {
+    await page.keyboard.press(key);
+    expect(
+      await page.evaluate(() => {
+        const el = document.activeElement;
+        return el === document.body || !!el?.closest("dialog[data-testid=logout-confirm]");
+      }),
+      `${key} の後のフォーカス`,
+    ).toBe(true);
+  }
+  await confirm.getByRole("button", { name: "キャンセル" }).click();
+  await expect(confirm).toBeHidden();
+  await expect(lock).toBeVisible();
+  await logoutButton.click();
+  await expect(confirm).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(confirm).toBeHidden();
+  await expect(lock).toBeVisible();
+  // ここまでは、ログアウトしていない（ロックの BFF の状態が 423 のまま）
+  await expect.poll(async () => (await page.request.get("/api/studies")).status()).toBe(423);
+
+  // 読み直したロックの画面（BFF が中身なしで描いた頁）からも出られる（CSRF の token が頁に渡っている）
+  await page.reload();
+  await expect(lock).toBeVisible();
+  // 同じブラウザのほかのタブ：ロックの画面で、まだ BFF に届いていないロックの覚えを持っている
+  const other = await fresh.context.newPage();
+  await other.goto("/");
+  await expect(other.getByTestId("screen-lock")).toBeVisible();
+  await other.evaluate(() => window.sessionStorage.setItem("tsunagi:pending-lock", "manual"));
+
+  // 実行：ログインの頁へ戻り、前の利用者の情報は頁にも覚えにも残らず、セッションは使えない
+  await logoutButton.click();
+  const logoutResponse = page.waitForResponse((r) => r.url().endsWith("/api/auth/logout") && r.request().method() === "POST");
+  await confirm.getByRole("button", { name: "ログアウトする" }).click();
+  // ロックの印の cookie を、サーバーの応答（Set-Cookie）で消している（document.cookie だけでは区別できない）
+  const setCookies: string[] = (await (await logoutResponse).headersArray())
+    .filter((h) => h.name.toLowerCase() === "set-cookie")
+    .map((h) => h.value);
+  const gone = /Max-Age=0|Expires=Thu, 01 Jan 1970/i;
+  expect(setCookies.find((v) => v.includes("tsunagi_lock")) ?? "", "ロックの印の cookie を消す Set-Cookie").toMatch(gone);
+  expect(setCookies.find((v) => v.includes("tsunagi_session")) ?? "", "セッションの cookie を消す Set-Cookie").toMatch(gone);
+  await expect(page).toHaveURL(/\/login$/);
+  // ほかのタブも、ログインの頁へ移り、届いていないロックの覚えを残さない
+  await expect(other).toHaveURL(/\/login$/);
+  expect(await other.evaluate(() => window.sessionStorage.getItem("tsunagi:pending-lock"))).toBeNull();
+  await other.close();
+  await expectNoPatientValues(page, patient);
+  await expect(page.getByTestId("screen-lock")).toHaveCount(0);
+  const kept = await page.evaluate(() => ({
+    local: Object.keys(window.localStorage).filter((k) => k.startsWith("tsunagi:")),
+    session: Object.keys(window.sessionStorage).filter((k) => k.startsWith("tsunagi:")),
+    cookie: document.cookie,
+  }));
+  expect(kept.local).toEqual([]);
+  expect(kept.session).toEqual([]);
+  expect(kept.cookie).not.toContain("tsunagi_lock");
+  expect((await page.request.get("/api/studies")).status()).toBe(401);
+
+  // 別の利用者が同じブラウザでログインし直せ、監査の記録の鎖（ロックと、ロックの画面からのログアウトの行を含む）が保たれる
+  await login();
+  const after = (await (await page.request.get("/api/audit/verify")).json()) as { ok: boolean; checked: number };
+  expect(after.ok).toBe(true);
+  // ロック・ロックの画面からのログアウト・ログインの 3 行以上が増える
+  expect(after.checked).toBeGreaterThanOrEqual(before.checked + 3);
+  await fresh.context.close();
+});
+
 test("ログアウトすると、セッションは使えない", async () => {
   const { page } = admin;
   await page.goto("/");
