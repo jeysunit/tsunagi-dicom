@@ -16,6 +16,8 @@ import { expect, test, type Page } from "@playwright/test";
 //    tsunagi-dicom の「送信」で storescp へ送る → storescp に同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。
 // 3. 予約から：ris-emulator の CLI で予約を作る → DTG がワークリスト（MWL）を取得し、その予約で撮って Orthanc へ送る →
 //    tsunagi-dicom の検査の一覧に、予約の StudyInstanceUID・受付番号・患者 ID で出る。
+// 4. HL7：DTG で緊急の患者を撮る → ris-emulator の pir send（A40）を HL7 の受け口が受ける → 同じ StudyInstanceUID の検査が
+//    1 件だけ、正式な患者 ID で一覧に出る。
 // 前の試験の結果に依らないが、順に流す（管理者のパスワードは 2 で変え、3 はそのパスワードでログインする）。
 
 test.describe.configure({ mode: "serial" });
@@ -145,9 +147,19 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   expect((await inspect(await containerId("storescp"))).Config.Image).toBe(dcmtkImage);
   expect(tsunagi.Config.Image).toBe(process.env.TSUNAGI_IMAGE || `${project}-tsunagi:local`);
 
-  // ris-emulator：ホストへは Web 画面（8081）だけを 127.0.0.1 に出し、MWL（11112）は出さない。入るのは dicom のネットワークだけ
+  // ris-emulator：ホストへは Web 画面（8081）だけを 127.0.0.1 に出し、MWL（11112）は出さない。
+  // 入るのは dicom と、HL7 の受け口だけと共有する hl7 のネットワーク
   expect(ris.HostConfig.PortBindings).toEqual({ "8081/tcp": [{ HostIp: "127.0.0.1", HostPort: process.env.DEV_RIS_WEB_PORT ?? "18081" }] });
-  expect(Object.keys(ris.NetworkSettings.Networks)).toEqual([net("dicom")]);
+  expect(Object.keys(ris.NetworkSettings.Networks).sort()).toEqual([net("dicom"), net("hl7")].sort());
+
+  // HL7 の受け口：ホストにポートを出さず、hl7 と backend だけに入る（docs/spec.md の 3.5「HL7 による患者情報の更新」）
+  const hl7Receiver = await inspect(await containerId("hl7-receiver"));
+  expect(hl7Receiver.Config.Image).toBe(`${project}-hl7-receiver:local`);
+  expect(Object.keys(hl7Receiver.HostConfig.PortBindings ?? {})).toEqual([]);
+  expect(Object.keys(hl7Receiver.NetworkSettings.Networks).sort()).toEqual([net("backend"), net("hl7")].sort());
+  // hl7 のネットワークには ris-emulator と受け口だけ
+  const [hl7Net] = JSON.parse(await docker(["network", "inspect", net("hl7")])) as { Containers: Record<string, unknown> }[];
+  expect(Object.keys(hl7Net!.Containers).sort()).toEqual([ris.Id, hl7Receiver.Id].sort());
 
   // ホストへの公開：Orthanc は DICOM（4242）だけ。REST（8042）は出さない
   expect(Object.keys(orthanc.HostConfig.PortBindings ?? {})).toEqual(["4242/tcp"]);
@@ -163,13 +175,13 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   // ネットワーク：Orthanc は backend と dicom だけ、tsunagi-dicom は backend と web だけ
   expect(Object.keys(orthanc.NetworkSettings.Networks).sort()).toEqual([net("backend"), net("dicom")].sort());
   expect(Object.keys(tsunagi.NetworkSettings.Networks).sort()).toEqual([net("backend"), net("web")].sort());
-  // backend は internal で、入っているのは tsunagi-dicom と Orthanc だけ
+  // backend は internal で、入っているのは tsunagi-dicom と Orthanc と、開発の一式だけの HL7 の受け口（BFF へ渡すため）
   const [backend] = JSON.parse(await docker(["network", "inspect", net("backend")])) as {
     Internal: boolean;
     Containers: Record<string, unknown>;
   }[];
   expect(backend!.Internal).toBe(true);
-  expect(Object.keys(backend!.Containers).sort()).toEqual([orthanc.Id, tsunagi.Id].sort());
+  expect(Object.keys(backend!.Containers).sort()).toEqual([orthanc.Id, tsunagi.Id, hl7Receiver.Id].sort());
   // dicom のコンテナどうしの通信は、開発用の compose だけが許す（dev.env の ORTHANC_DICOM_ICC=true が届いている）
   const [dicom] = JSON.parse(await docker(["network", "inspect", net("dicom")])) as { Options: Record<string, string> }[];
   expect(dicom!.Options["com.docker.network.bridge.enable_icc"]).toBe("true");
@@ -340,4 +352,41 @@ test("3 予約から：ris-emulator で予約を作る → DTG がワークリ�
 
   // CI の記録に残す数（名前と数だけ）
   console.log(`[flow] 予約から：ワークリストの件数 ${query.items.length}・DTG が作った画像 ${exam.files.length}・一覧に出た検査 1`);
+});
+
+test("4 HL7：緊急の患者で撮る → ris-emulator の pir send（A40）→ 受け口 → 同じ UID のまま正式な患者 ID で一覧に出る", async ({ page }) => {
+  // 試験ごとに別の架空の患者 ID にする（前の流れの結果に依らない）
+  const suffix = Date.now().toString().slice(-8);
+  const priorId = `ER${suffix}`;
+  const patientId = `PF${suffix}`;
+  const exam = JSON.parse(
+    await compose(
+      ["exec", "-T", "dtg", "python", "-m", "app.cli", "exam", "--emergency", "--patient-id", priorId, "--patient-name", "FLOW^EMERGENCY",
+        "-s", "1", "-i", "2", "--send", "--json"],
+      300_000,
+    ),
+  ) as { study_instance_uid: string; files: string[]; send: { status: string } };
+  expect(exam.send).toMatchObject({ status: "sent" });
+
+  await loginAsInitialAdmin(page);
+  type StudyList = { studies: { studyInstanceUid: string; patientId?: string }[] };
+  const listed = async () => (await (await page.request.get("/api/studies")).json()) as StudyList;
+  await waitFor("緊急の検査が一覧に出る", listed, (body) => body.studies.some((s) => s.studyInstanceUid === exam.study_instance_uid));
+
+  // ris-emulator から受け口（hl7-receiver）へ A40 を送る。受理（AA）なら終了コード 0
+  await compose(
+    ["exec", "-T", "ris", "python", "-m", "app.cli", "pir", "send", "--host", "hl7-receiver", "--kind", "a40",
+      "--patient-id", patientId, "--prior-patient-id", priorId, "--name", "FLOW^HL7=流れ^太郎=ナガレ^タロウ"],
+    120_000,
+  );
+
+  // 同じ StudyInstanceUID の検査が 1 件だけ、正式な患者 ID で出る（元の患者 ID の検査は残らない）
+  const after = await waitFor("正式な患者 ID で出る", listed, (body) =>
+    body.studies.some((s) => s.studyInstanceUid === exam.study_instance_uid && s.patientId === patientId),
+  );
+  const same = after.studies.filter((s) => s.studyInstanceUid === exam.study_instance_uid);
+  expect(same).toHaveLength(1);
+  expect(after.studies.some((s) => s.patientId === priorId)).toBe(false);
+
+  console.log(`[flow] HL7：A40 で統合した検査 1・画像 ${exam.files.length}`);
 });

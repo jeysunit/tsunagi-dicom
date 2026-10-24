@@ -1,0 +1,87 @@
+# ris-emulator の設定（docs/spec/03_web_cli.md の 4 章）。
+# 相対のパスは、プロセスの作業ディレクトリから辿る。
+# 開発・試験の環境だけで使う。本物の患者のデータを入れない。
+#
+# tsunagi-dicom の開発の一式（docker/dev/compose.yaml）が /app/config/app_config.yaml に重ねる写し。
+# 元は ris-emulator の 3573572 の config/app_config.yaml で、次の 2 か所だけを替えた（ris-emulator の版を上げたら、元と見比べる）：
+# - CT の装置の AE タイトルを、DTG の AE タイトル DTG_CT01 にする（DTG のワークリストに予約が出るように）
+# - hl7.host を HL7 の受け口（hl7-receiver）にする（pir send で --host を付けずに済む）
+
+database: "state/ris.sqlite3"     # 予約の保存先（SQLite）
+
+mwl:
+  ae_title: "RIS_EMU"
+  bind_address: "127.0.0.1"       # Docker では "0.0.0.0"
+  port: 11112
+  statuses: ["scheduled", "in_progress"]  # MWL で返す予約の状態
+  max_results: 1000               # 一致がこれを超えたら A700 で断る
+  require_called_ae_title: true   # 相手の Called AE Title が ae_title と違えば断る
+
+orders:
+  institution_name: "TEST HOSPITAL"
+  accession_prefix: "RE"          # 受付番号 = 接頭辞 + 作った日 + 4 桁の連番
+  patient_id_prefix: "RE"         # 乱数の患者 ID = 接頭辞 + 7 桁
+  issuer_namespace: "RIS_EMU"     # Issuer of Patient ID・Issuer of Accession Number Sequence。空なら返さない
+  default_character_set: "utf8"   # utf8, jis, jis_kana
+  roster_path: "data/patients_sample.yaml"
+  departments: ["内科", "外科", "整形外科", "脳神経外科", "呼吸器内科", "消化器内科", "救急科"]
+  retake_mode: "append"           # 撮り直し：append（同じ予約の中で追加。IHE）、new_order（撮り直しの予約を作る）
+  slot_minutes: 15                # 予約作成の画面の予定時刻の分の刻み：1, 5, 10, 15, 20, 30, 60
+  # stations は装置の台帳。name は画面と CLI で選ぶ名前（MWL には入れない）、
+  # ae_title は Scheduled Station AE Title（モダリティの側の AE タイトルとそろえる。16 字まで）、
+  # station_name は Scheduled Station Name（16 字まで）。予約で装置を選ばなければ、台帳の順に使う
+  modalities:
+    CT:
+      stations:
+        - {name: "CT1号機", ae_title: "DTG_CT01", station_name: "CT01"}
+      procedures:
+        - {code: "CT0001", name: "頭部 CT 単純"}
+        - {code: "CT0002", name: "胸部 CT 単純"}
+        - {code: "CT0003", name: "腹部 CT 造影"}
+        - {code: "CT0004", name: "胸腹部 CT 造影"}
+    MR:
+      stations:
+        - {name: "MR1号機", ae_title: "MR01", station_name: "MR01"}
+      procedures:
+        - {code: "MR0001", name: "頭部 MRI 単純"}
+        - {code: "MR0002", name: "腰椎 MRI 単純"}
+        - {code: "MR0003", name: "膝関節 MRI 単純"}
+    CR:
+      stations:
+        - {name: "CR1号機", ae_title: "CR01", station_name: "CR01"}
+      procedures:
+        - {code: "CR0001", name: "胸部 X 線 正面"}
+        - {code: "CR0002", name: "腹部 X 線 臥位"}
+    DX:
+      stations:
+        - {name: "DX1号機", ae_title: "DX01", station_name: "DX01"}
+      procedures:
+        - {code: "DX0001", name: "胸部 X 線 正面・側面"}
+        - {code: "DX0002", name: "腰椎 X 線 2 方向"}
+    US:
+      stations:
+        - {name: "US1号機", ae_title: "US01", station_name: "US01"}
+      procedures:
+        - {code: "US0001", name: "腹部 超音波"}
+        - {code: "US0002", name: "心臓 超音波"}
+    MG:
+      stations:
+        - {name: "MG1号機", ae_title: "MG01", station_name: "MG01"}
+      procedures:
+        - {code: "MG0001", name: "マンモグラフィ 両側"}
+
+web:
+  bind_address: "127.0.0.1"       # Docker では "0.0.0.0"（パスワードのファイルが要る）
+  port: 8081
+  start_mwl: true                 # 画面のプロセスで MWL の SCP も立てる
+
+# HL7 v2.3.1 の送信（pir send）。送り先は MLLP で待ち受ける PACS の受け口
+hl7:
+  host: "hl7-receiver"            # tsunagi-dicom の開発の一式の HL7 の受け口（hl7 のネットワーク）
+  port: 2575
+  sending_application: "RIS_EMU"  # MSH-3
+  sending_facility: "TEST_HOSPITAL"  # MSH-4
+  receiving_application: "PACS"   # MSH-5
+  receiving_facility: "PACS"      # MSH-6
+  processing_id: "P"              # MSH-11：P=本番、T=教育、D=デバッグ
+  timeout_seconds: 10             # 接続と ACK の待ち時間
