@@ -36,7 +36,7 @@ export function SideNav({ groups }: { groups: readonly NavGroup[] }) {
     <nav
       aria-label="ページ"
       data-testid="site-nav"
-      className="min-h-0 w-52 shrink-0 overflow-y-auto border-r border-border bg-surface px-2 py-3 group-data-[nav=collapsed]/body:w-14"
+      className="min-h-0 w-52 shrink-0 overflow-x-hidden overflow-y-auto border-r border-border bg-surface px-2 py-3 group-data-[nav=collapsed]/body:w-14 group-data-[nav=collapsed]/body:px-1"
     >
       {groups.map((group) => (
         <div key={group.label} className="mb-3 last:mb-0">
@@ -51,7 +51,7 @@ export function SideNav({ groups }: { groups: readonly NavGroup[] }) {
                     title={item.label}
                     aria-current={current ? "page" : undefined}
                     className={cn(
-                      "flex h-8 items-center gap-2 rounded-sm border-l-[3px] px-2 whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                      "flex h-8 items-center gap-2 rounded-sm border-l-[3px] px-2 whitespace-nowrap transition-colors group-data-[nav=collapsed]/body:px-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                       current
                         ? "border-ring bg-selected font-bold text-value"
                         : "border-transparent text-foreground hover:bg-hover hover:text-value active:bg-pressed",
