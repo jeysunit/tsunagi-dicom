@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tan
 import { CheckCircle2, ChevronDown, ChevronRight, Inbox, RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
+import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -153,12 +154,10 @@ function FilterBar({
   filter,
   facets,
   onChange,
-  trailing,
 }: {
   filter: StudyFilter;
   facets: StudyFacets | undefined;
   onChange: (f: StudyFilter) => void;
-  trailing?: React.ReactNode;
 }) {
   const [text, setText] = useState(filter.q ?? "");
   // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名）は「詳細条件」の中。どれかで絞っているときは最初から開く
@@ -243,7 +242,6 @@ function FilterBar({
           {/* 閉じていても、詳細条件で絞っていることが分かるように数を添える */}
           {conditions > 0 && <span data-testid="filter-more-count">（{conditions}）</span>}
         </button>
-        {trailing}
       </div>
       {more && (
         <div
@@ -814,40 +812,40 @@ function Browser({
         className="flex min-h-0 flex-1 flex-col gap-2 md:min-h-(--top-min) md:flex-none md:basis-(--split)"
         style={{ "--split": `${split}%`, "--top-min": `${filtersH + TOP_GAP_PX + LIST_MIN_PX}px` } as React.CSSProperties}
       >
-      <FilterBar
-        key={filterKey}
-        filter={filter}
-        facets={data?.facets}
-        onChange={changeFilter}
-        trailing={
-          <div className="flex flex-wrap items-baseline gap-2">
-            <h1 className="flex items-baseline gap-1" aria-live="polite" data-fetching={list.isFetching || undefined}>
-              {/* 取り直しの待ちの印が出ている間は、件数を「—」にする（古い件数を新しいものに見せない） */}
-              <span className="text-lg font-bold text-value" data-testid="study-count">
-                {data && !refetching ? `${data.count.count}${data.count.exact ? "" : " 以上"}` : "—"}
-              </span>
-              <span className="text-label">件</span>
-            </h1>
-            <PendingText pending={fetching} />
-            {refreshSeconds > 0 && (
+      {/* 条件の行と件数の行。測る対象（topRef の最初の子）は、この 2 つをまとめた入れ物 */}
+      <div className="shrink-0 space-y-3">
+        <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} />
+        {/* 件数の行（docs/design-system/components.md）：検索の欄が空かどうかで件数と自動更新の位置が動かない（#56） */}
+        <CountRow
+          aside={
+            refreshSeconds > 0 && (
               <span
-                className={cn("inline-flex items-center gap-1 text-xs", refresh.failed ? "text-danger" : "text-label")}
+                className={cn("inline-flex items-center gap-1", refresh.failed && "text-danger")}
                 data-testid="list-refresh"
                 data-failed={refresh.failed || undefined}
               >
                 <RefreshCw aria-hidden className="size-3.5" />
                 {refresh.failed ? "自動更新：接続できません" : `自動更新（${refreshSeconds}秒）`}
               </span>
-            )}
-            {notice && (
-              <p role="status" className="flex items-center gap-1.5 rounded-md border border-success px-2 text-sm text-success" data-testid="list-notice">
-                <CheckCircle2 aria-hidden className="size-4" />
-                {notice}
-              </p>
-            )}
-          </div>
-        }
-      />
+            )
+          }
+        >
+          <h1 className="flex items-baseline gap-1" aria-live="polite" data-fetching={list.isFetching || undefined}>
+            {/* 取り直しの待ちの印が出ている間は、件数を「—」にする（古い件数を新しいものに見せない） */}
+            <span className="text-lg font-bold text-value" data-testid="study-count">
+              {data && !refetching ? `${data.count.count}${data.count.exact ? "" : " 以上"}` : "—"}
+            </span>
+            <span className="text-label">件</span>
+          </h1>
+          <PendingText pending={fetching} />
+          {notice && (
+            <p role="status" className="flex items-center gap-1.5 border-l-4 border-success bg-surface px-2 text-sm text-success" data-testid="list-notice">
+              <CheckCircle2 aria-hidden className="size-4" />
+              {notice}
+            </p>
+          )}
+        </CountRow>
+      </div>
 
       {list.isError && (
         <p role="alert" className="text-danger">
