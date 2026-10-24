@@ -73,6 +73,34 @@ test("左のナビ：本文の左に幅 208px で置き、群の名前を出す�
   await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
 });
 
+test("左のナビ：低い画面でも、末尾の項目まで届く（ナビの中でスクロールする）", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await asAdmin(page);
+  const side = nav(page);
+  expect(await side.evaluate((el) => getComputedStyle(el).overflowY)).toBe("auto");
+  // 最後の項目（検証モードの管理者では、管理の群のビューア設定）に、ナビの中のスクロールで届いて押せる
+  const last = side.getByRole("link").last();
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", "/admin/viewers");
+});
+
+test("左のナビ：頁を移る待ちの間は、閉じた幅でも、項目の絵の場所に待ちの印を出す", async ({ page }) => {
+  await asAdmin(page);
+  await page.getByTestId("nav-toggle").click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  // 受信一覧の頁の取得を遅らせる（頁の切り替えが 0.3 秒を超えて待つ）
+  await page.route("**/received**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  const link = nav(page).locator("a[href='/received']");
+  await link.click();
+  await expect(link.getByTestId("spinner")).toBeVisible();
+  await expect(page).toHaveURL(/\/received$/);
+  await page.getByTestId("nav-toggle").click();
+});
+
 test("押せる物：カーソルは指の形、押せないときは禁止の形。hover で地が変わる", async ({ page }) => {
   await asAdmin(page);
   await expect(rows(page).first()).toBeVisible();
