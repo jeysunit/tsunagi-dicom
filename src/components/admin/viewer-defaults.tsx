@@ -27,7 +27,7 @@ export function ViewerDefaults({
       setValues((v) => ({ ...v, [modality]: before }));
       setMessage({ ok: false, text: errorText(result) });
     } else {
-      setMessage({ ok: true, text: `${modality} の既定ビューアを保存しました` });
+      setMessage({ ok: true, text: `${modality} の標準のビューアを保存しました` });
     }
   }
 
@@ -42,7 +42,7 @@ export function ViewerDefaults({
             <dt className="font-bold text-value">{m}</dt>
             <dd>
               <select
-                aria-label={`${m} の既定のビューア`}
+                aria-label={`${m} の標準のビューア`}
                 className="h-8 rounded-md border border-border bg-background px-2 text-value"
                 value={values[m] ?? ""}
                 disabled={openers.length === 0}

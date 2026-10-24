@@ -15,7 +15,7 @@ async function asAdmin(page: Page) {
   }
 }
 
-const nav = (page: Page) => page.getByRole("navigation", { name: "頁" });
+const nav = (page: Page) => page.getByRole("navigation", { name: "ページ" });
 const rows = (page: Page) => page.getByTestId("study-table").locator("tbody > tr[data-study-uid]");
 const bg = (page: Page, selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).backgroundColor);
 
@@ -259,6 +259,14 @@ const RETIRED_WORDS = [
   "すべての DICOM の値",
   "患者 ID",
   "監査の外",
+  // 画面の言葉の用語集（docs/design-system/glossary.md）で外した言葉
+  "待機中",
+  "既定",
+  "AE タイトル",
+  "頁",
+  "患者氏名",
+  "消去",
+  "再送せず",
 ];
 
 test("画面の言葉：用語集で外した言葉が、検証モードのどの頁にも出ない", async ({ page }) => {

@@ -45,7 +45,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
             <thead className="bg-surface text-left text-xs text-label">
               <tr className="border-b border-border">
                 <th className="px-2 py-1 font-normal">名称</th>
-                <th className="px-2 py-1 font-normal">AE タイトル</th>
+                <th className="px-2 py-1 font-normal">AEタイトル</th>
                 {showAddress && <th className="px-2 py-1 font-normal">ホスト:ポート</th>}
                 <th className="px-2 py-1 font-normal">接続確認</th>
               </tr>

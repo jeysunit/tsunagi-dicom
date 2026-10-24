@@ -51,7 +51,7 @@ const POLL_MS = 1500;
 
 /** Orthanc の仕事の状態の、画面の言葉（docs/spec.md の 2.2） */
 export const SEND_STATE_TEXT: Record<JobView["state"], string> = {
-  Pending: "待機中",
+  Pending: "送信待ち",
   Running: "送信中",
   Success: "送信完了",
   Failure: "送信失敗",
@@ -360,7 +360,7 @@ function SendStatus({
   if (phase.readError) {
     return (
       <div role="alert" className={cn(BOX, "space-y-1 border-danger bg-background")} data-testid="send-status" data-state={job?.state ?? "Accepted"}>
-        <p className="text-danger">状態を取得できませんでした（{phase.readError}）。再送せずに「再読み込み」を押してください</p>
+        <p className="text-danger">状態を取得できませんでした（{phase.readError}）。再送信せずに「再読み込み」を押してください</p>
         <p className="font-mono text-xs text-label">要求ID {phase.requestId}</p>
         <Button type="button" size="sm" variant="outline" onClick={onReread}>
           再読み込み
@@ -390,7 +390,7 @@ function SendStatus({
       </p>
     );
   }
-  // 送っている間（受け付けた・待機中・送信中・一時停止中・再試行待ち）
+  // 送っている間（受け付けた・送信待ち・送信中・一時停止中・再試行待ち）
   const text = job ? SEND_STATE_TEXT[job.state] : "送信を受け付けました";
   return (
     <div role="status" className={cn(BOX, "space-y-1.5 border-ring bg-background")} data-testid="send-status" data-state={job?.state ?? "Accepted"}>
@@ -420,7 +420,7 @@ function UnknownStatus({
   const [note, setNote] = useState("");
   return (
     <div role="alert" className={cn(BOX, "space-y-1 border-danger bg-background")} data-testid="send-status" data-state="Unknown">
-      <p className="text-danger">送信結果を確認できません。再送せずに状態を確認してください。確認が終わるまで、同じ送信先へは送信できません</p>
+      <p className="text-danger">送信結果を確認できません。再送信せずに状態を確認してください。確認が終わるまで、同じ送信先へは送信できません</p>
       <p className="font-mono text-xs text-label">要求ID {requestId}</p>
       {checkError && <p className="text-xs text-danger">確認できませんでした：{checkError}</p>}
       <Button type="button" size="sm" variant="outline" onClick={() => onCheck(requestId)} data-testid="send-check">

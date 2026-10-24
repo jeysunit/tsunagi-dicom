@@ -113,7 +113,7 @@ export function ViewerMenu({
           className="rounded-r-none"
           disabled={!defaultViewer}
           title={defaultViewer ? undefined : "ビューア未設定"}
-          aria-label={`${seriesLabel ?? ""}${label ?? "既定のビューア"}で開く`}
+          aria-label={`${seriesLabel ?? ""}${label ?? "標準のビューア"}で開く`}
           data-testid="open-default"
           onClick={() => openInViewer(studyUid, defaultViewer)}
         >

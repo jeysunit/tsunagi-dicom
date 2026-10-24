@@ -608,20 +608,20 @@ test("モダリティごとの既定のビューア：管理者が管理の画�
   await expect(page.getByText("管理者のみ利用できます")).toBeVisible();
 
   await asRole(page, "管理者");
-  await page.getByRole("navigation", { name: "頁" }).getByRole("link", { name: "ビューア設定" }).click();
+  await page.getByRole("navigation", { name: "ページ" }).getByRole("link", { name: "ビューア設定" }).click();
   await expect(page).toHaveURL(/\/admin\/viewers$/);
-  const ct = page.getByLabel("CT の既定のビューア");
+  const ct = page.getByLabel("CT の標準のビューア");
   await expect(ct).toHaveValue("ohif");
   await ct.selectOption("stone");
-  await expect(page.getByText("CT の既定ビューアを保存しました")).toBeVisible();
+  await expect(page.getByText("CT の標準のビューアを保存しました")).toBeVisible();
 
   await page.goto("/");
   await expectOpened(page, () => row(page).getByTestId("open-default").click(), /viewer\.example\.org\/stone\//);
 
   // 戻す
   await page.goto("/admin/viewers");
-  await page.getByLabel("CT の既定のビューア").selectOption("ohif");
-  await expect(page.getByText("CT の既定ビューアを保存しました")).toBeVisible();
+  await page.getByLabel("CT の標準のビューア").selectOption("ohif");
+  await expect(page.getByText("CT の標準のビューアを保存しました")).toBeVisible();
 });
 
 // ---- 1 行の一覧・件数つきの絞り込み・詰めた詳細（docs/spec.md の 3.1） ----

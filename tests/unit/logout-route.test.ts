@@ -63,7 +63,7 @@ describe("POST /api/auth/logout", () => {
 
   it("CSRF の token が合わなければ 403 で断り、セッションも cookie も触らない", async () => {
     const { RequestError } = await import("@/lib/api/auth-route");
-    mocks.checkedState.mockRejectedValue(new RequestError(403, "画面の確認用の token（x-csrf-token）が一致しません。頁を開き直してください"));
+    mocks.checkedState.mockRejectedValue(new RequestError(403, "画面の確認用の token（x-csrf-token）が一致しません。ページを開き直してください"));
     const res = await post();
     expect(res.status).toBe(403);
     expect(mocks.logout).not.toHaveBeenCalled();
