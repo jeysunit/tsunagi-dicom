@@ -106,16 +106,18 @@ test("押している間の手応え：ボタンは沈んで影が消え、絞�
   await page.mouse.up();
   await page.getByTestId("modality-all").click();
 
-  // 共通のボタン（詳細の「UID」）も同じ手応え。枠のボタンの地は白（明るい地の上で、押せる物の形に見せる）
-  await rows(page).first().click();
-  const uid = page.getByTestId("detail-uid-toggle");
-  expect(await uid.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
-  await uid.hover();
+  // 共通のボタン（受け取りの「読み直す」。前は詳細の「UID」のボタンで確かめていた。#57）も同じ手応え。
+  // 枠のボタンの地は白（明るい地の上で、押せる物の形に見せる）
+  await page.goto("/received");
+  const reload = page.getByTestId("received-reload");
+  expect(await reload.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
+  await reload.hover();
   await page.mouse.down();
-  await expect.poll(() => uid.evaluate((el) => getComputedStyle(el).translate)).toBe("0px 1px");
+  await expect.poll(() => reload.evaluate((el) => getComputedStyle(el).translate)).toBe("0px 1px");
   await page.mouse.up();
-  await expect.poll(() => uid.evaluate((el) => getComputedStyle(el).translate)).toBe("none");
-  await uid.click();
+  await expect.poll(() => reload.evaluate((el) => getComputedStyle(el).translate)).toBe("none");
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
 
   // 動きを減らす設定では沈めない（地の色と影の変化だけ）
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -283,11 +285,10 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   await page.getByTestId("study-detail").getByTestId("open-menu").click();
   await collect("詳細とビューアのメニュー");
   await page.keyboard.press("Escape");
-  await page.getByTestId("detail-uid-toggle").click();
-  await page.getByRole("button", { name: "DICOM タグ" }).click();
+  await page.getByTestId("series-open").first().click();
+  await page.getByTestId("tag-set-study").click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
-  await collect("詳細の UID と DICOM タグ");
-  await page.getByTestId("detail-uid-toggle").click();
+  await collect("詳細の UID と検査のタグ");
   for (const path of ["/received", "/modalities", "/admin/viewers"]) {
     await page.goto(path);
     if (path === "/modalities") {

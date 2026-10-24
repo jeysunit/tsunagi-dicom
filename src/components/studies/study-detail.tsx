@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
-import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { PendingText, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
@@ -11,7 +11,6 @@ import { Thumbnail } from "@/components/studies/thumbnail";
 import { ViewerMenu } from "@/components/studies/viewer-menu";
 import type { DicomValueRow } from "@/lib/all-values";
 import { getJson } from "@/lib/client/api";
-import { getDetailOpen, getServerDetailOpen, setDetailOpen, subscribeDetailOpen } from "@/lib/client/detail-open";
 import type { SeriesView, StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { tagName } from "@/lib/instance-tags";
@@ -25,8 +24,9 @@ import { cn } from "@/lib/utils";
 // 値の無い項目は省く。受付番号だけは、無いときも「受付番号 —」を出す（無いこと自体が照合の手がかりになる）。
 // その下にシリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。DICOM の値を見る権限のある役割では、
 // サムネイルを押すと、その下にシリーズの画像の場所（画像の一覧と、画像ごとのタグ）を開く。もう一度押すと閉じる。
-// 開け閉めは「UID」と「DICOM タグ」（検査単位の要約）の2つだけ
-// （UID の開閉はこの端末のブラウザに覚える）。値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
+// UID は開け閉めせず、見出しの 3 行目に StudyInstanceUID、画像の場所の見出しに SeriesInstanceUID を、写すボタンつきで出す
+// （2026-10-24。前は下に「UID」と「DICOM タグ」のボタンがあり、画像の場所と役割が重なっていた。#57）。検査単位のタグ（要約）は、
+// 画像の場所の「検査のタグ」から見る。値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
 
 export interface StudyDetailData {
   study: StudyView;
@@ -103,9 +103,9 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 /** StudyInstanceUID・SeriesInstanceUID：行の幅いっぱいに 0.75rem・等幅・控えめの色、コピーのボタン付き */
-function UidLine({ label, uid }: { label: string; uid: string }) {
+function UidLine({ label, uid, testId = "uid-line" }: { label: string; uid: string; testId?: string }) {
   return (
-    <div className="flex items-center gap-2" data-testid="uid-line">
+    <div className="flex items-center gap-2" data-testid={testId}>
       <span className="shrink-0 text-xs text-label">{label}</span>
       <code className="min-w-0 flex-1 font-mono text-[0.75rem] break-all text-label">{uid}</code>
       <CopyButton text={uid} label={label} />
@@ -224,8 +224,8 @@ function instanceLabel(i: InstanceItem): string {
   return `${i.instanceNumber ? `#${i.instanceNumber}` : i.sopInstanceUid}${frames}`;
 }
 
-/** 画像の場所のタグの組：主なタグ（設定の INSTANCE_TAGS）・すべてのタグ（その画像の値の全部） */
-type TagSet = "configured" | "all";
+/** 画像の場所のタグの組：主なタグ（設定の INSTANCE_TAGS）・すべてのタグ（その画像の値の全部）・検査のタグ（検査単位の要約） */
+type TagSet = "configured" | "all" | "study";
 
 /** 切り替えの1つ（押した形を aria-pressed と地の色で示す） */
 function SegmentButton({ pressed, onClick, testId, children }: { pressed: boolean; onClick: () => void; testId: string; children: ReactNode }) {
@@ -309,9 +309,13 @@ function SeriesImages({
             <SegmentButton pressed={tagSet === "all"} onClick={() => onTagSet("all")} testId="tag-set-all">
               すべてのタグ
             </SegmentButton>
+            <SegmentButton pressed={tagSet === "study"} onClick={() => onTagSet("study")} testId="tag-set-study">
+              検査のタグ
+            </SegmentButton>
           </div>
         )}
       </div>
+      {seriesUid && <UidLine label="SeriesInstanceUID" uid={seriesUid} testId="series-uid" />}
       {instances.isError && !instances.isFetching && (
         <p role="alert" className="text-danger">
           {instances.error.message}
@@ -357,8 +361,10 @@ function SeriesImages({
             ))}
           </ul>
           <div className="min-w-0 space-y-1">
-            <UidLine label="SOPInstanceUID" uid={sop} />
-            {readSop === "" ? (
+            {tagSet !== "study" && <UidLine label="SOPInstanceUID" uid={sop} />}
+            {tagSet === "study" ? (
+              <StudyTags uid={uid} />
+            ) : readSop === "" ? (
               <p className="p-2">
                 <PendingText pending />
               </p>
@@ -387,12 +393,12 @@ function SeriesImages({
 }
 
 /**
- * 開け閉めの「DICOM タグ」の中身（docs/spec.md の 3.1）。検査単位の要約（QIDO-RS の検査の検索の1行。どの画像の値かは分からない）。
- * 画像ごとの値は、サムネイルから開く画像の場所で見る
+ * 画像の場所の「検査のタグ」の中身（docs/spec.md の 3.1）。検査単位の要約（QIDO-RS の検査の検索の1行。どの画像の値かは分からない）。
+ * 画像ごとの値は、「主なタグ」「すべてのタグ」で見る
  */
-function DicomTags({ uid, id }: { uid: string; id: string }) {
+function StudyTags({ uid }: { uid: string }) {
   return (
-    <div id={id} className="space-y-1 pt-1" data-testid="dicom-tags">
+    <div className="space-y-1" data-testid="dicom-tags">
       <p className="text-xs text-label">検査単位（要約）</p>
       <TagTable<{ values: DicomValueRow[] }>
         url={`/api/studies/${encodeURIComponent(uid)}/values`}
@@ -465,13 +471,9 @@ export function StudyDetailPanel({
   const study: StudyView = { ...row, ...data?.study, ...definedViewerOf(row) };
   // 覚えを変えたら一覧を読み直す（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
   const changed = onChanged;
-  const allOpen = useSyncExternalStore(subscribeDetailOpen, getDetailOpen, getServerDetailOpen);
-  const allId = useId();
-  // 「DICOM タグ」（権限のある役割だけ。既定は閉じる。行が替わると閉じる）
+  // 画像の場所・タグ（権限のある役割だけ）
   const tagsShown = screen.can.allValues && uid !== "";
-  const [tagsOpen, setTagsOpen] = useState(false);
-  const tagsId = useId();
-  // サムネイルから開いた画像の場所（SeriesInstanceUID。同じ権限の役割だけ。行が替わると閉じる）と、主なタグ・すべてのタグの切り替え
+  // サムネイルから開いた画像の場所（SeriesInstanceUID。同じ権限の役割だけ。行が替わると閉じる）と、主なタグ・すべてのタグ・検査のタグの切り替え
   // （切り替えは、画像やシリーズを替えても保つ）
   const [openSeries, setOpenSeries] = useState<string | null>(null);
   const [tagSet, setTagSet] = useState<TagSet>("configured");
@@ -511,6 +513,8 @@ export function StudyDetailPanel({
               testId="detail-counts"
             />
           </p>
+          {/* 3 行目：検査の UID（写すボタンつき）。前は下の「UID」のボタンの中にあった（#57） */}
+          {uid && <UidLine label="StudyInstanceUID" uid={uid} testId="study-uid" />}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ViewerMenu
@@ -586,49 +590,6 @@ export function StudyDetailPanel({
         <SeriesImages key={openedSeries.seriesInstanceUid} uid={uid} series={openedSeries} tagSet={tagSet} onTagSet={setTagSet} />
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-expanded={allOpen}
-          aria-controls={allId}
-          data-testid="detail-uid-toggle"
-          onClick={() => setDetailOpen(!allOpen)}
-        >
-          {allOpen ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
-          UID
-        </Button>
-        {/* 開いても、ボタンの位置は動かさない（中身はボタンの並びの下に出す。2026-10-21。前は開くと入れ物が横いっぱいになり、ボタンが次の行へ移った） */}
-        {tagsShown && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            aria-expanded={tagsOpen}
-            aria-controls={tagsId}
-            data-testid="detail-tags-toggle"
-            onClick={() => setTagsOpen((v) => !v)}
-          >
-            {tagsOpen ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
-            DICOM タグ
-          </Button>
-        )}
-      </div>
-
-      {/* 開け閉めの「UID」の中は、StudyInstanceUID と SeriesInstanceUID だけ（ほかの値は見出しに上げた） */}
-      {allOpen && (
-      <div id={allId} className="space-y-1 pt-1" data-testid="detail-uid">
-      {uid && <UidLine label="StudyInstanceUID" uid={uid} />}
-      {data?.series.map(
-        (s) =>
-          s.seriesInstanceUid && (
-            <UidLine key={s.seriesInstanceUid} label={`SeriesInstanceUID${s.seriesNumber ? ` #${s.seriesNumber}` : ""}`} uid={s.seriesInstanceUid} />
-          ),
-      )}
-      </div>
-      )}
-      {tagsShown && tagsOpen && <DicomTags uid={uid} id={tagsId} />}
     </section>
   );
 }
