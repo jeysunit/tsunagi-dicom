@@ -1,0 +1,246 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>tsunagi-dicom 検査の詳細とビューア（ワイヤーフレーム）</title><meta name="description" content=""><style>:root{color-scheme:light;--color-background:#FFFFFF;--color-surface:#F6F6F6;--color-muted:#EEEEEE;--color-muted-strong:#E2E2E2;--color-border:#D2D2D2;--color-border-input:#8C8C8C;--color-foreground:#262626;--color-value:#1A1A1A;--color-label:#5F5F5F;--color-primary:#4B4FBF;--color-primary-foreground:#FFFFFF;--color-primary-hover:#3B3EA3;--color-link:#4B4FBF;--color-ring:#4B4FBF;--color-selected:#EDEDF9;--color-danger:#D1242F;--color-danger-foreground:#FFFFFF;--color-success:#1A7F37;--color-warning:#9A6700;--color-mod-ct:#0969DA;--color-mod-mr:#9333EA;--color-mod-crdx:#1A7F37;--color-mod-us:#BC4C00;--color-mod-es:#BF3989;--color-mod-mg:#9A6700;--color-mod-doc:#6E7781;--color-mod-sr:#1B7C83;--font-sans:system-ui,'Noto Sans JP',sans-serif;--font-mono:ui-monospace,'Noto Sans Mono',monospace;--shadow-lg:0 4px 16px rgba(0,0,0,.16)}@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--color-background:#1B1B1B;--color-surface:#242424;--color-muted:#2D2D2D;--color-muted-strong:#383838;--color-border:#3A3A3A;--color-border-input:#8A8A8A;--color-foreground:#E8E8E8;--color-value:#FFFFFF;--color-label:#A3A3A3;--color-primary:#5A5ECF;--color-primary-foreground:#FFFFFF;--color-primary-hover:#4B4FBF;--color-link:#A5A8FF;--color-ring:#A5A8FF;--color-selected:#2B2C4A;--color-danger:#FF7B72;--color-danger-foreground:#1B1B1B;--color-success:#3FB950;--color-warning:#D29922;--color-mod-ct:#4493F8;--color-mod-mr:#C084FC;--color-mod-crdx:#3FB950;--color-mod-us:#F0883E;--color-mod-es:#F778BA;--color-mod-mg:#D29922;--color-mod-doc:#9198A1;--color-mod-sr:#39C5CF;--shadow-lg:0 4px 16px rgba(0,0,0,.6)}}:root[data-theme=dark]{color-scheme:dark;--color-background:#1B1B1B;--color-surface:#242424;--color-muted:#2D2D2D;--color-muted-strong:#383838;--color-border:#3A3A3A;--color-border-input:#8A8A8A;--color-foreground:#E8E8E8;--color-value:#FFFFFF;--color-label:#A3A3A3;--color-primary:#5A5ECF;--color-primary-foreground:#FFFFFF;--color-primary-hover:#4B4FBF;--color-link:#A5A8FF;--color-ring:#A5A8FF;--color-selected:#2B2C4A;--color-danger:#FF7B72;--color-danger-foreground:#1B1B1B;--color-success:#3FB950;--color-warning:#D29922;--color-mod-ct:#4493F8;--color-mod-mr:#C084FC;--color-mod-crdx:#3FB950;--color-mod-us:#F0883E;--color-mod-es:#F778BA;--color-mod-mg:#D29922;--color-mod-doc:#9198A1;--color-mod-sr:#39C5CF;--shadow-lg:0 4px 16px rgba(0,0,0,.6)}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--color-background);color:var(--color-foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5}
+h1,h2,h3,h4,p,ul,ol,dl,dd,figure{margin:0}
+ul,ol{padding:0;list-style:none}
+a{color:var(--color-link);text-decoration:underline;text-underline-offset:2px}
+a:hover{color:var(--color-primary-hover)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--color-ring);outline-offset:2px}
+.mono{font-family:var(--font-mono);font-size:13px}
+.label{color:var(--color-label)}
+.xs{font-size:12px;line-height:18px}
+.b{font-weight:700;color:var(--color-value)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.ic{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
+
+/* ---- 文書の枠（設計書の頁・ワイヤーフレームの注記。製品の部品ではない） ---- */
+.doc{max-width:1120px;margin:0 auto;padding:24px 16px 80px}
+.doc h1{font-size:24px;line-height:32px;font-weight:700;color:var(--color-value)}
+.doc h2{font-size:20px;line-height:28px;font-weight:700;color:var(--color-value);margin:48px 0 12px;padding-top:16px;border-top:1px solid var(--color-border)}
+.doc h3{font-size:16px;line-height:24px;font-weight:700;color:var(--color-value);margin:28px 0 8px}
+.doc p{margin:8px 0;max-width:72ch}
+.doc .lead{color:var(--color-label)}
+.doc-top{position:sticky;top:0;z-index:30;background:var(--color-surface);border-bottom:1px solid var(--color-border)}
+.doc-top .in{max-width:1120px;margin:0 auto;padding:8px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.doc-top nav{display:flex;gap:4px 12px;flex-wrap:wrap;font-size:13px}
+.doc-top nav a{text-decoration:none;color:var(--color-label)}
+.doc-top nav a:hover{color:var(--color-value);text-decoration:underline}
+.doc-top .sp{flex:1}
+.spec{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+.spec th,.spec td{border:1px solid var(--color-border);padding:6px 10px;text-align:left;vertical-align:top}
+.spec th{background:var(--color-surface);font-weight:700;color:var(--color-value)}
+.spec td.n{white-space:nowrap}
+.scroll-x{overflow-x:auto}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--color-border);vertical-align:-2px;margin-right:6px}
+.part{border:1px solid var(--color-border);border-radius:8px;margin:16px 0;overflow:hidden}
+.part-h{padding:8px 12px;background:var(--color-surface);border-bottom:1px solid var(--color-border);font-weight:700;color:var(--color-value)}
+.part-demo{padding:16px;background:var(--color-background)}
+.part-demo.flush{padding:0}
+.part-demo.stack>*+*{margin-top:12px}
+.part-use{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--color-border);font-size:13px}
+.part-use>div{padding:8px 12px}
+.part-use>div+div{border-left:1px solid var(--color-border)}
+.part-use b{display:block;font-size:12px;color:var(--color-label);font-weight:700}
+@media (max-width:640px){.part-use{grid-template-columns:1fr}.part-use>div+div{border-left:0;border-top:1px solid var(--color-border)}}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.wf-note{border:1px solid var(--color-border);background:var(--color-surface);border-radius:8px;padding:12px 16px;margin:16px 0}
+.wf-note h2{all:unset;display:block;font-weight:700;color:var(--color-value);margin-bottom:4px}
+.wf-note ul{list-style:disc;padding-left:20px}
+.wf-note li{margin:2px 0}
+.frame{border:1px solid var(--color-border-input);border-radius:8px;overflow:hidden;background:var(--color-background)}
+.tag{display:inline-block;font-size:12px;line-height:18px;border:1px solid var(--color-border-input);border-radius:3px;padding:0 6px;color:var(--color-label)}
+.region{border:1px dashed var(--color-border-input);border-radius:4px;padding:6px 8px;font-size:12px;color:var(--color-label);background:var(--color-surface)}
+.region b{color:var(--color-value)}
+
+/* ---- 製品の部品 ---- */
+.shell{--nav-w:208px;display:grid;grid-template-columns:var(--nav-w) minmax(0,1fr);grid-template-rows:48px minmax(0,1fr);grid-template-areas:"top top" "nav main";min-height:560px;background:var(--color-background)}
+.shell.collapsed{--nav-w:56px}
+.topbar{grid-area:top;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--color-surface);border-bottom:1px solid var(--color-border);min-width:0}
+.topbar .brand{font-weight:700;color:var(--color-value);white-space:nowrap}
+.topbar .ver{font-size:12px;color:var(--color-label)}
+.topbar .sp{flex:1}
+.topbar .qs{position:relative;width:min(280px,30vw)}
+.topbar .qs .ic{position:absolute;left:8px;top:8px;color:var(--color-label)}
+.topbar .qs input{padding-left:30px;width:100%}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:32px;height:32px;padding:0 6px;border:1px solid transparent;border-radius:4px;background:none;cursor:pointer;color:var(--color-foreground)}
+.iconbtn:hover{background:var(--color-muted)}
+.sidenav{grid-area:nav;background:var(--color-surface);border-right:1px solid var(--color-border);padding:8px;overflow:hidden}
+.nav-g{margin:12px 8px 4px;font-size:12px;line-height:18px;color:var(--color-label)}
+.nav-g:first-child{margin-top:4px}
+.nav-i{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:4px;color:var(--color-foreground);text-decoration:none;white-space:nowrap;box-shadow:inset 3px 0 0 transparent}
+.nav-i:hover{background:var(--color-muted);color:var(--color-value)}
+.nav-i[aria-current=page]{background:var(--color-selected);box-shadow:inset 3px 0 0 var(--color-primary);font-weight:700;color:var(--color-value)}
+.nav-i .cnt{margin-left:auto;font-size:12px;color:var(--color-label);font-weight:400}
+.collapsed .nav-i .t,.collapsed .nav-i .cnt,.collapsed .nav-g{display:none}
+.collapsed .nav-i{justify-content:center;padding:0}
+.collapsed .nav-g+.nav-i{margin-top:0}
+.main{grid-area:main;min-width:0;padding:12px 24px 24px;display:flex;flex-direction:column;gap:12px}
+.crumbs{display:flex;flex-wrap:wrap;gap:4px;font-size:12px;line-height:18px;color:var(--color-label)}
+.crumbs a{color:var(--color-label)}
+.crumbs li+li::before{content:"/";margin-right:4px}
+.crumbs [aria-current]{color:var(--color-foreground)}
+.pagehead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.pagehead h1{font-size:20px;line-height:28px;font-weight:700;color:var(--color-value);display:flex;align-items:baseline;gap:8px}
+.pagehead h1 small{font-size:14px;font-weight:400;color:var(--color-label)}
+.acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.acts .gap{width:16px}
+
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;padding:8px 16px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:6px}
+.banner .nm{min-width:140px}
+.banner .nm .n{font-size:16px;line-height:24px;font-weight:700;color:var(--color-value)}
+.banner .nm .k{font-size:12px;line-height:18px;color:var(--color-label)}
+.banner .f{min-width:0}
+.banner .f .l{font-size:12px;line-height:18px;color:var(--color-label)}
+.banner .f .v{font-weight:700;color:var(--color-value)}
+.banner .end{margin-left:auto;display:flex;gap:8px;align-items:center}
+.banner .caution{border:1px solid var(--color-danger);border-radius:4px;padding:1px 6px;display:flex;flex-wrap:nowrap;gap:4px;align-items:center;max-width:320px;overflow:hidden;color:var(--color-value)}
+.banner .ctag{display:inline-block;height:18px;padding:0 6px;border:1px solid var(--color-border-input);border-radius:3px;background:var(--color-background);font-size:12px;line-height:16px;white-space:nowrap}
+.banner .caution .ic{color:var(--color-danger)}
+
+.searchband{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:12px 16px;background:var(--color-muted-strong);border-radius:6px}
+.searchband .more{width:100%;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding-top:12px;border-top:1px solid var(--color-border-input)}
+.field{display:flex;flex-direction:column;gap:2px;min-width:0}
+.field>.l{font-size:12px;line-height:18px;color:var(--color-label)}
+.field .req{color:var(--color-foreground);font-weight:700;margin-left:4px}
+.input,.select{height:32px;min-width:120px;padding:0 8px;border:1px solid var(--color-border-input);border-radius:4px;background:var(--color-background);color:var(--color-foreground)}
+.select{padding-right:4px}
+.input::placeholder{color:var(--color-label)}
+.input:disabled,.select:disabled{background:var(--color-surface);color:var(--color-label);border-color:var(--color-border);cursor:not-allowed}
+.input[aria-invalid=true]{border-color:var(--color-danger);box-shadow:inset 0 0 0 1px var(--color-danger)}
+.field .msg{display:flex;gap:4px;align-items:center;font-size:12px;line-height:18px;color:var(--color-foreground)}
+.field .msg .ic{color:var(--color-danger);width:14px;height:14px}
+.field .hint{font-size:12px;line-height:18px;color:var(--color-label)}
+.w-s{width:120px}.w-m{width:200px}.w-l{width:320px}.w-full{width:100%}
+.seg{display:inline-flex;border:1px solid var(--color-border-input);border-radius:4px;overflow:hidden;background:var(--color-background)}
+.seg button{height:30px;padding:0 10px;border:0;background:none;cursor:pointer;border-right:1px solid var(--color-border)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--color-selected);font-weight:700;color:var(--color-value);box-shadow:inset 0 -2px 0 var(--color-primary)}
+.seg button:hover{background:var(--color-muted)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:64px;padding:0 12px;border:1px solid var(--color-border-input);border-radius:4px;background:var(--color-background);color:var(--color-foreground);cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{background:var(--color-muted);color:var(--color-foreground)}
+.btn-primary{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-primary-foreground);font-weight:700}
+.btn-primary:hover{background:var(--color-primary-hover);border-color:var(--color-primary-hover);color:var(--color-primary-foreground)}
+.btn-danger{border-color:var(--color-danger);color:var(--color-danger);font-weight:700}
+.btn-danger.fill{background:var(--color-danger);color:var(--color-danger-foreground)}
+.btn-danger.fill:hover{background:var(--color-danger);color:var(--color-danger-foreground);filter:brightness(.92)}
+.btn-ghost{border-color:transparent;background:none}
+.btn[disabled],.btn[aria-disabled=true]{background:var(--color-surface);border-color:var(--color-border);color:var(--color-label);cursor:not-allowed;font-weight:400}
+.btn-sm{height:28px;padding:0 8px;min-width:48px}
+
+.tbl-wrap{border:1px solid var(--color-border);border-radius:6px;overflow:auto;background:var(--color-background)}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{position:sticky;top:0;background:var(--color-surface);text-align:left;font-weight:400;font-size:12px;line-height:18px;color:var(--color-label);height:28px;padding:0 8px;border-bottom:1px solid var(--color-border);white-space:nowrap}
+.tbl th button{all:unset;cursor:pointer;display:inline-flex;gap:2px;align-items:center}
+.tbl th button:focus-visible{outline:2px solid var(--color-ring)}
+.tbl th[aria-sort] button{color:var(--color-value);font-weight:700}
+.tbl th .ic{width:12px;height:12px}
+.tbl td{height:28px;padding:0 8px;border-bottom:1px solid var(--color-border);white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:var(--color-muted)}
+.tbl tbody tr[aria-selected=true]{background:var(--color-selected)}
+.tbl tbody tr[aria-selected=true] td:first-child{box-shadow:inset 3px 0 0 var(--color-primary)}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl .ck{width:32px;padding-right:0}
+.tbl .main-c{font-weight:700;color:var(--color-value)}
+.tbl .sub{display:block;font-size:12px;line-height:16px;color:var(--color-label);font-weight:400}
+.tbl.tall td{height:40px;padding-top:2px;padding-bottom:2px}
+.listhead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.listhead .cnt b{font-size:16px}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--color-label)}
+.mod{display:inline-block;min-width:34px;padding:0 6px;border-left:4px solid var(--m,var(--color-mod-doc));background:var(--color-surface);font-size:12px;line-height:18px;font-weight:700;color:var(--color-foreground)}
+
+.st{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border:1px solid var(--k,var(--color-border-input));border-radius:3px;font-size:12px;line-height:18px;color:var(--color-foreground);background:var(--color-background);white-space:nowrap}
+.st::before{content:var(--g,"○");color:var(--k,var(--color-label));font-size:10px;line-height:1}
+.st[data-k=plan]{--g:"○"}
+.st[data-k=run]{--g:"◐";--k:var(--color-warning)}
+.st[data-k=done]{--g:"●";--k:var(--color-success)}
+.st[data-k=cancel]{--g:"—";color:var(--color-label);text-decoration:line-through;--k:var(--color-border-input)}
+.st[data-k=stop]{--g:"■";--k:var(--color-danger)}
+.st[data-k=ok]{--g:"✓";--k:var(--color-success)}
+.st[data-k=ng]{--g:"✕";--k:var(--color-danger)}
+.st[data-k=wait]{--g:"◔";--k:var(--color-warning)}
+.st[data-k=unknown]{--g:"？";--k:var(--color-danger);border-style:dashed}
+.st[data-k=note]{--g:"◇"}
+.sumrow{display:flex;gap:8px;flex-wrap:wrap}
+.sum{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-background);cursor:pointer}
+.sum[aria-pressed=true]{border-color:var(--color-primary);box-shadow:inset 0 -2px 0 var(--color-primary);background:var(--color-selected)}
+.sum .nbr{font-size:16px;font-weight:700;color:var(--color-value);font-variant-numeric:tabular-nums}
+
+.notice{display:flex;gap:8px;align-items:flex-start;padding:8px 12px;border:1px solid var(--color-border);border-left:4px solid var(--n,var(--color-border-input));border-radius:4px;background:var(--color-surface);color:var(--color-foreground)}
+.notice .ic{color:var(--n,var(--color-label));margin-top:3px}
+.notice .x{margin-left:auto}
+.notice[data-k=ok]{--n:var(--color-success)}
+.notice[data-k=warn]{--n:var(--color-warning)}
+.notice[data-k=err]{--n:var(--color-danger)}
+
+.dlg-back{background:rgba(0,0,0,.45);padding:24px;display:flex;justify-content:center}
+.dlg{width:min(440px,100%);background:var(--color-background);border:1px solid var(--color-border);border-radius:8px;box-shadow:var(--shadow-lg);padding:16px 20px}
+.dlg h2,.dlg h3{font-size:16px;line-height:24px;font-weight:700;color:var(--color-value);margin:0 0 8px;border:0;padding:0}
+.dlg .ft{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+dialog.dlg{margin:auto}
+dialog.dlg::backdrop{background:rgba(0,0,0,.45)}
+.empty{padding:32px 16px;text-align:center;border:1px dashed var(--color-border-input);border-radius:6px;color:var(--color-label);display:flex;flex-direction:column;gap:8px;align-items:center}
+.empty b{color:var(--color-value);font-weight:700}
+.loading{display:flex;flex-direction:column;gap:8px}
+.loading .t{display:flex;gap:8px;align-items:center;color:var(--color-label)}
+.spin{width:14px;height:14px;border:2px solid var(--color-border-input);border-top-color:var(--color-primary);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.skel{height:20px;border-radius:3px;background:var(--color-muted)}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+
+.split-v{display:flex;flex-direction:column;gap:0;border:1px solid var(--color-border);border-radius:6px;overflow:hidden}
+.split-v>.top{padding:0;background:var(--color-background)}
+.split-v>.gut{height:8px;background:var(--color-muted);border-top:1px solid var(--color-border);border-bottom:1px solid var(--color-border);cursor:row-resize;display:flex;align-items:center;justify-content:center}
+.split-v>.gut::after{content:"";width:32px;height:2px;border-radius:2px;background:var(--color-border-input)}
+.split-v>.bot{padding:12px;display:flex;flex-direction:column;gap:12px;background:var(--color-background)}
+.split-h{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;align-items:start}
+@media (max-width:900px){.split-h{grid-template-columns:1fr}}
+.side{border:1px solid var(--color-border);border-radius:6px;background:var(--color-background);position:sticky;top:8px}
+.side>h2{font-size:14px;line-height:20px;padding:8px 12px;margin:0;background:var(--color-surface);border-bottom:1px solid var(--color-border);border-radius:6px 6px 0 0;color:var(--color-value);display:flex;justify-content:space-between;align-items:center}
+.side>.in{padding:12px;display:flex;flex-direction:column;gap:12px}
+.sec{border:1px solid var(--color-border);border-radius:6px;background:var(--color-background)}
+.sec>h2{font-size:14px;line-height:20px;margin:0;padding:8px 12px;background:var(--color-surface);border-bottom:1px solid var(--color-border);border-radius:6px 6px 0 0;color:var(--color-value)}
+.sec>.in{padding:12px 16px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 16px}
+.grid2 .span,.grid3 .span{grid-column:1/-1}
+.grid2 .input,.grid2 .select,.grid3 .input,.grid3 .select{width:100%}
+@media (max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px}
+.kv dt{font-size:12px;line-height:20px;color:var(--color-label)}
+.kv dd{font-weight:700;color:var(--color-value);min-width:0;overflow-wrap:anywhere}
+.formbar{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--color-border);background:var(--color-surface);border-radius:0 0 6px 6px}
+.formbar .l{margin-right:auto}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--color-border)}
+.tabs button{border:0;background:none;height:32px;padding:0 12px;cursor:pointer;color:var(--color-label);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button[aria-selected=true]{color:var(--color-value);font-weight:700;border-bottom-color:var(--color-primary)}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.thumb{flex:none;width:112px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-background);padding:4px;font-size:12px;line-height:16px}
+.thumb .img{height:72px;background:#1B1B1B;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#A3A3A3;font-size:12px}
+.steps{display:flex;gap:0;flex-wrap:wrap;font-size:13px}
+.steps li{padding:2px 12px 2px 0;color:var(--color-label)}
+.steps li[aria-current=step]{color:var(--color-value);font-weight:700}
+.steps li+li::before{content:"›";margin-right:12px;color:var(--color-label);font-weight:400}
+</style></head><body><svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol><symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol><symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol><symbol id="i-chevr" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol><symbol id="i-chevd" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol><symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></symbol><symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></symbol><symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10z"/></symbol><symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol><symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol><symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol><symbol id="i-sort" viewBox="0 0 24 24"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></symbol><symbol id="i-up" viewBox="0 0 24 24"><path d="M7 14l5-5 5 5"/></symbol><symbol id="i-down" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol><symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></symbol><symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-7z"/></symbol><symbol id="i-device" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol><symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13l3-8h12l3 8v6H3z"/><path d="M3 13h5l1 3h6l1-3h5"/></symbol><symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol><symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol><symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l2-3h4l2 3"/></symbol><symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol><symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M3 17l5-5 4 4 3-3 6 6"/></symbol><symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 7V4h4v3M6 7l1 13h10l1-13"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></symbol><symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol><symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2 6M20 5v6h-6"/></symbol><symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></symbol></defs></svg><div class="doc-top"><div class="in"><strong>ワイヤーフレーム</strong><span class="label">tsunagi-dicom／検査の詳細とビューア</span><span class="sp"></span><nav aria-label="ワイヤーフレーム"><a href="../README.md">設計書へ戻る</a><a href="wf-tsunagi-1-studies.html">検査の一覧</a><a href="wf-tsunagi-2-study.html" aria-current=page>検査の詳細とビューア</a><a href="wf-tsunagi-3-send.html">送る</a><a href="wf-ris-1-orders.html">予約の一覧</a><a href="wf-ris-2-order-new.html">予約作成</a><a href="wf-dtg-1-worklist.html">ワークリスト</a><a href="wf-dtg-2-exam.html">撮影</a><a href="wf-dtg-3-jobs.html">送信ジョブ</a></nav></div></div><div class="doc"><h1>tsunagi-dicom　検査の詳細とビューア</h1><p class="lead">設計書の部品だけで組んだ画面の案。データは架空。</p><div class="wf-note"><h2>今の画面との違い</h2><ul><li>詳細の見出し（氏名・かな・患者 ID…）を患者バナーに替える。受付番号と検査日時が同じ位置に並ぶ。</li><li>操作を見出しの右にまとめる。主はビューアで開く、副は送る・書き出し、危険な削除は間をあけて右端に置く。</li><li>シリーズを表にして、サムネイルは一覧側（検査の一覧）で使う。ビューアの選び分けと「次から記憶」を独立の区画にする。</li><li>「すべての項目」は閉じた区画として下に置く（今と同じ開閉）。</li></ul></div><div class="frame"><div class="shell"><header class="topbar"><button type="button" class="iconbtn" data-act="nav" aria-expanded="true" aria-label="ナビを開閉する"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button><span class="brand">tsunagi-dicom</span><span class="ver"></span><span class="sp"></span><div class="qs"><label class="sr" for="qs">患者 ID を開く</label><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="qs" class="input" placeholder="患者 ID・受付番号" autocomplete="off"></div><button type="button" class="iconbtn" data-act="theme" aria-label="明るい地と暗い地を切り替える" title="明るい地と暗い地を切り替える"><svg class="ic" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button><button type="button" class="iconbtn" aria-label="利用者のメニュー"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>管理者</span><svg class="ic" aria-hidden="true"><use href="#i-chevd"/></svg></button></header><nav class="sidenav" aria-label="頁"><p class="nav-g">業務</p><a class="nav-i" href="#" title="検査" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-list"/></svg><span class="t">検査</span></a><a class="nav-i" href="#" title="受け取り"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span class="t">受け取り</span></a><p class="nav-g">接続</p><a class="nav-i" href="#" title="機器"><svg class="ic" aria-hidden="true"><use href="#i-device"/></svg><span class="t">機器</span></a><a class="nav-i" href="#" title="保管の状態"><svg class="ic" aria-hidden="true"><use href="#i-sliders"/></svg><span class="t">保管の状態</span></a><p class="nav-g">管理</p><a class="nav-i" href="#" title="利用者"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span class="t">利用者</span></a><a class="nav-i" href="#" title="ビューアの既定"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg><span class="t">ビューアの既定</span></a></nav><main class="main"><nav aria-label="いまの場所"><ol class="crumbs"><li><a href="#">検査</a></li><li><a href="#">試験 太郎</a></li><li aria-current="page">胸部 単純</li></ol></nav><div class="pagehead"><h1>検査の詳細</h1><div class="acts"><button type="button" class="btn btn-primary"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>ビューアで開く</button><button type="button" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-send"/></svg>送る</button><button type="button" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>書き出し</button><span class="gap"></span><button type="button" class="btn btn-danger"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg>削除</button></div></div><section class="banner" aria-label="患者"><div class="nm"><div class="n">試験 太郎</div><div class="k">シケン タロウ</div></div><div class="f"><div class="l">患者 ID</div><div class="v mono">P000101</div></div><div class="f"><div class="l">生年月日・性別</div><div class="v">1970/04/01（56 歳）男</div></div><div class="f"><div class="l">受付番号</div><div class="v mono">A2610240001</div></div><div class="f"><div class="l">検査日時</div><div class="v">2026/10/24 09:12</div></div><div class="f"><div class="l">モダリティ・検査の記述</div><div class="v"><span class="mod" style="--m:var(--color-mod-ct)">CT</span> 胸部 単純</div></div><div class="end"><span class="st" data-k="ok">保管の確認 済</span></div></section><section class="sec"><h2>シリーズ</h2><div class="in"><div class="tbl-wrap" role="region" aria-label="シリーズ" tabindex="0"><table class="tbl"><thead><tr><th><button type="button">シリーズ<svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg></button></th><th><button type="button">モダリティ<svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg></button></th><th><button type="button">記述<svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg></button></th><th class="num"><button type="button">画像<svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg></button></th><th></th></tr></thead><tbody><tr data-row aria-selected="false"><td>S1</td><td><span class="mod" style="--m:var(--color-mod-ct)">CT</span></td><td>胸部 単純</td><td class="num">180</td><td><button type="button" class="btn btn-sm">開く</button></td></tr><tr data-row aria-selected="false"><td>S2</td><td><span class="mod" style="--m:var(--color-mod-ct)">CT</span></td><td>肺野条件</td><td class="num">180</td><td><button type="button" class="btn btn-sm">開く</button></td></tr><tr data-row aria-selected="false"><td>S3</td><td><span class="mod" style="--m:var(--color-mod-ct)">CT</span></td><td>スカウト</td><td class="num">52</td><td><button type="button" class="btn btn-sm">開く</button></td></tr></tbody></table></div></div></section><section class="sec"><h2>ビューア</h2><div class="in"><div class="row"><label class="field"><span class="l">この検査を開くビューア</span><select class="select w-m"><option>既定（OHIF）</option><option>OHIF</option><option>Stone</option><option>VolView</option><option>DICOMweb の URL をコピー</option></select><span class="hint">モダリティごとの既定は「ビューアの既定」で変える</span></label><button type="button" class="btn">この検査は次から記憶する</button></div></div></section><section class="sec"><h2>すべての項目</h2><div class="in"><div class="grid2"><dl class="kv"><dt>検査日時</dt><dd>2026/10/24 09:12</dd><dt>検査の記述</dt><dd>胸部 単純</dd><dt>受付番号</dt><dd class="mono">A2610240001</dd><dt>依頼科</dt><dd>呼吸器内科</dd><dt>装置</dt><dd>CT-1</dd></dl><dl class="kv"><dt>患者 ID</dt><dd class="mono">P000101</dd><dt>氏名</dt><dd>試験 太郎</dd><dt>生年月日</dt><dd>1970/04/01</dd><dt>性別</dt><dd>男</dd></dl><dl class="kv span"><dt>検査 UID</dt><dd class="mono xs">2.25.168436582293106582614719232718384519123</dd></dl></div></div></section></main></div></div></div><script>
+(function(){
+  var r=document.documentElement;
+  try{var t=localStorage.getItem('ds-theme');if(t)r.setAttribute('data-theme',t);}catch(e){}
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-act]');if(b){
+      var a=b.getAttribute('data-act');
+      if(a==='theme'){var cur=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+        var n=cur==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('ds-theme',n);}catch(x){}}
+      if(a==='nav'){var s=b.closest('.shell');if(s){s.classList.toggle('collapsed');b.setAttribute('aria-expanded',!s.classList.contains('collapsed'));}}
+      if(a==='dialog'){var d=document.getElementById(b.getAttribute('data-target'));if(d&&d.showModal)d.showModal();}
+      if(a==='close'){var d2=b.closest('dialog');if(d2)d2.close();}
+    }
+    var tr=e.target.closest('tbody tr[data-row]');
+    if(tr&&!e.target.closest('a,button,input')){var tb=tr.parentNode;
+      [].forEach.call(tb.querySelectorAll('tr[aria-selected]'),function(x){x.setAttribute('aria-selected','false');});
+      tr.setAttribute('aria-selected','true');}
+  });
+})();
+</script></body></html>
