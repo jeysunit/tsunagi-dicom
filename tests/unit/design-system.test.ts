@@ -149,8 +149,7 @@ describe("docs/design-system/tokens.md と globals.css の色", () => {
     expect(rows.length).toBeGreaterThan(20);
     for (const r of rows) {
       expect(light[r.name], `${r.name}（明るい地）`).toBe(r.light);
-      // 暗い地を持たない行（モダリティの印）は、明るい地の値だけを比べる。それ以外は暗い地の値を必須にする
-      if (r.name.startsWith("mod-")) continue;
+      // モダリティの印を含め、どの行も暗い地の値を必須にする
       expect(r.dark, `${r.name}（表の暗い地）`).toBeDefined();
       expect(dark[r.name], `${r.name}（暗い地）`).toBe(r.dark);
     }
