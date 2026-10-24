@@ -29,7 +29,7 @@ const EXCEPTIONS: { file: string; match: string; reason: string }[] = [
 
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
 // Tailwind の任意の値は空白を `_` で書く（`4px_rgb(…)`）ので、直前が英数字でないことで区切る（\b は `_` を字に数える）
-const COLOR_FUNCTION = /(?<![A-Za-z0-9])(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb)\([^)]*\)/g;
+const COLOR_FUNCTION = /(?<![A-Za-z0-9])(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb|color)\([^)]*\)/gi;
 // 色を取るユーティリティの接頭辞（border-t-… などの向きつきと ring-offset-… を含む）
 const COLOR_PREFIX =
   "(?:bg|text|border(?:-[trblxyse])?|ring(?:-offset)?|fill|stroke|outline|divide|decoration|accent|caret|from|to|via|placeholder|shadow)";
@@ -113,6 +113,7 @@ describe("色の直書き", () => {
   });
 
   it("検査の目はある：向きつきの枠・ring-offset・caret・placeholder の色名も拾う", () => {
+    expect("RGB(0 0 0) color(srgb 1 0 0)".match(COLOR_FUNCTION)).toEqual(["RGB(0 0 0)", "color(srgb 1 0 0)"]);
     const sample = "border-t-red-500 ring-offset-blue-500 caret-white placeholder-black md:hover:bg-gray-100";
     const hits = [PALETTE_CLASS, PLAIN_CLASS].flatMap((re) => sample.match(re) ?? []);
     expect(hits.sort()).toEqual(["border-t-red-500", "caret-white", "bg-gray-100", "placeholder-black", "ring-offset-blue-500"].sort());
