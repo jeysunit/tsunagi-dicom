@@ -190,6 +190,28 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(await sweep()).toMatchObject({ count: 1 });
   });
 
+  it.each([
+    ["ORM", { kind: "order", patientId: "P000001", uid: STUDY, accession: "RE9", control: "NW" }],
+    ["続きの A40", { kind: "alias", from: "P000001", to: "P000002", studies: [], fromNames: [], attributes: {} }]
+  ])("最初の A40 は期限の中でも、%s だけが時計より 5 分より先なら書き換えない", async (_name, remember) => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    rows.push({
+      actorId: "hl7-receiver", actorRole: "system", authMode: "hl7", action: "hl7", outcome: "success",
+      detail: { event: "ack", code: "AA", remember: { ...remember, at: new Date(clock + 10 * 60 * 1000).toISOString() } }
+    });
+    const calls = orthanc.modifyCalls.length;
+    expect(await sweep()).toMatchObject({ count: 0, blocked: expect.stringContaining("時計が戻った") });
+    expect(orthanc.modifyCalls).toHaveLength(calls);
+    // 時計が追いつけば見回りは止まらない（続きの A40 の場合は、統合の先が P000002 になり、同じ UID の検査が
+    // P000001 にあるので書き換えずに残す）
+    clock += 11 * 60 * 1000;
+    const after = await sweep();
+    expect(after.blocked).toBeUndefined();
+    expect(after.count).toBe(remember.kind === "order" ? 1 : 0);
+  });
+
   it("同じ時刻に受理した ORM と次の A40 は、受理した順で前後を決める", () => {
     const at = "2026-10-26T12:00:00.000Z";
     const ack = (remember: Record<string, unknown>): AuditEntryInput => ({
