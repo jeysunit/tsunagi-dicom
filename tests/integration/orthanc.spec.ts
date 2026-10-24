@@ -372,7 +372,7 @@ test("8（round-trip-test の 7）答えが失われたとき：Orthanc は送�
   const { page } = admin;
   const before = new Set((await storeJobs()).map((j) => j.ID));
   gate.setMode("drop-store-response");
-  let requestId = "";
+  let requestId: string;
   try {
     const panel = await sendToScp(page, C);
     const status = panel.getByTestId("send-status");

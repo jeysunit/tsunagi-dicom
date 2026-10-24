@@ -392,7 +392,7 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
         }
         // 鍵が替わったことの行は、前の鍵と新しい鍵を detail に書く（hash で守られている）。書いた中身が鎖と合うか
         if (row.keyId !== currentKeyId && row.action === "audit_key") {
-          let detail: { from?: unknown; to?: unknown } | null = null;
+          let detail: { from?: unknown; to?: unknown } | null;
           try {
             detail = row.detail ? (JSON.parse(row.detail) as { from?: unknown; to?: unknown }) : null;
           } catch {
