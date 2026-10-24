@@ -1042,9 +1042,6 @@ test("詳細の見出し：受付番号が無いときも「受付番号 —」�
 test("詳細の見出しは患者バナー：氏名・かな・患者 ID・生年月日と年齢・性別・検査日・モダリティ・検査名が、2 行（氏名とかな）に収まる", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await asRole(page, "一般");
-  // 期待の変更（左のナビ）：左のナビ（208px）を開くと、本文が狭くなって絞り込みが 3 段に折り返し（日本語の字体の CI で）、
-  // サムネイルが 720px の高さに収まらない。ナビを閉じた状態（56px）で、これまでの確かめを続ける
-  await page.getByTestId("nav-toggle").click();
   await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click();
   const head = page.getByTestId("detail-head");
   await expect(head).toContainText("JP-TEST-0004");
