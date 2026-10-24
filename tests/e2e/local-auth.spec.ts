@@ -174,7 +174,7 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
   await reauth.locator('input[name="password"]').fill("wrong-Pass-1x");
   await reauth.locator('input[name="code"]').fill("000000");
   await reauth.getByRole("button", { name: "認証して続行" }).click();
-  await expect(reauth.getByRole("alert")).toContainText("正しくありません");
+  await expect(reauth.getByRole("alert")).toContainText("合いません");
   await reauth.locator('input[name="password"]').fill(ADMIN_PASSWORD);
   await reauth.locator('input[name="code"]').fill(await nextCode(adminSecret));
   await reauth.getByRole("button", { name: "認証して続行" }).click();
@@ -479,7 +479,7 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   // 違うパスワードでは解けない
   await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
   await lock.getByRole("button", { name: "ロック解除" }).click();
-  await expect(lock.getByRole("alert")).toContainText("パスワードが正しくありません");
+  await expect(lock.getByRole("alert")).toContainText("パスワードが合いません");
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
@@ -558,7 +558,7 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   // 違うパスワードでは解けない
   await lock.getByLabel("パスワード").fill("wrong-Pass-1x");
   await lock.getByRole("button", { name: "ロック解除" }).click();
-  await expect(lock.getByRole("alert")).toContainText("正しくありません");
+  await expect(lock.getByRole("alert")).toContainText("合いません");
   await expect(page.getByTestId("study-count")).toHaveCount(0);
 
   await page.unroute("**/api/auth/lock");

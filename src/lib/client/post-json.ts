@@ -28,6 +28,6 @@ export async function postJson(
 
 /** 誤りの文言（理由の並びがあれば添える） */
 export function errorText(result: PostResult): string {
-  const base = result.data.error ?? `エラーが発生しました（${result.status}）`;
+  const base = result.data.error ?? "原因は分かりません。時間をおいて、やり直してください";
   return result.data.problems?.length ? `${base}：${result.data.problems.join("・")}` : base;
 }

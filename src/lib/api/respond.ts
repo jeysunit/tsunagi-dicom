@@ -20,5 +20,5 @@ export function errorResponse(error: unknown): Response {
     );
   }
   console.error(error);
-  return Response.json({ error: "サーバーでエラーが発生しました" }, { status: 500 });
+  return Response.json({ error: "原因は分かりません。時間をおいて、やり直してください" }, { status: 500 });
 }

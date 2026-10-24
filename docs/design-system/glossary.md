@@ -1,6 +1,6 @@
 # 画面の言葉の決まり
 
-3 製品（tsunagi-dicom・ris-emulator・dicom-test-generator）の画面に出す語と、語の使い分け。同じ意味には、製品をまたいで同じ語を使う。文の書き方（誤り・知らせ・窓）は扱わない。tsunagi-dicom の画面の言葉の表は `docs/spec.md` の 2.2 で、この文書と食い違うときは先に両方をそろえる。
+3 製品（tsunagi-dicom・ris-emulator・dicom-test-generator）の画面に出す語と、語の使い分け。同じ意味には、製品をまたいで同じ語を使う。文の書き方（誤り・知らせ・窓）は [writing.md](writing.md) が決める。tsunagi-dicom の画面の言葉の表は `docs/spec.md` の 2.2 で、この文書と食い違うときは先に両方をそろえる。
 
 ## 規則
 
