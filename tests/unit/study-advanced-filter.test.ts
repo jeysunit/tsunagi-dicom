@@ -13,7 +13,7 @@ import { listStudies } from "@/lib/study-list";
 const ALL = ROLE_FIELD_ALLOWLIST.general.study;
 
 describe("URL の値を読む", () => {
-  it("生年月日・性別・受付番号・検査名を読み、同じ形で書き戻す。依頼医の条件は持たない（2026-10-21 に承認者が外した）", () => {
+  it("生年月日・性別・受付番号・検査名を読み、同じ形で書き戻す。紹介医の条件は持たない（2026-10-21 に承認者が外した）", () => {
     const filter = parseFilter(
       new URLSearchParams({ birth: "1975-05-10", sex: "F", accession: " ACC-0001 ", desc: "Chest CT", referring: "佐藤 一郎" }),
     );

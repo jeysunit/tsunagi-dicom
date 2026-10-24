@@ -197,14 +197,14 @@ test("詳細のシリーズ：写しのある検査はサムネイルの画像�
   await expect(page.getByTestId("series-strip").getByTestId("thumbnail")).toHaveCount(0);
 });
 
-// 期待の変更：毎回見る値（受付番号・依頼医など）は見出しに上げ、開け閉めは「UID」だけにした（docs/spec.md の 3.1・UX のレビューの H8）。
+// 期待の変更：毎回見る値（受付番号・紹介医など）は見出しに上げ、開け閉めは「UID」だけにした（docs/spec.md の 3.1・UX のレビューの H8）。
 // 前は検査と患者の情報の 2 列を「すべての項目」の中で確かめていた。いまは見出しで確かめ、UID は「UID」を開いて確かめる
 test("詳細のパネル：行のクリックで開き、見出しの要点と、UID・シリーズの並び（暗い地）を出す", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
   const detail = page.getByTestId("study-detail");
   await expect(detail).toBeVisible();
-  // 見出し（2 行）：氏名・カナ・英字氏名・患者ID・生年月日と和暦・年齢・性別／検査日時・モダリティ・検査名・受付番号・依頼医など
+  // 見出し（2 行）：氏名・カナ・英字氏名・患者ID・生年月日と和暦・年齢・性別／検査日時・モダリティ・検査名・受付番号・紹介医など
   const head = detail.getByTestId("detail-head");
   await expect(head).toContainText("試験 髙子");
   await expect(head).toContainText("しけん たかこ");
@@ -888,7 +888,7 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
   await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
   // 絞った受付番号は、一覧の受付番号の列に見える
   for (const a of await rows(page).getByTestId("accession-number").allTextContents()) expect(a).toContain("0004");
-  // 依頼医の条件は持たない（2026-10-21 に承認者が外した）
+  // 紹介医の条件は持たない（2026-10-21 に承認者が外した）
   await expect(panel.getByTestId("filter-referring")).toHaveCount(0);
   await panel.getByTestId("filter-accession").fill("該当しない");
   await expect(page.getByTestId("study-count")).toHaveText("0");
@@ -956,7 +956,7 @@ test("詳細の「UID」：初めは閉じ、押すと UID が開く。開閉は
   await expect(page.getByTestId("detail-uid-toggle")).toHaveAttribute("aria-expanded", "false");
 });
 
-test("詳細の見出しに、毎回見る値を常に出す：受付番号・依頼医・英字氏名・Study ID・シリーズ数と画像数（UX のレビューの H8）", async ({ page }) => {
+test("詳細の見出しに、毎回見る値を常に出す：受付番号・紹介医・英字氏名・Study ID・シリーズ数と画像数（UX のレビューの H8）", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
   const head = page.getByTestId("detail-head");
@@ -964,7 +964,7 @@ test("詳細の見出しに、毎回見る値を常に出す：受付番号・�
   // 開け閉めを押さなくても出ている
   await expect(page.getByTestId("detail-uid")).toHaveCount(0);
   await expect(head.getByTestId("detail-accession")).toContainText("受付番号");
-  await expect(head.getByTestId("detail-referring")).toHaveText(/依頼医\s*試験 医師/);
+  await expect(head.getByTestId("detail-referring")).toHaveText(/紹介医\s*試験 医師/);
   await expect(head.getByTestId("detail-alphabetic")).toContainText("Shiken Takako");
   await expect(head.getByTestId("detail-counts")).toHaveText(/Se\/Im\s*1 \/ 4/);
   // 見出しは 2 行に収まる

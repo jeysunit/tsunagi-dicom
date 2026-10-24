@@ -26,7 +26,7 @@ export interface SyntheticStudy {
   studyDescription: string;
   modality: "CT";
   sopInstanceUids: string[];
-  /** 生年月日（DA）・性別（CS）・依頼医（PN）。詳細条件の試験で替える */
+  /** 生年月日（DA）・性別（CS）・紹介医（PN）。詳細条件の試験で替える */
   patientBirthDate: string;
   patientSex: string;
   referringPhysicianName: string;
