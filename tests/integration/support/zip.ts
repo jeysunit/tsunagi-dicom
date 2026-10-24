@@ -66,7 +66,7 @@ export function readZip(buf: Buffer): ZipEntry[] {
     let w = 0;
     if (buf.readUInt32LE(p + 24) === 0xffffffff) w++;
     if (compressed === 0xffffffff) compressed = Number(wide[w++] ?? 0n);
-    if (localOffset === 0xffffffff) localOffset = Number(wide[w++] ?? 0n);
+    if (localOffset === 0xffffffff) localOffset = Number(wide[w] ?? 0n);
 
     if (buf.readUInt32LE(localOffset) !== LOCAL) throw new Error(`${name} の頭の印が違う`);
     const start = localOffset + 30 + buf.readUInt16LE(localOffset + 26) + buf.readUInt16LE(localOffset + 28);

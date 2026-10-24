@@ -38,7 +38,7 @@ async function docker(args: string[], timeoutMs = 120_000): Promise<string> {
     return stdout;
   } catch (error) {
     const e = error as { stderr?: string; message: string };
-    throw new Error(`docker ${args.slice(0, 3).join(" ")} が失敗した: ${e.stderr?.trim() || e.message}`);
+    throw new Error(`docker ${args.slice(0, 3).join(" ")} が失敗した: ${e.stderr?.trim() || e.message}`, { cause: error });
   }
 }
 

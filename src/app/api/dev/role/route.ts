@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
   const text = await readLimitedText(request, MAX_BODY_BYTES);
   if (text === null) return Response.json({ error: "送信内容が大きすぎます" }, { status: 413 });
-  let body: { role?: unknown } | null = null;
+  let body: { role?: unknown } | null;
   try {
     body = JSON.parse(text) as { role?: unknown } | null;
   } catch {
