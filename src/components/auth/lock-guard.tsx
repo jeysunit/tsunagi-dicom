@@ -1,9 +1,10 @@
 "use client";
 
-import { Lock } from "lucide-react";
+import { Lock, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
 import { LOCK_COOKIE, type LockCookieReason } from "@/lib/auth/lock-cookie";
@@ -27,6 +28,10 @@ import { cn } from "@/lib/utils";
 //   過ぎた要求でも、その時点でロックする。届いていないロックは sessionStorage にも持ち（読み直しの後も閉じたまま
 //   送り直す）、BroadcastChannel で開いているほかのタブにも閉じてもらう。BFF のロックの解除の確かめが通るまで閉じる。
 // - 操作があれば、15 秒に1回まで BFF に知らせる（サーバーの側のロックの時間を数え直す）。
+// - ロックの画面から「ログアウト」できる（前の利用者のパスワードを知らない次の利用者が、ログインし直せるように）。
+//   確認の窓を挟み、BFF がセッションを終えて（監査の記録に from: screen_lock を残す）から、ログインの頁へ移す。
+//   ロックの間は中身を描いていないので、ログアウトで新しく消える画面の内容はない（確認の窓の 1 行は、ロックの前に入れて
+//   保存していない入力が残らないことを知らせる）。ログアウトの前に、このブラウザに置いたロックの覚えを消す。
 
 const LAST_ACTIVITY_KEY = "tsunagi:last-activity";
 const LOCK_EVENT_KEY = "tsunagi:lock-event";
@@ -114,6 +119,9 @@ export function LockGuard({
   const [locked, setLocked] = useState(initiallyLocked);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const lastActivity = useRef(0);
   /** このタブの最後の操作（performance.now。時計の合わせ直しの影響を受けない） */
   const lastActivityMono = useRef(0);
@@ -228,6 +236,7 @@ export function LockGuard({
         cleanRef.current = false;
         lastActivity.current = Date.now();
         lastActivityMono.current = performance.now();
+        setConfirmLogout(false);
         setLocked(false);
         router.refresh();
       });
@@ -257,6 +266,12 @@ export function LockGuard({
           onServerLocked();
         } else if (message?.type === "unlocked") {
           onPeerUnlocked();
+        } else if (message?.type === "loggedout") {
+          // ほかのタブがロックの画面からログアウトした。このタブの覚え（届いていないロック）を消してログインの頁へ移す
+          // （古い csrfToken と届いていないロックのまま残り、次の利用者の画面を意図せずロックしないように）
+          setPending(null);
+          clearLockCookieHere();
+          window.location.assign("/login");
         }
       };
     } catch {
@@ -334,8 +349,32 @@ export function LockGuard({
     writeShared(LAST_ACTIVITY_KEY, String(Date.now()));
     writeShared(LOCK_EVENT_KEY, `unlock:${Date.now()}`);
     channel.current?.postMessage({ type: "unlocked" });
+    setConfirmLogout(false);
     setLocked(false);
     router.refresh();
+  }
+
+  /** ロックの画面からのログアウト。BFF がセッションを終えてから、ロックの覚えを消し、ログインの頁へ移す */
+  async function onLogout() {
+    setLoggingOut(true);
+    setLogoutError(null);
+    const res = await postJson("/api/auth/logout", {}, csrfToken);
+    // 401 は、もうセッションが無い（ログアウトと同じ結果）
+    if (!res.ok && res.status !== 401) {
+      setLoggingOut(false);
+      setLogoutError(errorText(res));
+      return;
+    }
+    setPending(null);
+    clearLockCookieHere();
+    try {
+      window.localStorage.removeItem(LAST_ACTIVITY_KEY);
+      window.localStorage.removeItem(LOCK_EVENT_KEY);
+    } catch {
+      // 使えないブラウザでは、置いていない
+    }
+    channel.current?.postMessage({ type: "loggedout" });
+    window.location.assign(res.data.next ?? "/login");
   }
 
   return (
@@ -379,7 +418,12 @@ export function LockGuard({
                 {error}
               </p>
             )}
-            <div className="flex gap-2">
+            {/* 主な操作（ロック解除）を右端に置く */}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmLogout(true)}>
+                <LogOut aria-hidden />
+                ログアウト
+              </Button>
               <ActionButton type="submit" pending={busy}>
                 ロック解除
               </ActionButton>
@@ -387,6 +431,20 @@ export function LockGuard({
           </form>
         </div>
       )}
+      <ConfirmDialog
+        open={locked && confirmLogout}
+        testId="logout-confirm"
+        title="ログアウトする"
+        body="ロックの前に入力して保存していない内容は残りません。"
+        confirmLabel="ログアウトする"
+        pending={loggingOut}
+        error={logoutError}
+        onConfirm={() => void onLogout()}
+        onCancel={() => {
+          setConfirmLogout(false);
+          setLogoutError(null);
+        }}
+      />
     </>
   );
 }

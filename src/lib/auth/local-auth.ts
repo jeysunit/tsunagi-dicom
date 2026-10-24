@@ -986,9 +986,14 @@ export async function purgeExpiredSessions(db: Db, at: Date = new Date()): Promi
   return res.count;
 }
 
-export async function logout(ctx: AuthContext, session: SessionRow, user: User): Promise<void> {
+/** fromScreenLock：画面のロック中に、ロックの画面から出たログアウト（監査の記録の detail の from に screen_lock を残す） */
+export async function logout(ctx: AuthContext, session: SessionRow, user: User, options: { fromScreenLock?: boolean } = {}): Promise<void> {
   await ctx.db.session.deleteMany({ where: { id: session.id } });
-  await record(ctx, actorOf(user), { action: "logout", outcome: "success" });
+  await record(ctx, actorOf(user), {
+    action: "logout",
+    outcome: "success",
+    ...(options.fromScreenLock ? { detail: { from: "screen_lock" } } : {}),
+  });
 }
 
 // ── 画面のロック（第7.0版 12 遵守事項⑥） ──

@@ -49,5 +49,6 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 | 一覧の表 | `src/components/ui/table.tsx` | あり |
 | 状態の札 | `src/components/ui/status-badge.tsx` | 部品はある。使う画面は状態の列を足す PR から |
 | ボタン | `src/components/ui/button.tsx` | あり |
+| 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトが使う |
 | 入力欄 | `src/components/ui/input.tsx` | あり |
 | 待ちの印 | `src/components/ui/pending.tsx` | あり |
