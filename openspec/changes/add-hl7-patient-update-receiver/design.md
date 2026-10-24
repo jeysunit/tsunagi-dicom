@@ -78,12 +78,16 @@ ris-emulator ──MLLP（hl7 のネットワーク）──> hl7-receiver ─�
 POST /studies/{Orthanc の検査の ID}/modify
 { "Replace": { PatientID, PatientName, PatientBirthDate, PatientSex[, AccessionNumber] },
   "Keep": ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"],
-  "Force": true, "KeepSource": false }
+  "Force": true, "KeepSource": false, "Asynchronous": true }
 ```
 
+- **Orthanc の仕事（job）として流す**（`Asynchronous: true`）。答えの仕事の ID を `dispatch` の行に残し、`/jobs/{id}` を読んで `Success`・`Failure` になるまで待つ（120 秒まで）。
+  時間切れの後も Orthanc の中で処理が続きうるので、仕事が終わったと読めるまでは結果を決めない（10）。
+- **終わった後に、画像ごとに確かめる。** 書き換えの前に、検査の画像の SOP Instance UID の一覧を `request` に残す。仕事が `Success` になったら、StudyInstanceUID で検査を引き当て（ちょうど 1 件）、`/studies/{id}/instances-tags` で全部の画像の SOPInstanceUID・PatientID・PatientName・PatientBirthDate・PatientSex・AccessionNumber を読み、
+  SOP Instance UID の一覧と件数が前と同じで、全部の画像が予定の値になっていれば成功とする。1 枚でも違えば失敗（`result` の `partial`）として AE を返し、後のメッセージを止める（10）。
 - `KeepSource: false` を必ず付ける。省くと同じ StudyInstanceUID の検査が 2 件並び、tsunagi-dicom の引き当てが 409 になる。
 - 替え先の患者 ID がすでに Orthanc にあると、患者のタグを全部 `Replace` に入れないと 400 になる。そのため、患者の 4 つのタグ（PatientID・PatientName・PatientBirthDate・PatientSex）をいつも入れる。
-- 書き換えると Orthanc の中の検査の ID が変わる（患者 ID が ID の元に入るため）。答えの `ID` を新しい ID として監査の記録に残す。
+- 書き換えると Orthanc の中の検査の ID が変わる（患者 ID が ID の元に入るため）。引き当て直した ID を新しい ID として監査の記録に残す。
 - 元の検査は Orthanc から消え、戻せない。監査の記録の前の値から、人が書き戻すことはできる。
 - 患者を探すのは `POST /tools/find`（`Level: Study`、`Query: { PatientID }`、`Expand: false`。読む資格情報）。患者 ID に `*`・`?`・`\`・制御文字があれば、探さずに AE にする（Orthanc の検索で字の当てはめになるため）。
 - 受付番号の書き換えで探すのは、いまの `lookupStudyIds`（`/tools/lookup`）。答えが 2 件以上なら選ばずに AE にする。
@@ -100,7 +104,7 @@ POST /studies/{Orthanc の検査の ID}/modify
 
 ### 6. 患者 ID の発番元
 
-- 設定 `HL7_PATIENT_ID_ISSUER` に、受ける患者 ID の発番元（CX の 4 つめの 1 つめの成分。ris-emulator は `RIS_EMU`）を 1 つだけ書く。Orthanc の患者 ID は、すべてこの発番元のものとみなす（1 つの施設の一式だけで使う前提。Non-Goals）。
+- 設定 `HL7_PATIENT_ID_ISSUER` に、受ける患者 ID の発番元（CX の 4 つめの 1 つめの下位成分。namespace ID。ris-emulator は `RIS_EMU`）を 1 つだけ書く。発番元は namespace ID だけで見分ける。CX の 4 つめの 2 つめ・3 つめ（universal ID とその種類）に値があれば AE。Orthanc の患者 ID は、すべてこの発番元のものとみなす（1 つの施設の一式だけで使う前提。Non-Goals）。
 - PID-3 と MRG-1 は、繰り返しのうち発番元がこれと同じで、種類（CX の 5 つめ）が `PI` か空のものを選ぶ。ちょうど 1 つでなければ AE（0 件は「発番元の違う患者 ID」、2 件以上は「どれか決められない」）。
 
 ### 7. メッセージの解析
@@ -119,14 +123,29 @@ POST /studies/{Orthanc の検査の ID}/modify
 
 6. セグメントの数：MSH・PID はちょうど 1 つ。A40 は MRG がちょうど 1 つ。ORM は ORC・OBR・ZDS がちょうど 1 つずつ。ほかのセグメント（EVN・PV1 など）は読まずに受ける。数が合わなければ AR（変更の前に断る）。
 7. ORM の ORC-1 は `NW` だけ。ほかは AR。
-8. メッセージ全体を確かめ終えるまで、Orthanc は呼ばない。
+8. 使う欄の形：下の表より多い繰り返し・成分があれば AR。表に無い欄は読まない。
+
+   | 欄 | 繰り返し | 成分 |
+   |---|---|---|
+   | MSH-3〜6・MSH-11・MSH-12・MSH-18 | 1 | 1（MSH-3〜6 は HD の 3 つまで） |
+   | MSH-9 | 1 | 3 |
+   | MSH-10 | 1 | 1。必須（1〜20 字、空白・区切りの字なし）。空なら AR |
+   | PID-3・MRG-1 | 4 まで | CX の 5 つまで（4 つめは下位成分 3 つまで） |
+   | PID-5 | 3 まで | XPN の 8 つまで |
+   | PID-7 | 1 | 1 |
+   | PID-8 | 1 | 1 |
+   | ORC-1 | 1 | 1 |
+   | OBR-18 | 1 | 1 |
+   | ZDS-1 | 1 | 4 |
+
+9. メッセージ全体を確かめ終えるまで、Orthanc は呼ばない。
 
 ### 8. 値の取り出しと DICOM の値の確かめ
 
 | 値 | 欄 | 確かめ（合わなければ AE） |
 |---|---|---|
 | 患者 ID・旧い患者 ID | PID-3・MRG-1（6 で選んだ繰り返しの 1 つめ） | 1〜64 文字（LO）、前後の空白なし、`\`・`*`・`?` なし |
-| 氏名 | PID-5 | 下の規則。グループの各成分は 64 文字まで、`\`・`=`・`^` を含まない |
+| 氏名 | PID-5 | 下の規則。成分に `\`・`=`・`^` を含まない。並べ替えた後のグループ（英字・漢字・かなのそれぞれ。区切りの `^` を含む）は 64 文字まで（DICOM PS3.5 の 6.2 の PN） |
 | 生年月日 | PID-7 の先頭 8 字 | `YYYYMMDD` の実在する日付 |
 | 性別 | PID-8 | `M`・`F`・`O`。`U` と空は「変えない」 |
 | 受付番号 | OBR-18 | 1〜16 文字（SH）、`\` なし |
@@ -153,13 +172,21 @@ POST /studies/{Orthanc の検査の ID}/modify
 
 ### 10. 同じメッセージと、結果の分からない書き換え
 
-- **同じメッセージ**：送り手（MSH-3・MSH-4）と MSH-10 の組で、前に受けたかを監査の記録から探す（直近 7 日。`ack` の行）。前に受けて本文の SHA-256 が同じなら、Orthanc を呼ばずに前と同じ ACK のコードを返す。本文が違えば AR（同じ MSH-10 の別の中身）。
-  古い A08 の送り直しで、新しい A08 の値が巻き戻らないようにするため。
-- **結果の分からない書き換え**：`request` の行の後に `result` の行が無いか、`result` が `unknown` の書き換えを「解いていない」とする。新しいメッセージを処理する前に、解いていない書き換えを Orthanc と照らす。
-  - 照らし方：`request` に残した StudyInstanceUID で検査を引き当て、ちょうど 1 件で、その患者 ID・氏名・生年月日・性別・受付番号が予定の値と同じなら成功、前の値と同じなら「書き換わらなかった」として、`reconcile` の行を足して解く。
-  - どちらとも言えない（0 件・2 件以上・値が混ざる）ときは解かずに、新しいメッセージに AE（「結果の分からない書き換えがある」）を返し、Orthanc を変えない。解くのは人（記録と Orthanc を見て、必要なら書き戻す）。人が解いたことを記録する道は、この change では作らない。
-- **記録の失敗**：`request` を書けなければ Orthanc を呼ばずに AE。Orthanc を呼んだ後に `result` を書けなければ、その書き換えは解いていないまま残り（上の照らしで解く）、ACK は AE にする。`ack` の行を書けなければ AE を返す。
-- 受け口の知らせ（`refused` など）を BFF に届けられなかったときは、受け口のログに残すだけで、送り直さない。
+- **受けたことを先に残す**：解析を通ったメッセージは、Orthanc を読む前に `received` の行（送り手の MSH-3・MSH-4、MSH-10、本文の SHA-256、メッセージの ID）を残す。残せなければ AE。
+- **同じメッセージ**：送り手と MSH-10 の組で、前の `received` の行を探す（直近 7 日）。
+  - 前の行があり、本文の SHA-256 が違えば AR（同じ MSH-10 の別の中身）。
+  - 本文が同じで、そのメッセージの `ack` の行があれば、Orthanc を呼ばずに前と同じ ACK のコードを返す。古い A08 の送り直しで、新しい A08 の値が巻き戻らないようにするため。
+  - 本文が同じで `ack` の行が無い（処理の途中で BFF が止まった）ときは、下の「途中で止まったメッセージ」として扱う。
+- **解いていない書き換え**：`request` の行があり、`result` の結果が決まっていない（`result` が無い・`unknown`・`partial`）書き換え。新しいメッセージを処理する前に、全部を照らす。
+  - 仕事の ID がある（`dispatch` の行がある）：`/jobs/{id}` を読む。`Success` なら 4 の画像ごとの確かめをして、`reconcile` の行で成功か `partial` を足す。`Failure` なら、4 と同じ確かめで前の値のままなら「書き換わらなかった」として解く。まだ動いている・読めないときは解かない。
+  - 仕事の ID が無い（Orthanc に送ったが答えが来なかった）：仕事が作られたかが分からないので、自動では解かない。
+  - `partial` は自動では解かない（画像の一部だけが書き換わっている）。
+  - 解けないものが 1 つでもあれば、新しいメッセージに AE（「結果の分からない書き換えがある」）を返し、Orthanc を変えない。
+- **人が解く道**：`POST /api/hl7/resolve`（管理者だけ。`pacs.reconcile`。画面の書き込みの決まり（CSRF・ロック）を通す）。本文は書き換えごとの ID と、Orthanc の側で処理が終わったことをどこでどう確かめたかの文（必須）。
+  BFF は Orthanc をもう一度読み（4 の画像ごとの確かめ）、見た結果を `reconcile`（`manual: true`）の行に足して解く。Orthanc には書かない。書き戻しが要るなら、人が Orthanc の側で行う。画面は作らない（削除の照らし合わせと同じく、API だけ）。
+- **途中で止まったメッセージ**：`received` の行があって `ack` の行が無いメッセージ。そのメッセージの書き換えが全部解けていれば、`ack` の行を AE（`interrupted`）で足して閉じる。同じ MSH-10 の送り直しには、この AE を返す（送り手は新しい MSH-10 で送り直す）。
+- **記録の失敗**：`request` を書けなければ Orthanc を呼ばずに AE。Orthanc を呼んだ後に `dispatch`・`result` を書けなければ、その書き換えは解いていないまま残り、ACK は AE にする。`ack` の行を書けなければ AE を返す（そのメッセージは途中で止まったメッセージになる）。
+- **受け口の知らせ**：BFF に届けられなければ、受け口は 3 回まで（1 秒・5 秒・30 秒の後）送り直す。それでも届かなければ数を数えておき、次に知らせが届いたときに `dropped`（落とした数と期間）として一緒に送る。受け口が起き直すと、この数は失われる（ログには残る）。
 
 ### 11. ACK
 
@@ -175,7 +202,7 @@ POST /studies/{Orthanc の検査の ID}/modify
 - 1 通の大きさは 1 MiB まで（`HL7_MAX_MESSAGE_BYTES`）。超えたら閉じる。枠の外のバイトが来たら閉じる。どちらも BFF には HL7 の本文を渡さず、`oversize`・`framing` を知らせるだけにする。
 - 時間：1 通の枠の始まりから終わりまで 30 秒（`HL7_READ_TIMEOUT_SECONDS`）。次のメッセージを待つ間も 30 秒で閉じる。BFF の答えは 60 秒まで待つ。
 - BFF の答えを待つ間は socket の読み取りを止める（溜めるのは 1 通の上限まで）。1 つの接続で複数のメッセージを順に受けてよい（受けた順に 1 通ずつ答える）。
-- 同時の接続は 8 まで。超えた接続はすぐ閉じる。
+- 同時の接続は 8 まで。超えた接続はすぐ閉じ、BFF に `busy` を知らせる（1 分にまとめて 1 回、数を添える）。
 - BFF への転送：送り先は設定の `HL7_FORWARD_URL` の 1 か所だけ。移す答え（3xx）には付いていかない。proxy の環境変数は使わない（Node.js の fetch の既定）。token は `HL7_RECEIVER_TOKEN_FILE` から読み、空・読めない・32 文字未満なら起動しない。
 - 受け口のログに出す外の値（住所・理由）は、14 の規則で見える形にしてから出す。HL7 の本文と token はログに出さない。
 
@@ -185,12 +212,14 @@ POST /studies/{Orthanc の検査の ID}/modify
 
 | `detail.event` | いつ | outcome |
 |---|---|---|
-| `refused`・`oversize`・`timeout`・`framing` | 受け口の知らせ | denied |
+| `refused`・`oversize`・`timeout`・`framing`・`busy`・`dropped` | 受け口の知らせ（`busy`・`dropped` は数を添える） | denied |
 | `rejected` | AR を返す前 | denied |
-| `request` | Orthanc の書き換えを呼ぶ前。対象の Orthanc の ID・StudyInstanceUID・前の値・予定の値・書き換えごとの ID（UUID）・メッセージの ID（UUID）・MSH-10 | success |
-| `result` | 呼んだ後。書き換えごとの ID・新しい Orthanc の ID・Orthanc の答えの要点 | success・failed・unknown |
-| `reconcile` | 解いていない書き換えを照らした（10） | success・failed |
-| `ack` | ACK を返す前。種類・MSH-3/4・MSH-10・本文の SHA-256・ACK のコード・書き換えた件数 | success（AA）・failed（AE） |
+| `received` | 解析を通った後、Orthanc を読む前。種類・MSH-3/4・MSH-10・本文の SHA-256・メッセージの ID（UUID） | success |
+| `request` | Orthanc の書き換えを呼ぶ前。対象の Orthanc の ID・StudyInstanceUID・SOP Instance UID の一覧・前の値・予定の値・書き換えごとの ID（UUID）・メッセージの ID | success |
+| `dispatch` | 仕事を作れた後。書き換えごとの ID・仕事の ID | success |
+| `result` | 仕事が終わった後か、送れなかった・答えが来なかった後。書き換えごとの ID・新しい Orthanc の ID・画像ごとの確かめの結果・Orthanc の答えの要点 | success・failed・unknown・partial（outcome は failed、`detail.partial: true`） |
+| `reconcile` | 解いていない書き換えを照らした・人が解いた（10） | success・failed |
+| `ack` | ACK を返す前。メッセージの ID・ACK のコード・書き換えた件数・止まったメッセージを閉じたか | success（AA）・failed（AE） |
 
 - 監査の記録の `patientId` には、書き換えの後の患者 ID を入れ、`studyInstanceUid` には対象の検査の UID を入れる。
 - `detail` に入れる文字の値のうち、送り手が書いた値（MSH-3/4・MSH-10）・理由の文・Orthanc の答えの要点は、14 の規則で見える形にしてから入れる。
