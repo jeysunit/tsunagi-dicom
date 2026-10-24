@@ -36,6 +36,7 @@ export function ConfirmDialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const bodyId = useId();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -49,6 +50,7 @@ export function ConfirmDialog({
       ref={ref}
       data-testid={testId}
       aria-labelledby={titleId}
+      aria-describedby={bodyId}
       // Esc で閉じるときも、画面の側の状態を合わせる
       onCancel={(event) => {
         event.preventDefault();
@@ -59,7 +61,9 @@ export function ConfirmDialog({
       <h2 id={titleId} className="mb-2 text-value font-bold">
         {title}
       </h2>
-      <p className="text-label">{body}</p>
+      <p id={bodyId} className="text-label">
+        {body}
+      </p>
       {error && (
         <p role="alert" className="mt-2 text-sm text-danger">
           {error}

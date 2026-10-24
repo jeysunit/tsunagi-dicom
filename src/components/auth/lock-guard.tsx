@@ -266,6 +266,12 @@ export function LockGuard({
           onServerLocked();
         } else if (message?.type === "unlocked") {
           onPeerUnlocked();
+        } else if (message?.type === "loggedout") {
+          // ほかのタブがロックの画面からログアウトした。このタブの覚え（届いていないロック）を消してログインの頁へ移す
+          // （古い csrfToken と届いていないロックのまま残り、次の利用者の画面を意図せずロックしないように）
+          setPending(null);
+          clearLockCookieHere();
+          window.location.assign("/login");
         }
       };
     } catch {
@@ -367,6 +373,7 @@ export function LockGuard({
     } catch {
       // 使えないブラウザでは、置いていない
     }
+    channel.current?.postMessage({ type: "loggedout" });
     window.location.assign(res.data.next ?? "/login");
   }
 
