@@ -176,8 +176,11 @@ describe("部品", () => {
     }
   });
 
-  it("状態の札：取消は取り消し線、結果不明は破線", () => {
-    expect(renderToStaticMarkup(badge("canceled", "取消"))).toContain("line-through");
+  it("状態の札：取消は文字に取り消し線を引かず（灰と「—」で示す）、結果不明は破線", () => {
+    const canceled = renderToStaticMarkup(badge("canceled", "取消"));
+    expect(canceled).not.toContain("line-through");
+    expect(canceled).toContain("取消");
+    expect(canceled).toContain("—");
     expect(renderToStaticMarkup(badge("unknown", "結果不明"))).toContain("border-dashed");
   });
 
