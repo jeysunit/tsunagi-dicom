@@ -15,7 +15,7 @@ export async function compose(args: string[], options: { timeoutMs?: number } = 
     return stdout;
   } catch (error) {
     const e = error as { stderr?: string; message: string };
-    throw new Error(`docker compose ${args.join(" ")} が失敗した: ${e.stderr?.trim() || e.message}`);
+    throw new Error(`docker compose ${args.join(" ")} が失敗した: ${e.stderr?.trim() || e.message}`, { cause: error });
   }
 }
 
