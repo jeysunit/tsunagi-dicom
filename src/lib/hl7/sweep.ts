@@ -19,6 +19,8 @@ import {
 
 /** A40・ORM の覚えを使う期間。受理から 24 時間（design.md §15） */
 export const REMEMBER_TTL_MS = 24 * 60 * 60 * 1000;
+/** BFF の時計の巻き戻りを許す幅（design.md §15.2） */
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /** 覚えに、受理した順（監査の記録の並び）と受理の時刻を添えたもの。前後は順で決め、時刻は期限だけに使う */
 type Ordered<T> = T & { seq: number; time: number };
@@ -54,7 +56,7 @@ export function memory(rows: HistoryRow[]): { aliases: Alias[]; orders: Order[] 
 
 /** 統合の最初の段の A40 が、期限（受理から 24 時間）の中か。時計の小さな巻き戻り（5 分まで）は許す */
 export function withinTtl(link: { time: number }, now: number): boolean {
-  return link.time - now <= 5 * 60 * 1000 && now - link.time <= REMEMBER_TTL_MS;
+  return link.time - now <= CLOCK_SKEW_MS && now - link.time <= REMEMBER_TTL_MS;
 }
 
 /** 統合の 1 段。同じ旧い患者 ID から同じ先への A40（送り直しを含む）をまとめたもの */
@@ -152,6 +154,10 @@ export async function sweepArrivals(
   }
   const now = (options.now ?? Date.now)();
   const { aliases, orders } = memory(rows);
+  // 時計が 5 分より大きく戻ったときは、どの覚えを使ってよいか決められないので、時計が追いつくまで書き換えない
+  if ([...aliases, ...orders].some(m => m.time - now > CLOCK_SKEW_MS)) {
+    return { count: 0, skipped: 0, blocked: "覚えの時刻が BFF の時計より先にある（時計が戻った）" };
+  }
   const sweepId = randomUUID();
   const row: AuditRow = (event, outcome, detail = {}, patientId, studyInstanceUid) => audit({
     actorId: "hl7-receiver",

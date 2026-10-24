@@ -177,6 +177,19 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(ordersForChain(links, orders)).toEqual([]);
   });
 
+  it("時計が 5 分より大きく戻ったら、時計が追いつくまで書き換えない", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    expect(await send(orm("P000001", STUDY, "RE1"))).toContain("MSA|AA|");
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    // 受理の時刻（いまの時計）より 10 分前に時計が戻った
+    clock -= 10 * 60 * 1000;
+    expect(await sweep()).toMatchObject({ count: 0, blocked: expect.stringContaining("時計が戻った") });
+    expect(patientsOf(STUDY).sort()).toEqual(["P000001", TEMP].sort());
+    clock += 20 * 60 * 1000;
+    expect(await sweep()).toMatchObject({ count: 1 });
+  });
+
   it("同じ時刻に受理した ORM と次の A40 は、受理した順で前後を決める", () => {
     const at = "2026-10-26T12:00:00.000Z";
     const ack = (remember: Record<string, unknown>): AuditEntryInput => ({
