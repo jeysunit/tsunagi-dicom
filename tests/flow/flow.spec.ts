@@ -417,6 +417,16 @@ test("5 照合：緊急の患者で撮る → ris-emulator の未照合に出る
   const listed = async () => (await (await page.request.get("/api/studies")).json()) as StudyList;
   await waitFor("緊急の検査が一覧に出る", listed, (body) => body.studies.some((s) => s.studyInstanceUid === exam.study_instance_uid));
 
+  // 画像ごとの SeriesInstanceUID と SOPInstanceUID の組（DICOMweb の WADO-RS の中継の metadata）。照合の前後で変わらないことを確かめる
+  const instanceUids = async () => {
+    const res = await page.request.get(`/api/dicom-web/studies/${exam.study_instance_uid}/metadata`, { headers: { accept: "application/dicom+json" } });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as Record<string, { Value?: string[] }>[];
+    return body.map((i) => `${i["0020000E"]?.Value?.[0]}/${i["00080018"]?.Value?.[0]}`).sort();
+  };
+  const before = await instanceUids();
+  expect(before).toHaveLength(exam.files.length);
+
   // ris-emulator の未照合に、仮の患者 ID と撮影の StudyInstanceUID で出る（予約どおりでない撮影の MPPS）
   type Unreconciled = { sop_instance_uid: string; status: string; patient_id: string; study_instance_uid: string; modality: string; problem: string };
   const unreconciled = await waitFor(
@@ -446,6 +456,7 @@ test("5 照合：緊急の患者で撮る → ris-emulator の未照合に出る
   expect(same).toHaveLength(1);
   expect(same[0]).toMatchObject({ patientId, patientBirthDate: "19980312", patientSex: "M", accessionNumber: accession, instanceCount: exam.files.length });
   expect(same[0]!.patientName).toContain("流れ");
+  expect(await instanceUids()).toEqual(before);
   expect(after.studies.some((s) => s.patientId === priorId)).toBe(false);
 
   // ris-emulator の予約は、撮影の StudyInstanceUID で、撮影が完了しているので完了になる。照合済みは未照合から外れる
