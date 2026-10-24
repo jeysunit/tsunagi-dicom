@@ -12,30 +12,36 @@
 @theme {
   --color-background: #ffffff;
   /* 控えめな地（見出し・帯・パネル） */
-  --color-surface: #f6f8fa;
-  --color-foreground: #1f2328;
-  --color-label: #59636e;
+  --color-surface: #f6f6f6;
+  --color-foreground: #262626;
+  --color-label: #5f5f5f;
   /* 値（太字で出す） */
-  --color-value: #1f2328;
-  --color-border: #d1d9e0;
+  --color-value: #1a1a1a;
+  --color-border: #d2d2d2;
+  /* 入力欄・ボタンの輪郭。区切りの線（border）より濃く、地との対比を 3:1 以上にする */
+  --color-border-input: #8c8c8c;
   /* 一覧の行の hover などの、地との差の小さい色（選んだ行の地より薄く） */
-  --color-muted: #eff2f5;
+  --color-muted: #eeeeee;
+  /* 検索の条件の帯など、muted より一段濃い地 */
+  --color-muted-strong: #e2e2e2;
+  /* 画面の外枠（ヘッダー・サイドバー）の暗い地。値の定義だけで、使うのは段 2 */
+  --color-chrome: #333333;
   /* 押せる物（枠のボタン・枠の無いボタン・絞り込み）の hover の地。白い地・控えめな地と見分けられる差にする（docs/spec.md の 2.3） */
-  --color-hover: #dfe5eb;
+  --color-hover: #e2e2e2;
   /* 押している間の地（hover より一段濃く） */
-  --color-pressed: #d1d9e0;
+  --color-pressed: #d2d2d2;
   /* 選んだ行の地（主の色の薄い地。左の縦線は主の色） */
-  --color-selected: #ddf4ff;
-  /* 主の色（ボタンの地。白い字） */
-  --color-primary: #0969da;
+  --color-selected: #ededf9;
+  /* 主の色（ボタンの地。白い字）。選択・主のボタン・リンクにだけ使い、状態の意味（正常・注意・異常）には使わない */
+  --color-primary: #4b4fbf;
   --color-primary-foreground: #ffffff;
   /* ボタンの地の hover（白い字との対比を下げないよう、濃くする） */
-  --color-primary-hover: #0757b5;
+  --color-primary-hover: #3b3ea3;
   /* ボタンの地の、押している間（hover より一段濃く） */
-  --color-primary-active: #054a9b;
+  --color-primary-active: #2f3288;
   /* リンク・強調の文字 */
-  --color-link: #0969da;
-  --color-ring: #0969da;
+  --color-link: #4b4fbf;
+  --color-ring: #4b4fbf;
   --color-danger: #d1242f;
   /* 終わったことの印（送信完了・接続確認の成功）。文字と印を必ず添える */
   --color-success: #1a7f37;
@@ -73,24 +79,27 @@ body:has([data-split-root]) {
 /* 暗い地（利用者が選んだとき・画像のまわり） */
 [data-theme="dark"] {
   color-scheme: dark;
-  --color-background: #121417;
-  --color-surface: #1a1d21;
-  --color-foreground: #e6edf3;
-  --color-label: #8a949e;
+  --color-background: #1b1b1b;
+  --color-surface: #242424;
+  --color-foreground: #e8e8e8;
+  --color-label: #a3a3a3;
   --color-value: #ffffff;
-  --color-border: #2a2f36;
-  --color-muted: #23272d;
-  --color-hover: #272c33;
-  --color-pressed: #30363d;
-  /* 主の色 #1f6feb を 25% だけ地に重ねた色 */
-  --color-selected: #152b4c;
-  --color-primary: #1f6feb;
+  --color-border: #3a3a3a;
+  --color-border-input: #777777;
+  --color-muted: #2d2d2d;
+  --color-muted-strong: #383838;
+  --color-chrome: #121212;
+  --color-hover: #333333;
+  --color-pressed: #444444;
+  /* 主の色 #4b4fbf を 25% だけ地に重ねた色 */
+  --color-selected: #272844;
+  --color-primary: #4b4fbf;
   --color-primary-foreground: #ffffff;
-  --color-primary-hover: #1858c4;
-  --color-primary-active: #1550b0;
+  --color-primary-hover: #3b3ea3;
+  --color-primary-active: #2f3288;
   /* 暗い地の上のリンクの文字は、ボタンの地の色より明るくする */
-  --color-link: #4493f8;
-  --color-ring: #4493f8;
+  --color-link: #a5a8ff;
+  --color-ring: #a5a8ff;
   --color-danger: #ff7b72;
   --color-success: #3fb950;
 }
