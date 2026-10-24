@@ -22,6 +22,8 @@ export interface FakeOrthanc {
   studyId(patientId: string, uid: string): string;
   modifyCalls: { id: string; replace: Record<string, string> }[];
   deleteCalls: { id: string; sops: string[] }[];
+  /** 仕事の状態（試験が後から Success にする） */
+  jobs: Map<string, JobState>;
 }
 
 export function createFakeOrthanc(): FakeOrthanc {
@@ -35,6 +37,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     unstable: new Set(),
     next: {},
     modifyCalls: [],
+    jobs,
     deleteCalls: [],
     studyId,
     add(instance) {

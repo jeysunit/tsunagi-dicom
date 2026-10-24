@@ -320,6 +320,25 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(orthanc.deleteCalls.at(-1)?.sops).toEqual([`${STUDY}.2.1`]);
   });
 
+  it("仕事の終わりを待ちきれずに止まっても、仕事が成功していれば、次の照らし合わせで元の画像を消して解く", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    // 画像は書き換わったが、仕事の状態は Running のまま待ちきれない
+    orthanc.next.state = "Running";
+    const deletes = orthanc.deleteCalls.length;
+    const result = await sweepArrivals(orthanc.backend, audit, { ...options(), jobTimeoutMs: 0 });
+    expect(result).toMatchObject({ count: 0, blocked: "書き換えに失敗した" });
+    expect(rows.filter(r => r.detail?.event === "result").at(-1)).toMatchObject({ outcome: "unknown", detail: { reason: "仕事の完了を待つ時間を超えた" } });
+    expect(orthanc.deleteCalls).toHaveLength(deletes);
+    for (const id of orthanc.jobs.keys()) orthanc.jobs.set(id, "Success");
+    // 次の見回りの照らし合わせが、確かめてから元の画像を名指しで消し、成功として解く
+    expect(await sweep()).toEqual({ count: 0, skipped: 0 });
+    expect(orthanc.deleteCalls.at(-1)).toEqual({ id: orthanc.studyId(TEMP, STUDY), sops: [`${STUDY}.2.1`] });
+    expect(patientsOf(STUDY)).toEqual(["P000001"]);
+    expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "success", detail: { partial: false, matchesAfter: true } });
+  });
+
   it("書き換えた画像が替え先の検査に揃わなければ、元の画像を消さずに部分反映で止める", async () => {
     temp();
     await send(a40(TEMP, "P000001"));

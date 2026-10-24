@@ -189,8 +189,12 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
       if (!job || !["Success", "Failure"].includes(job.state)) {
         continue;
       }
+      // 患者 ID の変わる書き換えは元の検査が残るので、仕事の終わりを読めずに止まった後も、確かめてから元の画像を
+      // 名指しで消す（書き換えたときと同じ。消し終えていれば何もしない。design.md §15.4）
+      const arrivalsKept = job.state === "Success" && d.after[0]!.PatientID !== d.before[0]!.PatientID
+        ? await removeSource(backend, d) : true;
       const checked = await verify(backend, d);
-      const success = job.state === "Success" && checked.matchesAfter;
+      const success = job.state === "Success" && checked.matchesAfter && arrivalsKept;
       // Success の不一致は、前の値と同じでも自動で解かない（design.md §4）。
       const partial = !success && (job.state === "Success" || !checked.matchesBefore);
       const row: HistoryRow = {
@@ -199,7 +203,7 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
         authMode: "hl7",
         action: "hl7",
         outcome: success ? "success" : "failed",
-        detail: { ...d, event: "reconcile", partial, ...checked }
+        detail: { ...d, event: "reconcile", partial, ...checked, ...(arrivalsKept ? {} : { arrivalsLost: true }) }
       };
       await audit(row);
       rows.push(row);
