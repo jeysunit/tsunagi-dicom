@@ -2,6 +2,7 @@
   "DicomAet": "ORTHANC",
   "DicomCheckCalledAet": true,
   "DicomCheckModalityHost": false,
+  "OverwriteInstances": true,
   "DicomModalities": {
     "dtg": {
       "AET": "DTG_CT01",
