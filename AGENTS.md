@@ -60,5 +60,6 @@
 ## CI と配布
 
 - GitHub Actions の権限は最小にする。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付ける。`id-token: write`（署名）はイメージを作る仕事にだけ。
+- **イメージを GHCR へ出すのは、版のタグ（`v*`）の push・手動（`main` を選ぶ）・週に1回の作り直しのときだけ。`main` への push では出さない**（試験だけ流す）。
 - イメージのタグは `vX.Y.Z` と `sha-<短い hash>`、週の作り直しには `rebuild-YYYYMMDD` も付ける。作り直しで版のタグを上書きしない。配備は版のタグか digest を指定する。
 - 出したイメージは digest に署名する（cosign の鍵の要らない署名）。タグには署名しない。

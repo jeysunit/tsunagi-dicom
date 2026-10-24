@@ -608,8 +608,8 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
   - secret のファイル（`SESSION_SECRET`・Orthanc のパスワード・最初の管理者のパスワード）は `deploy/init-secrets.sh` が乱数で作る。リポジトリに入れない。
   - 開発・試験用の compose（`docker/dev/compose.yaml`）は、この compose を include し、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足す。`docker/dev/up.sh` で立てる（[`round-trip-test.md`](round-trip-test.md)）。
   - 1つのコンテナだけの `compose.yaml`（リポジトリの直下）は、モックで画面を試すときと、Orthanc を別の場所に置くときに使う。
-- CI（GitHub Actions）：PR で lint・型・Vitest・Playwright（モック）と、結合の試験（試験の中で立てた Orthanc と DCMTK のコンテナ）と、開発用の compose の流れ（`tests/flow`。開発用の compose をそのまま立てる）。後の2つは `.github/workflows/integration.yml` にあり、必須のチェックにはまだしていない。`main` への merge と版のタグで、イメージを作って GHCR へ。週に1回、`main` を作り直して出す（イメージの中の包みの更新を取り込む）。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付け、`id-token: write`（署名）はイメージを作る仕事にだけ付ける（リポジトリ全体を読み書きにしない）。
-- イメージのタグ：`vX.Y.Z` と `sha-<短い hash>`、作り直しには `rebuild-YYYYMMDD` も付ける。作り直しは版のタグを付けない・上書きしない。`latest` は付けてもよいが、配備は版のタグか digest を指定する。イメージは CI（lint・型・Vitest・Playwright・イメージの試しの起動）が通ってから出す。
+- CI（GitHub Actions）：PR で lint・型・Vitest・Playwright（モック）と、結合の試験（試験の中で立てた Orthanc と DCMTK のコンテナ）と、開発用の compose の流れ（`tests/flow`。開発用の compose をそのまま立てる）。後の2つは `.github/workflows/integration.yml` にあり、必須のチェックにはまだしていない。`main` への merge では試験だけを流し、イメージは出さない。イメージを作って GHCR へ出すのは、版のタグの push・手動（`main` を選ぶ）・週に1回の作り直し（イメージの中の包みの更新を取り込む）のときだけ。**`permissions: packages: write` は、イメージを作る仕事と古いイメージを片付ける仕事にだけ**付け、`id-token: write`（署名）はイメージを作る仕事にだけ付ける（リポジトリ全体を読み書きにしない）。
+- イメージのタグ：`vX.Y.Z`（版のタグの push のときだけ）と `sha-<短い hash>`、週の作り直しには `rebuild-YYYYMMDD` も付ける。手動と作り直しは版のタグを付けない・上書きしない。`latest` は付けてもよいが、配備は版のタグか digest を指定する。イメージは CI（lint・型・Vitest・Playwright・イメージの試しの起動）が通ってから出す。
 - イメージの署名：出したイメージの digest に、cosign の鍵の要らない署名（GitHub Actions の OIDC）を付ける。確かめ方は README。
 - イメージの片付け：版のタグの付いたイメージは消さない。ほかのタグのイメージは新しい順に 10 個と、2 日より新しいものを残し、残りとタグの無いイメージを週に1回消す（署名などの子は親と一緒）。いまは dry-run で、消す候補を記録に出すだけ（記録を確かめてから消す形にする）。範囲は README と `.github/workflows/image-cleanup.yml`。
 - **仕様の外で足した道**（アプリの機能ではないもの）：`/api/health`（コンテナの生死の確かめ。認証なし・画像サーバーにつながない）、`/api/audit/verify`（監査の記録のつなぎの確かめ。管理者だけ）。3.6 を参照。
