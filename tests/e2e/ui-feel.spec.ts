@@ -19,15 +19,15 @@ const nav = (page: Page) => page.getByRole("navigation", { name: "ページ" });
 const rows = (page: Page) => page.getByTestId("study-table").locator("tbody > tr[data-study-uid]");
 const bg = (page: Page, selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).backgroundColor);
 
-test("今いる頁：ナビゲーションの項目に aria-current とタブの形、ブラウザのタブの題名は頁ごと", async ({ page }) => {
+test("今いる頁：左のナビの項目に aria-current と選んだ行の形、ブラウザのタブの題名は頁ごと", async ({ page }) => {
   await asAdmin(page);
   await expect(page).toHaveTitle("検査一覧 - tsunagi-dicom");
   const current = nav(page).locator("[aria-current=page]");
   await expect(current).toHaveCount(1);
   await expect(current).toHaveAttribute("href", "/");
-  // 色だけで示さない：太字と下の線
+  // 色だけで示さない：太字と左の線（左のナビの現在地。docs/design-system/menu.md）
   expect(await current.evaluate((el) => getComputedStyle(el).fontWeight)).toBe("700");
-  expect(await current.evaluate((el) => getComputedStyle(el).borderBottomWidth)).toBe("2px");
+  expect(await current.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("3px");
   const other = nav(page).locator("a[href='/received']");
   await expect(other).not.toHaveAttribute("aria-current", /.*/);
   expect(await other.evaluate((el) => getComputedStyle(el).fontWeight)).not.toBe("700");
@@ -45,6 +45,60 @@ test("今いる頁：ナビゲーションの項目に aria-current とタブの
     const h1 = page.locator("main h1").first();
     expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("18px");
   }
+});
+
+test("左のナビ：本文の左に幅 208px で置き、群の名前を出す。上の帯のボタンで 56px に閉じ、読み込み直しても閉じたまま", async ({ page }) => {
+  await asAdmin(page);
+  const side = nav(page);
+  const main = page.locator("main").first();
+  const sideBox = (await side.boundingBox())!;
+  const mainBox = (await main.boundingBox())!;
+  expect(sideBox.x + sideBox.width).toBeLessThanOrEqual(mainBox.x + 1);
+  expect(Math.round(sideBox.width)).toBe(208);
+  for (const group of ["業務", "接続", "管理"]) await expect(side.getByText(group, { exact: true })).toBeVisible();
+  // 上の帯には、画面への道を置かない
+  await expect(page.locator("header").getByRole("link", { name: "受信一覧" })).toHaveCount(0);
+
+  const toggle = page.getByTestId("nav-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => Math.round((await side.boundingBox())!.width)).toBe(56);
+  // 閉じても項目は押せて、名前は読み上げと title に残る
+  await expect(side.getByRole("link", { name: "受信一覧" })).toHaveAttribute("title", "受信一覧");
+  await page.reload();
+  await expect(page.getByTestId("nav-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  await page.getByTestId("nav-toggle").click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
+});
+
+test("左のナビ：低い画面でも、末尾の項目まで届く（ナビの中でスクロールする）", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await asAdmin(page);
+  const side = nav(page);
+  expect(await side.evaluate((el) => getComputedStyle(el).overflowY)).toBe("auto");
+  // 最後の項目（検証モードの管理者では、管理の群のビューア設定）に、ナビの中のスクロールで届いて押せる
+  const last = side.getByRole("link").last();
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", "/admin/viewers");
+});
+
+test("左のナビ：頁を移る待ちの間は、閉じた幅でも、項目の絵の場所に待ちの印を出す", async ({ page }) => {
+  await asAdmin(page);
+  await page.getByTestId("nav-toggle").click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  // 受信一覧の頁の取得を遅らせる（頁の切り替えが 0.3 秒を超えて待つ）
+  await page.route("**/received**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  const link = nav(page).locator("a[href='/received']");
+  await link.click();
+  await expect(link.getByTestId("spinner")).toBeVisible();
+  await expect(page).toHaveURL(/\/received$/);
+  await page.getByTestId("nav-toggle").click();
 });
 
 test("押せる物：カーソルは指の形、押せないときは禁止の形。hover で地が変わる", async ({ page }) => {

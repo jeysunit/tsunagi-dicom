@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { LockGuard } from "@/components/auth/lock-guard";
 import { DevModeBand } from "@/components/layout/dev-mode-band";
+import { buildNavGroups } from "@/components/layout/nav-items";
+import { SideNav } from "@/components/layout/side-nav";
 import { SiteHeader, type HeaderUser } from "@/components/layout/site-header";
 import { screenUnlockNeedsTotp } from "@/lib/auth/local-auth";
 import { can, ROLE_LABELS } from "@/lib/auth/roles";
@@ -40,26 +42,35 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const signedIn = state.kind === "active" || state.kind === "locked" ? state.session : undefined;
   const theme = signedIn ? await getTheme(await getDb(), signedIn.actorId) : DEFAULT_THEME;
 
+  // 左のナビは、ログインしている（検証モードを含む）ときだけ。ロックの間は、ほかの中身と同じく描かない
+  const navGroups =
+    state.kind === "active"
+      ? buildNavGroups({
+          canManageUsers: !!local && can(state.session.role, "user.manage"),
+          canEditViewerDefaults: can(state.session.role, "viewer.defaults"),
+          account: !!local,
+          canViewReceived: can(state.session.role, "receive.view"),
+          canCheckModalities: can(state.session.role, "modality.check"),
+        })
+      : undefined;
   const main = <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-6 py-4">{children}</main>;
+  const content = navGroups ? (
+    <div className="flex min-h-0 flex-1">
+      <SideNav groups={navGroups} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{main}</div>
+    </div>
+  ) : (
+    main
+  );
   return (
     <html lang="ja" data-theme={theme}>
-      <body className="flex min-h-dvh flex-col antialiased">
+      <body className="group/body flex min-h-dvh flex-col antialiased">
         {config.auth.mode === "dev" && state.kind === "active" && <DevModeBand role={state.session.role} allowWrite={!!config.auth.devAllowWrite} />}
         <SiteHeader
           user={user}
           pendingCsrfToken={pendingCsrfToken}
           theme={state.kind === "active" ? { current: theme, csrfToken: local?.row.csrfToken } : undefined}
-          nav={
-            state.kind === "active"
-              ? {
-                  canManageUsers: !!local && can(state.session.role, "user.manage"),
-                  canEditViewerDefaults: can(state.session.role, "viewer.defaults"),
-                  account: !!local,
-                  canViewReceived: can(state.session.role, "receive.view"),
-                  canCheckModalities: can(state.session.role, "modality.check"),
-                }
-              : undefined
-          }
+          navToggle={!!navGroups}
         />
         {local ? (
           <LockGuard
@@ -68,10 +79,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             needsTotp={screenUnlockNeedsTotp(config.auth, local.user)}
             initiallyLocked={state.kind === "locked"}
           >
-            {main}
+            {content}
           </LockGuard>
         ) : (
-          main
+          content
         )}
       </body>
     </html>

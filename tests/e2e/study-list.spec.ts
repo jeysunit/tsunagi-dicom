@@ -423,7 +423,9 @@ test("上下に分ける：狭い画面では一覧だけを出し、行を選�
 });
 
 test("上下に分ける：境目を上へ寄せても、一覧が最小の高さを保ち、絞り込みがはみ出さない", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 560 });
+  // 期待の変更（左のナビ）：左のナビ（208px）を開くと、本文が狭くなって絞り込みが 1 段多く折り返す（日本語の字体で 3 段）。
+  // その 1 段（約 32px）ぶん、画面の高さを 560px から 640px に上げた。ナビを閉じれば、これまでの高さでも収まる
+  await page.setViewportSize({ width: 1280, height: 640 });
   await asRole(page, "一般");
   await row(page).click();
   const handle = page.getByTestId("split-handle");
