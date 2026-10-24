@@ -30,9 +30,14 @@ const EXCEPTIONS: { file: string; match: string; reason: string }[] = [
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
 // Tailwind の任意の値は空白を `_` で書く（`4px_rgb(…)`）ので、直前が英数字でないことで区切る（\b は `_` を字に数える）
 const COLOR_FUNCTION = /(?<![A-Za-z0-9])(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb)\([^)]*\)/g;
-const PALETTE_CLASS =
-  /\b(?:bg|text|border|ring|fill|stroke|outline|divide|decoration|accent|caret|from|to|via|placeholder)-(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d{2,3}\b/g;
-const PLAIN_CLASS = /\b(?:bg|text|border|ring|fill|stroke|outline|divide|decoration|accent|from|to|via)-(?:white|black)\b/g;
+// 色を取るユーティリティの接頭辞（border-t-… などの向きつきと ring-offset-… を含む）
+const COLOR_PREFIX =
+  "(?:bg|text|border(?:-[trblxyse])?|ring(?:-offset)?|fill|stroke|outline|divide|decoration|accent|caret|from|to|via|placeholder|shadow)";
+const PALETTE_CLASS = new RegExp(
+  `\\b${COLOR_PREFIX}-(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\\d{2,3}\\b`,
+  "g",
+);
+const PLAIN_CLASS = new RegExp(`\\b${COLOR_PREFIX}-(?:white|black)\\b`, "g");
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { recursive: true, withFileTypes: true })
@@ -41,9 +46,29 @@ function sourceFiles(dir: string): string[] {
     .filter((p) => !p.startsWith("src/generated/"));
 }
 
-/** コメントを除く（ここの色の説明は直書きに数えない）。文字列の中の `//`（URL）は消さない */
+/** コメントを除く（ここの色の説明は直書きに数えない）。文字列（' " `）の中の `//` や `/*` は、コメントとして扱わず残す */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+  let out = "";
+  let quote = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    const two = text.slice(i, i + 2);
+    if (quote) {
+      out += c;
+      if (c === "\\") out += text[++i] ?? "";
+      else if (c === quote) quote = "";
+    } else if (two === "/*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
+    } else if (two === "//") {
+      const end = text.indexOf("\n", i);
+      i = end < 0 ? text.length : end - 1;
+    } else {
+      if (c === '"' || c === "'" || c === "`") quote = c;
+      out += c;
+    }
+  }
+  return out;
 }
 
 /** globals.css から、トークンを定義する塊（`@theme { … }` と `[data-theme="dark"] { … }`）を除く */
@@ -86,12 +111,28 @@ describe("色の直書き", () => {
     const hits = [HEX, COLOR_FUNCTION, PALETTE_CLASS, PLAIN_CLASS].flatMap((re) => sample.match(re) ?? []);
     expect(hits.sort()).toEqual(["#4b4fbf", "bg-red-500", "rgb(0 0 0)", "text-white"].sort());
   });
+
+  it("検査の目はある：向きつきの枠・ring-offset・caret・placeholder の色名も拾う", () => {
+    const sample = "border-t-red-500 ring-offset-blue-500 caret-white placeholder-black md:hover:bg-gray-100";
+    const hits = [PALETTE_CLASS, PLAIN_CLASS].flatMap((re) => sample.match(re) ?? []);
+    expect(hits.sort()).toEqual(["border-t-red-500", "caret-white", "bg-gray-100", "placeholder-black", "ring-offset-blue-500"].sort());
+  });
+
+  it("コメントの除き方：文字列の中の // や /* は残し、その後ろの違反も見落とさない", () => {
+    const hits = (s: string) => [PALETTE_CLASS].flatMap((re) => stripComments(s).match(re) ?? []);
+    expect(hits('const text = "a //"; const cls = "bg-red-500";')).toEqual(["bg-red-500"]);
+    expect(hits('const a = "/*"; const cls = "text-blue-600"; const b = "*/";')).toEqual(["text-blue-600"]);
+    expect(hits("/* bg-red-500 */ // text-blue-600\nconst ok = 1;")).toEqual([]);
+  });
 });
 
 function cssTokens(selector: string): Record<string, string> {
   const start = css.indexOf(`${selector} {`);
   const body = css.slice(start, css.indexOf("}", start));
-  return Object.fromEntries([...body.matchAll(/--color-([a-z-]+):\s*(#[0-9a-f]{6});/g)].map((m) => [m[1]!, m[2]!]));
+  // 値は 6 桁の #hex に限る（別の書き方に替えたら、この検査が拾えなくなるので、数えて確かめる）
+  const decls = [...body.matchAll(/--color-([a-z-]+):\s*([^;]+);/g)];
+  for (const d of decls) expect(d[2]!.trim(), `--color-${d[1]}`).toMatch(/^#[0-9a-fA-F]{6}$/);
+  return Object.fromEntries(decls.map((d) => [d[1]!, d[2]!.trim().toLowerCase()]));
 }
 
 describe("docs/design-system/tokens.md と globals.css の色", () => {
@@ -107,8 +148,10 @@ describe("docs/design-system/tokens.md と globals.css の色", () => {
     expect(rows.length).toBeGreaterThan(20);
     for (const r of rows) {
       expect(light[r.name], `${r.name}（明るい地）`).toBe(r.light);
-      // 暗い地を持たない行（モダリティの印）は、明るい地の値だけを比べる
-      if (r.dark) expect(dark[r.name], `${r.name}（暗い地）`).toBe(r.dark);
+      // 暗い地を持たない行（モダリティの印）は、明るい地の値だけを比べる。それ以外は暗い地の値を必須にする
+      if (r.name.startsWith("mod-")) continue;
+      expect(r.dark, `${r.name}（表の暗い地）`).toBeDefined();
+      expect(dark[r.name], `${r.name}（暗い地）`).toBe(r.dark);
     }
   });
 

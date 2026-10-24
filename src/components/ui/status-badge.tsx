@@ -34,7 +34,7 @@ export function StatusBadge({ kind, className, children, ...props }: { kind: Sta
     <span
       data-slot="status-badge"
       data-kind={kind}
-      className={cn("inline-flex items-center gap-1 rounded-[3px] border px-1.5 text-xs whitespace-nowrap text-foreground", k.border, className)}
+      className={cn("inline-flex items-center gap-1 rounded-[3px] border px-1 text-xs whitespace-nowrap text-foreground", k.border, className)}
       {...props}
     >
       <span aria-hidden className={k.markTone}>

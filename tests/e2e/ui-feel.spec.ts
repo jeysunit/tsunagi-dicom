@@ -165,6 +165,14 @@ test("件数の行：検索の欄が空でも入っていても、件数と自�
   // 幅が狭くても、件数の行は条件の行の下に別の行として出る
   const filters = await page.getByTestId("study-filters").boundingBox();
   expect(emptyCount.y).toBeGreaterThanOrEqual(Math.round(filters!.y + filters!.height));
+
+  // 狭い幅（折り返す）でも、件数の行は条件の行の下にあり、横にはみ出さない。詳細条件を開いても同じ
+  await page.setViewportSize({ width: 700, height: 800 });
+  await page.getByTestId("filter-more").click();
+  const narrowFilters = await page.getByTestId("study-filters").boundingBox();
+  const narrowCount = await page.getByTestId("study-count").boundingBox();
+  expect(narrowCount!.y).toBeGreaterThanOrEqual(narrowFilters!.y + narrowFilters!.height);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
 test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に細い帯、古い行を薄く、件数は「—」。すぐ終われば出さない", async ({ page }) => {

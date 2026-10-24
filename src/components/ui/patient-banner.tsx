@@ -38,9 +38,9 @@ export function PatientBanner({
       {items
         .filter((i) => i.value !== "" && i.value != null)
         .map((i) => (
-          <dl key={i.label}>
+          <dl key={i.label} className="min-w-0">
             <dt className="text-xs text-label">{i.label}</dt>
-            <dd className={cn("font-bold text-value", i.mono && "font-mono font-normal")}>{i.value}</dd>
+            <dd className={cn("font-bold break-words text-value", i.mono && "font-mono font-normal")}>{i.value}</dd>
           </dl>
         ))}
       {end && <div className="ml-auto flex flex-wrap items-center gap-2">{end}</div>}

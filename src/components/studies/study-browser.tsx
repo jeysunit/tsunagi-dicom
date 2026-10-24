@@ -813,7 +813,7 @@ function Browser({
         style={{ "--split": `${split}%`, "--top-min": `${filtersH + TOP_GAP_PX + LIST_MIN_PX}px` } as React.CSSProperties}
       >
       {/* 条件の行と件数の行。測る対象（topRef の最初の子）は、この 2 つをまとめた入れ物 */}
-      <div className="shrink-0 space-y-1.5">
+      <div className="shrink-0 space-y-3">
         <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} />
         {/* 件数の行（docs/design-system/components.md）：検索の欄が空かどうかで件数と自動更新の位置が動かない（#56） */}
         <CountRow
@@ -839,7 +839,7 @@ function Browser({
           </h1>
           <PendingText pending={fetching} />
           {notice && (
-            <p role="status" className="flex items-center gap-1.5 rounded-md border border-success px-2 text-sm text-success" data-testid="list-notice">
+            <p role="status" className="flex items-center gap-1.5 border-l-4 border-success bg-surface px-2 text-sm text-success" data-testid="list-notice">
               <CheckCircle2 aria-hidden className="size-4" />
               {notice}
             </p>
