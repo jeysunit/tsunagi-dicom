@@ -79,7 +79,7 @@ ris-emulator ──MLLP（hl7 のネットワーク）──> hl7-receiver ─�
 POST /studies/{Orthanc の検査の ID}/modify
 { "Replace": { PatientID, PatientName, PatientBirthDate, PatientSex[, AccessionNumber] },
   "Keep": ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"],
-  "Force": true, "KeepSource": false, "Asynchronous": true }
+  "Force": true, "Asynchronous": true[, "KeepSource": false（A40 だけ）] }
 ```
 
 - **Orthanc の仕事（job）として流す**（`Asynchronous: true`）。答えの仕事の ID を `dispatch` の行に残し、`/jobs/{id}` を読んで `Success`・`Failure` になるまで待つ（120 秒まで）。
@@ -87,7 +87,10 @@ POST /studies/{Orthanc の検査の ID}/modify
 - **終わった後に、画像ごとに確かめる。** 書き換えの前に、検査の画像ごとの UID の組（StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID）の一覧を `request` に残す。仕事が `Success` になったら、StudyInstanceUID で検査を引き当て（ちょうど 1 件）、`/studies/{id}/instances-tags` で全部の画像の UID の組と PatientID・PatientName・PatientBirthDate・PatientSex・AccessionNumber を読み、
   UID の組の一覧と件数が前と同じで、全部の画像が予定の値になっていれば成功とする。1 枚でも違えば `partial` として AE を返し、後のメッセージを止める（10）。
 - 仕事が `Failure` になったとき・Orthanc が書き換えを断った（400 など）ときも、同じ読み方で全部の画像を確かめる。全部が前の値のままなら失敗（`failed`）として決め、AE を返す。そうでなければ `partial` にして後のメッセージを止める。
-- `KeepSource: false` を必ず付ける。省くと同じ StudyInstanceUID の検査が 2 件並び、tsunagi-dicom の引き当てが 409 になる。
+- **`KeepSource: false` は、患者 ID が変わる書き換え（A40）にだけ付ける。** 省くと同じ StudyInstanceUID の検査が 2 件並び、tsunagi-dicom の引き当てが 409 になる。
+  患者 ID が変わらない書き換え（A08・ORM）には付けない（既定の残す）。書き換えた画像の Orthanc の中の ID が元と同じなので、`OverwriteInstances` で元の画像が置き換わり、2 件は並ばない。
+  ここで `KeepSource: false` を付けると、Orthanc は置き換えた後に元の ID の画像を消すので、書き換えた画像ごと検査が消える（2026-10-24 21:05 に開発の一式の A08 で起きた。架空の患者の検査）。
+- A40 で MRG-1 と PID-3 の患者 ID が同じなら、書き換えずに AE（患者 ID が変わらないのに `KeepSource: false` を付けることになるため）。
 - 替え先の患者 ID がすでに Orthanc にあると、患者のタグを全部 `Replace` に入れないと 400 になる。そのため、患者の 4 つのタグ（PatientID・PatientName・PatientBirthDate・PatientSex）をいつも入れる。
 - 書き換えると Orthanc の中の検査の ID が変わる（患者 ID が ID の元に入るため）。引き当て直した ID を新しい ID として監査の記録に残す。
 - 元の検査は Orthanc から消え、戻せない。監査の記録の前の値から、人が書き戻すことはできる。

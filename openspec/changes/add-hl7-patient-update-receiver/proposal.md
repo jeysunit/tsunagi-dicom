@@ -16,7 +16,7 @@ RIS の送り手（ris-emulator の `pir send`。`docs/spec/06_hl7_pir.md`）は
   - ADT^A40（患者の統合）：MRG の旧い患者 ID の検査を、PID の患者 ID と属性に書き換える。
   - ADT^A08（患者の属性の更新）：PID の患者 ID の検査の、氏名・生年月日・性別を書き換える。患者 ID は変えない。
   - ORM^O01 の NW（予約の知らせ）：ZDS の Study Instance UID の検査に、受付番号を入れる。
-- **HL7 経由の書き換えでは UID を保つ。** Orthanc の `/studies/{id}/modify` に `Keep`（Study・Series・SOP の 3 つの UID）・`Force: true`・`KeepSource: false` を渡す（2026-10-24 の実測。design.md の 4）。
+- **HL7 経由の書き換えでは UID を保つ。** Orthanc の `/studies/{id}/modify` に `Keep`（Study・Series・SOP の 3 つの UID）・`Force: true` を渡し、患者 ID が変わる A40 だけは `KeepSource: false` も渡す（2026-10-24 の実測。design.md の 4）。
   画面の「値の修正」（段 6）は、いまの方針（UID を新しくする）のまま変えない。
 - 壊れたメッセージ・扱わない種類のメッセージには AR を返し、Orthanc を変えない。旧い患者が Orthanc に無い A40 は、何もせずに AA を返す。
 - 同じメッセージの送り直しには前と同じ ACK を返し、結果の分からない書き換えは次のメッセージの前に Orthanc と照らす（照らせなければ止める）。

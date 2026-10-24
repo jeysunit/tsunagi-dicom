@@ -182,6 +182,11 @@ BFF は ADT^A08 を受けたら、PID-3 の患者 ID の検査の、氏名・生
 - **WHEN** 患者 ID `P000001` の検査があり、氏名だけを変えた A08 を受ける
 - **THEN** AA の ACK が返り、検査の氏名が替わり、患者 ID・生年月日・UID は変わらない
 
+#### Scenario: 元の検査を消さない
+
+- **WHEN** 患者 ID `P000001` の画像 4 枚の検査があり、氏名を変えた A08 を受ける
+- **THEN** BFF は Orthanc に `KeepSource: false` を渡さず、書き換えの後も同じ UID の画像 4 枚が新しい氏名で 1 件の検査に残る
+
 #### Scenario: 患者が無い
 
 - **WHEN** PID-3 の患者 ID の検査が Orthanc に無い A08 を受ける
