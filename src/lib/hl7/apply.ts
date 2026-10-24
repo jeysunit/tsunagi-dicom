@@ -142,19 +142,22 @@ function sameInstances(actual: PatientInstance[], expected: PatientInstance[]): 
  * （最中に届いた画像）が、消した後に 1 枚でも無ければ false（名指ししていない画像まで消えた）
  */
 async function removeSource(backend: Backend, d: WriteDetail): Promise<boolean> {
+  // 元の検査の画像。画像を全部消すと Orthanc は検査ごと無くすので、引き当てに無ければ空とする
+  const sourceInstances = async () =>
+    (await backend.lookupStudyIds(d.StudyInstanceUID)).includes(d.oldOrthancId) ? backend.studyInstanceTags(d.oldOrthancId) : [];
   const ids = (await backend.lookupStudyIds(d.StudyInstanceUID)).filter(id => id !== d.oldOrthancId);
   const copied = (await Promise.all(ids.map(id => backend.studyInstanceTags(id)))).flat();
   if (!sameInstances(copied, [...d.alongside ?? [], ...d.after])) {
     return true;
   }
   const written = new Set(d.before.map(triple));
-  const source = await backend.studyInstanceTags(d.oldOrthancId);
+  const source = await sourceInstances();
   const named = source.filter(i => written.has(triple(i)));
   if (!named.length) {
     return true;
   }
   await backend.deleteStudyInstances(d.oldOrthancId, named);
-  const left = new Set((await backend.studyInstanceTags(d.oldOrthancId)).map(triple));
+  const left = new Set((await sourceInstances()).map(triple));
   return source.every(i => written.has(triple(i)) || left.has(triple(i)));
 }
 /**

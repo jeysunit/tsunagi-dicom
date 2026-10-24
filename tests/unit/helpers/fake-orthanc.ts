@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { Backend, JobState, PatientInstance } from "@/lib/backend/types";
+import { BackendError, type Backend, type JobState, type PatientInstance } from "@/lib/backend/types";
 
 /**
  * HL7 の書き換えの試験のための、画像ごとの小さな Orthanc。検査の ID は Orthanc と同じく患者 ID と
@@ -63,7 +63,12 @@ export function createFakeOrthanc(): FakeOrthanc {
       return [...new Set(fake.instances.filter(i => i.PatientID === patientId).map(idOf))];
     },
     async studyInstanceTags(id: string) {
-      return fake.instances.filter(i => idOf(i) === id).map(i => ({ ...i }));
+      const found = fake.instances.filter(i => idOf(i) === id).map(i => ({ ...i }));
+      // 本物の Orthanc は、画像が 1 枚も無い検査を持たない（404。http.ts は「画像のタグを読み込めません」を投げる）
+      if (!found.length) {
+        throw new BackendError("画像のタグを読み込めません");
+      }
+      return found;
     },
     async studyIsStable(id: string) {
       return !fake.unstable.has(id);
