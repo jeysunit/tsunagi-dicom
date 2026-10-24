@@ -48,13 +48,28 @@ export function activeMemory(rows: HistoryRow[], now: number): { aliases: Alias[
   };
 }
 
+/** 統合の 1 段。同じ旧い患者 ID から同じ先への A40（送り直しを含む）をまとめたもの */
+export interface Link {
+  from: string;
+  to: string;
+  /** その段の最初の A40 の受理の時刻 */
+  since: number;
+  studies: string[];
+  fromNames: string[];
+  fromBirthDates: string[];
+  fromSexes: string[];
+  /** その段の最後の A40 の、統合した先の患者の値 */
+  attributes: Record<string, string>;
+}
+
 /**
  * 仮の患者 ID から、統合の続き（仮→正→別の正）をたどって、いまの患者 ID を決める。
  * 同じ患者 ID から 2 つ以上の先がある・輪になっているときは、どれか決められないので null（書き換えない）。
- * 続きの統合は、前の統合より後に受理したものだけをたどる。
+ * 続きの統合は、前の段の最初の A40 より後に受理したものだけをたどる。同じ先への A40 の送り直し（別の MSH-10）は
+ * 1 つの段にまとめ、最初の A40 の検査・氏名・時刻を失わない。
  */
-export function resolveAlias(aliases: Alias[], start: string): Alias[] | null {
-  const links: Alias[] = [];
+export function resolveAlias(aliases: Alias[], start: string): Link[] | null {
+  const links: Link[] = [];
   const seen = new Set([start]);
   let current = start;
   let since = Number.NEGATIVE_INFINITY;
@@ -67,16 +82,39 @@ export function resolveAlias(aliases: Alias[], start: string): Alias[] | null {
     if (targets.size > 1) {
       return null;
     }
-    const link = next.at(-1)!;
-    if (seen.has(link.to)) {
+    const to = next[0]!.to;
+    if (seen.has(to)) {
       return null;
     }
-    seen.add(link.to);
+    const union = (pick: (a: Alias) => string[] | undefined) => [...new Set(next.flatMap(a => pick(a) ?? []))];
+    const link: Link = {
+      from: current,
+      to,
+      since: Math.min(...next.map(a => Date.parse(a.at))),
+      studies: union(a => a.studies),
+      fromNames: union(a => a.fromNames),
+      fromBirthDates: union(a => a.fromBirthDates).filter(Boolean),
+      fromSexes: union(a => a.fromSexes).filter(Boolean),
+      attributes: next.at(-1)!.attributes
+    };
+    seen.add(to);
     links.push(link);
-    current = link.to;
-    since = Date.parse(link.at);
+    current = to;
+    since = link.since;
   }
   return links.length ? links : null;
+}
+
+/**
+ * 統合の先の患者の ORM のうち、使ってよいもの。その段の最初の A40 の後で、次の段（その患者がさらに別の患者に
+ * 統合された）の最初の A40 より前に受理したものだけ。統合された後の患者 ID の ORM は、別の患者のものでありうる。
+ */
+export function ordersForChain(links: Link[], orders: Order[]): Order[] {
+  return orders.filter(o => links.some((link, i) => {
+    const at = Date.parse(o.at);
+    const until = links[i + 1]?.since ?? Number.POSITIVE_INFINITY;
+    return o.patientId === link.to && at >= link.since && at < until;
+  }));
 }
 
 function uniform(instances: PatientInstance[], keys: (keyof PatientInstance)[]): boolean {
@@ -129,11 +167,11 @@ export async function sweepArrivals(
       continue;
     }
     const target = links.at(-1)!.to;
-    const chain = new Set(links.map(l => l.to));
-    const first = Date.parse(links[0]!.at);
-    const relevantOrders = orders.filter(o => chain.has(o.patientId) && Date.parse(o.at) >= first);
-    const known = new Set([...links.flatMap(l => l.studies), ...relevantOrders.map(o => o.uid)]);
-    const fromNames = links[0]!.fromNames;
+    const head = links[0]!;
+    const relevantOrders = ordersForChain(links, orders);
+    // 仮の患者の検査と分かるのは、最初の段の A40 で書き換えた検査と、最初の段の先の患者の ORM の検査だけ。
+    // 後の段の先の患者の検査・ORM は、その患者のほかの検査でありうるので、仮の患者 ID の画像の相手にしない
+    const known = new Set([...head.studies, ...relevantOrders.filter(o => o.patientId === head.to).map(o => o.uid)]);
     for (const id of await backend.findStudiesByPatientId(source)) {
       if (!await backend.studyIsStable(id)) {
         continue;
@@ -144,14 +182,29 @@ export async function sweepArrivals(
         skip("統合した検査でも、統合した先の予約の検査でもない", source, uid);
         continue;
       }
-      if (fromNames.length && before.some(i => !fromNames.includes(i.PatientName))) {
+      // 統合の前の画像と、氏名・生年月日・性別の空でない値が食い違えば、別の患者の画像でありうる
+      if (head.fromNames.length && before.some(i => !head.fromNames.includes(i.PatientName))) {
         skip("統合の前の氏名と違う", source, uid);
+        continue;
+      }
+      if (head.fromBirthDates.length && before.some(i => i.PatientBirthDate && !head.fromBirthDates.includes(i.PatientBirthDate))) {
+        skip("統合の前の生年月日と違う", source, uid);
+        continue;
+      }
+      if (head.fromSexes.length && before.some(i => i.PatientSex && !head.fromSexes.includes(i.PatientSex))) {
+        skip("統合の前の性別と違う", source, uid);
         continue;
       }
       const others = (await backend.lookupStudyIds(uid)).filter(other => other !== id);
       const alongside = (await Promise.all(others.map(other => backend.studyInstanceTags(other)))).flat();
       if (alongside.some(i => i.PatientID !== target)) {
         skip("同じ StudyInstanceUID の検査が別の患者にある", source, uid);
+        continue;
+      }
+      // 同じ画像（Study・Series・SOP の UID が同じ）の送り直しは、上書きになって確かめが合わないので書き換えない
+      const sent = new Set(alongside.map(i => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|")));
+      if (before.some(i => sent.has([i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|")))) {
+        skip("統合した先の検査に同じ画像がすでにある", source, uid);
         continue;
       }
       // 統合した先の患者の値は、Orthanc のいまの値を使う（A40 の後の A08 を巻き戻さない）。無ければ A40 の値
@@ -164,6 +217,7 @@ export async function sweepArrivals(
       const attributes = basis.length
         ? { PatientName: basis[0]!.PatientName, PatientBirthDate: basis[0]!.PatientBirthDate, PatientSex: basis[0]!.PatientSex }
         : links.at(-1)!.attributes;
+      // 先の患者に検査が無い（A40 の時点で画像が無かった）とき、A40 の値の空の欄は、届いた画像の値のまま
       // 受付番号は、その検査の最後の ORM（CA・DC なら空）。無ければ、同じ検査のすでにある画像の値
       const order = relevantOrders.filter(o => o.uid === uid).at(-1);
       let accession = order

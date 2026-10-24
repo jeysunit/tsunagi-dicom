@@ -64,9 +64,10 @@ BFF は ORM^O01 の ORC-1 が `CA`（取消）か `DC`（中止）なら、ZDS-1
 
 ### Requirement: 照合の後に仮の患者 ID で届いた画像を統合した先の患者に書き換える
 
-BFF は、A40 と ORM を受理（AA）したときに、旧い患者 ID と統合した先の患者 ID・その A40 で書き換えた検査の StudyInstanceUID・統合の前の氏名・ORM の StudyInstanceUID と受付番号と ORC-1 を、監査の記録の `ack` の行に覚えなければならない（SHALL）。覚えは受理から 24 時間だけ使う（SHALL）。
+BFF は、A40 と ORM を受理（AA）したときに、旧い患者 ID と統合した先の患者 ID・その A40 で書き換えた検査の StudyInstanceUID・統合の前の氏名と生年月日と性別・ORM の StudyInstanceUID と受付番号と ORC-1 を、監査の記録の `ack` の行に覚えなければならない（SHALL）。覚えは受理から 24 時間だけ使う（SHALL）。
 受け口は BFF の `/api/hl7/sweep`（`/api/hl7/messages` と同じ token）を定期に呼び、BFF はメッセージと同じ列で、覚えのある旧い患者 ID の検査のうち、StudyInstanceUID が覚えにあり、届き終えた（Orthanc の `IsStable`）ものを、A40 と同じ書き方（UID を保ち、元を消し、監査の記録を通し、仕事の終わりと全画像を確かめる）で統合した先の患者に書き換えなければならない（SHALL。IHE PIR の Case 6）。受付番号は、その検査の最後の ORM の値（CA・DC なら空）にする。
-覚えに無い StudyInstanceUID の検査、統合の前と氏名の違う画像、同じ StudyInstanceUID の検査が別の患者にあるとき、同じ旧い患者 ID から 2 つ以上の先がある・統合が輪になっているときは、書き換えてはならない（SHALL NOT）。結果の分からない書き換えがあるときは、何も書き換えない（SHALL NOT）。
+覚えの StudyInstanceUID は、最初の段の A40 で書き換えた検査と、最初の段の先の患者の ORM（その患者がさらに統合される前に受理したもの）の検査に限る（SHALL）。
+覚えに無い StudyInstanceUID の検査、統合の前と氏名・生年月日・性別の食い違う画像、統合した先の検査にすでにある画像の送り直し、同じ StudyInstanceUID の検査が別の患者にあるとき、同じ旧い患者 ID から 2 つ以上の先がある・統合が輪になっているときは、書き換えてはならない（SHALL NOT）。結果の分からない書き換えがあるときは、何も書き換えない（SHALL NOT）。
 
 #### Scenario: 統合した検査に後から届いた画像
 

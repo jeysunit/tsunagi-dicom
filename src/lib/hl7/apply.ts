@@ -205,8 +205,10 @@ export type Remembered = {
   to: string;
   /** この A40 で書き換えた検査の StudyInstanceUID */
   studies: string[];
-  /** 書き換える前の旧い患者の氏名（検査があったときだけ）。後で届いた画像の氏名と比べる */
+  /** 書き換える前の旧い患者の氏名・生年月日・性別（検査があったときだけ）。後で届いた画像の値と比べる */
   fromNames: string[];
+  fromBirthDates?: string[];
+  fromSexes?: string[];
   /** 統合した先の患者の値（Orthanc に統合した先の検査が無いときに使う） */
   attributes: Record<string, string>;
   at: string;
@@ -232,6 +234,8 @@ function rememberEntry(
       to: command.patientId,
       studies: plans.map(p => p.before[0]!.StudyInstanceUID),
       fromNames: [...new Set(plans.flatMap(p => p.before.map(i => i.PatientName)))],
+      fromBirthDates: [...new Set(plans.flatMap(p => p.before.map(i => i.PatientBirthDate)))],
+      fromSexes: [...new Set(plans.flatMap(p => p.before.map(i => i.PatientSex)))],
       attributes,
       at
     };

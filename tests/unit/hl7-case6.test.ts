@@ -100,6 +100,61 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     warn.mockRestore();
   });
 
+  it("A40 を別の MSH-10 で送り直しても、最初の A40 の検査と ORM を使う", async () => {
+    temp();
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+    expect(await send(orm("P000001", STUDY, "RE1"))).toContain("MSA|AA|");
+    // 送り直しの時点では仮の患者の検査が無い（覚えの studies は空）
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    expect(await sweep()).toMatchObject({ count: 1 });
+    expect(orthanc.instances.every(i => i.PatientID === "P000001" && i.AccessionNumber === "RE1")).toBe(true);
+  });
+
+  it("統合の前と生年月日・性別が食い違う画像は書き換えない（空は比べない）", async () => {
+    const warn = quietly();
+    temp(STUDY, { PatientBirthDate: "19800101" });
+    await send(a40(TEMP, "P000001"));
+    temp(STUDY, { PatientBirthDate: "20000101", SOPInstanceUID: `${STUDY}.2.1` });
+    expect(await sweep()).toEqual({ count: 0, skipped: 1 });
+    orthanc.instances = orthanc.instances.filter(i => i.SOPInstanceUID !== `${STUDY}.2.1`);
+    temp(STUDY, { PatientSex: "F", SOPInstanceUID: `${STUDY}.3.1` });
+    expect(await sweep()).toEqual({ count: 0, skipped: 1 });
+    orthanc.instances = orthanc.instances.filter(i => i.SOPInstanceUID !== `${STUDY}.3.1`);
+    temp(STUDY, { PatientSex: "", SOPInstanceUID: `${STUDY}.4.1` });
+    expect(await sweep()).toMatchObject({ count: 1 });
+    warn.mockRestore();
+  });
+
+  it("統合した先の検査にある画像の送り直しは書き換えず、後の書き換えを止めない", async () => {
+    const warn = quietly();
+    const original = temp();
+    await send(a40(TEMP, "P000001"));
+    // モダリティが同じ画像を仮の患者 ID のまま送り直す
+    temp(STUDY, { SeriesInstanceUID: original.SeriesInstanceUID, SOPInstanceUID: original.SOPInstanceUID });
+    expect(await sweep()).toEqual({ count: 0, skipped: 1 });
+    expect(orthanc.modifyCalls.filter(c => c.replace.PatientID === "P000001")).toHaveLength(1);
+    expect(await send(a40("ER9", "P000009"))).toContain("MSA|AA|");
+    warn.mockRestore();
+  });
+
+  it("統合された後の中間の患者 ID の ORM は使わない（別の患者のものでありうる）", async () => {
+    const warn = quietly();
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+    expect(await send(a40("P000001", "P000002"))).toContain("MSA|AA|");
+    clock += 1000;
+    vi.useFakeTimers({ now: clock, toFake: ["Date"] });
+    try {
+      expect(await send(orm("P000001", STUDY, "OTHER-ORDER"))).toContain("MSA|AA|");
+    } finally {
+      vi.useRealTimers();
+    }
+    temp();
+    expect(await sweep()).toEqual({ count: 0, skipped: 1 });
+    expect(patientsOf(STUDY)).toEqual([TEMP]);
+    warn.mockRestore();
+  });
+
   it("同じ StudyInstanceUID の検査が別の患者にあれば書き換えない", async () => {
     const warn = quietly();
     temp();
