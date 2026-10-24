@@ -149,7 +149,7 @@ test("詳細のシリーズ：サムネイルが横に 1 列に並び、横に�
   await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click();
   const strip = page.getByTestId("series-strip");
   await expect(strip.getByTestId("series-item")).toHaveCount(2);
-  await expect(strip).toHaveCSS("background-color", "rgb(18, 20, 23)");
+  await expect(strip).toHaveCSS("background-color", "rgb(27, 27, 27)");
   const items = strip.getByTestId("series-item");
   // サムネイルは同じ高さに左から右へ並ぶ（縦に積まない）
   const boxes = await items.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()));
@@ -185,7 +185,7 @@ test("詳細のシリーズ：写しのある検査はサムネイルの画像�
   await expect(img).toBeVisible();
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
   // まわりは暗い地
-  await expect(img.locator("xpath=..")).toHaveCSS("background-color", "rgb(18, 20, 23)");
+  await expect(img.locator("xpath=..")).toHaveCSS("background-color", "rgb(27, 27, 27)");
   await expect(strip.getByTestId("thumbnail-missing")).toHaveCount(0);
 
   // 写しの無い検査（1 行目以外のどれか）は印だけ
@@ -230,7 +230,7 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   const strip = detail.getByTestId("series-strip");
   await expect(strip.getByTestId("series-item")).toHaveCount(1);
   await expect(strip).toContainText("Chest Axial 5mm");
-  await expect(strip).toHaveCSS("background-color", "rgb(18, 20, 23)");
+  await expect(strip).toHaveCSS("background-color", "rgb(27, 27, 27)");
   // 一般にも「DICOM タグ」（前は「すべての DICOM の値」）がある（前は医師に無かった。役割を2つにした。docs/spec.md の 3.6）
   await expect(detail.getByRole("button", { name: "DICOM タグ" })).toHaveCount(1);
 

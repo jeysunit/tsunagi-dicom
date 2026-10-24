@@ -348,7 +348,7 @@ function SeriesImages({
                 onClick={() => choose(item.sopInstanceUid)}
                 className={cn(
                   "cursor-pointer border-l-[3px] px-2 py-0.5 break-all",
-                  i === index ? "border-primary bg-selected font-bold text-value" : "border-transparent hover:bg-hover",
+                  i === index ? "border-ring bg-selected font-bold text-value" : "border-transparent hover:bg-hover",
                 )}
                 data-testid="instance-item"
               >
@@ -482,7 +482,7 @@ export function StudyDetailPanel({
       {/* 見出し：1〜2 行。左に患者と検査の要点、右にビューア */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         {/* 左の縦線は、一覧で選んだ行の縦線と同じ（どの行の詳細かを示す。docs/spec.md の 3.1） */}
-        <div className="min-w-0 flex-1 basis-96 border-l-[3px] border-primary pl-2" data-testid="detail-head">
+        <div className="min-w-0 flex-1 basis-96 border-l-[3px] border-ring pl-2" data-testid="detail-head">
           {/* 1 行目：患者（本人の確かめの手がかり） */}
           <p className="flex flex-wrap items-baseline gap-x-3" data-testid="detail-head-patient">
             <span className="font-bold break-words text-value" data-testid="detail-name">
@@ -566,7 +566,7 @@ export function StudyDetailPanel({
                         "w-full cursor-pointer space-y-1 rounded border bg-surface p-1.5 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                         pressFeedback,
                         // 選んだ形は枠と地の色で示す（フォーカスの輪と見分ける）
-                        pressed ? "border-primary bg-selected" : "border-border hover:border-label hover:bg-hover",
+                        pressed ? "border-ring bg-selected" : "border-border hover:border-label hover:bg-hover",
                       )}
                       data-testid="series-open"
                     >

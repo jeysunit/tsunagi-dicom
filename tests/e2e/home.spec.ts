@@ -31,7 +31,7 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect(body).toHaveCSS("background-color", "rgb(255, 255, 255)");
     await expect(body).toHaveCSS("font-size", "14px");
-    await expect(body).toHaveCSS("color", "rgb(31, 35, 40)");
+    await expect(body).toHaveCSS("color", "rgb(38, 38, 38)");
   });
 
   test("暗い地に切り替えると、利用者ごとに覚えて、開き直しても暗い地のまま", async ({ page }) => {
@@ -46,8 +46,8 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await toggle.click();
     await saved;
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(18, 20, 23)");
-    await expect(page.locator("body")).toHaveCSS("color", "rgb(230, 237, 243)");
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(27, 27, 27)");
+    await expect(page.locator("body")).toHaveCSS("color", "rgb(232, 232, 232)");
 
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

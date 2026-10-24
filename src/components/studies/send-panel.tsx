@@ -304,7 +304,7 @@ function SendProgress({ progress }: { progress: number | null }) {
       className="relative h-1 w-full overflow-hidden rounded-full bg-hover"
       data-testid="send-progress"
     >
-      <div className="absolute inset-y-0 left-0 bg-primary transition-[width]" style={{ width: `${value}%` }} />
+      <div className="absolute inset-y-0 left-0 bg-ring transition-[width]" style={{ width: `${value}%` }} />
     </div>
   );
 }
@@ -329,7 +329,7 @@ function SendStatus({
   if (phase.kind === "sending") {
     // 押した直後から出す（0.3 秒を待たない。押したことが分かるように）
     return (
-      <div role="status" className={cn(BOX, "space-y-1.5 border-primary bg-background")} data-testid="send-status" data-state="Starting">
+      <div role="status" className={cn(BOX, "space-y-1.5 border-ring bg-background")} data-testid="send-status" data-state="Starting">
         <p className="flex items-center gap-1.5 font-bold text-value">
           <Spinner />
           送信を開始しています…（{phase.target.id}（{phase.target.aet}））
@@ -393,7 +393,7 @@ function SendStatus({
   // 送っている間（受け付けた・待機中・送信中・一時停止中・再試行待ち）
   const text = job ? SEND_STATE_TEXT[job.state] : "送信を受け付けました";
   return (
-    <div role="status" className={cn(BOX, "space-y-1.5 border-primary bg-background")} data-testid="send-status" data-state={job?.state ?? "Accepted"}>
+    <div role="status" className={cn(BOX, "space-y-1.5 border-ring bg-background")} data-testid="send-status" data-state={job?.state ?? "Accepted"}>
       <p className="flex items-center gap-1.5 font-bold text-value">
         <Spinner />
         {text}

@@ -507,7 +507,7 @@ function StudyRows({
                   data-selected={isOpen || undefined}
                   className={cn(
                     "h-7 cursor-pointer border-b border-border align-middle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-                    isOpen ? "bg-selected [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-primary)]" : "hover:bg-muted",
+                    isOpen ? "bg-selected [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-ring)]" : "hover:bg-muted",
                   )}
                   onClick={(e) => {
                     // ビューアの部品の中の操作は、選ぶ操作にしない。行を選んでも一覧の行は動かない（詳細は下の場所に出る）
