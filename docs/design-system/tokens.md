@@ -56,7 +56,8 @@
 | text-lg | 16px / 24px | 700 | 患者バナーの氏名・区画の見出し・窓の題 |
 | text-xl | 20px / 28px | 700 | 画面の題 |
 | text-2xl | 24px / 32px | 700 | 要約の数だけ |
-| mono | 13px / 20px | 400 | ID・UID・AE タイトル |
+| mono | 13px / 20px | 400 | ID・AE タイトル |
+| mono-uid | 12px / 18px | 400 | UID（長い値を、行の幅いっぱいに折り返して出す。色は `--color-label`） |
 
 ## 3. 余白・高さ
 
