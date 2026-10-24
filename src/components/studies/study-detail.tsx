@@ -300,8 +300,8 @@ function SeriesImages({
         <h3 className="text-sm font-bold break-words text-value">{title || <span className="font-normal text-label">（シリーズ名なし）</span>}</h3>
         {series.instanceCount != null && <span className="text-xs text-label">{series.instanceCount} 画像</span>}
         <PendingText pending={instances.isFetching} />
-        {/* 切り替えは、出す画像があるときだけ */}
-        {items.length > 0 && (
+        {/* 切り替えは、画像の一覧の読み込みが終わってから（読めなかった・画像が無いときも、検査のタグは見られるように出す） */}
+        {(items.length > 0 || !instances.isFetching) && (
           <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="タグの表示">
             <SegmentButton pressed={tagSet === "configured"} onClick={() => onTagSet("configured")} testId="tag-set-configured">
               主なタグ
@@ -388,6 +388,8 @@ function SeriesImages({
           </div>
         </div>
       )}
+      {/* 画像の一覧が読めなかった・空のときも、検査のタグは見られる */}
+      {items.length === 0 && !instances.isFetching && tagSet === "study" && <StudyTags uid={uid} />}
     </section>
   );
 }

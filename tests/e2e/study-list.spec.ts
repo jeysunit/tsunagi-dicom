@@ -930,17 +930,36 @@ test("詳細の UID：検査は見出しの 3 行目、シリーズは画像の�
   // シリーズの UID：シリーズを押すと画像の場所の見出しに出る。別のシリーズに替えると、そのシリーズの UID に替わる
   await expect(detail.getByTestId("series-uid")).toHaveCount(0);
   const open = detail.getByTestId("series-open");
+  // 合成の見本のシリーズの UID（画面の API の答え）と完全に一致する
+  const shown = (await detail.getAttribute("data-study-uid"))!;
+  const body = (await (await page.request.get(`/api/studies/${encodeURIComponent(shown)}`)).json()) as { series: { seriesInstanceUid: string }[] };
+  const seriesUids = body.series.map((s) => s.seriesInstanceUid);
+  expect(seriesUids.length).toBeGreaterThanOrEqual(2);
   await open.nth(0).click();
   const area = detail.getByTestId("series-images");
-  const first = await area.getByTestId("series-uid").locator("code").textContent();
+  await expect(area.getByTestId("series-uid").locator("code")).toHaveText(seriesUids[0]!);
+  await expect(area.getByTestId("series-uid").locator("code")).toHaveCSS("font-size", "12px");
+  await expect(area.getByTestId("series-uid").locator("code")).toHaveCSS("font-family", /mono|Mono|Courier/);
   await expect(area.getByRole("button", { name: "SeriesInstanceUIDをコピー" })).toBeVisible();
   await open.nth(1).click();
-  const second = await detail.getByTestId("series-images").getByTestId("series-uid").locator("code").textContent();
-  expect(second).not.toBe(first);
+  await expect(detail.getByTestId("series-images").getByTestId("series-uid").locator("code")).toHaveText(seriesUids[1]!);
   // 行を替えると、画像の場所は閉じ、見出しの UID は選んだ検査のものに替わる
   await rows(page).nth(1).click();
   await expect(detail.getByTestId("series-images")).toHaveCount(0);
-  await expect(detail.getByTestId("study-uid")).not.toContainText(STUDY);
+  await expect(detail.getByTestId("study-uid")).not.toContainText(shown);
+});
+
+test("詳細の「検査のタグ」：画像の一覧が読めなくても、検査のタグは見られる", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
+  await page.route("**/series/*/instances", (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "読み込めません" }) }));
+  await page.getByTestId("series-open").first().click();
+  const area = page.getByTestId("series-images");
+  await expect(area.getByRole("alert")).toBeVisible();
+  await area.getByTestId("tag-set-study").click();
+  await expect(area.getByTestId("all-values")).toContainText("0010,0020");
+  await page.unroute("**/series/*/instances");
 });
 
 test("詳細の見出しに、毎回見る値を常に出す：受付番号・紹介医・英字氏名・Study ID・シリーズ数と画像数（UX のレビューの H8）", async ({ page }) => {
