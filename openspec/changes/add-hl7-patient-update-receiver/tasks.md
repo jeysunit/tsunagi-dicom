@@ -29,7 +29,7 @@
 
 ## 6. 結合の試験と開発の一式
 
-- [ ] 6.1 結合の試験の Orthanc を `OverwriteInstances: true` にし（いまの場面が送り直しの無視に頼っていないことを先に確かめる）、A40 の後に UID が同じまま患者 ID が替わり元の検査が残らないこと、A08 で氏名が替わること、ORM で受付番号が入ることを、画像ごとの UID と件数まで確かめる場面を足す
+- [ ] 6.1 結合の試験の Orthanc を `OverwriteInstances: true` にし（いまの場面が送り直しの無視に頼っていないことを先に確かめる）、A40 の後に UID が同じまま患者 ID が替わり元の検査が残らないこと、A08 で氏名が替わること、ORM で受付番号が入ること、替え先の患者がすでにある A40（属性が同じなら通り、違えば AE で両方の検査が変わらない）を、画像ごとの UID の組・値・件数・元の検査の有無まで確かめる場面を足す。仕事の途中の失敗（`partial`）は、実の Orthanc で起こす手段が無いので、モックの試験で確かめる（PR に書く）
 - [ ] 6.2 開発の一式に受け口を足し（`hl7` と `backend` のネットワーク、ホストにポートを出さない。design.md の 2）、Orthanc を `OverwriteInstances: true` にし、ris-emulator の版を上げ、`up.sh` で token を作る
 - [ ] 6.3 開発の一式で、ris-emulator の `pir send`（A40・A08・ORM）から受け口を通して Orthanc が書き換わることを確かめ、`docs/round-trip-test.md` に手順と結果を書く
 

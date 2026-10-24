@@ -84,8 +84,8 @@ POST /studies/{Orthanc の検査の ID}/modify
 
 - **Orthanc の仕事（job）として流す**（`Asynchronous: true`）。答えの仕事の ID を `dispatch` の行に残し、`/jobs/{id}` を読んで `Success`・`Failure` になるまで待つ（120 秒まで）。
   時間切れの後も Orthanc の中で処理が続きうるので、仕事が終わったと読めるまでは結果を決めない（10）。
-- **終わった後に、画像ごとに確かめる。** 書き換えの前に、検査の画像の SOP Instance UID の一覧を `request` に残す。仕事が `Success` になったら、StudyInstanceUID で検査を引き当て（ちょうど 1 件）、`/studies/{id}/instances-tags` で全部の画像の SOPInstanceUID・PatientID・PatientName・PatientBirthDate・PatientSex・AccessionNumber を読み、
-  SOP Instance UID の一覧と件数が前と同じで、全部の画像が予定の値になっていれば成功とする。1 枚でも違えば `partial` として AE を返し、後のメッセージを止める（10）。
+- **終わった後に、画像ごとに確かめる。** 書き換えの前に、検査の画像ごとの UID の組（StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID）の一覧を `request` に残す。仕事が `Success` になったら、StudyInstanceUID で検査を引き当て（ちょうど 1 件）、`/studies/{id}/instances-tags` で全部の画像の UID の組と PatientID・PatientName・PatientBirthDate・PatientSex・AccessionNumber を読み、
+  UID の組の一覧と件数が前と同じで、全部の画像が予定の値になっていれば成功とする。1 枚でも違えば `partial` として AE を返し、後のメッセージを止める（10）。
 - 仕事が `Failure` になったとき・Orthanc が書き換えを断った（400 など）ときも、同じ読み方で全部の画像を確かめる。全部が前の値のままなら失敗（`failed`）として決め、AE を返す。そうでなければ `partial` にして後のメッセージを止める。
 - `KeepSource: false` を必ず付ける。省くと同じ StudyInstanceUID の検査が 2 件並び、tsunagi-dicom の引き当てが 409 になる。
 - 替え先の患者 ID がすでに Orthanc にあると、患者のタグを全部 `Replace` に入れないと 400 になる。そのため、患者の 4 つのタグ（PatientID・PatientName・PatientBirthDate・PatientSex）をいつも入れる。
@@ -202,7 +202,7 @@ POST /studies/{Orthanc の検査の ID}/modify
   名前は接続のたびに引き直す（コンテナの住所は起き直すと変わる）。引くのは 2 秒まで。引けない・時間切れは断る。名前の引き直しは同時の接続の数（下）までしか重ならない。
 - 一覧に無い住所からの接続は、何も読まずに閉じ、BFF に `refused` を知らせる（同じ住所は 1 分に 1 回まで。監査の記録を埋めないため）。
 - 1 通の大きさは 1 MiB まで（`HL7_MAX_MESSAGE_BYTES`）。超えたら閉じる。枠の外のバイトが来たら閉じる。どちらも BFF には HL7 の本文を渡さず、`oversize`・`framing` を知らせるだけにする。
-- 時間：1 通の枠の始まりから終わりまで 30 秒（`HL7_READ_TIMEOUT_SECONDS`）。次のメッセージを待つ間も 30 秒で閉じる。BFF の答えは 60 秒まで待つ。
+- 時間は 2 つに分ける（どちらも `HL7_READ_TIMEOUT_SECONDS`、既定 30 秒）。枠の始まりを待つ時間：接続から、または前の ACK を返してから、枠の始まりのバイトが来るまで。枠を読む時間：枠の始まりから終わりまで。どちらかを超えたら閉じる（`timeout`）。BFF の答えは 60 秒まで待つ。
 - BFF の答えを待つ間は socket の読み取りを止める（溜めるのは 1 通の上限まで）。1 つの接続で複数のメッセージを順に受けてよい（受けた順に 1 通ずつ答える）。
 - 同時の接続は 8 まで。超えた接続はすぐ閉じ、BFF に `busy` を知らせる（1 分にまとめて 1 回、数を添える）。
 - BFF への転送：送り先は設定の `HL7_FORWARD_URL` の 1 か所だけ。移す答え（3xx）には付いていかない。proxy の環境変数は使わない（Node.js の fetch の既定）。token は `HL7_RECEIVER_TOKEN_FILE` から読み、空・読めない・32 文字未満なら起動しない。
@@ -217,7 +217,7 @@ POST /studies/{Orthanc の検査の ID}/modify
 | `refused`・`oversize`・`timeout`・`framing`・`busy`・`dropped` | 受け口の知らせ（`busy`・`dropped` は数を添える） | denied |
 | `rejected` | AR を返す前 | denied |
 | `received` | 解析を通った後、Orthanc を読む前。種類・MSH-3/4・MSH-10・本文の SHA-256・メッセージの ID（UUID） | success |
-| `request` | Orthanc の書き換えを呼ぶ前。対象の Orthanc の ID・StudyInstanceUID・SOP Instance UID の一覧・前の値・予定の値・書き換えごとの ID（UUID）・メッセージの ID | success |
+| `request` | Orthanc の書き換えを呼ぶ前。対象の Orthanc の ID・StudyInstanceUID・画像ごとの UID の組の一覧・前の値・予定の値・書き換えごとの ID（UUID）・メッセージの ID | success |
 | `dispatch` | 仕事を作れた後。書き換えごとの ID・仕事の ID | success |
 | `result` | 仕事が終わった後か、送れなかった・答えが来なかった後。書き換えごとの ID・新しい Orthanc の ID・画像ごとの確かめの結果・Orthanc の答えの要点 | success・failed・unknown・partial（outcome は failed、`detail.partial: true`） |
 | `reconcile` | 解いていない書き換えを照らした・人が解いた（10） | success・failed |
