@@ -148,7 +148,13 @@ export async function sweepArrivals(
   if (!(options.allowWrite ?? (getConfig().auth.mode !== "dev" || getConfig().auth.devAllowWrite))) {
     return { count: 0, skipped: 0, blocked: "検証モードの書き込みが許可されていない" };
   }
-  const rows = [...await (options.readHistory ?? history)()];
+  let rows: HistoryRow[];
+  try {
+    rows = [...await (options.readHistory ?? history)()];
+  } catch (e) {
+    // 鍵つきの値・つなぎの合わない行（HistoryTampered）を含め、経過を確かめて読めなければ何も書き換えない
+    return { count: 0, skipped: 0, blocked: e instanceof Error ? e.message : "監査の記録を読めない" };
+  }
   if (!await reconcile(backend, rows, audit)) {
     return { count: 0, skipped: 0, blocked: "結果の分からない書き換えがある" };
   }
@@ -194,15 +200,21 @@ export async function sweepArrivals(
     const relevantOrders = ordersForChain(links, orders);
     // 仮の患者の検査と分かるのは、最初の段の A40 で書き換えた検査と、最初の段の先の患者の ORM の検査だけ。
     // 後の段の先の患者の検査・ORM は、その患者のほかの検査でありうるので、仮の患者 ID の画像の相手にしない
-    const known = new Set([...head.studies, ...relevantOrders.filter(o => o.patientId === head.to).map(o => o.uid)]);
+    const ordered = new Set(relevantOrders.filter(o => o.patientId === head.to).map(o => o.uid));
     for (const id of await backend.findStudiesByPatientId(source)) {
       if (!await backend.studyIsStable(id)) {
         continue;
       }
       const before = await backend.studyInstanceTags(id);
       const uid = before[0]?.StudyInstanceUID ?? "";
-      if (!known.has(uid)) {
+      const fromA40 = head.studies.includes(uid);
+      if (!fromA40 && !ordered.has(uid)) {
         skip("統合した検査でも、統合した先の予約の検査でもない", source, uid);
+        continue;
+      }
+      // findStudiesByPatientId は Orthanc の検査の要約で探すので、画像ごとの患者 ID も仮の患者 ID かを確かめる
+      if (!before.every(i => i.PatientID === source)) {
+        skip("画像の患者 ID が仮の患者 ID と違う", source, uid);
         continue;
       }
       // 統合の前の画像と、氏名・生年月日・性別の空でない値が食い違えば、別の患者の画像でありうる
@@ -222,6 +234,12 @@ export async function sweepArrivals(
       const alongside = (await Promise.all(others.map(other => backend.studyInstanceTags(other)))).flat();
       if (alongside.some(i => i.PatientID !== target)) {
         skip("同じ StudyInstanceUID の検査が別の患者にある", source, uid);
+        continue;
+      }
+      // A40 で統合した検査は、統合した先にその検査が残っているときだけ書き換える。無ければ、人が誤った統合を
+      // 元の患者へ書き戻したものでありうるので、統合し直さない
+      if (fromA40 && !alongside.length) {
+        skip("統合した検査が統合した先に無い（書き戻されたかもしれない）", source, uid);
         continue;
       }
       // 同じ画像（Study・Series・SOP の UID が同じ）の送り直しは、上書きになって確かめが合わないので書き換えない

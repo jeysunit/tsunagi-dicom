@@ -143,8 +143,27 @@ describe("監査の記録", () => {
       // appendAuditWith は、BFF のデータベースの変更と記録の1行の追記を、1つの transaction で書くもの（段 2）。
       // appendAuditIf は、同じ並びの中で「もう書いてあれば書かない」を確かめてから追記するもの（段 4）。
       // 記録の行は追記するだけで、更新・削除はしない
-      // computeAuditMac・computeAuditHash は hash の計算だけで、データベースに書かない
-      expect(functions).toEqual(["appendAudit", "appendAuditIf", "appendAuditWith", "computeAuditHash", "computeAuditMac", "verifyAuditChain"]);
+      // computeAuditMac・computeAuditHash は hash の計算だけ、checkAuditRow は 1 行の確かめだけで、データベースに書かない
+      expect(functions).toEqual([
+        "appendAudit", "appendAuditIf", "appendAuditWith", "checkAuditRow", "computeAuditHash", "computeAuditMac", "verifyAuditChain"
+      ]);
+    });
+
+    it("checkAuditRow：1 行を、前の行の hash と行の鍵で確かめる", async () => {
+      const db = await freshDb();
+      await appendMany(db, 2);
+      const [first, second] = await db.auditLog.findMany({ orderBy: { seq: "asc" } });
+      const ring = auditKeyringFrom(SECRET);
+      expect(auditModule.checkAuditRow(first!, undefined, ring)).toBeNull();
+      expect(auditModule.checkAuditRow(second!, first!.hash, ring)).toBeNull();
+      expect(auditModule.checkAuditRow(second!, undefined, ring)).toContain("prevHash");
+      expect(auditModule.checkAuditRow({ ...second!, detail: '{"changed":true}' }, first!.hash, ring)).toContain("hash と合わない");
+      expect(auditModule.checkAuditRow(second!, first!.hash, auditKeyringFrom("another-secret-0123456789-0123456789"))).toContain("鍵が無い");
+      // 鍵の無い形の行は、鍵つきを求めるときは通さない
+      const legacy = { ...second!, keyId: null };
+      const legacyRow = { ...legacy, hash: computeAuditHash(legacy) };
+      expect(auditModule.checkAuditRow(legacyRow, first!.hash, ring)).toBeNull();
+      expect(auditModule.checkAuditRow(legacyRow, first!.hash, ring, true)).toBe("鍵の無い行");
     });
 
     it("appendAuditIf：書かないと決めたら行を足さず、書くときは同じつなぎに足す", async () => {

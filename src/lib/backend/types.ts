@@ -71,14 +71,17 @@ export interface Backend {
   /** A40 の空欄を補うために、現在の患者の値を読む（design.md §9）。 */
   studyPatient(orthancStudyId: string): Promise<StudyPatient | null>;
   /**
-   * UID を保つ書き換えの仕事を作る（design.md §4）。removeSource は患者 ID が変わるときだけ true（KeepSource: false）。
-   * 患者 ID が変わらないと Orthanc の中の ID が元と同じなので、元を消すと書き換えた画像ごと消える
+   * UID を保つ書き換えの仕事を作る（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
+   * OverwriteInstances で元の画像が置き換わる。患者 ID が変わると書き換えた画像は別の検査になり、元の検査も残る。
+   * 元の画像は、書き換えた画像を確かめてから deleteStudyInstances で名指しで消す（Orthanc に元を消させると、
+   * 書き換えの最中に同じ検査へ届いた画像も一緒に消えうるため。design.md §15）
    */
-  modifyStudyKeepingUids(
-    orthancStudyId: string,
-    replace: Record<string, string>,
-    options: { removeSource: boolean },
-  ): Promise<{ jobId: string }>;
+  modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
+  /**
+   * 検査の画像のうち、UID の組（Study・Series・SOP）が instances のどれかと同じものだけを 1 枚ずつ消す。
+   * ほかの画像（後から届いた画像）は残す。すでに無い画像は飛ばす
+   */
+  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[]): Promise<void>;
   /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
   /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */

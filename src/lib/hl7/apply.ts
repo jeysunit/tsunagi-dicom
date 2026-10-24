@@ -1,7 +1,8 @@
 /* eslint-disable no-control-regex -- ASCII と制御文字の検証。 */
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { appendAudit, type AuditEntryInput, type AuditOutcome } from "@/lib/audit";
+import { appendAudit, checkAuditRow, type AuditEntryInput, type AuditOutcome } from "@/lib/audit";
+import { auditKeyring } from "@/lib/audit-key";
 import { getDb } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getBackend } from "@/lib/backend";
@@ -19,15 +20,41 @@ export type HistoryRow = AuditEntryInput & {
   occurredAt?: Date;
 };
 export const writeAudit: AuditWriter = async (input) => appendAudit(await getDb(), input);
-/** 監査の一本のつなぎから、HL7 の経過を古い順に読む（design.md §13）。 */
+/** 監査の記録の HL7 の行が、鍵つきの値とつなぎに合わない（書き換えられた・差し込まれた）。人が確かめるまで処理しない */
+export class HistoryTampered extends BackendUnknownError {
+  constructor(seq: number, reason: string) {
+    super(`監査の記録の HL7 の行が鍵つきの値・つなぎと合わない（seq ${seq}：${reason}）`);
+  }
+}
+/**
+ * 監査の一本のつなぎから、HL7 の経過を古い順に読む（design.md §13）。使う前に、行ごとに鍵つきの値と前の行との
+ * つなぎを確かめる（design.md §15.3）。覚え（remember）を持つ行は鍵つきだけを受ける。合わない行があれば投げる。
+ */
 export async function history(): Promise<HistoryRow[]> {
-  const rows = await (await getDb()).auditLog.findMany({ where: { action: "hl7" }, orderBy: { seq: "asc" } });
-  return rows.map(r => ({
-    ...r,
-    action: "hl7",
-    outcome: r.outcome as AuditOutcome,
-    detail: r.detail ? JSON.parse(r.detail) : {}
-  }));
+  const db = await getDb();
+  const rows = await db.auditLog.findMany({ where: { action: "hl7" }, orderBy: { seq: "asc" } });
+  const previous = new Map<number, string>();
+  // SQLite の変数の数の上限を超えないように分けて読む
+  for (let i = 0; i < rows.length; i += 500) {
+    const seqs = rows.slice(i, i + 500).map(r => r.seq - 1);
+    for (const p of await db.auditLog.findMany({ where: { seq: { in: seqs } }, select: { seq: true, hash: true } })) {
+      previous.set(p.seq, p.hash);
+    }
+  }
+  const keyring = auditKeyring();
+  return rows.map(r => {
+    let detail: Record<string, unknown>;
+    try {
+      detail = r.detail ? JSON.parse(r.detail) : {};
+    } catch {
+      throw new HistoryTampered(r.seq, "detail が JSON でない");
+    }
+    const reason = checkAuditRow(r, previous.get(r.seq - 1), keyring, detail?.remember !== undefined);
+    if (reason) {
+      throw new HistoryTampered(r.seq, reason);
+    }
+    return { ...r, action: "hl7" as const, outcome: r.outcome as AuditOutcome, detail };
+  });
 }
 /** 本文を含めず、受け口の知らせだけを監査に残す（design.md §12・§13）。 */
 export async function recordReceiverEvent(
@@ -98,6 +125,38 @@ export function unresolved(rows: HistoryRow[]): WriteDetail[] {
     return !last || (last.detail?.manual !== true && (last.outcome === "unknown" || last.detail?.partial === true));
   });
 }
+/** 画像の集まりが、UID の組と患者の値で過不足なく同じか。どちらかに UID の組の重なりがあれば同じとしない */
+function sameInstances(actual: PatientInstance[], expected: PatientInstance[]): boolean {
+  if (!actual.length || actual.length !== expected.length) {
+    return false;
+  }
+  if (new Set(expected.map(triple)).size !== expected.length || new Set(actual.map(triple)).size !== actual.length) {
+    return false;
+  }
+  return expected.every(e => actual.some(a => triple(a) === triple(e) && values.every(k => a[k] === e[k])));
+}
+/**
+ * 患者 ID の変わる書き換えの後に、元の検査から書き換えた画像だけを名指しで消す（design.md §15）。書き換えは元を残すので、
+ * 替え先の検査（元の検査の外の、同じ StudyInstanceUID の検査）が書き換えた後の画像と過不足なく合うときだけ消す。
+ * 合わなければ消さずに戻り、後の確かめが部分反映として止める。消す前に元の検査にあった、書き換えていない画像
+ * （最中に届いた画像）が、消した後に 1 枚でも無ければ false（名指ししていない画像まで消えた）
+ */
+async function removeSource(backend: Backend, d: WriteDetail): Promise<boolean> {
+  const ids = (await backend.lookupStudyIds(d.StudyInstanceUID)).filter(id => id !== d.oldOrthancId);
+  const copied = (await Promise.all(ids.map(id => backend.studyInstanceTags(id)))).flat();
+  if (!sameInstances(copied, [...d.alongside ?? [], ...d.after])) {
+    return true;
+  }
+  const written = new Set(d.before.map(triple));
+  const source = await backend.studyInstanceTags(d.oldOrthancId);
+  const named = source.filter(i => written.has(triple(i)));
+  if (!named.length) {
+    return true;
+  }
+  await backend.deleteStudyInstances(d.oldOrthancId, named);
+  const left = new Set((await backend.studyInstanceTags(d.oldOrthancId)).map(triple));
+  return source.every(i => written.has(triple(i)) || left.has(triple(i)));
+}
 /**
  * 全画像の UID の組と属性を前後の値に照らす（design.md §4）。同じ StudyInstanceUID の検査が Orthanc に
  * 2 件以上あれば、全部の画像を合わせて比べる（照合の後に届いた画像の書き換えの前は、替え先の検査と 2 件並ぶ。§15）。
@@ -107,19 +166,7 @@ export async function verify(backend: Backend, d: WriteDetail) {
   const ids = await backend.lookupStudyIds(d.StudyInstanceUID);
   const actual = (await Promise.all(ids.map(id => backend.studyInstanceTags(id)))).flat();
   const alongside = d.alongside ?? [];
-  const matches = (written: PatientInstance[]) => {
-    const expected = [...alongside, ...written];
-    if (!actual.length || actual.length !== expected.length) {
-      return false;
-    }
-    if (new Set(expected.map(triple)).size !== expected.length) {
-      return false;
-    }
-    if (new Set(actual.map(triple)).size !== actual.length) {
-      return false;
-    }
-    return expected.every(e => actual.some(a => triple(a) === triple(e) && values.every(k => a[k] === e[k])));
-  };
+  const matches = (written: PatientInstance[]) => sameInstances(actual, [...alongside, ...written]);
   return {
     matchesAfter: matches(d.after),
     matchesBefore: matches(d.before),
@@ -347,9 +394,7 @@ export async function writeAndVerify(
   let refusal: string | undefined;
   let jobCreated = false;
   try {
-    // 元を消すのは患者 ID が変わる書き換え（A40）だけ（design.md §4）
-    const removeSource = after[0]!.PatientID !== before[0]!.PatientID;
-    const { jobId } = await backend.modifyStudyKeepingUids(id, replace, { removeSource });
+    const { jobId } = await backend.modifyStudyKeepingUids(id, replace);
     jobCreated = true;
     await row("dispatch", "success", { writeId: d.writeId, jobId });
     const deadline = Date.now() + (options.jobTimeoutMs ?? 120000);
@@ -375,18 +420,29 @@ export async function writeAndVerify(
     refusal = e.message;
   }
   let checked;
+  // 患者 ID の変わる書き換え（A40）だけ、元の検査が残る。書き換えた画像を確かめてから元の画像を名指しで消す（design.md §15）
+  let arrivalsKept = true;
+  try {
+    if (state === "Success" && after[0]!.PatientID !== before[0]!.PatientID) {
+      arrivalsKept = await removeSource(backend, d);
+    }
+  } catch (e) {
+    await row("result", "unknown", { ...d, reason: visible(e instanceof Error ? e.message : "元の画像を消せなかった") });
+    throw e;
+  }
   try {
     checked = await verify(backend, d);
   } catch (e) {
     await row("result", "unknown", { ...d, reason: "画像ごとの確かめに失敗した" });
     throw e;
   }
-  const success = state === "Success" && checked.matchesAfter;
+  const success = state === "Success" && checked.matchesAfter && arrivalsKept;
   // 成功した仕事の不一致は部分反映として止め、人の確認を待つ（design.md §4）。
   const partial = !success && (state === "Success" || !checked.matchesBefore);
   await row("result", success ? "success" : "failed", {
     ...d,
     ...checked,
+    ...(arrivalsKept ? {} : { arrivalsLost: true }),
     partial,
     state,
     reason: refusal ? visible(refusal) : undefined

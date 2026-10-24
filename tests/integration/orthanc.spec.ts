@@ -981,3 +981,55 @@ test("18 HL7 照合の後に仮の患者 ID で届いた画像を、統合した
   for (const t of cancelled)
     expect(t).toMatchObject({ PatientID: finalId, AccessionNumber: "" });
 });
+
+// HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後に置く
+test("19 HL7 見回りの書き換えの最中に届いた画像は、本物の Orthanc で消えずに残り、部分反映で止まる（2026-10-25）", async () => {
+  const token = process.env.ITEST_HL7_TOKEN;
+  if (!token) {
+    throw Error("試験の HL7 token が無い");
+  }
+  const first = syntheticStudy("hl7-race-first", 55, 2, { accessionNumber: "", patientName: "UNKNOWN^MALE" });
+  writeDumps(first);
+  await storescuToOrthanc(first.batch);
+  await waitFor("仮の患者の検査", () => lookupStudy(first.studyInstanceUid), ids => ids.length === 1);
+  const finalId = "JP-TEST-HL7-RACE";
+  expect(await sendHl7("A40", finalId, { old: first.patientId, name: "ITEST^RACE", birth: "19700101" })).toContain("MSA|AA|");
+  // 統合の後に、仮の患者 ID のまま 2 つめのシリーズが届く
+  const late = { ...syntheticStudy("hl7-race-late", 55, 1, { accessionNumber: "", patientName: "UNKNOWN^MALE" }), studyInstanceUid: first.studyInstanceUid };
+  writeDumps(late);
+  await storescuToOrthanc(late.batch);
+  await waitFor("同じ UID の検査が 2 件", () => lookupStudy(first.studyInstanceUid), ids => ids.length === 2);
+  // 見回りが書き換えの仕事を作った直後に、仮の患者 ID の 3 つめのシリーズを届ける
+  const during = { ...syntheticStudy("hl7-race-during", 55, 1, { accessionNumber: "", patientName: "UNKNOWN^MALE" }), studyInstanceUid: first.studyInstanceUid };
+  writeDumps(during);
+  gate.onceAfterModify(() => storescuToOrthanc(during.batch));
+  const sweep = async () => {
+    const response = await fetch(`${bffUrl}/api/hl7/sweep`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(130000)
+    });
+    expect(response.status).toBe(200);
+    return await response.json() as { ok: boolean; count: number; skipped: number; blocked?: string };
+  };
+  // 届き終える（StableAge は 2 秒）までは書き換えない。書き換えれば、最中に届いた画像のために部分反映で止まる
+  const result = await waitFor("見回りが書き換えを試す", sweep, r => r.count > 0 || r.blocked !== undefined, 60_000);
+  expect(result).toMatchObject({ ok: true, count: 0, blocked: "画像の一部だけが書き換わった" });
+
+  // 最中に届いた画像は、仮の患者 ID のまま Orthanc に残っている（Orthanc に元を消させないため）
+  const sops = async () => {
+    const tags = (await Promise.all((await lookupStudy(first.studyInstanceUid)).map(id =>
+      orthancJson<Record<string, Record<string, string>>>(`studies/${id}/instances-tags?simplify`)))).flatMap(t => Object.values(t));
+    return tags.map(t => ({ sop: t.SOPInstanceUID, patientId: t.PatientID }));
+  };
+  const now = await sops();
+  expect(now.filter(i => i.sop === during.sopInstanceUids[0])).toEqual([{ sop: during.sopInstanceUids[0], patientId: first.patientId }]);
+  // どの画像も失っていない（書き換えた画像は統合した先にあり、元の画像は名指しで消したか、そのまま残っている）
+  for (const sop of [...first.sopInstanceUids, ...late.sopInstanceUids, ...during.sopInstanceUids])
+    expect(now.some(i => i.sop === sop)).toBe(true);
+  const results = readAudit().filter(r => r.action === "hl7" && r.detail.type === "sweep" && r.detail.event === "result"
+    && r.studyInstanceUid === first.studyInstanceUid);
+  expect(results.at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, state: "Success" } });
+  // 次の見回りも、人が解くまで書き換えない
+  expect(await sweep()).toMatchObject({ count: 0, blocked: "結果の分からない書き換えがある" });
+});

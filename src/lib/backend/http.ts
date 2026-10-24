@@ -42,6 +42,7 @@ import {
   STUDY_LIMIT,
   type Backend,
   type InstanceSummary,
+  type PatientInstance,
   type ReceivedStudy,
   type RelayRequest,
   type StudyQuery,
@@ -145,6 +146,44 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     }
     return res.json();
+  }
+
+  /** 検査の全画像の Orthanc の画像の ID と、患者の値と UID の組（design.md §4） */
+  async function instanceTags(id: string): Promise<[string, PatientInstance][]> {
+    if (!isOrthancId(id)) {
+      throw new BackendError("検査の ID が正しくありません", 400);
+    }
+    const json = await restJsonOrNull(`studies/${id}/instances-tags?simplify`);
+    if (!json || typeof json !== "object" || Array.isArray(json)) {
+      throw new BackendError("画像のタグを読み込めません");
+    }
+    return Object.entries(json).map(([instanceId, raw]): [string, PatientInstance] => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new BackendError("画像のタグが正しくありません");
+      }
+      const tags = raw as Record<string, unknown>;
+      const get = (key: string) => {
+        const v = tags[key];
+        if (v === undefined) {
+          return "";
+        }
+        if (typeof v !== "string") {
+          throw new BackendError("画像のタグが正しくありません");
+        }
+        return v;
+      };
+      return [instanceId, {
+        PatientID: get("PatientID"),
+        PatientName: get("PatientName"),
+        PatientBirthDate: get("PatientBirthDate"),
+        PatientSex: get("PatientSex"),
+        AccessionNumber: get("AccessionNumber"),
+        StudyInstanceUID: get("StudyInstanceUID"),
+        SeriesInstanceUID: get("SeriesInstanceUID"),
+        SOPInstanceUID: get("SOPInstanceUID"),
+        SpecificCharacterSet: get("SpecificCharacterSet")
+      }];
+    });
   }
 
   /**
@@ -412,45 +451,37 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
 
     // 検査の要約だけでは部分反映を見落とすので、全画像を読む（design.md §4）。
     async studyInstanceTags(id: string) {
-      if (!isOrthancId(id)) {
-        throw new BackendError("検査の ID が正しくありません", 400);
-      }
-      const json = await restJsonOrNull(`studies/${id}/instances-tags?simplify`);
-      if (!json || typeof json !== "object" || Array.isArray(json)) {
-        throw new BackendError("画像のタグを読み込めません");
-      }
-      return Object.values(json).map((raw): import("./types").PatientInstance => {
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          throw new BackendError("画像のタグが正しくありません");
-        }
-        const tags = raw as Record<string, unknown>;
-        const get = (key: string) => {
-          const v = tags[key];
-          if (v === undefined) {
-            return "";
-          }
-          if (typeof v !== "string") {
-            throw new BackendError("画像のタグが正しくありません");
-          }
-          return v;
-        };
-        return {
-          PatientID: get("PatientID"),
-          PatientName: get("PatientName"),
-          PatientBirthDate: get("PatientBirthDate"),
-          PatientSex: get("PatientSex"),
-          AccessionNumber: get("AccessionNumber"),
-          StudyInstanceUID: get("StudyInstanceUID"),
-          SeriesInstanceUID: get("SeriesInstanceUID"),
-          SOPInstanceUID: get("SOPInstanceUID"),
-          SpecificCharacterSet: get("SpecificCharacterSet")
-        };
-      });
+      return (await instanceTags(id)).map(([, instance]) => instance);
     },
 
-    // 仕事の完了は呼び手が確かめる（design.md §4）。元を消す（KeepSource: false）のは患者 ID が変わるときだけ。
-    // 患者 ID が同じなら OverwriteInstances で元の画像が置き換わり、元を消すと置き換えた画像ごと消える（2026-10-24 の開発の一式）
-    async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>, options: { removeSource: boolean }) {
+    // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す。design.md §15）
+    async deleteStudyInstances(id: string, instances: PatientInstance[]) {
+      const key = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
+      const named = new Set(instances.map(key));
+      for (const [instanceId, instance] of await instanceTags(id)) {
+        if (!named.has(key(instance))) {
+          continue;
+        }
+        if (!isOrthancId(instanceId)) {
+          throw new BackendError("画像の ID が正しくありません");
+        }
+        const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
+        await res.body?.cancel();
+        if (res.status === 404) {
+          continue;
+        }
+        if (!res.ok && isUncertainStatus(res.status)) {
+          throw new BackendUnknownError();
+        }
+        if (!res.ok) {
+          throw new BackendError(`画像サーバーが画像の削除を断りました（${res.status}）`);
+        }
+      }
+    },
+
+    // 仕事の完了は呼び手が確かめる（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
+    // OverwriteInstances で元の画像が置き換わる。患者 ID が変わると元の検査が残り、呼び手が deleteStudyInstances で消す
+    async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>) {
       if (!isOrthancId(orthancStudyId)) {
         throw new BackendError("検査の ID が正しくありません", 400);
       }
@@ -458,7 +489,6 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         Replace: replace,
         Keep: ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"],
         Force: true,
-        ...(options.removeSource ? { KeepSource: false } : {}),
         Asynchronous: true
       }), { write: true });
       if (!res.ok) {

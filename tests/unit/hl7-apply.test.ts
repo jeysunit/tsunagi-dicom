@@ -106,7 +106,7 @@ describe("HL7 の反映と監査", () => {
   it("ORM は受付番号を入れ、同じ番号の再送は書き換えない", async () => {
     const study = await first();
     const id = (await backend.lookupStudyIds(study.studyInstanceUid))[0]!;
-    await backend.modifyStudyKeepingUids(id, { AccessionNumber: "" }, { removeSource: false });
+    await backend.modifyStudyKeepingUids(id, { AccessionNumber: "" });
     const message = orm.replace("P000001", study.patientId).replace("2.25.67256859653214869994870466343258677753", study.studyInstanceUid);
     const modify = vi.spyOn(backend, "modifyStudyKeepingUids");
     expect(await send(message)).toContain("MSA|AA|");

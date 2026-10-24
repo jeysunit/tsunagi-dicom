@@ -494,7 +494,9 @@ export function createMockBackend(): Backend {
           });
       return result;
     },
-    async modifyStudyKeepingUids(id: string, replace: Record<string, string>, options: { removeSource: boolean }) {
+    // モックは検査を 1 件ずつしか持たないので、患者 ID が変わると元の検査を残さず新しい ID へ移す（元の画像を名指しで
+    // 消した後の形）。後の deleteStudyInstances は、元の検査がもう無いので何もしない
+    async modifyStudyKeepingUids(id: string, replace: Record<string, string>) {
       const study = (await restStudies()).find((s) => s.ID === id);
       if (!study) {
         throw new BackendError("検査が見つかりません", 404);
@@ -503,11 +505,6 @@ export function createMockBackend(): Backend {
       const before = await this.studyInstanceTags(id);
       const patientId = replace.PatientID ?? study.PatientMainDicomTags.PatientID;
       const patientChanged = patientId !== study.PatientMainDicomTags.PatientID;
-      // 実の Orthanc では、患者 ID が同じまま元を消すと書き換えた画像ごと消え、患者 ID が変わるのに元を残すと
-      // 同じ UID の検査が 2 件並ぶ（design.md §4）。モックでは、その呼び方を誤りにして試験で見つける
-      if (options.removeSource !== patientChanged) {
-        throw new Error(`モック：KeepSource の指定が患者 ID の変化と合わない（removeSource=${options.removeSource}）`);
-      }
       // Orthanc の ID の形（16 進 40 字を 8 字ずつ 5 つ）にそろえる。SHA-256 の先頭の 40 字を使う
       const newId = patientChanged
         ? createHash("sha256").update(`${uid}:${patientId}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-") : id;
@@ -524,6 +521,11 @@ export function createMockBackend(): Backend {
         throw new BackendUnknownError();
       }
       return { jobId };
+    },
+    async deleteStudyInstances(id: string) {
+      if ((await restStudies()).some((s) => s.ID === id)) {
+        throw new BackendError("モック：書き換えの元の検査が残っている");
+      }
     },
 
     async lookupStudyIds(studyInstanceUid: string) {
