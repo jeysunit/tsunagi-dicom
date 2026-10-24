@@ -13,7 +13,8 @@
 #   内部ネットワーク（backend）には入らない。dicom のコンテナどうしの通信は、dev.env の ORTHANC_DICOM_ICC=true で許す
 #   （配る compose の既定は止める）。そのため、この compose では DTG と storescp から Orthanc の REST に届く（認証は要る）。
 # - HL7 の受け口（hl7-receiver）は、ris-emulator だけと共有する hl7 のネットワークと backend に入り、ホストにポートを出さない。
-#   ris-emulator の `pir send --host hl7-receiver` で、患者の統合（A40）・属性の更新（A08）・予約（ORM）を送る。
+#   ris-emulator の `pir send` で、患者の統合（A40）・属性の更新（A08）・予約（ORM）を送る（送り先は docker/dev/ris/app_config.yaml の
+#   hl7.host で受け口にしてある。`--host hl7-receiver` を付けても同じ）。
 #   受け口のための token と発番元は hl7.override.yaml で tsunagi-dicom に渡す。患者 ID を変えない書き換え（A08・ORM）のために、
 #   Orthanc を OverwriteInstances: true にする（docker/dev/orthanc/site.json。同じ SOP Instance UID の送り直しは上書きになる）。
 # - Orthanc は送り元の IP アドレスを確かめない（docker/dev/orthanc/site.json の DicomCheckModalityHost: false。接続先の Host が
@@ -54,6 +55,8 @@ services:
     volumes:
       # 予約は SQLite（/app/state）に残る
       - ris-state:/app/state
+      # CT の装置の AE タイトルを DTG にそろえ、HL7 の送り先を受け口にした設定（docker/dev/ris/app_config.yaml の冒頭）
+      - ./ris/app_config.yaml:/app/config/app_config.yaml:ro
     secrets:
       - ris_web_password
     ports:
@@ -187,8 +190,7 @@ secrets:
     file: ./secrets/ris_web_password.txt
   dtg_web_password:
     file: ./secrets/dtg_web_password.txt
-  hl7_receiver_token:
-    file: ./secrets/hl7_receiver_token.txt
+  # hl7_receiver_token は hl7.override.yaml（include）で決める。ここで決め直すと、取り込んだものとぶつかる
 
 volumes:
   ris-state:
