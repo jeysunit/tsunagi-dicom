@@ -10,8 +10,8 @@ const KINDS = {
   active: { mark: "◐", border: "border-warning", markTone: "text-warning", extra: "" },
   /** 終わった */
   done: { mark: "●", border: "border-success", markTone: "text-success", extra: "" },
-  /** なくなった（取り消し線） */
-  canceled: { mark: "—", border: "border-border-input", markTone: "text-label", extra: "line-through" },
+  /** なくなった（灰と「—」で示す。文字に取り消し線は引かない） */
+  canceled: { mark: "—", border: "border-border-input", markTone: "text-label", extra: "" },
   /** 途中でやめた */
   stopped: { mark: "■", border: "border-danger", markTone: "text-danger", extra: "" },
   /** 送っている途中 */
