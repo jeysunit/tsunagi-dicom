@@ -17,7 +17,7 @@ export interface StudySummary {
   studyDescription: string;
   /** StudyID（装置・施設の検査の番号） */
   studyId: string;
-  /** 依頼医（PN の1本の文字列） */
+  /** 紹介医（PN の1本の文字列） */
   referringPhysicianName: string;
   modalities: string[];
   seriesCount: number | null;
