@@ -24,8 +24,6 @@
   --color-muted: #eeeeee;
   /* 検索の条件の帯など、muted より一段濃い地 */
   --color-muted-strong: #e2e2e2;
-  /* 画面の外枠（ヘッダー・サイドバー）の暗い地。値の定義だけで、使うのは段 2 */
-  --color-chrome: #333333;
   /* 押せる物（枠のボタン・枠の無いボタン・絞り込み）の hover の地。白い地・控えめな地と見分けられる差にする（docs/spec.md の 2.3） */
   --color-hover: #e2e2e2;
   /* 押している間の地（hover より一段濃く） */
@@ -51,7 +49,8 @@
   --color-dev-band-foreground: #ffe8a3;
   /* モダリティの色分け（一覧の印。文字ではなく飾りで、名前の文字を必ず添える） */
   --color-mod-ct: #0969da;
-  --color-mod-mr: #8250df;
+  /* MR は赤紫。青い CT と見分けやすくする（docs/design-system/tokens.md） */
+  --color-mod-mr: #9333ea;
   --color-mod-crdx: #1a7f37;
   --color-mod-us: #bc4c00;
   --color-mod-es: #bf3989;
@@ -90,7 +89,6 @@ body:has([data-split-root]) {
   --color-border-input: #777777;
   --color-muted: #2d2d2d;
   --color-muted-strong: #383838;
-  --color-chrome: #121212;
   --color-hover: #333333;
   --color-pressed: #3a3a3a;
   /* 主の色 #4b4fbf を 25% だけ地に重ねた色 */
@@ -105,6 +103,15 @@ body:has([data-split-root]) {
   --color-danger: #ff7b72;
   --color-success: #3fb950;
   --color-warning: #d29922;
+  /* モダリティの色分け（暗い地の上で見分けられる明るさにする） */
+  --color-mod-ct: #4493f8;
+  --color-mod-mr: #c084fc;
+  --color-mod-crdx: #3fb950;
+  --color-mod-us: #f0883e;
+  --color-mod-es: #f778ba;
+  --color-mod-mg: #d29922;
+  --color-mod-doc: #9198a1;
+  --color-mod-sr: #39c5cf;
 }
 
 /* 一覧の上の細い進みの帯（src/components/ui/pending.tsx） */

@@ -412,7 +412,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
 
     await expect(unlockScreen(ctx, s.session, s.user, { password: "wrong-pass-123" })).rejects.toMatchObject({
       status: 401,
-      message: "パスワードが正しくありません",
+      message: "パスワードが合いません",
       problems: [],
     });
     expect((await user()).failedLoginCount).toBe(1);
