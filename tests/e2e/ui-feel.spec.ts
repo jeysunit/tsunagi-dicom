@@ -146,6 +146,27 @@ test("選んだ行：主の色の薄い地と左の縦線。hover の行の地�
   expect(await head.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("3px");
 });
 
+test("件数の行：検索の欄が空でも入っていても、件数と自動更新は条件の行とは別の行の同じ位置にある（#56）", async ({ page }) => {
+  await asAdmin(page);
+  await expect(rows(page)).toHaveCount(8);
+  const place = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left), y: Math.round(r.top) };
+    });
+  const search = page.getByTestId("study-search");
+  await expect(search).toHaveValue("");
+  const emptyCount = await place("study-count");
+  const emptyRefresh = await place("list-refresh");
+  await search.fill("JP-TEST-0004");
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  expect(await place("study-count")).toEqual(emptyCount);
+  expect(await place("list-refresh")).toEqual(emptyRefresh);
+  // 幅が狭くても、件数の行は条件の行の下に別の行として出る
+  const filters = await page.getByTestId("study-filters").boundingBox();
+  expect(emptyCount.y).toBeGreaterThanOrEqual(Math.round(filters!.y + filters!.height));
+});
+
 test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に細い帯、古い行を薄く、件数は「—」。すぐ終われば出さない", async ({ page }) => {
   await asAdmin(page);
   await expect(rows(page)).toHaveCount(8);

@@ -45,6 +45,8 @@
   --color-danger: #d1242f;
   /* 終わったことの印（送信完了・接続確認の成功）。文字と印を必ず添える */
   --color-success: #1a7f37;
+  /* 途中のことの印（実施中・送信中）。赤でも緑でもない状態に使い、文字と印を必ず添える */
+  --color-warning: #9a6700;
   --color-dev-band: #6b4a00;
   --color-dev-band-foreground: #ffe8a3;
   /* モダリティの色分け（一覧の印。文字ではなく飾りで、名前の文字を必ず添える） */
@@ -102,6 +104,7 @@ body:has([data-split-root]) {
   --color-ring: #a5a8ff;
   --color-danger: #ff7b72;
   --color-success: #3fb950;
+  --color-warning: #d29922;
 }
 
 /* 一覧の上の細い進みの帯（src/components/ui/pending.tsx） */
