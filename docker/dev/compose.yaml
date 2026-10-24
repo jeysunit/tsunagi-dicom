@@ -43,8 +43,8 @@ services:
     # ris-emulator の Dockerfile から作る。版は commit で固定する（RIS_GIT_REF で替えられる）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-ris:local
     build:
-      # 既定は main の 3573572（HL7 の送信 pir send のある版）
-      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-3573572224b4aef907ce2916c634a26a972c8e76}
+      # 既定は main の ae71765（照合 reconcile のある版。ris-emulator の #24 のマージ）
+      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-ae71765e7620275de38a5f09c71db1bdc7355d44}
     environment:
       RIS_WEB_PASSWORD_FILE: /run/secrets/ris_web_password
       # Web 画面と MWL を、コンテナの中では 0.0.0.0 で待ち受ける（イメージの既定と同じ。設定ファイルより先に効く）

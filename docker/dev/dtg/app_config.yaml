@@ -23,7 +23,8 @@ modality:
     host: "ris"
     port: 11112
     timeout_seconds: 30
-  mpps: null                      # ris-emulator は MPPS をまだ受けない
+    use_mpps: true                # 撮影の開始・完了を MPPS で ris-emulator に送る（予約の無い撮影は、ris-emulator の照合の対象になる）
+  mpps: null                      # MPPS の送り先は、ワークリストの ris-emulator と同じ（use_mpps）
   destinations:
     - name: "ORTHANC"
       ae_title: "ORTHANC"
