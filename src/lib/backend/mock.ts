@@ -3,6 +3,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { crc32 } from "node:zlib";
 import {
+  checkedPatientId,
+  studyPatientFromRest,
   firstInstanceId,
   isOrthancId,
   jobFromRest,
@@ -29,6 +31,7 @@ import {
 import { isAcceptableImageAccept, wadoRsTarget } from "@/lib/backend/relay-path";
 import {
   BackendError,
+  BackendUnknownError,
   clampStudyLimit,
   STUDY_LIMIT,
   type Backend,
@@ -67,6 +70,9 @@ const mockJobs = (jobsHolder[JOBS_KEY] ??= new Map<string, MockJob>());
 
 /** モックの /changes が 1 回に返す数の上限（実の Orthanc が切り詰める形をまねる。BFF が Last から続けて読むことを試す） */
 const MOCK_CHANGES_MAX = 5;
+const UPDATES_KEY = Symbol.for("tsunagi-dicom.mock-hl7");
+const updatesHolder = globalThis as typeof globalThis & { [UPDATES_KEY]?: Map<string, { id: string; replace: Record<string, string> }> };
+const mockUpdates = (updatesHolder[UPDATES_KEY] ??= new Map<string, { id: string; replace: Record<string, string> }>());
 
 const orthancNow = (d = new Date()) => d.toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 
@@ -78,13 +84,18 @@ const mockDeleted = (deletedHolder[DELETED_KEY] ??= new Set<string>());
 /** 試験のための、モックの Orthanc の中の変化（同じ UID の検査が2つある・確かめの後に検査が変わった） */
 const TEST_KEY = Symbol.for("tsunagi-dicom.mock-test");
 const testHolder = globalThis as typeof globalThis & {
-  [TEST_KEY]?: { extraIds: Map<string, string[]>; versions: Map<string, string> };
+  [TEST_KEY]?: { extraIds: Map<string, string[]>; versions: Map<string, string>; revision: number };
 };
-const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map() });
+const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map(), revision: 0 });
 
 /** 試験のため：モックで消した検査と、試験の変化を戻す */
 export function restoreMockStudies(): void {
   mockDeleted.clear();
+  mockUpdates.clear();
+  hl7Jobs.clear();
+  hl7Instances.clear();
+  hl7Simulation = {};
+  mockTest.revision = 0;
   mockTest.extraIds.clear();
   mockTest.versions.clear();
 }
@@ -144,7 +155,9 @@ async function readJson<T>(...parts: string[]): Promise<T> {
 
 interface RestStudy {
   ID: string;
+  originalId?: string;
   MainDicomTags: { StudyInstanceUID?: string };
+  PatientMainDicomTags: Record<string, string | undefined>;
 }
 interface RestSeries {
   ID: string;
@@ -247,13 +260,27 @@ export function createMockBackend(): Backend {
   const qidoStudies = async () =>
     (await readJson<DicomJsonDataset[]>("dicom-web", "studies.json")).filter(
       (ds) => !mockDeleted.has(stringValue(ds, TAG.StudyInstanceUID)),
-    );
+    ).map((ds) => {
+      const update = mockUpdates.get(stringValue(ds, TAG.StudyInstanceUID));
+      if (!update) return ds;
+      const copy = structuredClone(ds);
+      const tags: Record<string, string> = { PatientID: "00100020", PatientName: "00100010", PatientBirthDate: "00100030", PatientSex: "00100040", AccessionNumber: "00080050" };
+      for (const [name, value] of Object.entries(update.replace)) {
+        const tag = tags[name];
+        if (tag) copy[tag] = { vr: ({ PatientID: "LO", PatientName: "PN", PatientBirthDate: "DA", PatientSex: "CS", AccessionNumber: "SH" } as Record<string, string>)[name]!, Value: name === "PatientName" ? [{ Alphabetic: value.split("=")[0], Ideographic: value.split("=")[1], Phonetic: value.split("=")[2] }] : [value] };
+      }
+      return copy;
+    });
   const restStudies = async <T extends RestStudy>() =>
-    (await readAll<T>("studies")).filter((s) => !mockDeleted.has(s.MainDicomTags.StudyInstanceUID ?? ""));
+    (await readAll<T>("studies")).filter((s) => !mockDeleted.has(s.MainDicomTags.StudyInstanceUID ?? "")).map((s) => {
+      const update = mockUpdates.get(s.MainDicomTags.StudyInstanceUID ?? "");
+      if (!update) return s;
+      return { ...s, originalId: s.ID, ID: update.id, PatientMainDicomTags: { ...s.PatientMainDicomTags, ...Object.fromEntries(Object.entries(update.replace).filter(([k]) => k.startsWith("Patient"))) }, MainDicomTags: { ...s.MainDicomTags, ...(update.replace.AccessionNumber !== undefined ? { AccessionNumber: update.replace.AccessionNumber } : {}) } };
+    });
 
   async function restSeriesByStudy(): Promise<Map<string, RestSeries[]>> {
     const [studies, series] = await Promise.all([restStudies(), readAll<RestSeries>("series")]);
-    const uidById = new Map(studies.map((s) => [s.ID, s.MainDicomTags.StudyInstanceUID ?? ""]));
+    const uidById = new Map(studies.map((s) => [s.originalId ?? s.ID, s.MainDicomTags.StudyInstanceUID ?? ""]));
     const out = new Map<string, RestSeries[]>();
     for (const s of series) {
       const uid = uidById.get(s.ParentStudy);
@@ -333,9 +360,9 @@ export function createMockBackend(): Backend {
     },
 
     async studyListVersion() {
-      // 見本の変更の記録の最後の番号に、このプロセスで消した検査の数を足す（消すと、実の Orthanc の Deleted の出来事と同じく進む）
+      // 見本の変更の記録の最後の番号に、このプロセスで消した検査の数と HL7 の更新の数を足す（消すと、実の Orthanc の Deleted の出来事と同じく進む）
       const { last } = parseChanges(await readJson<unknown>("made", "changes.json"));
-      return String(last + mockDeleted.size);
+      return String(last + mockDeleted.size + mockTest.revision);
     },
 
     async searchSeries(studyInstanceUid: string) {
@@ -415,14 +442,14 @@ export function createMockBackend(): Backend {
         readJson<Record<string, unknown>>("made", "instance-metadata.json"),
       ]);
       const received = receivedStudyIds(changes, limit).flatMap(({ id, date }): ReceivedStudy[] => {
-        const study = studies.find((s) => s.ID === id);
+        const study = studies.find((s) => s.ID === id || s.originalId === id);
         if (!study) return [];
         // Orthanc の /studies/{id}/series の形（検査のシリーズの順）
         const rows = (study.Series ?? []).flatMap((sid) => series.filter((s) => s.ID === sid));
         const { summary, instanceCount } = studyFromRest(study, rows);
         const first = firstInstanceId(rows);
         const reception = receptionFromMetadata(first ? metadata[first] : undefined);
-        return [{ orthancId: id, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
+        return [{ orthancId: study.ID, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
       });
       return { studies: received, complete };
     },
@@ -435,6 +462,64 @@ export function createMockBackend(): Backend {
       const list = modalitiesFromRest(await readJson<unknown>("made", "modalities.json"));
       if (!list.some((m) => m.id === modalityId)) throw new BackendError("接続先が登録されていません", 404);
       return modalityId !== "offline";
+    },
+
+    async findStudiesByPatientId(patientId: string) {
+      checkedPatientId(patientId);
+      return (await restStudies()).filter((s) => s.PatientMainDicomTags.PatientID === patientId).map((s) => s.ID);
+    },
+    async studyPatient(id: string) {
+      return studyPatientFromRest((await restStudies()).find((s) => s.ID === id));
+    },
+    async studyInstanceTags(id: string) {
+      const patient = await this.studyPatient(id);
+      if (!patient) {
+        return [];
+      }
+      const overrides = hl7Instances.get(patient.StudyInstanceUID);
+      if (overrides) {
+        return overrides.map(p => ({ ...p }));
+      }
+      const result: import("./types").PatientInstance[] = [];
+      for (const series of await this.searchSeries(patient.StudyInstanceUID))
+        for (const instance of await this.searchInstances(patient.StudyInstanceUID, series.seriesInstanceUid))
+          result.push({
+            ...patient,
+            SeriesInstanceUID: series.seriesInstanceUid,
+            SOPInstanceUID: instance.sopInstanceUid,
+            SpecificCharacterSet: "ISO_IR 192"
+          });
+      return result;
+    },
+    async modifyStudyKeepingUids(id: string, replace: Record<string, string>, options: { removeSource: boolean }) {
+      const study = (await restStudies()).find((s) => s.ID === id);
+      if (!study) {
+        throw new BackendError("検査が見つかりません", 404);
+      }
+      const uid = study.MainDicomTags.StudyInstanceUID!;
+      const before = await this.studyInstanceTags(id);
+      const patientId = replace.PatientID ?? study.PatientMainDicomTags.PatientID;
+      const patientChanged = patientId !== study.PatientMainDicomTags.PatientID;
+      // 実の Orthanc では、患者 ID が同じまま元を消すと書き換えた画像ごと消え、患者 ID が変わるのに元を残すと
+      // 同じ UID の検査が 2 件並ぶ（design.md §4）。モックでは、その呼び方を誤りにして試験で見つける
+      if (options.removeSource !== patientChanged) {
+        throw new Error(`モック：KeepSource の指定が患者 ID の変化と合わない（removeSource=${options.removeSource}）`);
+      }
+      const newId = patientChanged
+        ? createHash("sha1").update(`${uid}:${patientId}`).digest("hex").match(/.{8}/g)!.join("-") : id;
+      mockTest.revision++;
+      mockUpdates.set(uid, { id: newId, replace: { ...mockUpdates.get(uid)?.replace, ...replace } });
+      const jobId = crypto.randomUUID();
+      const state = hl7Simulation.state ?? "Success";
+      // 失敗を再現した後の成功でも、前回の画像ごとの値を残さない。
+      const changedCount = hl7Simulation.changedInstances ?? (state === "Failure" ? 0 : before.length);
+      hl7Instances.set(uid, before.map((instance, index) =>
+        index < changedCount ? { ...instance, ...replace } : instance));
+      hl7Jobs.set(jobId, { state });
+      if (hl7Simulation.dispatchTimeout) {
+        throw new BackendUnknownError();
+      }
+      return { jobId };
     },
 
     async lookupStudyIds(studyInstanceUid: string) {
@@ -464,8 +549,22 @@ export function createMockBackend(): Backend {
     },
 
     async jobStatus(jobId: string) {
+      const hl7 = hl7Jobs.get(jobId);
+      if (hl7) {
+        return {
+          id: jobId,
+          state: hl7.state,
+          progress: hl7.state === "Running" ? 50 : 100,
+          errorCode: 0,
+          errorDescription: "",
+          creationTime: orthancNow(),
+          completionTime: null
+        };
+      }
       const job = mockJobs.get(jobId);
-      if (!job) return null;
+      if (!job) {
+        return null;
+      }
       job.reads += 1;
       const failed = job.modality === "offline";
       const state = job.reads <= 1 ? "Pending" : job.reads === 2 ? "Running" : failed ? "Failure" : "Success";
@@ -495,4 +594,20 @@ export function createMockBackend(): Backend {
       mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
     },
   };
+}
+
+// テストから仕事の終了・失敗・時間切れを再現する。画像ごとの応答も差し替えられる。
+export const hl7Jobs = new Map<string, {
+  state: import("./types").JobState;
+}>();
+
+const hl7Instances = new Map<string, import("./types").PatientInstance[]>();
+let hl7Simulation: {
+  state?: import("./types").JobState;
+  changedInstances?: number;
+  dispatchTimeout?: boolean;
+} = {};
+/** 次の書き換えを、動き続ける仕事・失敗・一部だけの変更・応答の時間切れにする。 */
+export function simulateMockHl7(options: typeof hl7Simulation): void {
+  hl7Simulation = { ...options };
 }

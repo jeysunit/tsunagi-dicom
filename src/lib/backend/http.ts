@@ -15,6 +15,8 @@ import {
   type DicomJsonDataset,
 } from "@/lib/backend/dicom-json";
 import {
+  checkedPatientId,
+  studyPatientFromRest,
   firstInstanceId,
   isJobId,
   isModalityName,
@@ -373,6 +375,107 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       // Orthanc は C-ECHO が通らないとき 500 を返す。ほか（資格情報の誤り・入口の誤りなど）は「つながらない」としない
       if (res.status === 500) return false;
       throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+    },
+
+    async findStudiesByPatientId(patientId: string) {
+      const res = await restPost("tools/find", JSON.stringify({
+        Level: "Study",
+        Query: { PatientID: checkedPatientId(patientId) },
+        Expand: false
+      }), { credential: "read" });
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+      }
+      const body: unknown = await res.json();
+      if (!Array.isArray(body) || !body.every(isOrthancId)) {
+        throw new BackendError("検査の ID を読み込めませんでした");
+      }
+      return body;
+    },
+
+    async studyPatient(orthancStudyId: string) {
+      if (!isOrthancId(orthancStudyId)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      return studyPatientFromRest(await restJsonOrNull(`studies/${orthancStudyId}`));
+    },
+
+    // 検査の要約だけでは部分反映を見落とすので、全画像を読む（design.md §4）。
+    async studyInstanceTags(id: string) {
+      if (!isOrthancId(id)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      const json = await restJsonOrNull(`studies/${id}/instances-tags?simplify`);
+      if (!json || typeof json !== "object" || Array.isArray(json)) {
+        throw new BackendError("画像のタグを読み込めません");
+      }
+      return Object.values(json).map((raw): import("./types").PatientInstance => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          throw new BackendError("画像のタグが正しくありません");
+        }
+        const tags = raw as Record<string, unknown>;
+        const get = (key: string) => {
+          const v = tags[key];
+          if (v === undefined) {
+            return "";
+          }
+          if (typeof v !== "string") {
+            throw new BackendError("画像のタグが正しくありません");
+          }
+          return v;
+        };
+        return {
+          PatientID: get("PatientID"),
+          PatientName: get("PatientName"),
+          PatientBirthDate: get("PatientBirthDate"),
+          PatientSex: get("PatientSex"),
+          AccessionNumber: get("AccessionNumber"),
+          StudyInstanceUID: get("StudyInstanceUID"),
+          SeriesInstanceUID: get("SeriesInstanceUID"),
+          SOPInstanceUID: get("SOPInstanceUID"),
+          SpecificCharacterSet: get("SpecificCharacterSet")
+        };
+      });
+    },
+
+    // 仕事の完了は呼び手が確かめる（design.md §4）。元を消す（KeepSource: false）のは患者 ID が変わるときだけ。
+    // 患者 ID が同じなら OverwriteInstances で元の画像が置き換わり、元を消すと置き換えた画像ごと消える（2026-10-24 の開発の一式）
+    async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>, options: { removeSource: boolean }) {
+      if (!isOrthancId(orthancStudyId)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      const res = await restPost(`studies/${orthancStudyId}/modify`, JSON.stringify({
+        Replace: replace,
+        Keep: ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"],
+        Force: true,
+        ...(options.removeSource ? { KeepSource: false } : {}),
+        Asynchronous: true
+      }), { write: true });
+      if (!res.ok) {
+        if (isUncertainStatus(res.status)) {
+          await res.body?.cancel();
+          throw new BackendUnknownError();
+        }
+        // 応答には要求の値も入りうるので、既知の設定の理由だけを取り出す。
+        const text = await res.text();
+        const hint = /OverwriteInstances/i.test(text) ? "。Orthanc の OverwriteInstances が要る" : "";
+        throw new BackendError(`画像サーバーが書き換えを断りました（${res.status}）${hint}`, res.status === 400 ? 400 : 502);
+      }
+      let body: unknown;
+      try {
+        body = await res.json();
+      }
+      catch {
+        throw new BackendUnknownError();
+      }
+      const id = body && typeof body === "object" ? (body as {
+        ID?: unknown;
+      }).ID : undefined;
+      if (!isJobId(id)) {
+        throw new BackendUnknownError();
+      }
+      return { jobId: id };
     },
 
     async lookupStudyIds(studyInstanceUid: string) {

@@ -66,6 +66,21 @@ export interface StudyQuery {
 export interface Backend {
   readonly kind: "orthanc";
   readonly mock: boolean;
+  /** 発番元を確認した患者 ID で、全検査を REST から探す（design.md §4・§6）。 */
+  findStudiesByPatientId(patientId: string): Promise<string[]>;
+  /** A40 の空欄を補うために、現在の患者の値を読む（design.md §9）。 */
+  studyPatient(orthancStudyId: string): Promise<StudyPatient | null>;
+  /**
+   * UID を保つ書き換えの仕事を作る（design.md §4）。removeSource は患者 ID が変わるときだけ true（KeepSource: false）。
+   * 患者 ID が変わらないと Orthanc の中の ID が元と同じなので、元を消すと書き換えた画像ごと消える
+   */
+  modifyStudyKeepingUids(
+    orthancStudyId: string,
+    replace: Record<string, string>,
+    options: { removeSource: boolean },
+  ): Promise<{ jobId: string }>;
+  /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
+  studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
   /**
    * QIDO-RS の検査の検索（検査日の範囲で絞れる）。検査日の新しい順に limit 件まで。
    * QIDO-RS は返す順を決めていない（PS3.18 8.3.4.4）ので、limit を超える検査があれば、検査日の範囲で区切って
@@ -244,4 +259,20 @@ export class BackendError extends Error {
     super(message);
     this.name = "BackendError";
   }
+}
+
+/** HL7 で書き換える前の値（Orthanc の REST）。 */
+export interface StudyPatient {
+  PatientID: string;
+  PatientName: string;
+  PatientBirthDate: string;
+  PatientSex: string;
+  AccessionNumber: string;
+  StudyInstanceUID: string;
+}
+
+export interface PatientInstance extends StudyPatient {
+  SeriesInstanceUID: string;
+  SOPInstanceUID: string;
+  SpecificCharacterSet: string;
 }

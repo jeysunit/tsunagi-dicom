@@ -48,6 +48,8 @@ chmodSync(usersFile, 0o644);
 writeFileSync(path.join(workDir, "backend-password.txt"), `${orthancPassword}\n`, { mode: 0o600 });
 
 const sessionSecret = randomBytes(48).toString("base64");
+const hl7Token = randomBytes(48).toString("base64url");
+writeFileSync(path.join(workDir, "hl7-receiver-token"), `${hl7Token}\n`, { mode: 0o600 });
 
 // GitHub Actions では、作った値を記録の伏せ字に登録する（Playwright の list の報告は、失敗した操作の記録に fill の値を出しうる）
 if (process.env.GITHUB_ACTIONS === "true") {
@@ -64,6 +66,7 @@ const env = {
   ITEST_ADMIN_INITIAL_PASSWORD: adminInitial,
   ITEST_ADMIN_PASSWORD: adminChanged,
   ITEST_SESSION_SECRET: sessionSecret,
+  ITEST_HL7_TOKEN: hl7Token,
 };
 
 const compose = (args, stdio = "inherit") => execFileSync("docker", ["compose", "-f", composeFile, ...args], { env, stdio });

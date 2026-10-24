@@ -703,3 +703,228 @@ test("13 上限を超えたとき：検査が 1000 件を超えても、いち�
   expect(jan.count).toEqual({ count: 31, exact: true });
   expect(jan.studies.map((s) => s.studyInstanceUid).sort()).toEqual(bulk.slice(0, 31).map((s) => s.uid).sort());
 });
+
+
+test("15 HL7 の A40：患者 ID を替え、Study・Series・SOP の UID を保ち、元の検査を残さない", async () => {
+  const study = syntheticStudy("hl7-a40", 50, 2);
+  const temporaryId = study.patientId;
+  const finalId = "JP-TEST-HL7-FINAL";
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [oldId] = await waitFor("HL7 の試験の検査が入る", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  const controlId = `HL7-${newUid().slice(-16)}`;
+  const token = process.env.ITEST_HL7_TOKEN;
+  if (!token) {
+    throw new Error("試験の HL7 token が無い");
+  }
+  const message = [
+    `MSH|^~\\&|TEST|TEST|BFF|TEST|20261024120000||ADT^A40^ADT_A39|${controlId}|P|2.3.1`,
+    `PID|1||${finalId}^^^RIS_EMU^PI||ITEST^FINAL`,
+    `MRG|${temporaryId}^^^RIS_EMU^PI`,
+    "",
+  ].join("\r");
+  // fetch の要求のヘッダーを試験の報告に出さない（token は試験のたびに作る）。
+  const response = await fetch(`${bffUrl}/api/hl7/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ peer: "192.0.2.1", message: Buffer.from(message).toString("base64") }),
+    signal: AbortSignal.timeout(60000),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json() as {
+    ack: string;
+  };
+  expect(Buffer.from(body.ack, "base64").toString()).toContain(`MSA|AA|${controlId}|`);
+  const [newId] = await lookupStudy(study.studyInstanceUid);
+  expect(newId).toBeTruthy();
+  expect(newId).not.toBe(oldId);
+  expect((await orthanc(`studies/${oldId}`)).status).toBe(404);
+  const current = await orthancJson<{
+    MainDicomTags: {
+      StudyInstanceUID: string;
+    };
+    PatientMainDicomTags: {
+      PatientID: string;
+    };
+    Series: string[];
+  }>(`studies/${newId}`);
+  expect(current.MainDicomTags.StudyInstanceUID).toBe(study.studyInstanceUid);
+  expect(current.PatientMainDicomTags.PatientID).toBe(finalId);
+  const series = await orthancJson<{
+    MainDicomTags: {
+      SeriesInstanceUID: string;
+    };
+  }>(`series/${current.Series[0]}`);
+  expect(series.MainDicomTags.SeriesInstanceUID).toBe(study.seriesInstanceUid);
+  const instances = await orthancJson<{
+    MainDicomTags: {
+      SOPInstanceUID: string;
+    };
+  }[]>(`studies/${newId}/instances`);
+  expect(instances.map((i) => i.MainDicomTags.SOPInstanceUID).sort()).toEqual([...study.sopInstanceUids].sort());
+  expect(await orthancJson("tools/find", {
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({ Level: "Study", Query: { PatientID: temporaryId }, Expand: false })
+  })).toEqual([]);
+  const rows = readAudit().filter((r) => r.action === "hl7" && r.detail.controlId === controlId);
+  expect(rows.map((r) => `${r.detail.event}:${r.outcome}`)).toEqual([
+    "received:success",
+    "request:success",
+    "dispatch:success",
+    "result:success",
+    "ack:success"
+  ]);
+  expect(rows[3]!.detail).toMatchObject({
+    writeId: rows[1]!.detail.writeId,
+    oldOrthancId: oldId,
+    newOrthancId: newId,
+    before: expect.arrayContaining([expect.objectContaining({ PatientID: temporaryId })]),
+    after: expect.arrayContaining([expect.objectContaining({ PatientID: finalId })])
+  });
+  const tags = await orthancJson<Record<string, Record<string, string>>>(`studies/${newId}/instances-tags?simplify`);
+  expect(Object.values(tags)).toHaveLength(study.sopInstanceUids.length);
+  const actualUids = Object.values(tags).map(t => [t.StudyInstanceUID, t.SeriesInstanceUID, t.SOPInstanceUID].join("|"));
+  const expectedUids = study.sopInstanceUids.map(sop => [study.studyInstanceUid, study.seriesInstanceUid, sop].join("|"));
+  expect(actualUids.sort()).toEqual(expectedUids.sort());
+  for (const t of Object.values(tags))
+    expect(t).toMatchObject({
+      PatientID: finalId,
+      PatientName: "ITEST^FINAL",
+      PatientBirthDate: study.patientBirthDate,
+      PatientSex: study.patientSex,
+      AccessionNumber: study.accessionNumber
+    });
+});
+
+// 既存の取り込み（beforeAll、詳細条件、日本語タグ）はすべて新しい UID を1回送る。
+// 重複の送り直しが無視されることを期待する場面は無い。OverwriteInstances はこの試験の Orthanc だけに設定する。
+async function sendHl7(kind: "A40" | "A08" | "ORM", patientId: string, fields: {
+  name?: string;
+  birth?: string;
+  old?: string;
+  uid?: string;
+  accession?: string;
+} = {}) {
+  const token = process.env.ITEST_HL7_TOKEN;
+  if (!token) {
+    throw Error("試験の HL7 token が無い");
+  }
+  const controlId = `IT-${newUid().slice(-16)}`;
+  const msh = [
+    "MSH",
+    "^~\\&",
+    "ITEST",
+    "ITEST",
+    "BFF",
+    "ITEST",
+    "20261024120000",
+    "",
+    kind === "ORM" ? "ORM^O01^ORM_O01" : `ADT^${kind}^${kind === "A40" ? "ADT_A39" : "ADT_A01"}`,
+    controlId,
+    "P",
+    "2.3.1",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "UNICODE UTF-8"
+  ].join("|");
+  const segments = [
+    msh,
+    `PID|1||${patientId}^^^RIS_EMU^PI||${fields.name ?? ""}||${fields.birth ?? ""}|`
+  ];
+  if (kind === "A40") {
+    segments.push(`MRG|${fields.old}^^^RIS_EMU^PI`);
+  }
+  if (kind === "ORM") {
+    const obr = Array<string>(19).fill("");
+    obr[0] = "OBR";
+    obr[18] = fields.accession!;
+    segments.push("ORC|NW", obr.join("|"), `ZDS|${fields.uid}`);
+  }
+  const response = await fetch(`${bffUrl}/api/hl7/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      peer: "192.0.2.1",
+      message: Buffer.from(segments.join("\r") + "\r").toString("base64")
+    }),
+    signal: AbortSignal.timeout(130000)
+  });
+  expect(response.status).toBe(200);
+  return Buffer.from((await response.json() as {
+    ack: string;
+  }).ack, "base64").toString();
+}
+async function hl7Tags(study: ReturnType<typeof syntheticStudy>) {
+  const ids = await lookupStudy(study.studyInstanceUid);
+  expect(ids).toHaveLength(1);
+  const tags = Object.values(await orthancJson<Record<string, Record<string, string>>>(`studies/${ids[0]}/instances-tags?simplify`));
+  expect(tags).toHaveLength(study.sopInstanceUids.length);
+  const actualUids = tags.map(t => [t.StudyInstanceUID, t.SeriesInstanceUID, t.SOPInstanceUID].join("|"));
+  const expectedUids = study.sopInstanceUids.map(sop => [study.studyInstanceUid, study.seriesInstanceUid, sop].join("|"));
+  expect(actualUids.sort()).toEqual(expectedUids.sort());
+  return tags;
+}
+test("16 HL7 A08 と ORM は全画像の UID を保ち値を揃える", async () => {
+  const study = syntheticStudy("hl7-a08-orm", 51, 3, { accessionNumber: "" });
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  await waitFor("HL7 の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  const [originalId] = await lookupStudy(study.studyInstanceUid);
+  expect(await sendHl7("A08", study.patientId, { name: "ITEST^UPDATED" })).toContain("MSA|AA|");
+  for (const t of await hl7Tags(study))
+    expect(t).toMatchObject({
+      PatientID: study.patientId,
+      PatientName: "ITEST^UPDATED",
+      PatientBirthDate: study.patientBirthDate,
+      PatientSex: study.patientSex,
+      AccessionNumber: ""
+    });
+  expect(await sendHl7("ORM", study.patientId, { uid: study.studyInstanceUid, accession: "IT-HL7-ORM" })).toContain("MSA|AA|");
+  for (const t of await hl7Tags(study))
+    expect(t).toMatchObject({
+      PatientID: study.patientId,
+      PatientName: "ITEST^UPDATED",
+      PatientBirthDate: study.patientBirthDate,
+      PatientSex: study.patientSex,
+      AccessionNumber: "IT-HL7-ORM"
+    });
+  expect(await lookupStudy(study.studyInstanceUid)).toEqual([originalId]);
+});
+test("17 HL7 A40 の替え先が存在：違う属性は両方を保ち、同じ属性は統合する", async () => {
+  const source = syntheticStudy("hl7-merge-source", 52, 2, { patientName: "SOURCE^PATIENT", patientBirthDate: "19990101" });
+  const target = syntheticStudy("hl7-merge-target", 53, 3, { patientName: "TARGET^PATIENT", patientBirthDate: "19800101" });
+  for (const study of [source, target]) {
+    writeDumps(study);
+    await storescuToOrthanc(study.batch);
+    await waitFor("HL7 の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  }
+  const [oldId] = await lookupStudy(source.studyInstanceUid);
+  const beforeSource = await hl7Tags(source);
+  const beforeTarget = await hl7Tags(target);
+  const conflictingAck = await sendHl7("A40", target.patientId, {
+    old: source.patientId, name: target.patientName, birth: "20000101",
+  });
+  expect(conflictingAck).toContain("MSA|AE|");
+  expect(await hl7Tags(source)).toEqual(beforeSource);
+  expect(await hl7Tags(target)).toEqual(beforeTarget);
+  expect(await sendHl7("A40", target.patientId, { old: source.patientId, name: target.patientName })).toContain("MSA|AA|");
+  for (const t of await hl7Tags(source))
+    expect(t).toMatchObject({
+      PatientID: target.patientId,
+      PatientName: target.patientName,
+      PatientBirthDate: target.patientBirthDate,
+      PatientSex: target.patientSex,
+      AccessionNumber: source.accessionNumber
+    });
+  expect(await hl7Tags(target)).toEqual(beforeTarget);
+  expect((await orthanc(`studies/${oldId}`)).status).toBe(404);
+  expect(await orthancJson("tools/find", {
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({ Level: "Study", Query: { PatientID: source.patientId }, Expand: false })
+  })).toEqual([]);
+});
