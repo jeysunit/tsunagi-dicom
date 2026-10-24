@@ -12,10 +12,10 @@ import { detailKey, StudyDetailPanel, type StudyDetailData } from "@/components/
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 const SERIES = "1.2.826.0.1.3680043.8.498.1";
 
-function render(allValues: boolean): string {
+function render(allValues: boolean, study: Partial<StudyDetailData["study"]> = {}): string {
   const client = new QueryClient();
   const data: StudyDetailData = {
-    study: { studyInstanceUid: STUDY, patientName: "試験 髙子" },
+    study: { studyInstanceUid: STUDY, patientName: "試験 髙子", ...study },
     series: [{ seriesInstanceUid: SERIES, seriesNumber: "1", seriesDescription: "Chest Axial 5mm", modality: "CT", instanceCount: 4 }],
   };
   // 取り終えた詳細（取得の時刻を先にして、描くときに取り直しの途中の形にしない）
@@ -54,5 +54,48 @@ describe("サムネイルを押せるか（権限）", () => {
     // シリーズの並びの中に、押せる物が無い
     const strip = html.slice(html.indexOf('data-testid="series-row"'));
     expect(strip.slice(0, strip.indexOf("</ul>"))).not.toContain("<button");
+  });
+});
+
+describe("見出し（患者バナー）と「検査の情報」", () => {
+  const full = {
+    patientKana: "しけん たかこ",
+    patientId: "JP-TEST-0004",
+    patientBirthDate: "19600715",
+    patientSex: "F",
+    studyDate: "20260410",
+    accessionNumber: "ACC-4",
+    referringPhysicianName: "試験 医師",
+    studyId: "S1",
+    seriesCount: 1,
+    instanceCount: 4,
+  };
+
+  it("バナーに、氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時を、この順で出す。和暦・紹介医はバナーに足さない", () => {
+    const html = render(true, full);
+    const banner = html.slice(html.indexOf('aria-label="患者"'), html.indexOf("</section>", html.indexOf('aria-label="患者"')));
+    expect(banner).toContain("試験 髙子");
+    expect(banner).toContain("しけん たかこ");
+    const labels = [...banner.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時"]);
+    expect(banner).toContain("1960/07/15（65歳） 女");
+    expect(banner).not.toContain("試験 医師");
+    expect(banner).not.toContain("昭和");
+  });
+
+  it("バナーに足さない値は「検査の情報」のタブに置く。出す値が無いときは、タブを出さずシリーズだけにする", () => {
+    const withInfo = render(true, full);
+    expect(withInfo).toContain('role="tablist"');
+    const info = withInfo.slice(withInfo.indexOf('data-testid="detail-info"'));
+    expect(info).toContain("試験 医師");
+    expect(info).toContain("1960/07/15（昭和35年）");
+    expect(info).toContain("1 / 4");
+    expect(render(true)).not.toContain('role="tablist"');
+  });
+
+  it("受付番号が空でも、項目ごと返らない（許可の一覧に無い）ときを除き、「受付番号 —」を出す", () => {
+    const empty = render(true, { accessionNumber: "" });
+    expect(empty).toMatch(/<dt[^>]*>受付番号<\/dt><dd[^>]*>—<\/dd>/);
+    expect(render(true)).not.toContain("受付番号");
   });
 });
