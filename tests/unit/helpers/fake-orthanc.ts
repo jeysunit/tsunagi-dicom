@@ -21,7 +21,7 @@ export interface FakeOrthanc {
 export function createFakeOrthanc(): FakeOrthanc {
   const jobs = new Map<string, JobState>();
   const studyId = (patientId: string, uid: string) =>
-    createHash("sha1").update(`${patientId}|${uid}`).digest("hex").match(/.{8}/g)!.join("-");
+    createHash("sha256").update(`${patientId}|${uid}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-");
   const idOf = (i: PatientInstance) => studyId(i.PatientID, i.StudyInstanceUID);
   const fake: FakeOrthanc = {
     instances: [],
