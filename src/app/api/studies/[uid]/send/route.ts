@@ -151,7 +151,7 @@ function logRecordFailure(requestId: string, jobId: string | null, error: unknow
 
 function unknownResponse(requestId: string): Response {
   return Response.json(
-    { requestId, outcome: "unknown", error: "送信結果を確認できません。再送せずに状態を確認してください" },
+    { requestId, outcome: "unknown", error: "送信結果を確認できません。再送信せずに状態を確認してください" },
     { status: 202 },
   );
 }

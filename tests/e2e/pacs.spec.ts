@@ -20,7 +20,7 @@ async function asRole(page: Page, label: "管理者" | "一般") {
 // 一覧で開く→検査一覧で表示・つながった→成功（時刻つき）・書き込みは止めている→書き込み：無効など）。確かめる振る舞いは同じ。
 test("受け取りの記録：一般は、受け取った検査を新しい順に 1 件 1 行で見られ、REST で入った検査は「インポート」と分かる", async ({ page }) => {
   await asRole(page, "一般");
-  await page.getByRole("navigation", { name: "頁" }).getByRole("link", { name: "受信一覧" }).click();
+  await page.getByRole("navigation", { name: "ページ" }).getByRole("link", { name: "受信一覧" }).click();
   await expect(page).toHaveURL(/\/received$/);
   const rows = page.getByTestId("received-row");
   await expect(rows).toHaveCount(8);
@@ -150,7 +150,7 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
 // 一般には普段使う頁の道があり、管理者だけの頁（ビューア設定）の道は無く、開いても断ることを見る（docs/spec.md の 3.6）
 test("一般の画面には、普段使う頁の道があり、管理者だけの頁の道は出さない。開いても断る", async ({ page }) => {
   await asRole(page, "一般");
-  const nav = page.getByRole("navigation", { name: "頁" });
+  const nav = page.getByRole("navigation", { name: "ページ" });
   await expect(nav.getByRole("link", { name: "検査一覧" })).toHaveCount(1);
   await expect(nav.getByRole("link", { name: "受信一覧" })).toHaveCount(1);
   await expect(nav.getByRole("link", { name: "接続先" })).toHaveCount(1);
@@ -161,7 +161,7 @@ test("一般の画面には、普段使う頁の道があり、管理者だけ�
   expect((await page.request.get("/api/receive-log")).status()).toBe(200);
   // 管理者には、ビューア設定の道がある
   await asRole(page, "管理者");
-  await expect(page.getByRole("navigation", { name: "頁" }).getByRole("link", { name: "ビューア設定" })).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "ページ" }).getByRole("link", { name: "ビューア設定" })).toHaveCount(1);
 });
 
 test("検証モードで書き込みを止めているときは、送るのボタンが無く、送る要求も断る", async ({ page }) => {

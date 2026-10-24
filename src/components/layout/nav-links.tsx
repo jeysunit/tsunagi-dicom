@@ -29,7 +29,7 @@ export function isCurrent(pathname: string, href: string): boolean {
 export function NavLinks({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname() ?? "";
   return (
-    <nav aria-label="頁" className="flex items-end gap-1 self-stretch" data-testid="site-nav">
+    <nav aria-label="ページ" className="flex items-end gap-1 self-stretch" data-testid="site-nav">
       {items.map((item) => {
         const current = isCurrent(pathname, item.href);
         return (
