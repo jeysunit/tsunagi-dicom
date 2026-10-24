@@ -12,7 +12,8 @@ datasource db {
 
 // 監査の記録（docs/spec.md の 3.6、第7.0版 17 遵守事項①②）。
 // 追記だけ。更新と削除はデータベースの trigger で断る（migration を参照）。
-// 各行は前の行の hash を prevHash に持ち、hash は行の中身と prevHash の SHA-256。
+// 各行は前の行の hash を prevHash に持ち、hash は行の中身と prevHash の HMAC-SHA256（鍵は SESSION_SECRET から導く。
+// keyId が空の行は、鍵つきにする前の鍵の無い SHA-256。docs/adr/0001-audit-chain-mac.md）。
 model AuditLog {
   // 1 から始まる続き番号。抜けがあれば、行が消されたと分かる。値はアプリ（src/lib/audit.ts）が決めて入れる。
   // Prisma は SQLite の Int の @id を `INTEGER PRIMARY KEY AUTOINCREMENT` にする（migration と同じ。
@@ -39,6 +40,8 @@ model AuditLog {
   hash                    String   @unique
   // 要求のヘッダーにあった接続元（X-Forwarded-For など。偽れる値）。hash には値があるときだけ入れる
   sourceAddressUnverified String?
+  // hash を計算した鍵の印（src/lib/audit-key.ts）。空の行は、鍵つきにする前の鍵の無い SHA-256 の行
+  keyId                   String?
 
   @@index([occurredAt])
   @@index([patientId])

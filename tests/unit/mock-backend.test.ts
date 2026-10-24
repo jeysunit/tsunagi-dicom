@@ -9,8 +9,9 @@ describe("モックのバックエンド", () => {
   it("Orthanc の形：見本の 8 件の検査を新しい順に返し、件数も 8（/statistics の写し）", async () => {
     const backend = createMockBackend();
     expect(backend.kind).toBe("orthanc");
-    const studies = await backend.searchStudies();
+    const { studies, complete } = await backend.searchStudies();
     expect(studies).toHaveLength(8);
+    expect(complete).toBe(true);
     expect(await backend.countStudies()).toEqual({ count: 8, exact: true });
     const keys = studies.map((s) => s.studyDate + s.studyTime);
     expect(keys).toEqual([...keys].sort().reverse());
@@ -18,7 +19,7 @@ describe("モックのバックエンド", () => {
   });
 
   it("DICOM JSON の値を検査の形にする", async () => {
-    const studies = await createMockBackend().searchStudies();
+    const { studies } = await createMockBackend().searchStudies();
     const study = studies.find((s) => s.accessionNumber === "ACC-0004-1");
     expect(study).toMatchObject({
       studyInstanceUid: "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012",
@@ -35,10 +36,10 @@ describe("モックのバックエンド", () => {
 
   it("検索の件数を 1〜1000 に収める", async () => {
     const backend = createMockBackend();
-    expect(await backend.searchStudies(3)).toHaveLength(3);
-    expect(await backend.searchStudies(0)).toHaveLength(1);
-    expect(await backend.searchStudies(-5)).toHaveLength(1);
-    expect(await backend.searchStudies(Number.NaN)).toHaveLength(8);
+    expect(await backend.searchStudies(3)).toMatchObject({ studies: { length: 3 }, complete: false });
+    expect((await backend.searchStudies(0)).studies).toHaveLength(1);
+    expect((await backend.searchStudies(-5)).studies).toHaveLength(1);
+    expect(await backend.searchStudies(Number.NaN)).toMatchObject({ studies: { length: 8 }, complete: true });
     expect(clampStudyLimit(10_000)).toBe(STUDY_LIMIT);
     expect(clampStudyLimit(2.7)).toBe(2);
     expect(clampStudyLimit(undefined)).toBe(STUDY_LIMIT);
@@ -132,9 +133,9 @@ describe("PN の文字列", () => {
 describe("モックのバックエンド（段 2：検査日の範囲・シリーズ・値の全部・サムネイル）", () => {
   it("検査日の範囲で絞る", async () => {
     const backend = createMockBackend();
-    expect(await backend.searchStudies(1000, { dateFrom: "20261017", dateTo: "20261017" })).toHaveLength(4);
-    expect(await backend.searchStudies(1000, { dateTo: "20260410" })).toHaveLength(4);
-    expect(await backend.searchStudies(1000, { dateFrom: "20261018" })).toHaveLength(0);
+    expect((await backend.searchStudies(1000, { dateFrom: "20261017", dateTo: "20261017" })).studies).toHaveLength(4);
+    expect((await backend.searchStudies(1000, { dateTo: "20260410" })).studies).toHaveLength(4);
+    expect((await backend.searchStudies(1000, { dateFrom: "20261018" })).studies).toHaveLength(0);
     expect(studyDateRange({ dateFrom: "20260401", dateTo: "20260430" })).toBe("20260401-20260430");
     expect(studyDateRange({ dateFrom: "20260401", dateTo: "20260401" })).toBe("20260401");
     expect(studyDateRange({ dateTo: "20260430" })).toBe("-20260430");
@@ -156,7 +157,7 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
     ]);
     expect(await createMockBackend().searchSeries("1.2.3")).toEqual([]);
     // 見本の全部のシリーズ（10）が、どれかの検査に入る
-    const studies = await createMockBackend().searchStudies();
+    const { studies } = await createMockBackend().searchStudies();
     const all = await Promise.all(studies.map((s) => createMockBackend().searchSeries(s.studyInstanceUid)));
     expect(all.flat()).toHaveLength(10);
   });
@@ -188,17 +189,23 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
   it("中継：写しのある画像の検査・シリーズのサムネイルだけを PNG で返す", async () => {
     const backend = createMockBackend();
     // 写しのある1枚（rest/instances/…/preview.png）の検査を、見本から探す
-    const studies = await backend.searchStudies();
+    const { studies } = await backend.searchStudies();
     let found: { study: string; series: string } | null = null;
     for (const s of studies) {
       for (const se of await backend.searchSeries(s.studyInstanceUid)) {
         const target = wadoRsTarget(["studies", s.studyInstanceUid, "series", se.seriesInstanceUid, "thumbnail"])!;
-        const res = await backend.relayDicomweb({ method: "GET", target, search: "" });
+        const res = await backend.relayDicomweb({ method: "GET", target, search: "", accept: "image/png" });
         if (res.status === 200) {
           expect(res.headers.get("content-type")).toBe("image/png");
           const bytes = new Uint8Array(await res.arrayBuffer());
           expect([...bytes.slice(1, 4)]).toEqual([0x50, 0x4e, 0x47]);
           found = { study: s.studyInstanceUid, series: se.seriesInstanceUid };
+          // image/jpeg を求めたら JPEG を返す（PNG を返さない。Accept が無いときも、rendered の既定の image/jpeg）
+          for (const accept of ["image/jpeg", undefined]) {
+            const jpeg = await backend.relayDicomweb({ method: "GET", target, search: "", accept });
+            expect(jpeg.headers.get("content-type")).toBe("image/jpeg");
+            expect([...new Uint8Array(await jpeg.arrayBuffer()).slice(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+          }
         }
       }
     }
@@ -212,7 +219,7 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
   it("中継：thumbnail・rendered は、受け付けない Accept（ブラウザの <img> の Accept）に 400。BFF が決めた Accept なら通る", async () => {
     const backend = createMockBackend();
     let target: WadoRsTarget | null = null;
-    for (const s of await backend.searchStudies()) {
+    for (const s of (await backend.searchStudies()).studies) {
       for (const se of await backend.searchSeries(s.studyInstanceUid)) {
         const t = wadoRsTarget(["studies", s.studyInstanceUid, "series", se.seriesInstanceUid, "thumbnail"])!;
         if ((await backend.relayDicomweb({ method: "GET", target: t, search: "" })).status === 200) target = t;

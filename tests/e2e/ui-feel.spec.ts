@@ -75,6 +75,60 @@ test("押せる物：カーソルは指の形、押せないときは禁止の�
   expect(cursor).toBe("not-allowed");
 });
 
+test("押している間の手応え：ボタンは沈んで影が消え、絞り込みの並びは内側に影。枠のボタンは白い地と影で浮かせる", async ({ page }) => {
+  await asAdmin(page);
+  await expect(rows(page).first()).toBeVisible();
+  const style = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => {
+      const s = getComputedStyle(el);
+      // Tailwind CSS v4 の translate-* は、CSS の translate の属性（transform ではない）
+      return { translate: s.translate, shadow: s.boxShadow };
+    });
+  // 見える影があるか（Tailwind CSS v4 は、影の無い形も透明の影を並べて書く。色の透明度が 0 でない影を探す）
+  const shadowVisible = (v: string) => v !== "none" && v.split(/,(?![^(]*\))/).some((part) => !/rgba\([^)]*,\s*0\)/.test(part));
+
+  // 「詳細条件」（枠のボタンの形）：押す前は影で浮き、押している間は 1px 沈んで影が消える。離すと戻る
+  const before = await style("filter-more");
+  expect(shadowVisible(before.shadow)).toBe(true);
+  expect(before.translate).toBe("none");
+  await page.getByTestId("filter-more").hover();
+  await page.mouse.down();
+  await expect.poll(async () => (await style("filter-more")).translate).toBe("0px 1px");
+  await expect.poll(async () => shadowVisible((await style("filter-more")).shadow)).toBe(false);
+  await page.mouse.up();
+  await expect.poll(async () => (await style("filter-more")).translate).toBe("none");
+
+  // 絞り込みの並びのボタンは、並びを崩さないよう沈めずに内側の影
+  await page.getByTestId("modality-MR").hover();
+  await page.mouse.down();
+  await expect.poll(async () => (await style("modality-MR")).shadow).toContain("inset");
+  expect((await style("modality-MR")).translate).toBe("none");
+  await page.mouse.up();
+  await page.getByTestId("modality-all").click();
+
+  // 共通のボタン（受け取りの「読み直す」。前は詳細の「UID」のボタンで確かめていた。#57）も同じ手応え。
+  // 枠のボタンの地は白（明るい地の上で、押せる物の形に見せる）
+  await page.goto("/received");
+  const reload = page.getByTestId("received-reload");
+  expect(await reload.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
+  await reload.hover();
+  await page.mouse.down();
+  await expect.poll(() => reload.evaluate((el) => getComputedStyle(el).translate)).toBe("0px 1px");
+  await page.mouse.up();
+  await expect.poll(() => reload.evaluate((el) => getComputedStyle(el).translate)).toBe("none");
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+
+  // 動きを減らす設定では沈めない（地の色と影の変化だけ）
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByTestId("filter-more").hover();
+  await page.mouse.down();
+  await expect.poll(async () => shadowVisible((await style("filter-more")).shadow)).toBe(false);
+  expect((await style("filter-more")).translate).toBe("none");
+  await page.mouse.up();
+  await page.emulateMedia({ reducedMotion: null });
+});
+
 test("選んだ行：主の色の薄い地と左の縦線。hover の行の地とは違う", async ({ page }) => {
   await asAdmin(page);
   await expect(rows(page)).toHaveCount(8);
@@ -92,6 +146,35 @@ test("選んだ行：主の色の薄い地と左の縦線。hover の行の地�
   // 詳細の見出しにも同じ縦線
   const head = page.getByTestId("detail-head");
   expect(await head.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("3px");
+});
+
+test("件数の行：検索の欄が空でも入っていても、件数と自動更新は条件の行とは別の行の同じ位置にある（#56）", async ({ page }) => {
+  await asAdmin(page);
+  await expect(rows(page)).toHaveCount(8);
+  const place = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left), y: Math.round(r.top) };
+    });
+  const search = page.getByTestId("study-search");
+  await expect(search).toHaveValue("");
+  const emptyCount = await place("study-count");
+  const emptyRefresh = await place("list-refresh");
+  await search.fill("JP-TEST-0004");
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  expect(await place("study-count")).toEqual(emptyCount);
+  expect(await place("list-refresh")).toEqual(emptyRefresh);
+  // 幅が狭くても、件数の行は条件の行の下に別の行として出る
+  const filters = await page.getByTestId("study-filters").boundingBox();
+  expect(emptyCount.y).toBeGreaterThanOrEqual(Math.round(filters!.y + filters!.height));
+
+  // 狭い幅（折り返す）でも、件数の行は条件の行の下にあり、横にはみ出さない。詳細条件を開いても同じ
+  await page.setViewportSize({ width: 700, height: 800 });
+  await page.getByTestId("filter-more").click();
+  const narrowFilters = await page.getByTestId("study-filters").boundingBox();
+  const narrowCount = await page.getByTestId("study-count").boundingBox();
+  expect(narrowCount!.y).toBeGreaterThanOrEqual(narrowFilters!.y + narrowFilters!.height);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
 test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に細い帯、古い行を薄く、件数は「—」。すぐ終われば出さない", async ({ page }) => {
@@ -121,7 +204,7 @@ test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に�
 });
 
 // 画面の言葉は docs/spec.md の 2.2 の用語集から選ぶ。用語集で「使わない言い方」とした言葉が、画面に出ていないことを確かめる。
-// 前の役割の名前のうち「医師」は、見本の依頼医の名前（試験 医師）に含まれるので、ここでは見ない（検証モードの帯に無いことは
+// 前の役割の名前のうち「医師」は、見本の紹介医の名前（試験 医師）に含まれるので、ここでは見ない（検証モードの帯に無いことは
 // tests/e2e/home.spec.ts で見る）
 const RETIRED_WORDS = [
   "すべての項目",
@@ -202,11 +285,10 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   await page.getByTestId("study-detail").getByTestId("open-menu").click();
   await collect("詳細とビューアのメニュー");
   await page.keyboard.press("Escape");
-  await page.getByTestId("detail-uid-toggle").click();
-  await page.getByRole("button", { name: "DICOM タグ" }).click();
+  await page.getByTestId("series-open").first().click();
+  await page.getByTestId("tag-set-study").click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
-  await collect("詳細の UID と DICOM タグ");
-  await page.getByTestId("detail-uid-toggle").click();
+  await collect("詳細の UID と検査のタグ");
   for (const path of ["/received", "/modalities", "/admin/viewers"]) {
     await page.goto(path);
     if (path === "/modalities") {

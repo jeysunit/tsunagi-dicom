@@ -1,7 +1,7 @@
 # GHCR の古いイメージを片付ける（週に1回と手動）。
 # 残す：版のタグ（v*）の付いたイメージは全部。ほかのタグ（sha-*・rebuild-*）の付いたイメージは新しい順に 10 個。2 日より新しいものは全部。
 # 消す：上に当たらないタグ付きのイメージと、タグの無いイメージ。署名・SBOM・provenance・プラットフォーム別の子は、親と一緒に残し・消す。
-# いまは dry-run（消さずに、消す候補を記録に出すだけ）。記録を確かめてから、別の PR で dry-run を外す。
+# 2026-10-21 に dry-run の記録（run 39506976836）を確かめた。消す候補は最も古い sha- のタグ1つ分だけで、latest・最新の sha-・rebuild-・cosign の署名・v* は候補に無かったので、dry-run を外した。
 #
 # Action の選び方：公式の actions/delete-package-versions は、タグの無い版を1つずつ消すだけで、
 # buildx の索引（image index）の子（SBOM・provenance）と cosign の署名（referrer・sha256-* のタグ）を見分けない。
@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   cleanup:
-    name: 古いイメージを片付ける（dry-run）
+    name: 古いイメージを片付ける
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -38,4 +38,4 @@ jobs:
           delete-orphaned-images: true
           older-than: 2 days
           validate: true
-          dry-run: true
+          dry-run: false

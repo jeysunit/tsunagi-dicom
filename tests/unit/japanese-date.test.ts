@@ -101,6 +101,17 @@ describe("日付・時刻・性別の読み取り", () => {
     expect(formatDicomTime("")).toBe("");
   });
 
+  it("TM の形（PS3.5 6.2）：時だけの値は分を「--」、小数の秒も読む。形の違う値は空", () => {
+    expect(formatDicomTime("07")).toBe("07:--");
+    expect(formatDicomTime("07 ")).toBe("07:--");
+    expect(formatDicomTime("093000.123456")).toBe("09:30");
+    expect(formatDicomTime("093000.1")).toBe("09:30");
+    expect(formatDicomTime("24")).toBe("");
+    expect(formatDicomTime("070")).toBe("");
+    expect(formatDicomTime("0930001")).toBe("");
+    expect(formatDicomTime("093000.1234567")).toBe("");
+  });
+
   it("性別", () => {
     expect([sexLabel("M"), sexLabel("F"), sexLabel("O"), sexLabel("m "), sexLabel(""), sexLabel("U")]).toEqual([
       "男",

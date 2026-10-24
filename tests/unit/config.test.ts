@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "@/lib/config";
+import { DEFAULT_INSTANCE_TAGS } from "@/lib/instance-tags";
 
 const SECRET = "x".repeat(48);
 
@@ -37,6 +38,19 @@ describe("設定の読み込み", () => {
     expect(config.auth).toMatchObject({ mode: "dev", mfaRequired: true, loginLockThreshold: 5 });
     expect(config.databaseUrl).toBe("file:/data/tsunagi.db");
     expect(config.timeZone).toBe("Asia/Tokyo");
+  });
+
+  it("監査の記録：前の SESSION_SECRET（1 行に 1 つ）と、先頭の控えのファイル（絶対のパス）を読む", () => {
+    expect(loadConfig(base).audit).toEqual({ anchorFile: undefined, sessionSecretPrevious: [] });
+    const config = loadConfig(
+      { ...base, SESSION_SECRET_PREVIOUS_FILE: "/run/secrets/previous", AUDIT_ANCHOR_FILE: "/audit-anchors/a.jsonl" },
+      { readFile: () => `${"p".repeat(40)}\n\n${"q".repeat(40)}\n` },
+    );
+    expect(config.audit).toEqual({ anchorFile: "/audit-anchors/a.jsonl", sessionSecretPrevious: ["p".repeat(40), "q".repeat(40)] });
+    // 短い値・読めないファイル・相対のパスは起動しない
+    expect(variablesOf({ ...base, SESSION_SECRET_PREVIOUS_FILE: "/p" }, { "/p": "short\n" })).toEqual(["SESSION_SECRET_PREVIOUS_FILE"]);
+    expect(variablesOf({ ...base, SESSION_SECRET_PREVIOUS_FILE: "/missing" })).toEqual(["SESSION_SECRET_PREVIOUS_FILE"]);
+    expect(variablesOf({ ...base, AUDIT_ANCHOR_FILE: "anchors.jsonl" })).toEqual(["AUDIT_ANCHOR_FILE"]);
   });
 
   it(".env.example の空の値は、設定しないのと同じに扱う", () => {
@@ -80,6 +94,52 @@ describe("設定の読み込み", () => {
     expect(variablesOf({ ...base, PASSWORD_HASH_CONCURRENCY: "0" })).toEqual(["PASSWORD_HASH_CONCURRENCY"]);
     expect(variablesOf({ ...base, PASSWORD_HASH_CONCURRENCY: "9" })).toEqual(["PASSWORD_HASH_CONCURRENCY"]);
     expect(variablesOf({ ...base, PASSWORD_HASH_QUEUE: "1025" })).toEqual(["PASSWORD_HASH_QUEUE"]);
+  });
+
+  it("検査の一覧の自動更新の間隔（既定 30 秒。0 で止める。1〜4 秒と 3600 秒より長い値・数でない値は起動しない）", () => {
+    expect(loadConfig(base).screen).toEqual({ studyListRefreshSeconds: 30, instanceTags: [...DEFAULT_INSTANCE_TAGS] });
+    expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "0" }).screen.studyListRefreshSeconds).toBe(0);
+    expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "5" }).screen.studyListRefreshSeconds).toBe(5);
+    expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "3600" }).screen.studyListRefreshSeconds).toBe(3600);
+    for (const bad of ["1", "4", "3601", "-1", "30s", "1.5"]) {
+      expect(variablesOf({ ...base, STUDY_LIST_REFRESH_SECONDS: bad })).toEqual(["STUDY_LIST_REFRESH_SECONDS"]);
+    }
+  });
+
+  describe("画像ごとの主なタグ（INSTANCE_TAGS。docs/spec.md の 3.1）", () => {
+    const tagsOf = (value: string | undefined) => loadConfig({ ...base, INSTANCE_TAGS: value }).screen.instanceTags;
+    const messageOf = (value: string) => problemsOf({ ...base, INSTANCE_TAGS: value });
+
+    it("3 つの書き方が混ざっても、書いた順に読む（16 進の大文字と小文字は区別しない）", () => {
+      expect(tagsOf("(0008,0018) 0020,0013 00280010")).toEqual(["00080018", "00200013", "00280010"]);
+      expect(tagsOf("  (0008,103e)\t0020,000d\n")).toEqual(["0008103E", "0020000D"]);
+    });
+
+    it("未設定・空（.env.example の空の値）は既定の 25 のタグ", () => {
+      expect(tagsOf(undefined)).toEqual([...DEFAULT_INSTANCE_TAGS]);
+      expect(tagsOf("")).toEqual([...DEFAULT_INSTANCE_TAGS]);
+      expect(DEFAULT_INSTANCE_TAGS).toHaveLength(25);
+    });
+
+    it("形の誤りは起動せず、誤った番号を示す", () => {
+      for (const bad of ["(0008,001G)", "0008-0018", "(00080018)", "(0008,0018", "0008,00181", "0008,0018,0020,0013"]) {
+        const problems = messageOf(bad);
+        expect(problems.map((p) => p.variable)).toEqual(["INSTANCE_TAGS"]);
+        expect(problems[0]!.message).toContain(bad);
+      }
+    });
+
+    it("重なりは起動せず、重なったタグを示す", () => {
+      const problems = messageOf("00080018 (0008,0018)");
+      expect(problems.map((p) => p.variable)).toEqual(["INSTANCE_TAGS"]);
+      expect(problems[0]!.message).toContain("0008,0018");
+    });
+
+    it("100 個までは起動し、101 個は起動しない", () => {
+      const many = (n: number) => Array.from({ length: n }, (_, i) => `0009${i.toString(16).padStart(4, "0")}`).join(" ");
+      expect(tagsOf(many(100))).toHaveLength(100);
+      expect(messageOf(many(101)).map((p) => p.variable)).toEqual(["INSTANCE_TAGS"]);
+    });
   });
 
   it("セッションの長さと再認証の時間（既定 10 分・12 時間・5 分。範囲の外は起動しない）", () => {

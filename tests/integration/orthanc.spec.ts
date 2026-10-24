@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
-import { syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
+import { newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
 import { readAudit, requestTrails } from "./support/audit-db";
 import { startGate, type Gate } from "./support/gate";
@@ -421,6 +423,14 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
   expect(body.ok).toBe(true);
   expect(body.checked).toBeGreaterThan(auditBefore);
   observe("audit.rowsAdded", body.checked - auditBefore);
+  // 鍵つきのつなぎ（鍵の無い行は無い）と、起動の時に書き出した先頭の控え（AUDIT_ANCHOR_FILE）との照らし合わせ
+  expect(body.legacy).toBe(0);
+  expect(body.anchors.status).toBe("checked");
+  expect(body.anchors.checked).toBeGreaterThanOrEqual(1);
+  const anchorLines = readFileSync(path.join(ITEST.workDir, "audit-anchors.jsonl"), "utf8").trim().split("\n");
+  const firstAnchor = JSON.parse(anchorLines[0]!) as { seq: number; hash: string; keyId: string | null };
+  expect(firstAnchor.keyId).toMatch(/^[0-9a-f]{16}$/);
+  expect(firstAnchor.hash).toMatch(/^[0-9a-f]{64}$/);
 
   // 操作ごとの行：つなぎが正しいだけでなく、書き込みの操作ごとに「求めた」「結果」「終わり」が要求の ID で結ばれている
   const rows = readAudit();
@@ -471,4 +481,450 @@ test("10 書き出しの結果が記録に残り、サムネイルがブラウ�
   });
   expect.soft(asImg.status(), "ブラウザの Accept のままのサムネイルが画像で返らない").toBe(200);
   expect.soft(asImg.headers()["content-type"] ?? "", "サムネイルの答えが画像でない").toMatch(/^image\//);
+});
+
+test("11 詳細条件：生年月日・性別・受付番号・検査名が、本物の Orthanc の QIDO-RS で引ける（2026-10-21）", async () => {
+  test.setTimeout(180_000);
+  const { page } = admin;
+  // 詳細条件の値だけを替えた、架空の患者の検査を2つ足す（生年月日は同じ、性別・受付番号・検査名は違う）
+  const D = syntheticStudy("adv-d", 21, 1, {
+    patientBirthDate: "19750510",
+    patientSex: "F",
+    accessionNumber: "IT-ADV-0001",
+    studyDescription: "Chest CT plain",
+  });
+  const E = syntheticStudy("adv-e", 22, 1, {
+    patientBirthDate: "19750510",
+    patientSex: "M",
+    accessionNumber: "IT-ADV-0002",
+    studyDescription: "HEAD CT",
+  });
+  for (const study of [D, E]) {
+    writeDumps(study);
+    await storescuToOrthanc(study.batch);
+    await waitFor(`Orthanc に ${study.batch} が入る`, () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  }
+  /** BFF の画面の API で絞った検査（試験で足した2つのうちのどれか） */
+  const found = async (params: Record<string, string>) => {
+    const res = await page.request.get(`/api/studies?${new URLSearchParams(params)}`);
+    expect(res.status()).toBe(200);
+    const { studies } = (await res.json()) as { studies: { studyInstanceUid: string }[] };
+    return [D, E].filter((s) => studies.some((r) => r.studyInstanceUid === s.studyInstanceUid)).map((s) => s.batch);
+  };
+  // Orthanc の QIDO-RS の答え（BFF が後から確かめて捨てる前）。大文字と小文字の扱いを記録する
+  const raw = async (query: Record<string, string>) => {
+    const rows = await orthancJson<Record<string, { Value?: unknown[] }>[]>(`dicom-web/studies?${new URLSearchParams(query)}`);
+    return [D, E].filter((s) => rows.some((r) => r["0020000D"]?.Value?.[0] === s.studyInstanceUid)).map((s) => s.batch);
+  };
+
+  expect(await found({ birth: "1975-05-10" })).toEqual(["adv-d", "adv-e"]);
+  expect(await found({ birth: "1975-05-10", sex: "F" })).toEqual(["adv-d"]);
+  expect(await found({ accession: "ADV-0002" })).toEqual(["adv-e"]);
+  expect(await found({ desc: "Chest CT" })).toEqual(["adv-d"]);
+  // ほかの検査（生年月日 19800101）は、生年月日の条件で出ない
+  const others = await page.request.get(`/api/studies?${new URLSearchParams({ birth: "1975-05-10" })}`);
+  expect(((await others.json()) as { studies: { patientId: string }[] }).studies.every((s) => s.patientId.startsWith("JP-TEST-IT2"))).toBe(true);
+
+  // 大文字と小文字：Orthanc の QIDO-RS の答えと、BFF の答えを並べて残す（仕様の 3.1 に書く）
+  const caseCheck = {
+    descLower: { orthanc: await raw({ StudyDescription: "*chest*" }), bff: await found({ desc: "chest" }) },
+    accessionLower: { orthanc: await raw({ AccessionNumber: "*adv-0001*" }), bff: await found({ accession: "adv-0001" }) },
+  };
+  observe("qido.advancedCase", caseCheck);
+  for (const [key, v] of Object.entries(caseCheck)) {
+    // Orthanc 26.9.1 の QIDO-RS は、大文字と小文字を区別しない（2026-10-21 に測った。仕様の 3.1 はこれを前提に書いた）
+    expect.soft(v.orthanc, `${key}：Orthanc が大文字と小文字を区別するようになった`).toEqual(["adv-d"]);
+    // BFF は Orthanc が合うとした検査を落とさない
+    expect.soft(v.bff, key).toEqual(v.orthanc);
+  }
+});
+
+test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像の並びを引き、WADO-RS の metadata で 1 枚の値を読む（2026-10-21）", async () => {
+  const { page } = admin;
+  const base = `/api/studies/${A.studyInstanceUid}/series/${A.seriesInstanceUid}/instances`;
+  const listRes = await page.request.get(base);
+  expect(listRes.status()).toBe(200);
+  const { instances } = (await listRes.json()) as { instances: { sopInstanceUid: string; instanceNumber: string }[] };
+  // 送った 3 枚が、画像の番号の順に並ぶ。画面へ返すのは選ぶのに要る値だけ
+  expect(instances.map((i) => i.sopInstanceUid)).toEqual(A.sopInstanceUids);
+  expect(instances.map((i) => i.instanceNumber)).toEqual(["1", "2", "3"]);
+  expect(Object.keys(instances[0]!).sort()).toEqual(["instanceNumber", "numberOfFrames", "sopClassUid", "sopInstanceUid"]);
+
+  // 1 枚の値の全部。その画像の SOPInstanceUID と画像の番号が入り、ほかの画像のものではない
+  const second = A.sopInstanceUids[1]!;
+  const valuesRes = await page.request.get(`${base}/${second}/values`);
+  expect(valuesRes.status()).toBe(200);
+  const { values } = (await valuesRes.json()) as { values: { tag: string; value: string }[] };
+  const value = (tag: string) => values.find((v) => v.tag === tag)?.value;
+  expect(value("0008,0018")).toBe(second);
+  expect(value("0020,0013")).toBe("2");
+  expect(value("0010,0020")).toBe(A.patientId);
+  // 別のシリーズの下の画像としては返さない
+  expect((await page.request.get(`/api/studies/${A.studyInstanceUid}/series/1.2.3/instances/${second}/values`)).status()).toBe(404);
+
+  // Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID と患者 ID を返すか（BFF が確かめに使う）を記録する
+  const rows = await orthancJson<Record<string, unknown>[]>(
+    `dicom-web/studies/${A.studyInstanceUid}/series/${A.seriesInstanceUid}/instances?includefield=00100020`,
+  );
+  const keys = Object.keys(rows[0] ?? {}).filter((k) => ["0020000D", "0020000E", "00100020"].includes(k));
+  observe("qido.instanceKeys", keys);
+  // BFF は、この 3 つがあることを前提に、求めた検査・シリーズの画像だけを返す（2026-10-21 に Orthanc 26.9.1 で測った）
+  expect.soft(keys.sort(), "Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID か患者 ID を返さなくなった").toEqual(["0020000D", "0020000E", "00100020"].sort());
+});
+
+// 13（検査を 1001 件足す）より前に流す
+test("14 画像ごとの主なタグ：ISO 2022 IR 87 の検査の氏名と検査名が、本物の Orthanc の WADO-RS の metadata から崩れずに返る（2026-10-23）", async () => {
+  test.setTimeout(120_000);
+  const { page } = admin;
+  // 文字の集合が ISO 2022 IR 87（JIS X 0208）の、架空の患者の検査
+  const J = syntheticStudy("study-jp", 23, 2, {
+    charset: "\\ISO 2022 IR 87",
+    patientName: "ITEST^HANAKO=試験^花子=しけん^はなこ",
+    studyDescription: "頭部単純",
+  });
+  writeDumps(J);
+  await storescuToOrthanc(J.batch);
+  await waitFor(`Orthanc に ${J.batch} が入る`, () => lookupStudy(J.studyInstanceUid), (ids) => ids.length === 1);
+
+  const sop = J.sopInstanceUids[1]!;
+  const res = await page.request.get(`/api/studies/${J.studyInstanceUid}/series/${J.seriesInstanceUid}/instances/${sop}/tags`);
+  expect(res.status()).toBe(200);
+  const { tags } = (await res.json()) as { tags: { tag: string; name: string; vr: string; value: string | null }[] };
+  // INSTANCE_TAGS（playwright.config.ts）の順に、設定のタグだけ
+  expect(tags.map((t) => t.tag)).toEqual(["0020,0013", "0008,0018", "0010,0010", "0008,1030", "0028,0010", "0018,0050", "0002,0010"]);
+  const byTag = (tag: string) => tags.find((t) => t.tag === tag)!;
+  expect(byTag("0020,0013")).toMatchObject({ name: "画像番号", value: "2" });
+  expect(byTag("0008,0018").value).toBe(sop);
+  // 漢字とかなが崩れない（BFF は文字コードを読み替えず、Orthanc が直した値をそのまま返す）
+  expect(byTag("0010,0010")).toMatchObject({ name: "氏名", vr: "PN", value: "ITEST^HANAKO=試験^花子=しけん^はなこ" });
+  expect(byTag("0008,1030")).toMatchObject({ name: "検査名", value: "頭部単純" });
+  expect(byTag("0028,0010").value).toBe("8");
+  // 画像に無いタグは null
+  expect(byTag("0018,0050")).toMatchObject({ vr: "", value: null });
+  // ファイルのメタ情報（転送構文）が WADO-RS の metadata に入るかを記録する（既定の一覧に入れなかった理由）
+  observe("metadata.transferSyntax", byTag("0002,0010"));
+  // 設定に無いタグ（患者ID）は返らない
+  expect(JSON.stringify(tags)).not.toContain(J.patientId);
+
+  // Orthanc の WADO-RS の metadata の答えの、文字の集合と日本語の値（モックの見本に写す）
+  const metadata = await orthancJson<Record<string, { vr: string; Value?: unknown[] }>[]>(
+    `dicom-web/studies/${J.studyInstanceUid}/series/${J.seriesInstanceUid}/instances/${sop}/metadata`,
+  );
+  observe("metadata.iso2022", {
+    "00080005": metadata[0]?.["00080005"],
+    "00081030": metadata[0]?.["00081030"],
+    "00100010": metadata[0]?.["00100010"],
+  });
+
+  // 画面：サムネイルから開き、主なタグの表に日本語の氏名が出る
+  await openStudy(page, J);
+  await page.getByTestId("series-open").click();
+  const table = page.getByTestId("series-images").getByTestId("instance-tags");
+  await expect(table.locator('tr[data-tag="0010,0010"]')).toContainText("試験^花子=しけん^はなこ");
+  await expect(table.locator('tr[data-tag="0008,1030"]')).toContainText("頭部単純");
+});
+
+test("13 上限を超えたとき：検査が 1000 件を超えても、いちばん新しい検査が一覧に出て、件数は「以上」になる（2026-10-21）", async () => {
+  // 最後の試験に置く（Orthanc に 1000 件を超える検査を足すので、ほかの試験の一覧に混ざらないように）
+  test.setTimeout(600_000);
+  const { page } = admin;
+  // 古い検査（2020-01-01 から 1 日に 1 件、1001 日分）を先に入れ、いちばん新しい検査を最後に入れる。
+  // Orthanc の REST（tools/create-dicom）で 1 枚ずつ作る（架空の患者。画像は無い）
+  const BULK_DAYS = 1001;
+  const bulk = Array.from({ length: BULK_DAYS }, (_, i) => ({
+    uid: newUid(),
+    date: new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString().slice(0, 10).replaceAll("-", ""),
+  }));
+  const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const latest = { uid: newUid(), date: today };
+  const create = async (s: { uid: string; date: string }, time: string) => {
+    const res = await orthanc("tools/create-dicom", {
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify({
+        Force: true,
+        Tags: {
+          SpecificCharacterSet: "ISO_IR 192",
+          PatientID: "JP-TEST-IT90",
+          PatientName: "ITEST^LIMIT",
+          StudyInstanceUID: s.uid,
+          SeriesInstanceUID: newUid(),
+          SOPInstanceUID: newUid(),
+          StudyDate: s.date,
+          StudyTime: time,
+          Modality: "CT",
+        },
+      }),
+    });
+    expect(res.status, `検査 ${s.date} を作る`).toBe(200);
+    await res.body?.cancel();
+  };
+  for (let i = 0; i < bulk.length; i += 8) await Promise.all(bulk.slice(i, i + 8).map((s) => create(s, "090000")));
+  await create(latest, "235959");
+  const total = (await orthancJson<{ CountStudies: number }>("statistics")).CountStudies;
+  expect(total).toBeGreaterThan(1001);
+
+  // Orthanc の QIDO-RS が limit で切ったときに返す順と、続きの知らせ（Warning 299）を記録する（PS3.18 8.3.4.4 は順を決めていない）
+  const rawRes = await orthanc("dicom-web/studies?limit=1000");
+  expect(rawRes.status).toBe(200);
+  const raw = (await rawRes.json()) as Record<string, { Value?: unknown[] }>[];
+  const rawUids = raw.map((r) => String(r["0020000D"]?.Value?.[0] ?? ""));
+  const rawDates = raw.map((r) => String(r["00080020"]?.Value?.[0] ?? ""));
+  const sortedDesc = [...rawDates].sort().reverse();
+  const askMore = await orthanc("dicom-web/studies?limit=1001");
+  const askMoreRows = ((await askMore.json()) as unknown[]).length;
+  observe("qido.limitOrder", {
+    total,
+    returned: raw.length,
+    warning: rawRes.headers.get("warning"),
+    warningLimit1001: askMore.headers.get("warning"),
+    returnedLimit1001: askMoreRows,
+    includesLatest: rawUids.includes(latest.uid),
+    newestFirst: rawDates.join() === sortedDesc.join(),
+    oldestFirst: rawDates.join() === [...sortedDesc].reverse().join(),
+    firstDates: rawDates.slice(0, 3),
+    lastDates: rawDates.slice(-3),
+  });
+
+  // BFF：いちばん新しい検査が一覧の先頭に出る。件数は確定にしない。新しい順の 1000 件（古い側の検査だけが外れる）
+  const res = await page.request.get("/api/studies");
+  expect(res.status()).toBe(200);
+  const list = (await res.json()) as { count: { count: number; exact: boolean }; studies: { studyInstanceUid: string }[] };
+  expect(list.studies[0]?.studyInstanceUid).toBe(latest.uid);
+  expect(list.count).toEqual({ count: 1000, exact: false });
+  const shown = new Set(list.studies.map((s) => s.studyInstanceUid));
+  const left = total - 1000;
+  expect(bulk.slice(0, left).filter((s) => shown.has(s.uid)), "外れるのは古い側の検査だけ").toEqual([]);
+  expect(bulk.slice(left).filter((s) => !shown.has(s.uid)), "新しい側の検査は全部出る").toEqual([]);
+
+  // 範囲の中が上限に届かなければ、件数は確定
+  const january = await page.request.get(`/api/studies?${new URLSearchParams({ date: "range", from: "2020-01-01", to: "2020-01-31" })}`);
+  const jan = (await january.json()) as { count: { count: number; exact: boolean }; studies: { studyInstanceUid: string }[] };
+  expect(jan.count).toEqual({ count: 31, exact: true });
+  expect(jan.studies.map((s) => s.studyInstanceUid).sort()).toEqual(bulk.slice(0, 31).map((s) => s.uid).sort());
+});
+
+
+test("15 HL7 の A40：患者 ID を替え、Study・Series・SOP の UID を保ち、元の検査を残さない", async () => {
+  const study = syntheticStudy("hl7-a40", 50, 2);
+  const temporaryId = study.patientId;
+  const finalId = "JP-TEST-HL7-FINAL";
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [oldId] = await waitFor("HL7 の試験の検査が入る", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  const controlId = `HL7-${newUid().slice(-16)}`;
+  const token = process.env.ITEST_HL7_TOKEN;
+  if (!token) {
+    throw new Error("試験の HL7 token が無い");
+  }
+  const message = [
+    `MSH|^~\\&|TEST|TEST|BFF|TEST|20261024120000||ADT^A40^ADT_A39|${controlId}|P|2.3.1`,
+    `PID|1||${finalId}^^^RIS_EMU^PI||ITEST^FINAL`,
+    `MRG|${temporaryId}^^^RIS_EMU^PI`,
+    "",
+  ].join("\r");
+  // fetch の要求のヘッダーを試験の報告に出さない（token は試験のたびに作る）。
+  const response = await fetch(`${bffUrl}/api/hl7/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ peer: "192.0.2.1", message: Buffer.from(message).toString("base64") }),
+    signal: AbortSignal.timeout(60000),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json() as {
+    ack: string;
+  };
+  expect(Buffer.from(body.ack, "base64").toString()).toContain(`MSA|AA|${controlId}|`);
+  const [newId] = await lookupStudy(study.studyInstanceUid);
+  expect(newId).toBeTruthy();
+  expect(newId).not.toBe(oldId);
+  expect((await orthanc(`studies/${oldId}`)).status).toBe(404);
+  const current = await orthancJson<{
+    MainDicomTags: {
+      StudyInstanceUID: string;
+    };
+    PatientMainDicomTags: {
+      PatientID: string;
+    };
+    Series: string[];
+  }>(`studies/${newId}`);
+  expect(current.MainDicomTags.StudyInstanceUID).toBe(study.studyInstanceUid);
+  expect(current.PatientMainDicomTags.PatientID).toBe(finalId);
+  const series = await orthancJson<{
+    MainDicomTags: {
+      SeriesInstanceUID: string;
+    };
+  }>(`series/${current.Series[0]}`);
+  expect(series.MainDicomTags.SeriesInstanceUID).toBe(study.seriesInstanceUid);
+  const instances = await orthancJson<{
+    MainDicomTags: {
+      SOPInstanceUID: string;
+    };
+  }[]>(`studies/${newId}/instances`);
+  expect(instances.map((i) => i.MainDicomTags.SOPInstanceUID).sort()).toEqual([...study.sopInstanceUids].sort());
+  expect(await orthancJson("tools/find", {
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({ Level: "Study", Query: { PatientID: temporaryId }, Expand: false })
+  })).toEqual([]);
+  const rows = readAudit().filter((r) => r.action === "hl7" && r.detail.controlId === controlId);
+  expect(rows.map((r) => `${r.detail.event}:${r.outcome}`)).toEqual([
+    "received:success",
+    "request:success",
+    "dispatch:success",
+    "result:success",
+    "ack:success"
+  ]);
+  expect(rows[3]!.detail).toMatchObject({
+    writeId: rows[1]!.detail.writeId,
+    oldOrthancId: oldId,
+    newOrthancId: newId,
+    before: expect.arrayContaining([expect.objectContaining({ PatientID: temporaryId })]),
+    after: expect.arrayContaining([expect.objectContaining({ PatientID: finalId })])
+  });
+  const tags = await orthancJson<Record<string, Record<string, string>>>(`studies/${newId}/instances-tags?simplify`);
+  expect(Object.values(tags)).toHaveLength(study.sopInstanceUids.length);
+  const actualUids = Object.values(tags).map(t => [t.StudyInstanceUID, t.SeriesInstanceUID, t.SOPInstanceUID].join("|"));
+  const expectedUids = study.sopInstanceUids.map(sop => [study.studyInstanceUid, study.seriesInstanceUid, sop].join("|"));
+  expect(actualUids.sort()).toEqual(expectedUids.sort());
+  for (const t of Object.values(tags))
+    expect(t).toMatchObject({
+      PatientID: finalId,
+      PatientName: "ITEST^FINAL",
+      PatientBirthDate: study.patientBirthDate,
+      PatientSex: study.patientSex,
+      AccessionNumber: study.accessionNumber
+    });
+});
+
+// 既存の取り込み（beforeAll、詳細条件、日本語タグ）はすべて新しい UID を1回送る。
+// 重複の送り直しが無視されることを期待する場面は無い。OverwriteInstances はこの試験の Orthanc だけに設定する。
+async function sendHl7(kind: "A40" | "A08" | "ORM", patientId: string, fields: {
+  name?: string;
+  birth?: string;
+  old?: string;
+  uid?: string;
+  accession?: string;
+} = {}) {
+  const token = process.env.ITEST_HL7_TOKEN;
+  if (!token) {
+    throw Error("試験の HL7 token が無い");
+  }
+  const controlId = `IT-${newUid().slice(-16)}`;
+  const msh = [
+    "MSH",
+    "^~\\&",
+    "ITEST",
+    "ITEST",
+    "BFF",
+    "ITEST",
+    "20261024120000",
+    "",
+    kind === "ORM" ? "ORM^O01^ORM_O01" : `ADT^${kind}^${kind === "A40" ? "ADT_A39" : "ADT_A01"}`,
+    controlId,
+    "P",
+    "2.3.1",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "UNICODE UTF-8"
+  ].join("|");
+  const segments = [
+    msh,
+    `PID|1||${patientId}^^^RIS_EMU^PI||${fields.name ?? ""}||${fields.birth ?? ""}|`
+  ];
+  if (kind === "A40") {
+    segments.push(`MRG|${fields.old}^^^RIS_EMU^PI`);
+  }
+  if (kind === "ORM") {
+    const obr = Array<string>(19).fill("");
+    obr[0] = "OBR";
+    obr[18] = fields.accession!;
+    segments.push("ORC|NW", obr.join("|"), `ZDS|${fields.uid}`);
+  }
+  const response = await fetch(`${bffUrl}/api/hl7/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      peer: "192.0.2.1",
+      message: Buffer.from(segments.join("\r") + "\r").toString("base64")
+    }),
+    signal: AbortSignal.timeout(130000)
+  });
+  expect(response.status).toBe(200);
+  return Buffer.from((await response.json() as {
+    ack: string;
+  }).ack, "base64").toString();
+}
+async function hl7Tags(study: ReturnType<typeof syntheticStudy>) {
+  const ids = await lookupStudy(study.studyInstanceUid);
+  expect(ids).toHaveLength(1);
+  const tags = Object.values(await orthancJson<Record<string, Record<string, string>>>(`studies/${ids[0]}/instances-tags?simplify`));
+  expect(tags).toHaveLength(study.sopInstanceUids.length);
+  const actualUids = tags.map(t => [t.StudyInstanceUID, t.SeriesInstanceUID, t.SOPInstanceUID].join("|"));
+  const expectedUids = study.sopInstanceUids.map(sop => [study.studyInstanceUid, study.seriesInstanceUid, sop].join("|"));
+  expect(actualUids.sort()).toEqual(expectedUids.sort());
+  return tags;
+}
+test("16 HL7 A08 と ORM は全画像の UID を保ち値を揃える", async () => {
+  const study = syntheticStudy("hl7-a08-orm", 51, 3, { accessionNumber: "" });
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  await waitFor("HL7 の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  const [originalId] = await lookupStudy(study.studyInstanceUid);
+  expect(await sendHl7("A08", study.patientId, { name: "ITEST^UPDATED" })).toContain("MSA|AA|");
+  for (const t of await hl7Tags(study))
+    expect(t).toMatchObject({
+      PatientID: study.patientId,
+      PatientName: "ITEST^UPDATED",
+      PatientBirthDate: study.patientBirthDate,
+      PatientSex: study.patientSex,
+      AccessionNumber: ""
+    });
+  expect(await sendHl7("ORM", study.patientId, { uid: study.studyInstanceUid, accession: "IT-HL7-ORM" })).toContain("MSA|AA|");
+  for (const t of await hl7Tags(study))
+    expect(t).toMatchObject({
+      PatientID: study.patientId,
+      PatientName: "ITEST^UPDATED",
+      PatientBirthDate: study.patientBirthDate,
+      PatientSex: study.patientSex,
+      AccessionNumber: "IT-HL7-ORM"
+    });
+  expect(await lookupStudy(study.studyInstanceUid)).toEqual([originalId]);
+});
+test("17 HL7 A40 の替え先が存在：違う属性は両方を保ち、同じ属性は統合する", async () => {
+  const source = syntheticStudy("hl7-merge-source", 52, 2, { patientName: "SOURCE^PATIENT", patientBirthDate: "19990101" });
+  const target = syntheticStudy("hl7-merge-target", 53, 3, { patientName: "TARGET^PATIENT", patientBirthDate: "19800101" });
+  for (const study of [source, target]) {
+    writeDumps(study);
+    await storescuToOrthanc(study.batch);
+    await waitFor("HL7 の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  }
+  const [oldId] = await lookupStudy(source.studyInstanceUid);
+  const beforeSource = await hl7Tags(source);
+  const beforeTarget = await hl7Tags(target);
+  const conflictingAck = await sendHl7("A40", target.patientId, {
+    old: source.patientId, name: target.patientName, birth: "20000101",
+  });
+  expect(conflictingAck).toContain("MSA|AE|");
+  expect(await hl7Tags(source)).toEqual(beforeSource);
+  expect(await hl7Tags(target)).toEqual(beforeTarget);
+  expect(await sendHl7("A40", target.patientId, { old: source.patientId, name: target.patientName })).toContain("MSA|AA|");
+  for (const t of await hl7Tags(source))
+    expect(t).toMatchObject({
+      PatientID: target.patientId,
+      PatientName: target.patientName,
+      PatientBirthDate: target.patientBirthDate,
+      PatientSex: target.patientSex,
+      AccessionNumber: source.accessionNumber
+    });
+  expect(await hl7Tags(target)).toEqual(beforeTarget);
+  expect((await orthanc(`studies/${oldId}`)).status).toBe(404);
+  expect(await orthancJson("tools/find", {
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({ Level: "Study", Query: { PatientID: source.patientId }, Expand: false })
+  })).toEqual([]);
 });

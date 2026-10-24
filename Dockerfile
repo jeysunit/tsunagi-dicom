@@ -40,8 +40,8 @@ FROM ${NODE_IMAGE} AS runner
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
-  && mkdir -p /data \
-  && chown node:node /data
+  && mkdir -p /data /audit-anchors \
+  && chown node:node /data /audit-anchors
 # CHECKPOINT_DISABLE：起動の時の prisma migrate deploy が、外へ版の確かめを送らないようにする
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

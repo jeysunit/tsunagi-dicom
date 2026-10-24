@@ -1,0 +1,199 @@
+# 開発・試験用の一式：配る compose（deploy/compose.yaml の tsunagi-dicom と Orthanc）に、
+# ris-emulator（架空の患者の検査の予約を作り、MWL で返す RIS）、dicom-test-generator（DTG。検査装置のふりをして、
+# ワークリストの予約か緊急の患者で撮り、画像を送る）と、DCMTK の storescp（送信の相手）を足す。
+# 架空の患者だけで使う。施設の画像サーバーにはつながない。
+#
+#   docker/dev/up.sh        # secret を作り、tsunagi-dicom のイメージを作り、一式を立てる（docs/round-trip-test.md）
+#
+# 流れ：ris-emulator の予約 →（C-FIND MWL）→ DTG →（C-STORE）→ Orthanc → tsunagi-dicom の受信一覧 →
+#       tsunagi-dicom の「送信」→ Orthanc →（C-STORE）→ storescp
+#
+# - deploy/compose.yaml の変数は dev.env で与える（相対のパスは deploy/ から数える）。シェルの環境変数があれば、そちらが先に効く。
+# - ris-emulator・DTG・storescp は、Orthanc の DICOM のネットワーク（dicom）に入る。tsunagi-dicom と Orthanc だけの
+#   内部ネットワーク（backend）には入らない。dicom のコンテナどうしの通信は、dev.env の ORTHANC_DICOM_ICC=true で許す
+#   （配る compose の既定は止める）。そのため、この compose では DTG と storescp から Orthanc の REST に届く（認証は要る）。
+# - HL7 の受け口（hl7-receiver）は、ris-emulator だけと共有する hl7 のネットワークと backend に入り、ホストにポートを出さない。
+#   ris-emulator の `pir send` で、患者の統合（A40）・属性の更新（A08）・予約（ORM）を送る（送り先は docker/dev/ris/app_config.yaml の
+#   hl7.host で受け口にしてある。`--host hl7-receiver` を付けても同じ）。
+#   受け口のための token と発番元は hl7.override.yaml で tsunagi-dicom に渡す。患者 ID を変えない書き換え（A08・ORM）のために、
+#   Orthanc を OverwriteInstances: true にする（docker/dev/orthanc/site.json。同じ SOP Instance UID の送り直しは上書きになる）。
+# - Orthanc は送り元の IP アドレスを確かめない（docker/dev/orthanc/site.json の DicomCheckModalityHost: false。接続先の Host が
+#   コンテナの名前のため）。
+# - DTG の Web 画面は 127.0.0.1:${DEV_DTG_WEB_PORT:-18080}（利用者 dtg）、ris-emulator の Web 画面は
+#   127.0.0.1:${DEV_RIS_WEB_PORT:-18081}（利用者 ris）に公開する（どちらも HTTP Basic）。MWL（ris:11112）はホストに出さない。
+# - DTG と ris-emulator の時間帯は Asia/Tokyo（Orthanc と同じ）。コンテナの既定の UTC のままだと、検査日・時刻（StudyDate・StudyTime）を
+#   UTC の時刻で書き、検査一覧の検査日時が 9 時間ずれる（2026-10-21 に承認者が見つけた）。予約の「今日」も同じ時間帯で決まる。
+# - 6 つのサービス（tsunagi-dicom・Orthanc は deploy/compose.yaml、ris-emulator・DTG・storescp・hl7-receiver はここ）は restart: unless-stopped。
+#   Docker が起き直したときに、一式がそろって立つ（止めたものは止めたまま）。
+# - 作るイメージの名前には compose のプロジェクトの名前（COMPOSE_PROJECT_NAME。既定は下の name の tsunagi-dev）を入れる
+#   （<プロジェクト>-ris:local・<プロジェクト>-dtg:local・<プロジェクト>-dcmtk:local。tsunagi-dicom は up.sh が
+#   <プロジェクト>-tsunagi:local で作る）。一式を2つ立てても、片方を作り直したときに、もう片方のイメージの名前が付け替わらない。
+
+name: tsunagi-dev
+
+include:
+  # hl7.override.yaml：tsunagi-dicom に HL7 の受け口との token と、受ける患者 ID の発番元を足す（配る compose は変えない）
+  - path:
+      - ../../deploy/compose.yaml
+      - ./hl7.override.yaml
+    env_file: ./dev.env
+
+services:
+  ris:
+    # ris-emulator の Dockerfile から作る。版は commit で固定する（RIS_GIT_REF で替えられる）
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-ris:local
+    build:
+      # 既定は main の 3573572（HL7 の送信 pir send のある版）
+      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-3573572224b4aef907ce2916c634a26a972c8e76}
+    environment:
+      RIS_WEB_PASSWORD_FILE: /run/secrets/ris_web_password
+      # Web 画面と MWL を、コンテナの中では 0.0.0.0 で待ち受ける（イメージの既定と同じ。設定ファイルより先に効く）
+      RIS_WEB_BIND_ADDRESS: 0.0.0.0
+      RIS_MWL_BIND_ADDRESS: 0.0.0.0
+      # 予約の「今日」と予定の時刻を日本の時刻で決める（DTG の TZ と同じ）
+      TZ: Asia/Tokyo
+    volumes:
+      # 予約は SQLite（/app/state）に残る
+      - ris-state:/app/state
+      # CT の装置の AE タイトルを DTG にそろえ、HL7 の送り先を受け口にした設定（docker/dev/ris/app_config.yaml の冒頭）
+      - ./ris/app_config.yaml:/app/config/app_config.yaml:ro
+    secrets:
+      - ris_web_password
+    ports:
+      - "127.0.0.1:${DEV_RIS_WEB_PORT:-18081}:8081"
+    networks:
+      - dicom
+      # HL7 の受け口へ送る（pir send --host hl7-receiver）
+      - hl7
+    healthcheck:
+      # Web 画面の待ち受けと、MWL の C-ECHO（AE タイトル RIS_EMU。相手の AE タイトルを確かめる設定のため名指しする）
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import socket
+          from pynetdicom import AE
+          socket.create_connection(("127.0.0.1", 8081), 3).close()
+          ae = AE(ae_title="RIS_HEALTH")
+          ae.add_requested_context("1.2.840.10008.1.1")
+          assoc = ae.associate("127.0.0.1", 11112, ae_title="RIS_EMU")
+          ok = assoc.is_established and assoc.send_c_echo().Status == 0
+          if assoc.is_established:
+              assoc.release()
+          raise SystemExit(0 if ok else 1)
+      # 起動の間は 2 秒ごと、起きた後は 30 秒ごと（C-ECHO の接続の記録を増やしすぎない）
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  dtg:
+    # dicom-test-generator の Dockerfile から作る。版は commit で固定する（DTG_GIT_REF で替えられる）
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-dtg:local
+    build:
+      # 既定は main の 52380eb（#19 のマージの後）
+      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-52380eb2c294309fa7a607696114ee4406c42e0e}
+    environment:
+      DTG_WEB_PASSWORD_FILE: /run/secrets/dtg_web_password
+      # 検査日・時刻を日本の時刻で書く（Orthanc の TZ と同じ）
+      TZ: Asia/Tokyo
+    volumes:
+      # ワークリストは ris-emulator（ris:11112）、送信先は Orthanc（orthanc:4242）。Web 画面はコンテナの中で 0.0.0.0 に bind する
+      - ./dtg/app_config.yaml:/app/config/app_config.yaml:ro
+      - dtg-state:/app/modality_state
+      - dtg-output:/app/output
+    secrets:
+      - dtg_web_password
+    ports:
+      - "127.0.0.1:${DEV_DTG_WEB_PORT:-18080}:8080"
+    networks:
+      - dicom
+    depends_on:
+      orthanc:
+        condition: service_healthy
+      ris:
+        condition: service_healthy
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  storescp:
+    # 結合の試験と同じ Dockerfile（docker/test/dcmtk）の DCMTK のイメージ。受けたファイルを検査の UID ごとのフォルダに置く
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-dcmtk:local
+    build: ../test/dcmtk
+    init: true
+    command:
+      - storescp
+      - --aetitle
+      - DEV_SCP
+      - --output-directory
+      - /received
+      - --sort-on-study-uid
+      - study
+      - "11112"
+    volumes:
+      - storescp-received:/received
+    networks:
+      - dicom
+    healthcheck:
+      test: ["CMD", "echoscu", "--aetitle", "DEV_HEALTH", "--call", "DEV_SCP", "127.0.0.1", "11112"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  hl7-receiver:
+    # HL7 v2 の受け口（MLLP。docs/spec.md の 3.5「HL7 による患者情報の更新」）。中身は読まずに tsunagi-dicom へ渡す。
+    # 待ち受けは hl7 のネットワーク（ris-emulator だけ）と backend の中だけで、ホストにポートを出さない。
+    # 送り手は許可の一覧の ris だけ（backend の tsunagi-dicom・Orthanc から来ても、読まずに閉じる）
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-hl7-receiver:local
+    build:
+      context: ../..
+      dockerfile: hl7-receiver/Dockerfile
+    environment:
+      HL7_LISTEN_PORT: "2575"
+      HL7_ALLOWED_SOURCES: ris
+      HL7_FORWARD_URL: http://tsunagi:3000/api/hl7/messages
+      HL7_RECEIVER_TOKEN_FILE: /run/secrets/hl7_receiver_token
+      TZ: Asia/Tokyo
+    secrets:
+      - hl7_receiver_token
+    networks:
+      - hl7
+      - backend
+    depends_on:
+      tsunagi:
+        condition: service_healthy
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+networks:
+  # ris-emulator と HL7 の受け口だけのネットワーク
+  hl7: {}
+
+secrets:
+  ris_web_password:
+    file: ./secrets/ris_web_password.txt
+  dtg_web_password:
+    file: ./secrets/dtg_web_password.txt
+  # hl7_receiver_token は hl7.override.yaml（include）で決める。ここで決め直すと、取り込んだものとぶつかる
+
+volumes:
+  ris-state:
+  dtg-state:
+  dtg-output:
+  storescp-received:

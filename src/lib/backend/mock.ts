@@ -1,8 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { crc32 } from "node:zlib";
 import {
+  checkedPatientId,
+  studyPatientFromRest,
   firstInstanceId,
   isOrthancId,
   jobFromRest,
@@ -17,7 +19,8 @@ import {
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
 import {
-  inDateRange,
+  matchesStudyQuery,
+  sortInstances,
   sortSeries,
   sortStudiesNewestFirst,
   stringValue,
@@ -28,9 +31,11 @@ import {
 import { isAcceptableImageAccept, wadoRsTarget } from "@/lib/backend/relay-path";
 import {
   BackendError,
+  BackendUnknownError,
   clampStudyLimit,
   STUDY_LIMIT,
   type Backend,
+  type InstanceSummary,
   type ReceivedStudy,
   type RelayRequest,
   type SeriesSummary,
@@ -48,6 +53,8 @@ import {
 //   機器 offline は C-ECHO に答えない。
 // - 段 5：書き出しは、画像の本体を入れない小さな ZIP を返す。削除は、このプロセスの記憶の中で検査を隠す（見本のファイルは変えない。
 //   消した検査は、検索・詳細・受け取りの記録・引き当て・中継のどれにも出さない）。
+// - 画像単位の DICOM タグ（2026-10-21）：シリーズの中の画像は REST の写しの Instances の並びから作る。画像の写しが1枚しか無いので、
+//   ほかの画像の SOPInstanceUID と値は、Orthanc の ID から決まる合成の値にする（instanceDatasetOf）。
 
 /** モックの仕事（このプロセスの記憶の中だけ。Next.js が部品を分けて組んでも1つにする） */
 interface MockJob {
@@ -63,6 +70,9 @@ const mockJobs = (jobsHolder[JOBS_KEY] ??= new Map<string, MockJob>());
 
 /** モックの /changes が 1 回に返す数の上限（実の Orthanc が切り詰める形をまねる。BFF が Last から続けて読むことを試す） */
 const MOCK_CHANGES_MAX = 5;
+const UPDATES_KEY = Symbol.for("tsunagi-dicom.mock-hl7");
+const updatesHolder = globalThis as typeof globalThis & { [UPDATES_KEY]?: Map<string, { id: string; replace: Record<string, string> }> };
+const mockUpdates = (updatesHolder[UPDATES_KEY] ??= new Map<string, { id: string; replace: Record<string, string> }>());
 
 const orthancNow = (d = new Date()) => d.toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 
@@ -74,13 +84,18 @@ const mockDeleted = (deletedHolder[DELETED_KEY] ??= new Set<string>());
 /** 試験のための、モックの Orthanc の中の変化（同じ UID の検査が2つある・確かめの後に検査が変わった） */
 const TEST_KEY = Symbol.for("tsunagi-dicom.mock-test");
 const testHolder = globalThis as typeof globalThis & {
-  [TEST_KEY]?: { extraIds: Map<string, string[]>; versions: Map<string, string> };
+  [TEST_KEY]?: { extraIds: Map<string, string[]>; versions: Map<string, string>; revision: number };
 };
-const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map() });
+const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map(), revision: 0 });
 
 /** 試験のため：モックで消した検査と、試験の変化を戻す */
 export function restoreMockStudies(): void {
   mockDeleted.clear();
+  mockUpdates.clear();
+  hl7Jobs.clear();
+  hl7Instances.clear();
+  hl7Simulation = {};
+  mockTest.revision = 0;
   mockTest.extraIds.clear();
   mockTest.versions.clear();
 }
@@ -140,7 +155,9 @@ async function readJson<T>(...parts: string[]): Promise<T> {
 
 interface RestStudy {
   ID: string;
+  originalId?: string;
   MainDicomTags: { StudyInstanceUID?: string };
+  PatientMainDicomTags: Record<string, string | undefined>;
 }
 interface RestSeries {
   ID: string;
@@ -151,7 +168,77 @@ interface RestSeries {
 interface RestInstance {
   ID: string;
   ParentSeries: string;
-  MainDicomTags: { SOPInstanceUID?: string };
+  MainDicomTags: { SOPInstanceUID?: string; InstanceNumber?: string; AcquisitionNumber?: string; ImagePositionPatient?: string };
+}
+
+/** モックの画像（画像単位の DICOM タグの見本） */
+interface MockInstance {
+  series: RestSeries;
+  tags: RestInstance["MainDicomTags"];
+  summary: InstanceSummary;
+}
+
+/** モダリティごとの SOP Class（CT Image Storage・MR Image Storage・ほかは Secondary Capture Image Storage） */
+const SOP_CLASS: Record<string, string> = {
+  CT: "1.2.840.10008.5.1.4.1.1.2",
+  MR: "1.2.840.10008.5.1.4.1.1.4",
+  OT: "1.2.840.10008.5.1.4.1.1.7",
+};
+
+/** 写しの無い画像の SOPInstanceUID（Orthanc の ID から決まる、2.25 の形の UID。64 字に収まる） */
+function syntheticUid(orthancId: string): string {
+  return `2.25.${BigInt(`0x${createHash("sha256").update(orthancId).digest("hex").slice(0, 30)}`)}`;
+}
+
+/** シリーズの MainDicomTags の VR（画像単位の DICOM タグの見本に入れるもの） */
+const SERIES_TAGS: Record<string, [string, string]> = {
+  Modality: ["00080060", "CS"],
+  SeriesDate: ["00080021", "DA"],
+  SeriesTime: ["00080031", "TM"],
+  Manufacturer: ["00080070", "LO"],
+  SeriesDescription: ["0008103E", "LO"],
+  BodyPartExamined: ["00180015", "CS"],
+  SeriesInstanceUID: ["0020000E", "UI"],
+  SeriesNumber: ["00200011", "IS"],
+};
+
+/** 検査の単位の検索だけにある項目（画像の値には無い）。画像単位の見本からは外す */
+const STUDY_ONLY = new Set(["00080056", "00080061", "00081190", "00201206", "00201208"]);
+
+/**
+ * 1枚の画像の DICOM の値の見本（WADO-RS の metadata の形）。検査の値（QIDO-RS の写し）に、シリーズと画像の値を足す。
+ * 画像の位置（ImagePositionPatient）は、写しがあればその値、無ければ画像の番号から決める（画像ごとに値が違う形の見本）
+ */
+function instanceDatasetOf(study: DicomJsonDataset, instance: MockInstance): DicomJsonDataset {
+  const ds: DicomJsonDataset = {};
+  for (const [key, value] of Object.entries(study)) if (!STUDY_ONLY.has(key)) ds[key] = value;
+  for (const [name, [tag, vr]] of Object.entries(SERIES_TAGS)) {
+    const v = instance.series.MainDicomTags[name];
+    if (v) ds[tag] = { vr, Value: [v] };
+  }
+  const { summary, tags } = instance;
+  const position = tags.ImagePositionPatient ?? `-160.0\\-160.0\\${(-55 + Number(summary.instanceNumber) * 5).toFixed(1)}`;
+  ds[TAG.SOPClassUID] = { vr: "UI", Value: [summary.sopClassUid] };
+  ds[TAG.SOPInstanceUID] = { vr: "UI", Value: [summary.sopInstanceUid] };
+  ds[TAG.InstanceNumber] = { vr: "IS", Value: [summary.instanceNumber] };
+  ds["00200012"] = { vr: "IS", Value: [tags.AcquisitionNumber ?? "1"] };
+  ds["00200032"] = { vr: "DS", Value: position.split("\\") };
+  // 画像ごとの「主なタグ」（docs/spec.md の 3.1）の見本：画像の形と表示の値（合成の値。どの画像も同じ）
+  ds["00080008"] = { vr: "CS", Value: ["ORIGINAL", "PRIMARY", "AXIAL"] };
+  ds["00200037"] = { vr: "DS", Value: ["1", "0", "0", "0", "1", "0"] };
+  ds["00280010"] = { vr: "US", Value: [512] };
+  ds["00280011"] = { vr: "US", Value: [512] };
+  ds["00280030"] = { vr: "DS", Value: ["0.625", "0.625"] };
+  ds["00280004"] = { vr: "CS", Value: ["MONOCHROME2"] };
+  ds["00280100"] = { vr: "US", Value: [16] };
+  ds["00280101"] = { vr: "US", Value: [12] };
+  ds["00281050"] = { vr: "DS", Value: ["40"] };
+  ds["00281051"] = { vr: "DS", Value: ["400"] };
+  // 値の出し方の見本（ImageComments）：3 枚目は HTML の形の値（文字のまま出す）、4 枚目は長い値（1024 文字で切る）
+  if (summary.instanceNumber === "3") ds["00204000"] = { vr: "LT", Value: ["<b>x</b>"] };
+  if (summary.instanceNumber === "4") ds["00204000"] = { vr: "LT", Value: ["試験の画像の注記。".repeat(500)] };
+  ds["7FE00010"] = { vr: "OW", BulkDataURI: "bulk" };
+  return ds;
 }
 
 async function readAll<T>(dir: string): Promise<T[]> {
@@ -164,6 +251,7 @@ interface PreviewImage {
   studyInstanceUid: string;
   seriesInstanceUid: string;
   sopInstanceUid: string;
+  /** PNG の写し（同じ名前の .jpg が JPEG の写し） */
   file: string;
 }
 
@@ -172,13 +260,27 @@ export function createMockBackend(): Backend {
   const qidoStudies = async () =>
     (await readJson<DicomJsonDataset[]>("dicom-web", "studies.json")).filter(
       (ds) => !mockDeleted.has(stringValue(ds, TAG.StudyInstanceUID)),
-    );
+    ).map((ds) => {
+      const update = mockUpdates.get(stringValue(ds, TAG.StudyInstanceUID));
+      if (!update) return ds;
+      const copy = structuredClone(ds);
+      const tags: Record<string, string> = { PatientID: "00100020", PatientName: "00100010", PatientBirthDate: "00100030", PatientSex: "00100040", AccessionNumber: "00080050" };
+      for (const [name, value] of Object.entries(update.replace)) {
+        const tag = tags[name];
+        if (tag) copy[tag] = { vr: ({ PatientID: "LO", PatientName: "PN", PatientBirthDate: "DA", PatientSex: "CS", AccessionNumber: "SH" } as Record<string, string>)[name]!, Value: name === "PatientName" ? [{ Alphabetic: value.split("=")[0], Ideographic: value.split("=")[1], Phonetic: value.split("=")[2] }] : [value] };
+      }
+      return copy;
+    });
   const restStudies = async <T extends RestStudy>() =>
-    (await readAll<T>("studies")).filter((s) => !mockDeleted.has(s.MainDicomTags.StudyInstanceUID ?? ""));
+    (await readAll<T>("studies")).filter((s) => !mockDeleted.has(s.MainDicomTags.StudyInstanceUID ?? "")).map((s) => {
+      const update = mockUpdates.get(s.MainDicomTags.StudyInstanceUID ?? "");
+      if (!update) return s;
+      return { ...s, originalId: s.ID, ID: update.id, PatientMainDicomTags: { ...s.PatientMainDicomTags, ...Object.fromEntries(Object.entries(update.replace).filter(([k]) => k.startsWith("Patient"))) }, MainDicomTags: { ...s.MainDicomTags, ...(update.replace.AccessionNumber !== undefined ? { AccessionNumber: update.replace.AccessionNumber } : {}) } };
+    });
 
   async function restSeriesByStudy(): Promise<Map<string, RestSeries[]>> {
     const [studies, series] = await Promise.all([restStudies(), readAll<RestSeries>("series")]);
-    const uidById = new Map(studies.map((s) => [s.ID, s.MainDicomTags.StudyInstanceUID ?? ""]));
+    const uidById = new Map(studies.map((s) => [s.originalId ?? s.ID, s.MainDicomTags.StudyInstanceUID ?? ""]));
     const out = new Map<string, RestSeries[]>();
     for (const s of series) {
       const uid = uidById.get(s.ParentStudy);
@@ -186,6 +288,40 @@ export function createMockBackend(): Backend {
       out.set(uid, [...(out.get(uid) ?? []), s]);
     }
     return out;
+  }
+
+  /** シリーズの中の画像（Orthanc の REST の写しの Instances の並び）。写しのある画像はその値、ほかは ID から決まる合成の値 */
+  async function mockInstances(studyInstanceUid: string, seriesInstanceUid: string): Promise<MockInstance[]> {
+    const series = ((await restSeriesByStudy()).get(studyInstanceUid) ?? []).find(
+      (s) => s.MainDicomTags.SeriesInstanceUID === seriesInstanceUid,
+    );
+    if (!series) return [];
+    const study = (await qidoStudies()).find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid);
+    const patientId = study ? stringValue(study, TAG.PatientID) : "";
+    const copied = new Map((await readAll<RestInstance>("instances")).map((i) => [i.ID, i]));
+    // 写しの無い画像の番号は、写しの画像の番号と重ならないように 1 から振る
+    const used = new Set(series.Instances.map((id) => copied.get(id)?.MainDicomTags.InstanceNumber).filter(Boolean));
+    let next = 1;
+    const nextNumber = () => {
+      while (used.has(String(next))) next += 1;
+      return String(next++);
+    };
+    return series.Instances.map((id) => {
+      const tags = copied.get(id)?.MainDicomTags;
+      return {
+        series,
+        tags: tags ?? {},
+        summary: {
+          studyInstanceUid,
+          seriesInstanceUid,
+          patientId,
+          sopInstanceUid: tags?.SOPInstanceUID ?? syntheticUid(id),
+          sopClassUid: SOP_CLASS[series.MainDicomTags.Modality ?? ""] ?? SOP_CLASS.OT!,
+          instanceNumber: tags?.InstanceNumber ?? nextNumber(),
+          numberOfFrames: null,
+        },
+      };
+    });
   }
 
   async function previews(): Promise<PreviewImage[]> {
@@ -212,13 +348,21 @@ export function createMockBackend(): Backend {
     mock: true,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
-      const studies = (await qidoStudies()).map(studyFromDicomJson).filter((s) => inDateRange(s.studyDate, query));
-      return sortStudiesNewestFirst(studies).slice(0, clampStudyLimit(limit));
+      // 検査日の範囲と詳細条件は、実の Orthanc の QIDO-RS の代わりに、ここで当てる
+      const studies = (await qidoStudies()).map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, query));
+      const max = clampStudyLimit(limit);
+      return { studies: sortStudiesNewestFirst(studies).slice(0, max), complete: studies.length <= max };
     },
 
     async countStudies() {
       const stats = await readJson<{ CountStudies: number }>("rest", "statistics.json");
       return { count: stats.CountStudies - mockDeleted.size, exact: true };
+    },
+
+    async studyListVersion() {
+      // 見本の変更の記録の最後の番号に、このプロセスで消した検査の数と HL7 の更新の数を足す（消すと、実の Orthanc の Deleted の出来事と同じく進む）
+      const { last } = parseChanges(await readJson<unknown>("made", "changes.json"));
+      return String(last + mockDeleted.size + mockTest.revision);
     },
 
     async searchSeries(studyInstanceUid: string) {
@@ -242,6 +386,16 @@ export function createMockBackend(): Backend {
       return (await qidoStudies()).find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid) ?? null;
     },
 
+    async searchInstances(studyInstanceUid: string, seriesInstanceUid: string) {
+      return sortInstances((await mockInstances(studyInstanceUid, seriesInstanceUid)).map((i) => i.summary));
+    },
+
+    async instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string) {
+      const found = (await mockInstances(studyInstanceUid, seriesInstanceUid)).find((i) => i.summary.sopInstanceUid === sopInstanceUid);
+      const study = (await qidoStudies()).find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid);
+      return found && study ? instanceDatasetOf(study, found) : null;
+    },
+
     async relayDicomweb(req: RelayRequest) {
       if (req.method !== "GET" && req.method !== "HEAD") throw new BackendError("中継は読み取りだけ", 405);
       const target = wadoRsTarget(req.target.path.split("/"));
@@ -261,8 +415,10 @@ export function createMockBackend(): Backend {
             (!target.sopInstanceUid || p.sopInstanceUid === target.sopInstanceUid),
         );
         if (image) {
-          const body = await readFile(image.file);
-          return new Response(req.method === "HEAD" ? null : body, { status: 200, headers: { "content-type": "image/png" } });
+          // 求めた型で返す（image/png には PNG、image/jpeg と Accept の無い要求には、rendered の既定の JPEG。PS3.18 8.7.4）
+          const png = req.accept === "image/png";
+          const body = await readFile(png ? image.file : image.file.replace(/\.png$/, ".jpg"));
+          return new Response(req.method === "HEAD" ? null : body, { status: 200, headers: { "content-type": png ? "image/png" : "image/jpeg" } });
         }
       }
       return Response.json({ error: "見本に無い" }, { status: 404 });
@@ -286,14 +442,14 @@ export function createMockBackend(): Backend {
         readJson<Record<string, unknown>>("made", "instance-metadata.json"),
       ]);
       const received = receivedStudyIds(changes, limit).flatMap(({ id, date }): ReceivedStudy[] => {
-        const study = studies.find((s) => s.ID === id);
+        const study = studies.find((s) => s.ID === id || s.originalId === id);
         if (!study) return [];
         // Orthanc の /studies/{id}/series の形（検査のシリーズの順）
         const rows = (study.Series ?? []).flatMap((sid) => series.filter((s) => s.ID === sid));
         const { summary, instanceCount } = studyFromRest(study, rows);
         const first = firstInstanceId(rows);
         const reception = receptionFromMetadata(first ? metadata[first] : undefined);
-        return [{ orthancId: id, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
+        return [{ orthancId: study.ID, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
       });
       return { studies: received, complete };
     },
@@ -306,6 +462,65 @@ export function createMockBackend(): Backend {
       const list = modalitiesFromRest(await readJson<unknown>("made", "modalities.json"));
       if (!list.some((m) => m.id === modalityId)) throw new BackendError("接続先が登録されていません", 404);
       return modalityId !== "offline";
+    },
+
+    async findStudiesByPatientId(patientId: string) {
+      checkedPatientId(patientId);
+      return (await restStudies()).filter((s) => s.PatientMainDicomTags.PatientID === patientId).map((s) => s.ID);
+    },
+    async studyPatient(id: string) {
+      return studyPatientFromRest((await restStudies()).find((s) => s.ID === id));
+    },
+    async studyInstanceTags(id: string) {
+      const patient = await this.studyPatient(id);
+      if (!patient) {
+        return [];
+      }
+      const overrides = hl7Instances.get(patient.StudyInstanceUID);
+      if (overrides) {
+        return overrides.map(p => ({ ...p }));
+      }
+      const result: import("./types").PatientInstance[] = [];
+      for (const series of await this.searchSeries(patient.StudyInstanceUID))
+        for (const instance of await this.searchInstances(patient.StudyInstanceUID, series.seriesInstanceUid))
+          result.push({
+            ...patient,
+            SeriesInstanceUID: series.seriesInstanceUid,
+            SOPInstanceUID: instance.sopInstanceUid,
+            SpecificCharacterSet: "ISO_IR 192"
+          });
+      return result;
+    },
+    async modifyStudyKeepingUids(id: string, replace: Record<string, string>, options: { removeSource: boolean }) {
+      const study = (await restStudies()).find((s) => s.ID === id);
+      if (!study) {
+        throw new BackendError("検査が見つかりません", 404);
+      }
+      const uid = study.MainDicomTags.StudyInstanceUID!;
+      const before = await this.studyInstanceTags(id);
+      const patientId = replace.PatientID ?? study.PatientMainDicomTags.PatientID;
+      const patientChanged = patientId !== study.PatientMainDicomTags.PatientID;
+      // 実の Orthanc では、患者 ID が同じまま元を消すと書き換えた画像ごと消え、患者 ID が変わるのに元を残すと
+      // 同じ UID の検査が 2 件並ぶ（design.md §4）。モックでは、その呼び方を誤りにして試験で見つける
+      if (options.removeSource !== patientChanged) {
+        throw new Error(`モック：KeepSource の指定が患者 ID の変化と合わない（removeSource=${options.removeSource}）`);
+      }
+      // Orthanc の ID の形（16 進 40 字を 8 字ずつ 5 つ）にそろえる。SHA-256 の先頭の 40 字を使う
+      const newId = patientChanged
+        ? createHash("sha256").update(`${uid}:${patientId}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-") : id;
+      mockTest.revision++;
+      mockUpdates.set(uid, { id: newId, replace: { ...mockUpdates.get(uid)?.replace, ...replace } });
+      const jobId = crypto.randomUUID();
+      const state = hl7Simulation.state ?? "Success";
+      // 失敗を再現した後の成功でも、前回の画像ごとの値を残さない。
+      const changedCount = hl7Simulation.changedInstances ?? (state === "Failure" ? 0 : before.length);
+      hl7Instances.set(uid, before.map((instance, index) =>
+        index < changedCount ? { ...instance, ...replace } : instance));
+      hl7Jobs.set(jobId, { state });
+      if (hl7Simulation.dispatchTimeout) {
+        throw new BackendUnknownError();
+      }
+      return { jobId };
     },
 
     async lookupStudyIds(studyInstanceUid: string) {
@@ -335,8 +550,22 @@ export function createMockBackend(): Backend {
     },
 
     async jobStatus(jobId: string) {
+      const hl7 = hl7Jobs.get(jobId);
+      if (hl7) {
+        return {
+          id: jobId,
+          state: hl7.state,
+          progress: hl7.state === "Running" ? 50 : 100,
+          errorCode: 0,
+          errorDescription: "",
+          creationTime: orthancNow(),
+          completionTime: null
+        };
+      }
       const job = mockJobs.get(jobId);
-      if (!job) return null;
+      if (!job) {
+        return null;
+      }
       job.reads += 1;
       const failed = job.modality === "offline";
       const state = job.reads <= 1 ? "Pending" : job.reads === 2 ? "Running" : failed ? "Failure" : "Success";
@@ -366,4 +595,20 @@ export function createMockBackend(): Backend {
       mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
     },
   };
+}
+
+// テストから仕事の終了・失敗・時間切れを再現する。画像ごとの応答も差し替えられる。
+export const hl7Jobs = new Map<string, {
+  state: import("./types").JobState;
+}>();
+
+const hl7Instances = new Map<string, import("./types").PatientInstance[]>();
+let hl7Simulation: {
+  state?: import("./types").JobState;
+  changedInstances?: number;
+  dispatchTimeout?: boolean;
+} = {};
+/** 次の書き換えを、動き続ける仕事・失敗・一部だけの変更・応答の時間切れにする。 */
+export function simulateMockHl7(options: typeof hl7Simulation): void {
+  hl7Simulation = { ...options };
 }

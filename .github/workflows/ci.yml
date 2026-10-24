@@ -1,18 +1,23 @@
 # PR で、lint・型・Vitest・Playwright（モック）・依存の確かめ・イメージの試しの作りを流す。
-# main への push と版のタグでは、image.yml がこの workflow を呼び（workflow_call）、通ってからイメージを出す。
+# main への push でも同じ試験を流す（イメージは出さない。イメージは image.yml が、版のタグ・手動・週に1回のときだけ出す）。
+# 版のタグ・手動・週に1回では、image.yml がこの workflow を呼び（workflow_call）、通ってからイメージを出す。
 # 実の画像サーバーにはつながない（BACKEND_MOCK=true と tests/fixtures の合成のデータだけ）。
 name: CI
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # 起こした元の種類を入れる（image.yml から呼ぶ公開前の試験が、main への push の試験の待ちに取り消されないように）
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  # main への push の試験は、次の push で打ち切らない（どの merge で落ちたかを残すため）。続けて push したときは、待ちは新しい 1 件だけ残る
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Prisma の CLI が外（checkpoint.prisma.io）へ版の確かめを送らないようにする

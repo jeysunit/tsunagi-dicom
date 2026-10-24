@@ -25,7 +25,7 @@ const studies = JSON.parse(readFileSync("tests/fixtures/orthanc/dicom-web/studie
   unknown
 >[];
 
-/** 画像サーバーが返しうる、画面に出さない値（施設・住所・別の ID・依頼医・取得の URL など）。どれも画面の API に出ない */
+/** 画像サーバーが返しうる、画面に出さない値（施設・住所・別の ID・職業・取得の URL など）。どれも画面の API に出ない */
 const EXTRA_TAGS: Record<string, { vr: string; Value: unknown[] }> = {
   "00080080": { vr: "LO", Value: ["EXTRA-INSTITUTION-must-not-leak"] },
   "00101040": { vr: "LO", Value: ["EXTRA-ADDRESS-must-not-leak"] },

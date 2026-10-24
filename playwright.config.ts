@@ -23,6 +23,8 @@ export const e2eEnv = {
   DEV_ALLOW_WRITE: "false",
   SESSION_SECRET: randomBytes(48).toString("base64"),
   DATABASE_URL: `file:${path.resolve(".e2e/e2e.db")}`,
+  // 監査の記録の先頭の控え（/api/audit/verify は、控えと照らせないと ok にしない）。scripts/e2e-server.mjs が起動の前に消す
+  AUDIT_ANCHOR_FILE: path.resolve(".e2e/audit-anchors.jsonl"),
   TZ: "Asia/Tokyo",
   // ビューアの選び分けの試験（段 2）。例の名前だけ。画面の試験は BFF の移り先を控えるだけで、この宛先へは通信しない
   VIEWER_OHIF_URL: "https://viewer.example.org/ohif",
@@ -52,9 +54,12 @@ export const localEnv = {
   INITIAL_ADMIN_PASSWORD_FILE: path.resolve(".e2e/local/initial-admin-password.txt"),
   E2E_INITIAL_ADMIN_PASSWORD: E2E_ADMIN.password,
   DATABASE_URL: `file:${path.resolve(".e2e/local/e2e.db")}`,
+  AUDIT_ANCHOR_FILE: path.resolve(".e2e/local/audit-anchors.jsonl"),
   PORT: String(LOCAL_PORT),
   // standalone の .next/static は、検証モードのサーバーの方で写す（同時に写さない）
   E2E_SKIP_PREPARE: "true",
+  // 検査一覧の自動更新を止める形は、こちらのサーバーで確かめる（検証モードのサーバーは既定の 30 秒）
+  STUDY_LIST_REFRESH_SECONDS: "0",
 };
 
 export default defineConfig({

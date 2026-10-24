@@ -53,6 +53,8 @@ export default defineConfig({
       BACKEND_USERNAME: process.env.ITEST_ORTHANC_USERNAME ?? "",
       BACKEND_PASSWORD_FILE: path.join(ITEST.workDir, "backend-password.txt"),
       AUTH_MODE: "local",
+      HL7_PATIENT_ID_ISSUER: "RIS_EMU",
+      HL7_RECEIVER_TOKEN_FILE: path.join(ITEST.workDir, "hl7-receiver-token"),
       // 管理者は TOTP を登録しない（再認証はパスワードだけ）。ログインの細かい振る舞いはモックの試験（tests/e2e）で見る
       MFA_REQUIRED: "false",
       SCREEN_LOCK_MINUTES: "0",
@@ -62,7 +64,11 @@ export default defineConfig({
       E2E_INITIAL_ADMIN_PASSWORD: process.env.ITEST_ADMIN_INITIAL_PASSWORD ?? "",
       SESSION_SECRET: process.env.ITEST_SESSION_SECRET ?? "",
       DATABASE_URL: `file:${path.join(ITEST.workDir, "itest.db")}`,
+      // 監査の記録の先頭の控え（試験の 9 で、/api/audit/verify が照らし合わせることを見る）
+      AUDIT_ANCHOR_FILE: path.join(ITEST.workDir, "audit-anchors.jsonl"),
       TZ: "Asia/Tokyo",
+      // 画像ごとの「主なタグ」（試験の 14）：3 つの書き方を混ぜ、患者の値・画像に無いタグ・ファイルのメタ情報も入れる
+      INSTANCE_TAGS: "(0020,0013) 0008,0018 00100010 (0008,1030) (0028,0010) (0018,0050) (0002,0010)",
       HOSTNAME: "127.0.0.1",
       PORT: String(ITEST.bffPort),
       CHECKPOINT_DISABLE: "1",

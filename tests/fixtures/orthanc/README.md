@@ -17,10 +17,12 @@
 | `rest/series/{id}.json` | `GET /series/{id}`（上の検査のシリーズのすべて） |
 | `rest/instances/{id}.json` | `GET /instances/{id}`（1つだけ） |
 | `rest/instances/{id}/preview.png` | `GET /instances/{id}/preview`（サムネイル。1枚だけ。64×64 の合成のファントム） |
+| `rest/instances/{id}/preview.jpg` | 上の PNG を JPEG（品質 90）にしたもの（2026-10-21 に sharp で作った。モックの中継が `image/jpeg` に答える絵） |
 | `rest/system.json` | `GET /system` |
 | `rest/statistics.json` | `GET /statistics`（下の置き換えの規則 4） |
 | `dicom-web/studies.json` | `GET /dicom-web/studies?PatientID=JP-TEST-*`（QIDO-RS、`Accept: application/dicom+json`） |
 | `dicom-web/studies/{StudyInstanceUID}/series.json` | `GET /dicom-web/studies/{StudyInstanceUID}/series`（上の1件目の検査） |
+| `dicom-web/iso2022-instance-metadata.json` | `GET /dicom-web/studies/{study}/series/{series}/instances/{sop}/metadata` の答えのうち、SpecificCharacterSet・StudyDescription・PatientName の 3 つだけ。SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の画像を、結合の試験の 14 で Orthanc 26.9.1 に入れて写した（2026-10-23） |
 
 JSON は読みやすいように、キーを並べ替えて字下げした（値は変えていない。置き換えたものを除く）。
 
@@ -43,7 +45,7 @@ NumberOfStudyRelatedSeries `00201206`・NumberOfStudyRelatedInstances `00201208`
 
 BFF の中継はビューアが画像を取る道（WADO-RS の読み取り）だけを通す（`docs/spec.md` の 3.2）。
 WADO-RS の応答（`metadata`・frames など）の見本はまだ無いので、モックの中継は宛先を確かめたうえで 404 を返す。
-ただしサムネイル（`thumbnail`・`rendered`）は、写しのある1枚（`rest/instances/{id}/preview.png`）の検査・シリーズ・画像に限り、その PNG を返す（段 2。一覧と詳細のパネルの代表のサムネイルの試験のため）。
+ただしサムネイル（`thumbnail`・`rendered`）は、写しのある1枚（`rest/instances/{id}/preview.png`）の検査・シリーズ・画像に限り、その絵を返す（段 2。一覧と詳細のパネルの代表のサムネイルの試験のため）。`Accept: image/png` には PNG、`image/jpeg` と Accept の無い要求には JPEG（`preview.jpg`）を返す（求めた型と違う型を返さない。2026-10-21）。
 上の QIDO-RS の写しは、画面の API（検索）のモックに使う。詳細のパネルのシリーズの並びは、QIDO-RS の写しが1件の検査の分しか無いので、
 REST の写し（`rest/studies`・`rest/series`）から組み立てる（`src/lib/backend/mock.ts`）。
 

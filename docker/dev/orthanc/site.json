@@ -1,0 +1,20 @@
+{
+  "DicomAet": "ORTHANC",
+  "DicomCheckCalledAet": true,
+  "DicomCheckModalityHost": false,
+  "OverwriteInstances": true,
+  "DicomModalities": {
+    "dtg": {
+      "AET": "DTG_CT01",
+      "Host": "dtg",
+      "Port": 11113,
+      "Manufacturer": "Generic"
+    },
+    "dev-scp": {
+      "AET": "DEV_SCP",
+      "Host": "storescp",
+      "Port": 11112,
+      "Manufacturer": "Generic"
+    }
+  }
+}

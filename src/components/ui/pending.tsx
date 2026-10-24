@@ -45,7 +45,7 @@ export function Spinner({ className }: { className?: string }) {
 export function ProgressBar({ label = "読み込み中" }: { label?: string }) {
   return (
     <div role="progressbar" aria-label={label} aria-busy="true" className="relative h-0.5 w-full overflow-hidden bg-hover" data-testid="progress-bar">
-      <div className="absolute inset-y-0 left-0 w-1/3 animate-[tsunagi-progress_1.2s_ease-in-out_infinite] bg-primary" />
+      <div className="absolute inset-y-0 left-0 w-1/3 animate-[tsunagi-progress_1.2s_ease-in-out_infinite] bg-ring" />
     </div>
   );
 }

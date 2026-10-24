@@ -1,0 +1,42 @@
+# docker/dev の dicom-test-generator（DTG）の設定（dicom-test-generator の config/app_config.yaml の形）。
+# ワークリストは同じ compose の ris-emulator（ris:11112）から取り、送信先は同じ compose の Orthanc（orthanc:4242）。
+# 架空の患者だけを送る。AE タイトル DTG_CT01 は、ris-emulator の CT の予約の予定の AE タイトルの既定と同じ。
+profiles:
+  search_paths: []
+
+modality:
+  ae_title: "DTG_CT01"
+  station_name: "DTG_CT01"
+  listen:                         # 保管の確認の結果を受ける待ち受け。Orthanc に dtg として登録してある
+    bind_address: "0.0.0.0"
+    port: 11113
+  state_dir: "modality_state"
+  output_dir: "output/modality"
+  character_set: "auto"
+  character_set_fallback: "utf8"
+  default_template: "ct_generic"
+  default_profile: null
+  default_hospital: null
+  default_pixel_mode: "ct_realistic"
+  worklist:                       # ris-emulator の MWL。予約が無いときは緊急の患者で撮る
+    ae_title: "RIS_EMU"
+    host: "ris"
+    port: 11112
+    timeout_seconds: 30
+  mpps: null                      # ris-emulator は MPPS をまだ受けない
+  destinations:
+    - name: "ORTHANC"
+      ae_title: "ORTHANC"
+      host: "orthanc"
+      port: 4242
+      storage_commitment: false
+      timeout_seconds: 30
+  default_destination: "ORTHANC"
+  retry:
+    max_attempts: 0
+  max_images_per_exam: 2000
+
+# Web 画面。コンテナの中では 0.0.0.0 で待ち受け、HTTP Basic のパスワードのファイル（DTG_WEB_PASSWORD_FILE）を使う
+web:
+  bind_address: "0.0.0.0"
+  port: 8080

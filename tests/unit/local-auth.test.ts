@@ -1,5 +1,8 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { verifyAuditChain } from "@/lib/audit";
+
+// 監査の記録の鍵は設定から導く。この試験では試験だけの値にする（tests/unit/helpers/audit-config.ts）
+vi.mock("@/lib/config", async (importOriginal) => (await import("./helpers/audit-config")).withAuditKey(await importOriginal()));
 import { bootstrapInitialAdmin, BootstrapError } from "@/lib/auth/bootstrap";
 import { DEFAULT_ARGON2_PARAMS, hashPassword } from "@/lib/auth/password-hash";
 import {

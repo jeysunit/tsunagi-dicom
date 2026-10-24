@@ -63,7 +63,12 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 | 7 | 削除 | 管理者が理由と再認証（パスワード）を通して消すと、Orthanc から消える（再認証の前は消えない） |
 | 8 | 答えが失われたとき（[`round-trip-test.md`](round-trip-test.md) の 7） | 入口（gate）が送る要求の答えを捨てて 504 を返すと、Orthanc は送るが画面は「送信結果を確認できません」と要求の ID を出す。同じ検査・同じ送り先へは重ねて送れない。管理者が「送信済みとして記録」すると、開き直してまた送れる |
 | 9 | 監査のつなぎ | `/api/audit/verify` が `ok`。送る・削除・照らし合わせの要求ごとに「求めた」「結果」「終わり」の行が要求の ID で結ばれ、結果不明の間に重ねた要求は断った行だけが残る。C-ECHO の成功と失敗が残る |
-| 10 | 見つけた食い違い | 書き出しの「結果」の行が残る。サムネイルがブラウザの Accept のまま画像で返る。どちらも 2026-10-20 の時点で BFF が満たしていないので赤（[`round-trip-test.md`](round-trip-test.md) の「結合の試験で見つけた、BFF の食い違い」）。直したら緑になる |
+| 10 | 見つけて直した食い違い | 書き出しの「結果」の行が残る。サムネイルがブラウザの Accept のまま画像で返る。2026-10-20 に見つけ、PR #33 で直した（[`round-trip-test.md`](round-trip-test.md) の「結合の試験で見つけて直した、BFF の食い違い」） |
+| 11 | 詳細条件（2026-10-21） | 生年月日・性別・受付番号・検査名で、画面の API（`/api/studies?birth=…&sex=…&accession=…&desc=…`）が Orthanc の QIDO-RS で絞った検査を返す。小文字で求めたときの Orthanc の答えと BFF の答えを並べて記録する（Orthanc 26.9.1 は大文字と小文字を区別しなかった） |
+| 12 | 画像の一覧とすべてのタグ（2026-10-21） | シリーズの中の画像の並び（QIDO-RS）が画像の番号の順に出て、1 枚の値（WADO-RS の metadata）がその画像の SOPInstanceUID のものになる。別のシリーズの下としては返さない |
+| 13 | 上限を超えたとき（2026-10-21） | 古い検査 1001 件のあとに、いちばん新しい検査を入れる（Orthanc の REST の `tools/create-dicom`。架空の患者）。画面の API（`/api/studies`）の一覧の先頭に、いちばん新しい検査が出る。件数は「以上」（`exact: false`）で、外れるのは古い側の検査だけ。範囲（2020 年 1 月）の中は確定の 31 件。Orthanc の QIDO-RS が `limit` で切ったときに返す順と、`Warning` の有無を記録する（[`spec.md`](spec.md) の 3.1「上限に届いたとき」） |
+| 14 | 画像ごとの主なタグと日本語の値（2026-10-23） | SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の検査を送り、主なタグ（`…/instances/{sop}/tags`）が `INSTANCE_TAGS` の順に、設定のタグだけを返す。氏名（漢字・かな）と検査名が崩れない。画像に無いタグは null。画面でサムネイルから開いた表にも日本語の氏名が出る。転送構文（(0002,0010)）が metadata に入るかと、metadata の文字の集合の値を記録する。流すのは 13 より前（13 が検査を 1001 件足すと、一覧の上限を超えて画面で開けなくなることがあるため） |
+| 15 | HL7 の A40 | 仮の患者 ID の検査を BFF の `/api/hl7/messages` から更新する。AA が返り、Study・Series・SOP の UID は同じで、患者 ID が替わり、元の患者の検査が残らず、監査の received・request・dispatch・result・ack が残る。token は試験のたびに乱数で作る |
 
 試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報と住所は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」に写す。
 
@@ -88,3 +93,21 @@ node tests/integration/run.mjs
 - trace と HTML の報告は作らない。入力した値（試験だけの管理者のパスワード）と通信の中身が残り、CI の成果物として外に出るため。
 - 監査の記録は、`/api/audit/verify` のつなぎに加えて、試験の BFF のデータベース（`.e2e/itest/itest.db`）を読むだけで開き、送る・削除・書き出しの要求ごとに「求めた」「結果」「終わり」の行が要求の ID で結ばれていることを照らす（`tests/integration/support/audit-db.ts`）。
 - 残したコンテナは `docker compose -f docker/test/compose.yaml down --volumes` で片付ける（compose の変数が要るので、`ITEST_DUMP_DIR` と `ITEST_ORTHANC_USERS_FILE` に `.e2e/itest/` の中の場所を渡す）。
+
+## 開発用の compose の流れ（`tests/flow`）
+
+同じ workflow の、もう1つの仕事（`開発用の compose の流れ（RIS → DTG → Orthanc → tsunagi-dicom → storescp）`）。この試験と違い、BFF もコンテナ（このリポジトリから作るイメージ）で動かし、配る compose（`deploy/compose.yaml`）の形のまま確かめる。手順は [`round-trip-test.md`](round-trip-test.md)。
+
+- `tests/flow/run.mjs` が `docker/dev/up.sh` で一式を立て、`tests/flow/flow.spec.ts` を流し、片付ける（`FLOW_KEEP=1` なら残す）。compose のプロジェクトは `tsunagi-flow`、ポートは画面 13000・DICOM 14242・DTG の Web 画面 18180・ris-emulator の Web 画面 18181 で、手元で使っている開発用の一式（`tsunagi-dev`）とは volume もポートも分ける。
+- 確かめること：Orthanc の REST（8042）がホストに公開されていない。内部ネットワーク `backend` が `internal: true` で、tsunagi-dicom と Orthanc だけが入る。ホストに公開した DICOM（4242）に C-ECHO が通る。ris-emulator は Web 画面（8081）だけを 127.0.0.1 に公開し、MWL（11112）は公開しない。DTG の CLI で送った架空の患者が受信一覧に出て、tsunagi-dicom から storescp へ送信すると、同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。ris-emulator の CLI で作った予約を、DTG がワークリスト（MWL）で取得して撮り、Orthanc へ送ると、tsunagi-dicom の検査の一覧に、予約の StudyInstanceUID・受付番号・患者 ID で出る。
+- CI の記録に `[flow]` の行で、各段の画像の数を出す。
+
+```sh
+npm ci
+npx playwright install chromium
+node tests/flow/run.mjs
+```
+
+HL7 の追加の場面は16（A08・ORM）と17（替え先の患者がある A40）。全画像の Study・Series・SOP の UID の組、5つの値、画像の件数を確かめる。A40 は元の検査の消失、属性が違う場合は両方の検査が変わらないことも確かめる。`docker/test/orthanc/orthanc.json` は `OverwriteInstances: true`。既存の投入箇所（共通準備・詳細条件・日本語タグ）は新しい UID を1回送っており、重複を無視する期待は無い。途中の job 失敗と partial はモックの単体試験で扱う。
+
+2026-10-24 に手元の Docker で流し、15〜17 を含む 17 件が通った。

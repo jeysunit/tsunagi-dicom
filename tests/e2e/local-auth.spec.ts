@@ -210,6 +210,23 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
   expect(JSON.stringify(list)).not.toMatch(/argon2id|passwordHash|totpSecret/);
 });
 
+test("検査一覧の自動更新を止める（STUDY_LIST_REFRESH_SECONDS=0）：印を出さず、一覧の版を読まない", async () => {
+  const { page } = admin;
+  const versionReads: string[] = [];
+  const onRequest = (req: { url: () => string }) => {
+    if (req.url().endsWith("/api/studies/version")) versionReads.push(req.url());
+  };
+  page.on("request", onRequest);
+  await page.goto("/");
+  await expect(page.getByTestId("study-table")).toBeVisible();
+  await expect(page.getByTestId("list-refresh")).toHaveCount(0);
+  // 開いた直後とタブに戻ったときにも読まない
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(1_500);
+  expect(versionReads).toEqual([]);
+  page.off("request", onRequest);
+});
+
 test("役割ごとにできる操作：一般は検査と画像を見られ、利用者の管理と監査の確かめはできない", async ({ browser }) => {
   test.setTimeout(90_000);
   const { context, page } = await newPage(browser);
@@ -250,6 +267,9 @@ test("CSRF の対策：token の無い要求・別の Origin の要求は断る"
   const origin = LOCAL_BASE_URL;
   const noToken = await page.request.post("/api/auth/lock", { headers: { origin }, data: { reason: "manual" } });
   expect(noToken.status()).toBe(403);
+  for (const headers of [{origin}, {origin,"x-csrf-token":"forged"}, {origin:"https://attacker.example"}] as Record<string,string>[]) {
+    expect((await page.request.post("/api/hl7/resolve", { headers, data: { writeId: crypto.randomUUID(), note: "試験" } })).status()).toBe(403);
+  }
   const wrongToken = await page.request.post("/api/auth/lock", {
     headers: { origin, "x-csrf-token": "forged" },
     data: { reason: "manual" },
@@ -315,6 +335,87 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   expect(after.checked).toBeGreaterThanOrEqual(before.checked + 5);
 });
 
+test("送信の手応え：押した直後から状態の枠、送っている間は進みと「閉じても送信は続きます」、閉じた後も状態が出て、終わったら「再送信…」", async () => {
+  test.setTimeout(60_000);
+  const { page } = admin;
+  await page.goto("/");
+  await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
+  await page.getByTestId("send-open").click();
+  const panel = page.getByTestId("send-panel");
+  await panel.getByTestId("send-modality").selectOption("dtg");
+  // 送信の要求の答えを止めておき、答えが来る前（押した直後）の画面を見る
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/studies/*/send", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await panel.getByTestId("send-submit").click();
+  // 押した直後から（答えが来る前に）、状態の枠と進みの帯
+  // （前は、答えが来るまで状態の文字が空で、0.3 秒たってから「読み込み中」の印だけが出ていた）
+  const status = panel.getByTestId("send-status");
+  await expect(status).toHaveAttribute("data-state", "Starting");
+  await expect(status).toContainText("送信を開始しています");
+  await expect(status.getByRole("progressbar")).toBeVisible();
+  // 受け付けの前は閉じられない（断られたときの知らせを見せるため）。「閉じても送信は続きます」は、受け付けた後だけ
+  await expect(panel.getByTestId("send-close")).toBeDisabled();
+  await expect(panel.getByTestId("send-continues")).toHaveCount(0);
+  await expect(panel.getByTestId("send-again")).toHaveCount(0);
+  release();
+  await expect(status).toHaveAttribute("data-state", /^(Accepted|Pending|Running)$/);
+  await page.unroute("**/api/studies/*/send");
+  await expect(panel.getByTestId("send-close")).toBeEnabled();
+  await expect(panel.getByTestId("send-continues")).toHaveText("閉じても送信は続きます");
+
+  // 送っている間に閉じる：「送信」の横に送信中を出し、終わると送信完了に変わる（閉じていても状態を読み続ける）
+  await panel.getByTestId("send-close").click();
+  await expect(page.getByTestId("send-panel")).toHaveCount(0);
+  const badge = page.getByTestId("send-badge");
+  await expect(badge).toHaveText("送信中");
+  await expect(badge).toHaveText("送信完了", { timeout: 15_000 });
+
+  // 開き直すと結果が出て、「再送信…」で確かめの画面に戻る（送るのは「送信する」を押したとき）
+  await page.getByTestId("send-open").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success");
+  await expect(panel.getByTestId("send-continues")).toHaveCount(0);
+  await expect(page.getByTestId("send-badge")).toHaveCount(0);
+  await panel.getByTestId("send-again").click();
+  await expect(panel.getByTestId("send-status")).toHaveCount(0);
+  await expect(panel.getByTestId("send-submit")).toBeVisible();
+  await expect(panel.getByTestId("send-confirm")).toContainText("dtg（DTG_SCP）");
+
+  // 送信失敗：印つきの失敗の枠と「再送信…」
+  await panel.getByTestId("send-modality").selectOption("offline");
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Failure", { timeout: 15_000 });
+  await expect(panel.getByTestId("send-status")).toContainText("送信失敗");
+  await expect(panel.getByTestId("send-again")).toBeVisible();
+
+  // ジョブの状態を読めずに止まったときは、閉じた後も「送信中」と見せない。開いて「再読み込み」で続きを読む
+  await panel.getByTestId("send-again").click();
+  await panel.getByTestId("send-modality").selectOption("dtg");
+  await page.route("**/api/jobs/**", (route) => route.fulfill({ status: 502, json: { error: "画像サーバーに接続できません" } }));
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toContainText("状態を取得できませんでした");
+  await panel.getByTestId("send-close").click();
+  await expect(page.getByTestId("send-badge")).toHaveText("状態を取得できません");
+  await page.unroute("**/api/jobs/**");
+  await page.getByTestId("send-open").click();
+  await panel.getByRole("button", { name: "再読み込み" }).click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 15_000 });
+
+  // 受け付けの前に断られた送信（403 など）は、閉じる前に画面に出る（受け付けの前は閉じられない）
+  await panel.getByTestId("send-again").click();
+  await page.route("**/api/studies/*/send", (route) =>
+    route.request().method() === "POST" ? route.fulfill({ status: 403, json: { error: "この操作の権限がありません" } }) : route.continue(),
+  );
+  await panel.getByTestId("send-submit").click();
+  await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Error");
+  await expect(panel.getByTestId("send-status")).toContainText("権限");
+  await page.unroute("**/api/studies/*/send");
+  await panel.getByTestId("send-close").click();
+});
+
 test("ログインの一時停止：3回続けて失敗したら、正しいパスワードでも止める。管理者は解ける", async ({ browser }) => {
   const { context, page } = await newPage(browser);
   for (let i = 0; i < 3; i++) {
@@ -347,6 +448,7 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("screen-lock")).toHaveCount(0);
   const patient = await patientValues(page);
 
+  const lockRequest=page.waitForRequest("**/api/auth/lock");
   // SCREEN_LOCK_MINUTES=1
   await page.clock.fastForward("01:10");
   const lock = page.getByTestId("screen-lock");
@@ -357,6 +459,11 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("study-table")).toHaveCount(0);
   // 頁を読み直すので、頁の HTML（描画の元のデータ・RSC の payload を含む）にも患者の値が残らない
   await expectNoPatientValues(page, patient);
+  const lockCsrf=(await lockRequest).headers()["x-csrf-token"]!;
+  expect((await page.request.post("/api/hl7/resolve", {
+    headers: { origin: LOCAL_BASE_URL, "x-csrf-token": lockCsrf },
+    data: { writeId: crypto.randomUUID(), note: "試験" }
+  })).status()).toBe(423);
   // サーバーの側もロックしている：画面の API と中継は 423、開き直しても中身を描かない
   await expect.poll(async () => (await page.request.get("/api/studies")).status()).toBe(423);
   expect((await page.request.get(`/api/dicom-web/studies/${STUDY}/metadata`)).status()).toBe(423);

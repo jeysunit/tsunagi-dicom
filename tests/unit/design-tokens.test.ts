@@ -54,9 +54,19 @@ const PAIRS: [string, string][] = [
   ["foreground", "selected"],
   ["value", "selected"],
   ["label", "selected"],
+  // 地の濃淡で面を分ける段（muted・muted-strong）と、その上のリンク・誤りの文字
+  ["foreground", "muted-strong"],
+  ["label", "muted-strong"],
+  ["link", "muted"],
+  ["link", "muted-strong"],
+  ["link", "selected"],
+  ["danger", "selected"],
   // 終わったことの印の文字（送信完了・接続確認の成功）
   ["success", "background"],
   ["success", "surface"],
+  // 途中のことの印（状態の札の枠と印。docs/design-system/components.md）
+  ["warning", "background"],
+  ["warning", "surface"],
 ];
 
 describe("文字と地の対比（WCAG 2.2 の AA）", () => {
@@ -93,33 +103,93 @@ describe("押せる物の hover と選んだ行は、地と見分けられる（
   }
 });
 
+describe("入力欄・ボタンの輪郭（border-input）は、地との対比が 3:1 以上（WCAG 2.2 の 1.4.11）", () => {
+  for (const [name, set] of [
+    ["明るい地", light],
+    ["暗い地", dark],
+  ] as const) {
+    it.each(["background", "surface"])(`${name}：border-input と %s の地`, (bg) => {
+      expect(contrast(set["border-input"]!, set[bg]!)).toBeGreaterThanOrEqual(3);
+    });
+  }
+});
+
+describe("選択の印（縦線・枠・進みの帯）に使う ring は、地との対比が 3:1 以上（WCAG 2.2 の 1.4.11）", () => {
+  for (const [name, set] of [
+    ["明るい地", light],
+    ["暗い地", dark],
+  ] as const) {
+    it.each(["background", "surface", "selected"])(`${name}：ring と %s の地`, (bg) => {
+      expect(contrast(set.ring!, set[bg]!)).toBeGreaterThanOrEqual(3);
+    });
+  }
+});
+
+describe("暗い地：誤りの文字（danger）は、押している間・hover の地の上でも 4.5:1 以上", () => {
+  it.each(["hover", "pressed"])("danger と %s の地", (bg) => {
+    expect(contrast(dark.danger!, dark[bg]!)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("グレーは色味のない中立（R=G=B）", () => {
+  for (const [name, set] of [
+    ["明るい地", light],
+    ["暗い地", dark],
+  ] as const) {
+    it.each(["background", "surface", "foreground", "label", "value", "border", "border-input", "muted", "muted-strong", "hover", "pressed", "chrome"])(`${name}：%s`, (key) => {
+      const hex = set[key]!;
+      expect(hex.slice(1, 3), key).toBe(hex.slice(3, 5));
+      expect(hex.slice(3, 5), key).toBe(hex.slice(5, 7));
+    });
+  }
+});
+
 describe("spec の 2 の色の値", () => {
   it("明るい地", () => {
     expect(light).toMatchObject({
       background: "#ffffff",
-      surface: "#f6f8fa",
-      foreground: "#1f2328",
-      label: "#59636e",
-      value: "#1f2328",
-      border: "#d1d9e0",
-      primary: "#0969da",
+      surface: "#f6f6f6",
+      foreground: "#262626",
+      label: "#5f5f5f",
+      value: "#1a1a1a",
+      border: "#d2d2d2",
+      "border-input": "#8c8c8c",
+      muted: "#eeeeee",
+      "muted-strong": "#e2e2e2",
+      chrome: "#333333",
+      primary: "#4b4fbf",
       "primary-foreground": "#ffffff",
+      "primary-hover": "#3b3ea3",
+      link: "#4b4fbf",
     });
   });
 
   it("暗い地", () => {
     expect(dark).toMatchObject({
-      background: "#121417",
-      surface: "#1a1d21",
-      foreground: "#e6edf3",
-      label: "#8a949e",
+      background: "#1b1b1b",
+      surface: "#242424",
+      foreground: "#e8e8e8",
+      label: "#a3a3a3",
       value: "#ffffff",
-      primary: "#1f6feb",
+      border: "#3a3a3a",
+      "border-input": "#777777",
+      muted: "#2d2d2d",
+      "muted-strong": "#383838",
+      chrome: "#121212",
+      primary: "#4b4fbf",
       "primary-foreground": "#ffffff",
+      "primary-hover": "#3b3ea3",
+      link: "#a5a8ff",
     });
   });
 
-  it("前の主の色（#2f81f7 に白い字。対比が足りない）を使っていない", () => {
-    expect(css.toLowerCase()).not.toContain("#2f81f7");
+  it("状態の色（誤り・終わったこと）は、主の色とは別の枠で、前の値のまま", () => {
+    expect(light).toMatchObject({ danger: "#d1242f", success: "#1a7f37" });
+    expect(dark).toMatchObject({ danger: "#ff7b72", success: "#3fb950" });
+  });
+
+  it("前の主の色（#2f81f7 に白い字。対比が足りない）と、前の青の値を使っていない", () => {
+    const lower = css.toLowerCase();
+    for (const old of ["#2f81f7", "#0757b5", "#054a9b", "#f6f8fa", "#d1d9e0", "#1f6feb"]) expect(lower, old).not.toContain(old);
   });
 });

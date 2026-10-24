@@ -20,6 +20,14 @@ let caPem: string;
 const seen: { url: string; authorization?: string; method: string; accept?: string }[] = [];
 
 const studies = JSON.parse(readFileSync("tests/fixtures/orthanc/dicom-web/studies.json", "utf8"));
+/** 画像単位の値の見本（合成の UID と患者） */
+const instanceDataset = {
+  "0020000D": { vr: "UI", Value: ["1.2.3"] },
+  "0020000E": { vr: "UI", Value: ["4.5.6"] },
+  "00080018": { vr: "UI", Value: ["7.8.9"] },
+  "00100020": { vr: "LO", Value: ["JP-TEST-0001"] },
+  "00200013": { vr: "IS", Value: [3] },
+};
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "tsunagi-tls-"));
@@ -60,6 +68,45 @@ beforeAll(async () => {
           "content-length": String(gz.byteLength),
         });
         res.end(gz);
+      } else if (req.url === "/dicom-web/studies/1.2.3/series/4.5.6/instances/7.8.9/metadata") {
+        // 画像単位の値（WADO-RS の metadata）：求めた3つの UID の画像を1件返す
+        res.writeHead(200, { "content-type": "application/dicom+json" });
+        res.end(JSON.stringify([instanceDataset]));
+      } else if (/^\/dicom-web\/studies\/1\.2\.3\/series\/4\.5\.6\/instances\/7\.8\.1[123]\/metadata$/.test(req.url ?? "")) {
+        // 3つの UID のうち、1つだけが求めたものと違う答え（7.8.11：検査、7.8.12：シリーズ、7.8.13：画像）
+        const sop = req.url!.split("/")[7]!;
+        const wrong = { vr: "UI", Value: ["9.9.9"] };
+        res.writeHead(200, { "content-type": "application/dicom+json" });
+        res.end(
+          JSON.stringify([
+            {
+              ...instanceDataset,
+              "00080018": sop === "7.8.13" ? wrong : { vr: "UI", Value: [sop] },
+              ...(sop === "7.8.11" ? { "0020000D": wrong } : {}),
+              ...(sop === "7.8.12" ? { "0020000E": wrong } : {}),
+            },
+          ]),
+        );
+      } else if (req.url?.startsWith("/dicom-web/studies/1.2.3/series/4.5.6/instances?")) {
+        // 画像の並び：求めた検査・シリーズの行・検査が違う行・シリーズが違う行・UID の無い行
+        const row = (study: string | null, series: string | null, sop: string, n: number) => ({
+          ...(study ? { "0020000D": { vr: "UI", Value: [study] } } : {}),
+          ...(series ? { "0020000E": { vr: "UI", Value: [series] } } : {}),
+          "00080018": { vr: "UI", Value: [sop] },
+          "00100020": { vr: "LO", Value: ["JP-TEST-0001"] },
+          "00200013": { vr: "IS", Value: [n] },
+        });
+        res.writeHead(200, { "content-type": "application/dicom+json" });
+        res.end(JSON.stringify([row("1.2.3", "4.5.6", "7.8.9", 1), row("9.9.9", "4.5.6", "7.8.10", 2), row("1.2.3", "9.9.9", "7.8.11", 3), row(null, null, "7.8.12", 4)]));
+      } else if (req.url?.startsWith("/dicom-web/studies/1.2.3/series/4.5.6/instances/0.0.0")) {
+        res.writeHead(404).end();
+      } else if (req.url?.startsWith("/w299/dicom-web/studies?")) {
+        // 求めた数より少なく返しても、続きがあることを Warning 299 で知らせる画像サーバー（PS3.18 8.3.4.4.1）
+        res.writeHead(200, {
+          "content-type": "application/dicom+json",
+          warning: "299 orthanc: There are 3 additional results that can be requested",
+        });
+        res.end(JSON.stringify(studies));
       } else if (req.url?.startsWith("/dicom-web/studies")) {
         res.writeHead(200, { "content-type": "application/dicom+json", "set-cookie": "backend-session=1" });
         res.end(JSON.stringify(studies));
@@ -96,11 +143,11 @@ describe("実の画像サーバーへの接続", () => {
   it("BACKEND_CA_FILE の CA で証明書を確かめてつなぎ、資格情報はサーバーの側で付ける", async () => {
     seen.length = 0;
     const b = backend({ caPem });
-    expect(await b.searchStudies()).toHaveLength(8);
+    expect(await b.searchStudies()).toMatchObject({ studies: { length: 8 }, complete: true });
     expect(await b.countStudies()).toEqual({ count: 42, exact: true });
     const expected = `Basic ${Buffer.from("tsunagi:backend-secret").toString("base64")}`;
     expect(seen.map((s) => s.authorization)).toEqual([expected, expected]);
-    expect(seen[0]!.url).toMatch(/^\/dicom-web\/studies\?limit=1000&includefield=00081030/);
+    expect(seen[0]!.url).toMatch(/^\/dicom-web\/studies\?limit=1001&includefield=00081030/);
   });
 
   it("自前の CA を渡さなければ、確かめに失敗してつながらない（確かめを切らない）", async () => {
@@ -108,10 +155,21 @@ describe("実の画像サーバーへの接続", () => {
     await expect(backend().searchStudies()).rejects.toThrow("画像サーバーに接続できません");
   });
 
-  it("検索の件数を上限の 1000 に収めて求める", async () => {
+  it("検索の件数を上限の 1000 に収め、続きがあるかを知るために 1 件多く求める", async () => {
     seen.length = 0;
     await backend({ caPem }).searchStudies(50_000);
-    expect(seen[0]!.url).toMatch(/^\/dicom-web\/studies\?limit=1000&/);
+    expect(seen[0]!.url).toMatch(/^\/dicom-web\/studies\?limit=1001&/);
+  });
+
+  it("答えに Warning 299 があれば、返した数が上限より少なくても「全部」としない（検査日の範囲で区切って問い合わせ直す）", async () => {
+    seen.length = 0;
+    const b = createHttpBackend({ kind: "orthanc", mock: false, dicomwebUrl: `${baseUrl}/w299/dicom-web`, orthancUrl: baseUrl, caPem });
+    const r = await b.searchStudies();
+    expect(r.complete).toBe(false);
+    const asked = seen.filter((s) => s.url.startsWith("/w299/dicom-web/studies?"));
+    expect(asked.length).toBeGreaterThan(1);
+    // 2 回目からは検査日の範囲の条件が付く
+    expect(new URL(asked[1]!.url, "https://x").searchParams.get("StudyDate")).toMatch(/^\d{8}-$|^\d{8}-\d{8}$|^-\d{8}$|^\d{8}$/);
   });
 
   const metadata = wadoRsTarget(["studies", "1.2.3", "series", "1.2.3.4", "metadata"])!;
@@ -174,6 +232,17 @@ describe("実の画像サーバーへの接続", () => {
       await relay(["metadata"], IMG_ACCEPT);
       expect(seen.at(-1)!.accept).toBe(IMG_ACCEPT);
     });
+
+    it("query の accept は画像サーバーへ渡さない（受け取る型は Accept のヘッダーで求める。PS3.18 8.3.3.1）", async () => {
+      await backend({ caPem }).relayDicomweb({
+        method: "GET",
+        target: wadoRsTarget(["studies", "1.2.3", "series", "1.2.3.4", "thumbnail"])!,
+        search: "?accept=image/gif&viewport=64,64",
+        accept: "image/png",
+      });
+      expect(seen.at(-1)!.url).toBe("/dicom-web/studies/1.2.3/series/1.2.3.4/thumbnail?viewport=64,64");
+      expect(seen.at(-1)!.accept).toBe("image/png");
+    });
   });
 
   it("圧縮の応答をほどいて渡し、画像サーバーの content-length・content-encoding を通さない", async () => {
@@ -206,7 +275,24 @@ describe("実の画像サーバーへの接続", () => {
     const studiesInRange = await backend({ caPem }).searchStudies(1000, { dateFrom: "20261017", dateTo: "20261017" });
     expect(new URL(seen[0]!.url, "https://x").searchParams.get("StudyDate")).toBe("20261017");
     // 手元のサーバーは範囲を見ずに 8 件を返すので、BFF の側で 4 件に絞る
-    expect(studiesInRange).toHaveLength(4);
+    expect(studiesInRange.studies).toHaveLength(4);
+  });
+
+  it("詳細条件は QIDO-RS の条件で求め（文字は `*語*`）、答えの条件に合わない検査は捨てる", async () => {
+    seen.length = 0;
+    const found = await backend({ caPem }).searchStudies(1000, {
+      patientBirthDate: "19750510",
+      patientSex: "M",
+      accessionNumber: "ACC-0001",
+    });
+    const params = new URL(seen[0]!.url, "https://x").searchParams;
+    expect(params.get("PatientBirthDate")).toBe("19750510");
+    expect(params.get("PatientSex")).toBe("M");
+    expect(params.get("AccessionNumber")).toBe("*ACC-0001*");
+    expect(params.has("StudyDescription")).toBe(false);
+    expect(params.has("ReferringPhysicianName")).toBe(false);
+    // 手元のサーバーは条件を見ずに 8 件を返すので、BFF の側で JP-TEST-0001 の 2 件に絞る
+    expect(found.studies.map((s) => s.accessionNumber).sort()).toEqual(["ACC-0001-1", "ACC-0001-2"]);
   });
 
   it("段 2：シリーズと値の全部は、UID を確かめてから QIDO-RS で求める", async () => {
@@ -222,6 +308,33 @@ describe("実の画像サーバーへの接続", () => {
     const before = seen.length;
     await expect(b.searchSeries("../../system")).rejects.toMatchObject({ status: 400 });
     await expect(b.studyDataset("1.2.3&PatientID=*")).rejects.toMatchObject({ status: 400 });
+    expect(seen).toHaveLength(before);
+  });
+
+  it("画像単位の DICOM タグ：画像の並びは QIDO-RS、値は WADO-RS の metadata。UID を確かめ、答えの UID が違えば返さない", async () => {
+    seen.length = 0;
+    const b = backend({ caPem });
+    const found = await b.searchInstances("1.2.3", "4.5.6");
+    const list = new URL(seen.at(-1)!.url, "https://x");
+    expect(list.pathname).toBe("/dicom-web/studies/1.2.3/series/4.5.6/instances");
+    expect(list.searchParams.getAll("includefield")).toEqual(["00200013", "00280008", "00100020"]);
+    // 答えの検査・シリーズの UID が求めたものと違う行・UID の無い行は返さない
+    expect(found.map((i) => i.sopInstanceUid)).toEqual(["7.8.9"]);
+    expect(found[0]).toMatchObject({ patientId: "JP-TEST-0001", instanceNumber: "1" });
+
+    const ds = await b.instanceDataset("1.2.3", "4.5.6", "7.8.9");
+    expect(seen.at(-1)).toMatchObject({ url: "/dicom-web/studies/1.2.3/series/4.5.6/instances/7.8.9/metadata", method: "GET", accept: "application/dicom+json" });
+    expect(ds).toEqual(instanceDataset);
+    // 見つからなければ null
+    expect(await b.instanceDataset("1.2.3", "4.5.6", "0.0.0")).toBeNull();
+    // 答えの UID が求めたものと違うときは返さない（検査・シリーズ・画像の UID を1つずつ違えて見る）
+    for (const sop of ["7.8.11", "7.8.12", "7.8.13"]) expect(await b.instanceDataset("1.2.3", "4.5.6", sop), sop).toBeNull();
+    // 画像の値でない答え（手元のサーバーは検査の検索の答えを返す）も返さない
+    expect(await b.instanceDataset("1.2.3", "4.5.6", "1.1.1")).toBeNull();
+    // UID の形でないものは、画像サーバーへ求めずに断る
+    const before = seen.length;
+    await expect(b.searchInstances("1.2.3", "../x")).rejects.toMatchObject({ status: 400 });
+    await expect(b.instanceDataset("1.2.3", "4.5.6", "7.8.9/../../x")).rejects.toMatchObject({ status: 400 });
     expect(seen).toHaveLength(before);
   });
 });

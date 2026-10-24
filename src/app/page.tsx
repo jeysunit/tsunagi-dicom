@@ -3,11 +3,13 @@ import type { ScreenInfo } from "@/components/studies/screen-info";
 import { pageAccess } from "@/lib/auth/page-session";
 import { can } from "@/lib/auth/roles";
 import { audit } from "@/lib/auth/session";
+import { isDicomUid } from "@/lib/backend/relay-path";
 import { BackendError } from "@/lib/backend/types";
 import { getConfig } from "@/lib/config";
 import { screenDeps } from "@/lib/screen-deps";
 import { searchAuditFields } from "@/lib/search-audit";
-import { parseFilter } from "@/lib/study-filter";
+import { filterToSearchParams, parseFilter } from "@/lib/study-filter";
+import { resolveSearchTrigger } from "@/lib/search-trigger";
 import { listStudies, type StudyListResult } from "@/lib/study-list";
 import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
 
@@ -30,11 +32,21 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     );
   }
   const { session } = access;
-  const filter = parseFilter(await searchParams);
+  const params = await searchParams;
+  const filter = parseFilter(params);
+  // 受信一覧の「検査一覧で表示」から開いたとき：その検査を選んだ形で開く（UID の形を確かめ、一覧にあるときだけ選ぶ。
+  // 選ぶと、行をクリックしたときと同じく詳細を読み、「詳細を開いた」を記録する）。URL からは、開いた後に外す
+  const studyUid = typeof params.studyUid === "string" && isDicomUid(params.studyUid) ? params.studyUid : undefined;
   const deps = await screenDeps(session);
+  const config = getConfig();
+  const refreshSeconds = config.screen.studyListRefreshSeconds;
 
   let result: StudyListResult;
+  let version: string | undefined;
   try {
+    // 自動更新の基準の版は、一覧を取る前に読む（間に入った検査は、次の版の読み取りで拾う）。
+    // 版を読めなくても一覧は出す（画面が最初に読んだ版を基準にする）
+    version = refreshSeconds > 0 ? await deps.backend.studyListVersion().catch(() => undefined) : undefined;
     result = await listStudies(deps, filter);
   } catch (error) {
     const message = error instanceof BackendError ? error.message : loadFailed("検査");
@@ -45,16 +57,18 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </p>
     );
   }
+  // 頁を開いたことは手動の検索（自動更新の読み直しを認める基準の条件として覚える。src/lib/search-trigger.ts）
+  resolveSearchTrigger(session, filterToSearchParams(filter).toString(), null);
   await audit(session, searchAuditFields("page", result.returned, result.facetAudit));
 
   const role = session.role;
-  const config = getConfig();
   // 検証モードで書き込みを止めているときは、書き込みの操作のボタンを出さない（BFF の側でも断る）
   const writes = config.auth.mode !== "dev" || !!config.auth.devAllowWrite;
   const screen: ScreenInfo = {
     csrfToken: session.local?.row.csrfToken,
     viewers: deps.viewers,
     timeZone: config.timeZone,
+    refreshSeconds,
     can: {
       rememberViewer: can(role, "viewer.remember"),
       allValues: can(role, "dicom.all_values"),
@@ -73,6 +87,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         initialFilter={filter}
         initialData={{ count: result.count, studies: result.studies, facets: result.facets }}
         initialDataAt={result.fetchedAt}
+        initialVersion={version}
+        initialSelected={studyUid && result.studies.some((s) => s.studyInstanceUid === studyUid) ? studyUid : undefined}
         screen={screen}
       />
     </>

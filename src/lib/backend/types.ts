@@ -17,7 +17,7 @@ export interface StudySummary {
   studyDescription: string;
   /** StudyID（装置・施設の検査の番号） */
   studyId: string;
-  /** 依頼医（PN の1本の文字列） */
+  /** 紹介医（PN の1本の文字列） */
   referringPhysicianName: string;
   modalities: string[];
   seriesCount: number | null;
@@ -35,18 +35,58 @@ export interface SeriesSummary {
   instanceCount: number | null;
 }
 
+/** シリーズの中の画像（BFF の側の QIDO-RS で引く。画像単位の DICOM タグの選び先。中継からは返さない） */
+export interface InstanceSummary {
+  /** 答えにあれば、求めた検査・シリーズのものかを確かめる（無ければ空）。画面へは返さない */
+  studyInstanceUid: string;
+  seriesInstanceUid: string;
+  /** 監査の記録の「どの患者」に使う（無ければ空）。画面へは返さない */
+  patientId: string;
+  sopInstanceUid: string;
+  sopClassUid: string;
+  instanceNumber: string;
+  numberOfFrames: number | null;
+}
+
 /** 検査の検索の条件。日付は DICOM の DA（YYYYMMDD）。画像サーバーへは QIDO-RS の条件として渡す */
 export interface StudyQuery {
   dateFrom?: string;
   dateTo?: string;
+  // ── 詳細条件（docs/spec.md の 3.1。2026-10-21）。値は study-filter.ts で形を確かめたもの（ワイルドカードの字を含まない） ──
+  /** 生年月日（DA。YYYYMMDD）。一致 */
+  patientBirthDate?: string;
+  /** 性別（M・F・O）。一致 */
+  patientSex?: string;
+  /** 受付番号・検査名。値を含むもの（QIDO-RS では `*値*`） */
+  accessionNumber?: string;
+  studyDescription?: string;
 }
 
 /** BFF から見た Orthanc（docs/spec.md の 0。Orthanc 専用）。資格情報はこの中だけで使い、ブラウザには渡さない */
 export interface Backend {
   readonly kind: "orthanc";
   readonly mock: boolean;
-  /** QIDO-RS の検査の検索（新しい順に limit 件まで。検査日の範囲で絞れる） */
-  searchStudies(limit?: number, query?: StudyQuery): Promise<StudySummary[]>;
+  /** 発番元を確認した患者 ID で、全検査を REST から探す（design.md §4・§6）。 */
+  findStudiesByPatientId(patientId: string): Promise<string[]>;
+  /** A40 の空欄を補うために、現在の患者の値を読む（design.md §9）。 */
+  studyPatient(orthancStudyId: string): Promise<StudyPatient | null>;
+  /**
+   * UID を保つ書き換えの仕事を作る（design.md §4）。removeSource は患者 ID が変わるときだけ true（KeepSource: false）。
+   * 患者 ID が変わらないと Orthanc の中の ID が元と同じなので、元を消すと書き換えた画像ごと消える
+   */
+  modifyStudyKeepingUids(
+    orthancStudyId: string,
+    replace: Record<string, string>,
+    options: { removeSource: boolean },
+  ): Promise<{ jobId: string }>;
+  /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
+  studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
+  /**
+   * QIDO-RS の検査の検索（検査日の範囲で絞れる）。検査日の新しい順に limit 件まで。
+   * QIDO-RS は返す順を決めていない（PS3.18 8.3.4.4）ので、limit を超える検査があれば、検査日の範囲で区切って
+   * 新しい側から問い合わせる（docs/spec.md の 3.1「上限に届いたとき」）
+   */
+  searchStudies(limit?: number, query?: StudyQuery): Promise<StudySearch>;
   /** 検査の中のシリーズ（QIDO-RS。シリーズの番号の順）。検査が無ければ空 */
   searchSeries(studyInstanceUid: string): Promise<SeriesSummary[]>;
   /**
@@ -55,8 +95,23 @@ export interface Backend {
    * すべての DICOM の値を見る権限（dicom.all_values）のときだけ
    */
   studyDataset(studyInstanceUid: string): Promise<DicomJsonDataset | null>;
+  /**
+   * シリーズの中の画像（QIDO-RS の studies/{study}/series/{series}/instances。画像の番号の順）。無ければ空。
+   * 画像単位の DICOM タグ（dicom.all_values）の選び先。BFF の側で引き、中継からは返さない（docs/spec.md の 3.2）
+   */
+  searchInstances(studyInstanceUid: string, seriesInstanceUid: string): Promise<InstanceSummary[]>;
+  /**
+   * 1枚の画像の DICOM の値の全部（WADO-RS の studies/{study}/series/{series}/instances/{sop}/metadata）。無ければ null。
+   * 返す前に、答えの3つの UID が求めたものと同じかを確かめる。dicom.all_values のときだけ画面へ返す
+   */
+  instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string): Promise<DicomJsonDataset | null>;
   /** 検査の件数。Orthanc の /statistics で正確に数える */
   countStudies(): Promise<StudyCount>;
+  /**
+   * 検査の一覧の版（docs/spec.md の 3.1 の自動更新）。Orthanc の変更の記録の最後の番号（/changes?last の Last）。
+   * 検査・シリーズ・画像が入る・消える・変わると進む。患者の情報は含まない
+   */
+  studyListVersion(): Promise<string>;
   /**
    * ビューアが画像を取る道（WADO-RS の読み取り）の中継。検索（QIDO-RS）と書き込みは通さない（docs/spec.md の 3.2）。
    * 宛先は relay-path.ts の wadoRsTarget で確かめたもの
@@ -167,6 +222,17 @@ export interface StudyCount {
   exact: boolean;
 }
 
+/** 検査の検索の答え */
+export interface StudySearch {
+  /** 検査日の新しい順に、上限の数まで */
+  studies: StudySummary[];
+  /**
+   * 条件に合う検査を全部返したか。false なら、返していない検査が画像サーバーにある（件数は「以上」）。
+   * 返した検査は、検査日の新しい側から欠けなく並ぶ（いちばん古い検査日の中だけは、全部とは限らない）
+   */
+  complete: boolean;
+}
+
 /** 一覧と件数で、一度に QIDO-RS から受ける検査の上限 */
 export const STUDY_LIMIT = 1000;
 
@@ -193,4 +259,20 @@ export class BackendError extends Error {
     super(message);
     this.name = "BackendError";
   }
+}
+
+/** HL7 で書き換える前の値（Orthanc の REST）。 */
+export interface StudyPatient {
+  PatientID: string;
+  PatientName: string;
+  PatientBirthDate: string;
+  PatientSex: string;
+  AccessionNumber: string;
+  StudyInstanceUID: string;
+}
+
+export interface PatientInstance extends StudyPatient {
+  SeriesInstanceUID: string;
+  SOPInstanceUID: string;
+  SpecificCharacterSet: string;
 }

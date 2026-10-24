@@ -29,7 +29,7 @@ export const STUDY_FIELDS = [
   "accessionNumber",
   "studyDescription",
   "studyId",
-  /** 依頼医（漢字が無ければローマ字） */
+  /** 紹介医（漢字が無ければローマ字） */
   "referringPhysicianName",
   "modalities",
   "seriesCount",

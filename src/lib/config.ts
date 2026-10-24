@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { isValidUsername, USERNAME_HINT } from "@/lib/auth/username";
+import { parseInstanceTags } from "@/lib/instance-tags";
 
 // 設定の読み込み（docs/spec.md の 2.1。正本は .env.example）。
 // 足りない・誤った値があれば、どの変数かを並べて ConfigError を投げる。値そのものは文言に出さない（秘密を漏らさない）。
@@ -61,6 +62,22 @@ export interface AppConfig {
     /** AUTH_MODE=dev（モックだけ）で、書き込みの操作も通すか（DEV_ALLOW_WRITE。既定は止める。docs/spec.md の 4） */
     devAllowWrite?: boolean;
   };
+  /** 画面の振る舞い */
+  screen: {
+    /** 検査の一覧の自動更新の間隔（秒。0 で止める。docs/spec.md の 3.1） */
+    studyListRefreshSeconds: number;
+    /** 画像ごとの「主なタグ」に出すタグ（8 桁の大文字の 16 進。設定の順。INSTANCE_TAGS。docs/spec.md の 3.1） */
+    instanceTags: string[];
+  };
+  /** 監査の記録（docs/adr/0001-audit-chain-mac.md） */
+  audit: {
+    /** 先頭の控えを追記するファイル（AUDIT_ANCHOR_FILE）。無ければコンテナのログ（標準出力）にだけ書く */
+    anchorFile?: string;
+    /** 前に使っていた SESSION_SECRET（SESSION_SECRET_PREVIOUS_FILE）。その鍵で書いた行を確かめるためだけに使う */
+    sessionSecretPrevious: string[];
+  };
+  hl7ReceiverToken?: string;
+  hl7PatientIdIssuer?: string;
   databaseUrl: string;
   sessionSecret: string;
   timeZone: string;
@@ -105,6 +122,8 @@ const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で�
 
 const envSchema = z.object({
   // 省ける（orthanc だけ）。前の設定の dicomweb は、黙って Orthanc として動かさずに断る
+  HL7_RECEIVER_TOKEN_FILE: z.string().optional(),
+  HL7_PATIENT_ID_ISSUER: z.string().optional(),
   BACKEND_KIND: z
     .enum(["orthanc"], { error: "orthanc だけにする（汎用の DICOMweb の dicomweb は外した）。省いてもよい" })
     .default("orthanc"),
@@ -138,6 +157,10 @@ const envSchema = z.object({
   LOGIN_PENDING_MINUTES: int(10, 1, 60),
   SESSION_MAX_HOURS: int(12, 1, 24),
   REAUTH_MINUTES: int(5, 1, 60),
+  // 検査の一覧の自動更新（既定 30 秒。2026-10-21 に承認者が決めた）。0 で止める。画像サーバーへ問い合わせすぎないよう 5 秒より短くしない
+  STUDY_LIST_REFRESH_SECONDS: int(30, 0, 3600).refine((v) => v === 0 || v >= 5, "0（止める）か 5〜3600 の整数にする"),
+  // 画像ごとの「主なタグ」に出すタグの番号（空白で区切る）。空なら既定の一覧（src/lib/instance-tags.ts）。誤りは loadConfig で出す
+  INSTANCE_TAGS: z.string().optional(),
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
@@ -155,6 +178,14 @@ const envSchema = z.object({
     .refine((v) => Buffer.byteLength(v, "utf8") >= SESSION_SECRET_MIN_BYTES, "32 バイト以上の乱数にする")
     .optional(),
   SESSION_SECRET_FILE: z.string().optional(),
+  // 前に使っていた SESSION_SECRET（1 行に 1 つ）。監査の記録のうち、その鍵で書いた行を確かめるためだけに使う
+  // （docs/adr/0001-audit-chain-mac.md）。セッションや token には使わない
+  SESSION_SECRET_PREVIOUS_FILE: z.string().optional(),
+  // 監査の記録の先頭（seq と hash）の控えを追記するファイル（JSON Lines）。データベースとは別の置き場にする
+  AUDIT_ANCHOR_FILE: z
+    .string()
+    .refine((v) => v.startsWith("/"), "絶対のパスにする（例：/audit-anchors/audit-anchors.jsonl）")
+    .optional(),
   TZ: z
     .string()
     .default("Asia/Tokyo")
@@ -221,6 +252,21 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   };
 
+  // 片方だけの設定で、認証や発番元の確認を欠いた道を開かない（design.md §3・§6）。
+  const hl7ReceiverToken = secret("HL7_RECEIVER_TOKEN", undefined, e.HL7_RECEIVER_TOKEN_FILE);
+  if (hl7ReceiverToken !== undefined && [...hl7ReceiverToken].length < 32) {
+    problem("HL7_RECEIVER_TOKEN_FILE", "32 文字以上の乱数にする");
+  }
+  const hl7PatientIdIssuer = e.HL7_PATIENT_ID_ISSUER?.trim();
+  if (e.HL7_PATIENT_ID_ISSUER !== undefined && !hl7PatientIdIssuer) {
+    problem("HL7_PATIENT_ID_ISSUER", "namespace ID は空にできない");
+  }
+  if (Boolean(e.HL7_RECEIVER_TOKEN_FILE) !== Boolean(hl7PatientIdIssuer)) {
+    problem("HL7_PATIENT_ID_ISSUER", "token ファイルと発番元は両方を設定する");
+  }
+  if (hl7PatientIdIssuer && /[|^~\\&\s]/u.test(hl7PatientIdIssuer)) {
+    problem("HL7_PATIENT_ID_ISSUER", "namespace ID を指定する");
+  }
   const sessionSecret = secret("SESSION_SECRET", e.SESSION_SECRET, e.SESSION_SECRET_FILE);
   if (
     e.SESSION_SECRET_FILE !== undefined &&
@@ -228,6 +274,20 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     Buffer.byteLength(sessionSecret, "utf8") < SESSION_SECRET_MIN_BYTES
   ) {
     problem("SESSION_SECRET_FILE", "32 バイト以上の乱数にする");
+  }
+  // 前の SESSION_SECRET（監査の記録の確かめだけに使う）。空の行は飛ばす。どれも 32 バイト以上
+  let sessionSecretPrevious: string[] = [];
+  if (e.SESSION_SECRET_PREVIOUS_FILE !== undefined) {
+    try {
+      sessionSecretPrevious = readFile(e.SESSION_SECRET_PREVIOUS_FILE)
+        .split(/\r?\n/)
+        .filter((line) => line !== "");
+      if (sessionSecretPrevious.some((s) => Buffer.byteLength(s, "utf8") < SESSION_SECRET_MIN_BYTES)) {
+        problem("SESSION_SECRET_PREVIOUS_FILE", "どの行も 32 バイト以上にする（前に使っていた SESSION_SECRET を 1 行に 1 つ）");
+      }
+    } catch {
+      problem("SESSION_SECRET_PREVIOUS_FILE", "ファイルを読めない");
+    }
   }
   const oidcClientSecret = secret("OIDC_CLIENT_SECRET", e.OIDC_CLIENT_SECRET, e.OIDC_CLIENT_SECRET_FILE);
 
@@ -293,6 +353,9 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     }
   }
 
+  const instanceTags = parseInstanceTags(e.INSTANCE_TAGS);
+  if (!instanceTags.ok) problem("INSTANCE_TAGS", instanceTags.message);
+
   if (e.DEV_ALLOW_WRITE && e.AUTH_MODE !== "dev") {
     // 検証モード（モックだけ）のときだけ効く。ほかで書いても書き込みが通るように見えないよう、誤りにする
     problem("DEV_ALLOW_WRITE", "AUTH_MODE=dev のときだけ使える（ほかの認証では役割の割り当てで書き込みを決める）");
@@ -337,6 +400,11 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       initialAdmin,
       devAllowWrite: e.DEV_ALLOW_WRITE,
     },
+    // 誤りは上で problem にして投げている
+    screen: { studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS, instanceTags: instanceTags.ok ? instanceTags.tags : [] },
+    audit: { anchorFile: e.AUDIT_ANCHOR_FILE, sessionSecretPrevious },
+    hl7ReceiverToken,
+    hl7PatientIdIssuer,
     databaseUrl: e.DATABASE_URL,
     // 無いときは上で problem にして投げている
     sessionSecret: sessionSecret!,
