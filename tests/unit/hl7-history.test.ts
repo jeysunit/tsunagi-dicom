@@ -43,8 +43,12 @@ async function dropGuards(db: Db) {
   await db.$executeRawUnsafe('DROP TRIGGER "AuditLog_no_replace"');
 }
 
-/** 鍵を持たない者が、つなぎの末尾に、先の時刻の A40 の覚えの行を書き足す（hash は鍵なしで作れる値だけ） */
-async function forgeAck(db: Db, remember: Record<string, unknown>, keyless = false) {
+/** 鍵を持たない者が、つなぎの末尾に A40 の覚えの行を書き足す（hash は鍵なしで作れる値だけ） */
+const forgeAck = (db: Db, remember: Record<string, unknown>, keyless = false) =>
+  forgeRow(db, { event: "ack", code: "AA", remember }, keyless);
+
+/** 鍵を持たない者が、つなぎの末尾に HL7 の行を書き足す。keyless なら鍵の無い形の hash、でなければ でたらめの hash */
+async function forgeRow(db: Db, detail: Record<string, unknown>, keyless = false) {
   const last = (await db.auditLog.findFirst({ orderBy: { seq: "desc" } }))!;
   const row = {
     seq: last.seq + 1,
@@ -57,7 +61,7 @@ async function forgeAck(db: Db, remember: Record<string, unknown>, keyless = fal
     patientId: null,
     studyInstanceUid: null,
     sourceAddress: null,
-    detail: JSON.stringify({ event: "ack", code: "AA", remember }),
+    detail: JSON.stringify(detail),
     prevHash: last.hash,
     sourceAddressUnverified: null,
     keyId: keyless ? null : last.keyId
@@ -141,6 +145,20 @@ describe("HL7 の経過の確かめ", () => {
     await forgeAck(current.db, alias(Date.now()), true);
     await expect(history()).rejects.toThrow("鍵の無い行");
     expect(await sweep()).toMatchObject({ count: 0, blocked: expect.stringContaining("鍵の無い行") });
+  });
+
+  it("鍵つきの行の後に書き足した鍵の無い行（偽の照らし合わせ）で、結果不明の書き換えを解かない", async () => {
+    temp(`${STUDY}.1.1`);
+    // 書き換えを結果不明にする（仕事の状態を読めない）
+    orthanc.next.state = "Running";
+    expect(await processMessage(Buffer.from(a40(TEMP, "P000001")), "192.0.2.1", orthanc.backend, undefined, { ...options, jobTimeoutMs: 0 }))
+      .toContain("MSA|AE|");
+    const request = (await history()).find(r => r.detail?.event === "request")!;
+    // 鍵を持たない者が、人が解いたことにする行を、鍵の無い形で書き足す
+    await forgeRow(current.db, { event: "reconcile", writeId: request.detail?.writeId, manual: true }, true);
+    await expect(history()).rejects.toThrow("鍵の無い行");
+    orthanc.add({ PatientID: "ER9", StudyInstanceUID: "2.25.900" });
+    expect(await send(a40("ER9", "P000009"))).toContain("MSA|AE|");
   });
 
   it("行の間に差し込んだ行（つなぎの合わない行）は使わない", async () => {

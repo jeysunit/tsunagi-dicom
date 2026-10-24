@@ -42,6 +42,9 @@ export async function history(): Promise<HistoryRow[]> {
     }
   }
   const keyring = auditKeyring();
+  // 鍵の無い行は、最初の鍵つきの行より前だけで受ける（verifyAuditChain と同じ決まり）。後ろに鍵の無い行を書き足せば、
+  // 鍵を持たない者でも hash を作れるので、偽の照らし合わせ（manual）で結果不明の書き換えを解けてしまう
+  const firstKeyed = (await db.auditLog.findFirst({ where: { keyId: { not: null } }, orderBy: { seq: "asc" }, select: { seq: true } }))?.seq;
   return rows.map(r => {
     let detail: Record<string, unknown>;
     try {
@@ -49,7 +52,8 @@ export async function history(): Promise<HistoryRow[]> {
     } catch {
       throw new HistoryTampered(r.seq, "detail が JSON でない");
     }
-    const reason = checkAuditRow(r, previous.get(r.seq - 1), keyring, detail?.remember !== undefined);
+    const requireKey = detail?.remember !== undefined || (firstKeyed !== undefined && r.seq > firstKeyed);
+    const reason = checkAuditRow(r, previous.get(r.seq - 1), keyring, requireKey);
     if (reason) {
       throw new HistoryTampered(r.seq, reason);
     }
