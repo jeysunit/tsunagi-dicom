@@ -40,7 +40,7 @@ export function NavLinks({ items }: { items: readonly NavItem[] }) {
             className={cn(
               "-mb-2.5 rounded-t-md border-b-2 px-3 pt-1.5 pb-2 whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
               current
-                ? "border-primary bg-background font-bold text-value"
+                ? "border-ring bg-background font-bold text-value"
                 : "border-transparent text-label hover:bg-hover hover:text-value active:bg-pressed",
             )}
           >

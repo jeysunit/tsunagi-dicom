@@ -111,6 +111,23 @@ describe("入力欄・ボタンの輪郭（border-input）は、地との対比�
   }
 });
 
+describe("選択の印（縦線・枠・進みの帯）に使う ring は、地との対比が 3:1 以上（WCAG 2.2 の 1.4.11）", () => {
+  for (const [name, set] of [
+    ["明るい地", light],
+    ["暗い地", dark],
+  ] as const) {
+    it.each(["background", "surface", "selected"])(`${name}：ring と %s の地`, (bg) => {
+      expect(contrast(set.ring!, set[bg]!)).toBeGreaterThanOrEqual(3);
+    });
+  }
+});
+
+describe("暗い地：誤りの文字（danger）は、押している間・hover の地の上でも 4.5:1 以上", () => {
+  it.each(["hover", "pressed"])("danger と %s の地", (bg) => {
+    expect(contrast(dark.danger!, dark[bg]!)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("グレーは色味のない中立（R=G=B）", () => {
   for (const [name, set] of [
     ["明るい地", light],

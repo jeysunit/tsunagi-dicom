@@ -90,7 +90,7 @@ body:has([data-split-root]) {
   --color-muted-strong: #383838;
   --color-chrome: #121212;
   --color-hover: #333333;
-  --color-pressed: #444444;
+  --color-pressed: #3a3a3a;
   /* 主の色 #4b4fbf を 25% だけ地に重ねた色 */
   --color-selected: #272844;
   --color-primary: #4b4fbf;
