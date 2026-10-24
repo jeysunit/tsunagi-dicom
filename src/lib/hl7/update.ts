@@ -8,7 +8,12 @@ export interface Command {
   attributes: Record<string, string>;
   uid?: string;
   accession?: string;
+  /** ORM の ORC-1。NW・XO は受付番号を入れ、CA・DC は外す（IHE RAD TF-2 4.4・4.13。design.md §9）。 */
+  control?: OrderControl;
 }
+
+export const ORDER_CONTROLS = ["NW", "CA", "DC", "XO"] as const;
+export type OrderControl = typeof ORDER_CONTROLS[number];
 
 export type UpdateResult = {
   ok: true;
@@ -74,8 +79,9 @@ export function extractUpdate(msg: Message, issuer = "RIS_EMU"): UpdateResult {
   if (!(type === "ADT" && ["A40", "A08"].includes(trigger)) && !(type === "ORM" && trigger === "O01")) {
     return { ok: false, code: "AR", reason: "扱わないメッセージ" };
   }
-  if (type === "ORM" && value(field(msg, "ORC", 1)) !== "NW") {
-    return { ok: false, code: "AR", reason: "ORC-1 は NW だけを扱う" };
+  const control = value(field(msg, "ORC", 1));
+  if (type === "ORM" && !(ORDER_CONTROLS as readonly string[]).includes(control)) {
+    return { ok: false, code: "AR", reason: "ORC-1 は NW・CA・DC・XO だけを扱う" };
   }
   const structure = field(msg, "MSH", 9)[0]?.[2]?.[0] ?? "";
   const allowed = type === "ORM" ? ["", "ORM_O01"] : trigger === "A40" ? ["", "ADT_A39"] : ["", "ADT_A01", "ADT_A08"];
@@ -132,7 +138,7 @@ export function extractUpdate(msg: Message, issuer = "RIS_EMU"): UpdateResult {
       }
       return {
         ok: true,
-        command: { kind: "ORM", patientId: id, attributes: {}, uid, accession }
+        command: { kind: "ORM", patientId: id, attributes: {}, uid, accession, control: control as OrderControl }
       };
     }
     const priorPatientId = trigger === "A40" ? patientId(field(msg, "MRG", 1), issuer) : undefined;

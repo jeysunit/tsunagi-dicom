@@ -471,6 +471,9 @@ export function createMockBackend(): Backend {
     async studyPatient(id: string) {
       return studyPatientFromRest((await restStudies()).find((s) => s.ID === id));
     },
+    async studyIsStable(id: string) {
+      return (await restStudies()).some((s) => s.ID === id);
+    },
     async studyInstanceTags(id: string) {
       const patient = await this.studyPatient(id);
       if (!patient) {

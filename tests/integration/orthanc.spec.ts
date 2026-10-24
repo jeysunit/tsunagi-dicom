@@ -805,6 +805,7 @@ async function sendHl7(kind: "A40" | "A08" | "ORM", patientId: string, fields: {
   old?: string;
   uid?: string;
   accession?: string;
+  control?: "NW" | "CA" | "DC" | "XO";
 } = {}) {
   const token = process.env.ITEST_HL7_TOKEN;
   if (!token) {
@@ -842,7 +843,7 @@ async function sendHl7(kind: "A40" | "A08" | "ORM", patientId: string, fields: {
     const obr = Array<string>(19).fill("");
     obr[0] = "OBR";
     obr[18] = fields.accession!;
-    segments.push("ORC|NW", obr.join("|"), `ZDS|${fields.uid}`);
+    segments.push(`ORC|${fields.control ?? "NW"}`, obr.join("|"), `ZDS|${fields.uid}`);
   }
   const response = await fetch(`${bffUrl}/api/hl7/messages`, {
     method: "POST",
@@ -927,4 +928,56 @@ test("17 HL7 A40 の替え先が存在：違う属性は両方を保ち、同じ
     contentType: "application/json",
     body: JSON.stringify({ Level: "Study", Query: { PatientID: source.patientId }, Expand: false })
   })).toEqual([]);
+});
+
+test("18 HL7 照合の後に仮の患者 ID で届いた画像を、統合した検査にまとめ、CA で受付番号を外す（2026-10-25）", async () => {
+  const token = process.env.ITEST_HL7_TOKEN;
+  if (!token) {
+    throw Error("試験の HL7 token が無い");
+  }
+  const first = syntheticStudy("hl7-case6-first", 54, 2, { accessionNumber: "", patientName: "UNKNOWN^MALE" });
+  writeDumps(first);
+  await storescuToOrthanc(first.batch);
+  await waitFor("仮の患者の検査", () => lookupStudy(first.studyInstanceUid), ids => ids.length === 1);
+  const finalId = "JP-TEST-HL7-CASE6";
+  expect(await sendHl7("A40", finalId, { old: first.patientId, name: "ITEST^CASE6", birth: "19700101" })).toContain("MSA|AA|");
+  expect(await sendHl7("ORM", finalId, { uid: first.studyInstanceUid, accession: "IT-CASE6-1" })).toContain("MSA|AA|");
+  // 同じ Study に、仮の患者 ID のまま 2 つめのシリーズが届く（Orthanc では別の検査になる）
+  const late = {
+    ...syntheticStudy("hl7-case6-late", 54, 2, { accessionNumber: "", patientName: "UNKNOWN^MALE" }),
+    studyInstanceUid: first.studyInstanceUid
+  };
+  writeDumps(late);
+  await storescuToOrthanc(late.batch);
+  await waitFor("同じ UID の検査が 2 件", () => lookupStudy(first.studyInstanceUid), ids => ids.length === 2);
+  const sweep = async () => {
+    const response = await fetch(`${bffUrl}/api/hl7/sweep`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(130000)
+    });
+    expect(response.status).toBe(200);
+    return await response.json() as { ok: boolean; count: number; skipped: number; blocked?: string };
+  };
+  // 届き終える（試験の Orthanc の StableAge は 2 秒）までは書き換えない
+  const result = await waitFor("見回りで書き換わる", sweep, r => r.count === 1, 30_000);
+  expect(result).toMatchObject({ ok: true, count: 1, skipped: 0 });
+  const ids = await lookupStudy(first.studyInstanceUid);
+  expect(ids).toHaveLength(1);
+  const tags = Object.values(await orthancJson<Record<string, Record<string, string>>>(`studies/${ids[0]}/instances-tags?simplify`));
+  expect(tags).toHaveLength(4);
+  const uids = tags.map(t => [t.StudyInstanceUID, t.SeriesInstanceUID, t.SOPInstanceUID].join("|")).sort();
+  const expected = [first, late].flatMap(s => s.sopInstanceUids.map(sop => [first.studyInstanceUid, s.seriesInstanceUid, sop].join("|"))).sort();
+  expect(uids).toEqual(expected);
+  for (const t of tags)
+    expect(t).toMatchObject({ PatientID: finalId, PatientName: "ITEST^CASE6", PatientBirthDate: "19700101", AccessionNumber: "IT-CASE6-1" });
+  expect(await sweep()).toMatchObject({ count: 0 });
+
+  // RAD-13 の CA：検査と画像を残し、受付番号を外す
+  expect(await sendHl7("ORM", finalId, { uid: first.studyInstanceUid, accession: "IT-CASE6-1", control: "CA" })).toContain("MSA|AA|");
+  const [afterCancel] = await lookupStudy(first.studyInstanceUid);
+  const cancelled = Object.values(await orthancJson<Record<string, Record<string, string>>>(`studies/${afterCancel}/instances-tags?simplify`));
+  expect(cancelled).toHaveLength(4);
+  for (const t of cancelled)
+    expect(t).toMatchObject({ PatientID: finalId, AccessionNumber: "" });
 });

@@ -192,7 +192,7 @@ describe("HL7 の反映と監査", () => {
   it.each([
     "BAD",
     a40.replace("ADT^A40", "ADT^A03"),
-    orm.replace("ORC|NW", "ORC|CA"),
+    orm.replace("ORC|NW", "ORC|OC"),
     a40.replace("TANAKA", "\x1b[31m"),
     a40.replace("RIS_EMU", "\x1b[31m")
   ])("AR は rejected だけを残す", async (message) => {

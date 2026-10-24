@@ -134,3 +134,17 @@ it("全画像の5つの値と UID の組を instances-tags から読む", async 
   expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}/instances-tags?simplify`);
   expect(state.fetch.mock.calls[0]![1].headers.authorization).toBe(`Basic ${Buffer.from("reader:synthetic-read").toString("base64")}`);
 });
+it.each([
+  [{ ID: id, IsStable: true }, true],
+  [{ ID: id, IsStable: false }, false],
+  [{ ID: id, IsStable: "true" }, false],
+  [{ ID: id }, false]
+])("届き終えたかは IsStable が true のときだけ（%j）", async (body, stable) => {
+  state.fetch.mockResolvedValue(Response.json(body));
+  expect(await backend().studyIsStable(id)).toBe(stable);
+  expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}`);
+});
+it("届き終えたかを見る検査の ID の形を確かめる", async () => {
+  await expect(backend().studyIsStable("../x")).rejects.toMatchObject({ status: 400 });
+  expect(state.fetch).not.toHaveBeenCalled();
+});

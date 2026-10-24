@@ -18,7 +18,7 @@ export type AuditWriter = (input: AuditEntryInput) => Promise<unknown>;
 export type HistoryRow = AuditEntryInput & {
   occurredAt?: Date;
 };
-const writeAudit: AuditWriter = async (input) => appendAudit(await getDb(), input);
+export const writeAudit: AuditWriter = async (input) => appendAudit(await getDb(), input);
 /** 監査の一本のつなぎから、HL7 の経過を古い順に読む（design.md §13）。 */
 export async function history(): Promise<HistoryRow[]> {
   const rows = await (await getDb()).auditLog.findMany({ where: { action: "hl7" }, orderBy: { seq: "asc" } });
@@ -85,6 +85,11 @@ export interface WriteDetail {
   StudyInstanceUID: string;
   before: PatientInstance[];
   after: PatientInstance[];
+  /**
+   * 同じ StudyInstanceUID で替え先の患者にすでにある画像（照合の後に届いた画像を書き換えるときだけ。design.md §15）。
+   * 書き換えた画像はこの検査にまとまるので、前と後のどちらの確かめにも足す。
+   */
+  alongside?: PatientInstance[];
 }
 /** 人が解くまで、期限を設けず結果不明と部分反映を拾う（design.md §10）。 */
 export function unresolved(rows: HistoryRow[]): WriteDetail[] {
@@ -93,11 +98,17 @@ export function unresolved(rows: HistoryRow[]): WriteDetail[] {
     return !last || (last.detail?.manual !== true && (last.outcome === "unknown" || last.detail?.partial === true));
   });
 }
-/** 全画像の UID の組と属性を前後の値に照らす（design.md §4）。 */
+/**
+ * 全画像の UID の組と属性を前後の値に照らす（design.md §4）。同じ StudyInstanceUID の検査が Orthanc に
+ * 2 件以上あれば、全部の画像を合わせて比べる（照合の後に届いた画像の書き換えの前は、替え先の検査と 2 件並ぶ。§15）。
+ * UID の組が重なれば一致としない。
+ */
 export async function verify(backend: Backend, d: WriteDetail) {
   const ids = await backend.lookupStudyIds(d.StudyInstanceUID);
-  const actual = ids.length === 1 ? await backend.studyInstanceTags(ids[0]!) : [];
-  const matches = (expected: PatientInstance[]) => {
+  const actual = (await Promise.all(ids.map(id => backend.studyInstanceTags(id)))).flat();
+  const alongside = d.alongside ?? [];
+  const matches = (written: PatientInstance[]) => {
+    const expected = [...alongside, ...written];
     if (!actual.length || actual.length !== expected.length) {
       return false;
     }
@@ -183,7 +194,62 @@ async function mergeAttributes(backend: Backend, command: Command, sources: Pati
   return attributes;
 }
 
-function planStudy(command: Command, attributes: Record<string, string>, id: string, before: PatientInstance[]) {
+/**
+ * 受理した A40 と ORM の覚え（design.md §15）。ack の行の `remember` に入れ、照合の後に仮の患者 ID で届いた画像を
+ * 書き換えるときに使う。`at` は BFF の時計の受理の時刻で、期限はここから数える。
+ */
+export type Remembered = {
+  kind: "alias";
+  /** 旧い（仮の）患者 ID と、統合した先の患者 ID */
+  from: string;
+  to: string;
+  /** この A40 で書き換えた検査の StudyInstanceUID */
+  studies: string[];
+  /** 書き換える前の旧い患者の氏名（検査があったときだけ）。後で届いた画像の氏名と比べる */
+  fromNames: string[];
+  /** 統合した先の患者の値（Orthanc に統合した先の検査が無いときに使う） */
+  attributes: Record<string, string>;
+  at: string;
+} | {
+  kind: "order";
+  patientId: string;
+  uid: string;
+  accession: string;
+  control: NonNullable<Command["control"]>;
+  at: string;
+};
+
+function rememberEntry(
+  command: Command,
+  attributes: Record<string, string>,
+  plans: { before: PatientInstance[] }[],
+  at: string,
+): Remembered | undefined {
+  if (command.kind === "A40") {
+    return {
+      kind: "alias",
+      from: command.priorPatientId!,
+      to: command.patientId,
+      studies: plans.map(p => p.before[0]!.StudyInstanceUID),
+      fromNames: [...new Set(plans.flatMap(p => p.before.map(i => i.PatientName)))],
+      attributes,
+      at
+    };
+  }
+  if (command.kind === "ORM") {
+    return {
+      kind: "order",
+      patientId: command.patientId,
+      uid: command.uid!,
+      accession: command.accession!,
+      control: command.control ?? "NW",
+      at
+    };
+  }
+  return undefined;
+}
+
+export function planStudy(command: Command, attributes: Record<string, string>, id: string, before: PatientInstance[]) {
   if (!before.length) {
     throw new BackendError("検査の画像が見つからない");
   }
@@ -210,7 +276,9 @@ function planStudy(command: Command, attributes: Record<string, string>, id: str
     if (p.AccessionNumber && p.AccessionNumber !== command.accession) {
       throw new BackendError("別の受付番号が入っている");
     }
-    replace.AccessionNumber = command.accession!;
+    // CA・DC は検査と画像を消さず、受付番号を外す（tsunagi は検査の状態の印を持たない。design.md §16）。
+    // すでに空なら書き換えない
+    replace.AccessionNumber = command.control === "CA" || command.control === "DC" ? "" : command.accession!;
   } else {
     Object.assign(replace, attributes);
     if (command.kind === "A40") {
@@ -242,7 +310,7 @@ function findPreviousMessage(rows: HistoryRow[], common: {
       && (!r.occurredAt || Date.now() - r.occurredAt.getTime() <= 7 * 86400000)
   );
 }
-type AuditRow = (
+export type AuditRow = (
   event: string,
   outcome: AuditOutcome,
   detail?: Record<string, unknown>,
@@ -250,14 +318,14 @@ type AuditRow = (
   studyInstanceUid?: string,
 ) => Promise<unknown>;
 // request を残した後だけ書き、仕事の終わりと全画像を確かめる（design.md §4・§10）。
-async function writeAndVerify(
+export async function writeAndVerify(
   backend: Backend,
-  plan: ReturnType<typeof planStudy>,
+  plan: ReturnType<typeof planStudy> & { alongside?: PatientInstance[] },
   messageId: string,
   row: AuditRow,
   options: ProcessOptions,
 ): Promise<boolean> {
-  const { id, before, after, replace } = plan;
+  const { id, before, after, replace, alongside } = plan;
   if (before.every((p, i) => values.every(k => p[k] === after[i]![k]))) {
     return false;
   }
@@ -267,7 +335,8 @@ async function writeAndVerify(
     oldOrthancId: id,
     StudyInstanceUID: before[0]!.StudyInstanceUID,
     before,
-    after
+    after,
+    ...(alongside?.length ? { alongside } : {})
   };
   await row("request", "success", { ...d }, after[0]!.PatientID, d.StudyInstanceUID);
   let state: string | undefined;
@@ -360,6 +429,7 @@ export async function processMessage(
   let code: "AA" | "AE" | "AR" = "AA";
   let reason = "受理した";
   let count = 0;
+  let remember: Remembered | undefined;
   try {
     if (!extracted.ok) {
       if (extracted.code === "AR") {
@@ -423,12 +493,20 @@ export async function processMessage(
         count++;
       }
     }
+    remember = rememberEntry(command, attributes, plans, new Date().toISOString());
   } catch (e) {
     code = "AE";
+    remember = undefined;
     reason = e instanceof BackendError || e instanceof BackendUnknownError ? e.message : "反映または監査の記録に失敗した";
   }
   try {
-    await row("ack", code === "AA" ? "success" : "failed", { code, count, reason: visible(reason) });
+    // AA の ack だけに、後で届く画像の書き換えに使う覚えを付ける（design.md §15）
+    await row("ack", code === "AA" ? "success" : "failed", {
+      code,
+      count,
+      reason: visible(reason),
+      ...(code === "AA" && remember ? { remember } : {})
+    });
   } catch {
     code = "AE";
     reason = "監査の記録に失敗した";

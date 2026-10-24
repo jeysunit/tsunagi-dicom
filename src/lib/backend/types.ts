@@ -81,6 +81,8 @@ export interface Backend {
   ): Promise<{ jobId: string }>;
   /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
+  /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */
+  studyIsStable(orthancStudyId: string): Promise<boolean>;
   /**
    * QIDO-RS の検査の検索（検査日の範囲で絞れる）。検査日の新しい順に limit 件まで。
    * QIDO-RS は返す順を決めていない（PS3.18 8.3.4.4）ので、limit を超える検査があれば、検査日の範囲で区切って

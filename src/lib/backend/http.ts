@@ -401,6 +401,15 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return studyPatientFromRest(await restJsonOrNull(`studies/${orthancStudyId}`));
     },
 
+    // 届き終えていない検査を書き換えると、書き換えの最中に届いた画像が元の検査ごと消えうる（design.md §15）。
+    async studyIsStable(id: string) {
+      if (!isOrthancId(id)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      const json = await restJsonOrNull(`studies/${id}`);
+      return Boolean(json && typeof json === "object" && (json as { IsStable?: unknown }).IsStable === true);
+    },
+
     // 検査の要約だけでは部分反映を見落とすので、全画像を読む（design.md §4）。
     async studyInstanceTags(id: string) {
       if (!isOrthancId(id)) {
