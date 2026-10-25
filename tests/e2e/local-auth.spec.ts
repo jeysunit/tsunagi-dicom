@@ -337,6 +337,8 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
 
 test("詳細の操作の行：開く・送信・エクスポートが同じ行の左から並び、削除は同じ行の右端に離れる", async () => {
   const { page } = admin;
+  // 1 行に収まる幅で確かめる（狭い詳細では、入りきらない削除が次の行の右端へ折り返す。字体で収まる幅が変わるため、行数は確かめない）
+  await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/");
   await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
   const group = page.getByTestId("study-detail").getByRole("group", { name: "検査の操作" });
@@ -352,6 +354,8 @@ test("詳細の操作の行：開く・送信・エクスポートが同じ行�
   // 削除は右端に離れる（エクスポートの右に十分な間がある）
   expect(del.x + del.width).toBeGreaterThanOrEqual(area.x + area.width - 2);
   expect(del.x).toBeGreaterThan(zip.x + zip.width + 16);
+  // あとの試験（同じ画面を使い回す）のために、画面の大きさを戻す
+  await page.setViewportSize({ width: 1280, height: 720 });
 });
 
 test("送信の手応え：押した直後から状態の枠、送っている間は進みと「閉じても送信は続きます」、閉じた後も状態が出て、終わったら「再送信…」", async () => {

@@ -60,10 +60,14 @@ export function PacsActions({
           </a>
         )}
         {screen.can.delete && (
-          <Button type="button" size="sm" variant="outline" aria-expanded={open === "delete"} aria-controls={deleteId} className="ml-auto text-danger" data-testid="delete-open" onClick={() => toggle("delete")}>
-            <Trash2 aria-hidden />
-            削除…
-          </Button>
+          <>
+            {/* 削除の左に、いつも 1rem 以上の間をあける（余りがあれば、間が広がって削除が右端に寄る）。入りきらなければ、削除は次の行の右端へ折り返す */}
+            <span aria-hidden className="grow basis-4" />
+            <Button type="button" size="sm" variant="outline" aria-expanded={open === "delete"} aria-controls={deleteId} className="ml-auto text-danger" data-testid="delete-open" onClick={() => toggle("delete")}>
+              <Trash2 aria-hidden />
+              削除…
+            </Button>
+          </>
         )}
       </div>
       {screen.can.send && (
