@@ -216,7 +216,7 @@ function SegmentButton({ pressed, onClick, testId, children }: { pressed: boolea
 
 /**
  * シリーズの画像の場所（docs/spec.md の 3.1）。サムネイルを押すと、サムネイルの並びの下に開く。
- * 左に画像の一覧（画像の番号の順。上下の矢印のキーで替える）、右に選んだ画像の SOPInstanceUID とタグの表。
+ * 左に画像の一覧（画像の番号の順。上下の矢印のキーで替える。Home・End で先頭・末尾）、右に選んだ画像の SOPInstanceUID とタグの表。
  * 表は「主なタグ」（設定のタグだけ。タグ名つき）と「すべてのタグ」（値の全部）を切り替える。最初は先頭の画像を選ぶ
  */
 function SeriesImages({
@@ -224,14 +224,18 @@ function SeriesImages({
   series,
   tagSet,
   onTagSet,
+  sopPick,
+  setSopPick,
 }: {
   uid: string;
   series: SeriesView;
   tagSet: TagSet;
   onTagSet: (set: TagSet) => void;
+  /** 選んだ画像の SOPInstanceUID（まだ選んでいなければ空）。詳細の取り直しで画像の場所を作り直しても戻れるよう、持ち主は親 */
+  sopPick: string;
+  setSopPick: (sop: string) => void;
 }) {
   const seriesUid = series.seriesInstanceUid ?? "";
-  const [sopPick, setSopPick] = useState("");
   const listId = useId();
   const instances = useQuery({
     queryKey: ["instances", uid, seriesUid],
@@ -247,7 +251,7 @@ function SeriesImages({
   const sop = items[index]?.sopInstanceUid ?? "";
   // 値を読む画像。矢印のキーで通り過ぎる画像の値は読まない（読むたびに操作ログに残るため）。キーで選んだ画像は 0.3 秒止まってから読み、
   // クリックで選んだ画像はすぐ読む（一覧の行の詳細の取り方と同じ考え）
-  const [settledPick, setSettledPick] = useState("");
+  const [settledPick, setSettledPick] = useState(sopPick);
   useEffect(() => {
     if (sopPick === settledPick) return;
     const timer = window.setTimeout(() => setSettledPick(sopPick), 300);
@@ -298,10 +302,11 @@ function SeriesImages({
             className="max-h-40 overflow-auto rounded border border-border bg-background py-1 text-sm focus-visible:outline-2 focus-visible:outline-ring md:max-h-80"
             data-testid="instance-list"
             onKeyDown={(e) => {
-              if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
               e.preventDefault();
               e.stopPropagation();
-              const next = Math.min(items.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)));
+              const step = e.key === "ArrowDown" ? index + 1 : index - 1;
+              const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : Math.min(items.length - 1, Math.max(0, step));
               setSopPick(items[next]!.sopInstanceUid);
               document.getElementById(optionId(next))?.scrollIntoView({ block: "nearest" });
             }}
@@ -440,6 +445,8 @@ export function StudyDetailPanel({
   // （切り替えは、画像やシリーズを替えても保つ）
   const [openSeries, setOpenSeries] = useState<string | null>(null);
   const [tagSet, setTagSet] = useState<TagSet>("configured");
+  // シリーズごとに選んだ画像。詳細を取り直す間（通信が戻ったときなど）は画像の場所が作り直されるので、ここに覚えて先頭へ戻らないようにする
+  const [sopPicks, setSopPicks] = useState<Record<string, string>>({});
   // 「検査のタグ」（検査単位の要約）。Study UID の横のボタンで開け閉めする（行が替わると閉じる）
   const [studyTagsOpen, setStudyTagsOpen] = useState(false);
   const studyTagsId = useId();
@@ -545,7 +552,15 @@ export function StudyDetailPanel({
       </div>
 
       {tagsShown && openedSeries && (
-        <SeriesImages key={openedSeries.seriesInstanceUid} uid={uid} series={openedSeries} tagSet={tagSet} onTagSet={setTagSet} />
+        <SeriesImages
+          key={openedSeries.seriesInstanceUid}
+          uid={uid}
+          series={openedSeries}
+          tagSet={tagSet}
+          onTagSet={setTagSet}
+          sopPick={sopPicks[openedSeries.seriesInstanceUid ?? ""] ?? ""}
+          setSopPick={(sop) => setSopPicks((picks) => ({ ...picks, [openedSeries.seriesInstanceUid ?? ""]: sop }))}
+        />
       )}
     </>
   );

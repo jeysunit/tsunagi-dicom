@@ -693,6 +693,22 @@ const headCount = async (page: Page) => Number(await page.getByTestId("study-cou
  * （待ちの印は 0.3 秒たつまで出ないので、件数の表示だけでは新旧を見分けられない）
  */
 const listSettled = (page: Page) => expect(page.getByRole("heading", { level: 1 }).and(page.locator("[data-fetching]"))).toHaveCount(0);
+/**
+ * 見出しや検索を操作したあと、その条件の一覧の応答が来て、画面が取り直しを終えるまで待つ。
+ * listSettled だけだと、取り直しが始まる前の「取り直し中でない」状態でも通り抜ける。そこで、操作の前に
+ * 「この条件の一覧の応答」を待つ約束を作り、応答が来てから listSettled で画面に反映されたことを見る。
+ * 応答は条件（クエリ）で選ぶので、操作より前に出した別の取り直しの応答では通り抜けない
+ * （この条件は、その試験の中で初めて当てるものにする。取り直しが無い操作では応答が来ず、待ちきれずに落ちる）
+ */
+const settledAfter = async (page: Page, params: Record<string, string>, action: () => Promise<unknown>) => {
+  const responded = page.waitForResponse((res) => {
+    const url = new URL(res.url());
+    return url.pathname === "/api/studies" && res.request().method() === "GET" && Object.entries(params).every(([k, v]) => url.searchParams.get(k) === v);
+  });
+  await action();
+  await responded;
+  await listSettled(page);
+};
 
 test("1 行の一覧：行の高さは 28px（14px の文字）、氏名の漢字とかなは別の列（かなは右）", async ({ page }) => {
   await asRole(page, "一般");
@@ -810,20 +826,17 @@ test("件数は、ほかの見出しと検索を当てたあとの数になる�
   await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
   // 検査日を押したあとの件数は、押す前の見出しの件数と同じ
   const n = await count(page.getByTestId("date-week"));
-  await page.getByTestId("date-week").click();
-  await listSettled(page);
+  await settledAfter(page, { modality: "MR", date: "week" }, () => page.getByTestId("date-week").click());
   await expect.poll(() => headCount(page)).toBe(n);
   // モダリティの見出しは、検査日を当てた数
   const ct = await count(page.getByTestId("modality-CT"));
-  await page.getByTestId("modality-CT").click();
-  await listSettled(page);
+  await settledAfter(page, { modality: "CT", date: "week" }, () => page.getByTestId("modality-CT").click());
   await expect.poll(() => headCount(page)).toBe(ct);
   // 横断の検索を当てると、全部の見出しの件数が絞られる
   await page.getByTestId("modality-all").click();
   await page.getByTestId("date-all").click();
-  await page.getByTestId("study-search").fill("JP-TEST-0004");
+  await settledAfter(page, { q: "JP-TEST-0004" }, () => page.getByTestId("study-search").fill("JP-TEST-0004"));
   await expect(page).toHaveURL(/q=JP-TEST-0004/);
-  await listSettled(page);
   await expect(page.getByTestId("study-count")).toHaveText("2");
   await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
   await expect.poll(() => count(page.getByTestId("modality-all"))).toBe(2);
@@ -1269,6 +1282,64 @@ test("画像の場所：上下の矢印のキーで画像を替える（検査�
   await expect(area.getByTestId("instance-tags").locator("tbody tr")).toHaveCount(25);
 });
 
+test("画像の場所：Home・End のキーで先頭・末尾の画像を選ぶ", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.getByTestId("series-open").click();
+  const area = page.getByTestId("series-images");
+  const list = area.getByTestId("instance-list");
+  await expect(list.getByRole("option")).toHaveCount(4);
+  await list.focus();
+  await page.keyboard.press("End");
+  await expect(list.getByRole("option", { name: "#4" })).toHaveAttribute("aria-selected", "true");
+  await expect(list).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "true");
+  // 先頭でもう一度 Home を押しても動かない
+  await page.keyboard.press("Home");
+  await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "true");
+  // 検査一覧で選んだ行は替わらない
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", STUDY);
+});
+
+test("画像の場所：通信が戻って詳細を取り直しても、開いたシリーズと選んだ画像は先頭へ戻らない", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.getByTestId("series-open").click();
+  const area = page.getByTestId("series-images");
+  const list = area.getByTestId("instance-list");
+  await expect(list.getByRole("option")).toHaveCount(4);
+  const seriesUid = (await area.getAttribute("data-series-uid"))!;
+  await list.getByRole("option", { name: "#3" }).click();
+  await expect(list.getByRole("option", { name: "#3" })).toHaveAttribute("aria-selected", "true");
+  const picked = (await area.getByTestId("uid-line").locator("code").textContent())!;
+
+  // 通信が切れて戻る（ブラウザーの offline → online）。詳細は取り直しになり、その間は画像の場所を隠す
+  const reread = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/studies/${STUDY}` && r.request().method() === "GET");
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+  });
+  await reread;
+  // 同じシリーズが開いたまま、選んだ画像（#3）に戻る。先頭（#1）には戻らない
+  await expect(area).toHaveAttribute("data-series-uid", seriesUid);
+  await expect(list.getByRole("option")).toHaveCount(4);
+  await expect(list.getByRole("option", { name: "#3" })).toHaveAttribute("aria-selected", "true");
+  await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "false");
+  await expect(area.getByTestId("uid-line").locator("code")).toHaveText(picked);
+  await expect(area.getByTestId("instance-tags").locator('tr[data-tag="0008,0018"]')).toContainText(picked);
+});
+
+test("画像の場所：通信が切れたときの文は、ブラウザーの英語でなく日本語で出す", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.route(/\/api\/studies\/[\d.]+\/series\/[\d.]+\/instances$/, (route) => route.abort("connectionfailed"));
+  await page.getByTestId("series-open").click();
+  const alert = page.getByTestId("series-images").getByRole("alert");
+  await expect(alert).toHaveText("サーバーに接続できません");
+  await expect(page.getByTestId("series-images")).not.toContainText("Failed to fetch");
+});
+
 test("画像の場所の値：HTML の形の値は文字のまま。長い値は 1024 文字で切り、全体の文字数を添える。バイナリは中身を出さない", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
@@ -1394,8 +1465,14 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   version += 1;
   arrived = true;
   hold = new Promise<void>((resolve) => (release = resolve));
-  await page.clock.fastForward(30_000);
-  await expect.poll(() => listReads).toBe(1);
+  // 前の版の読み（上の 2 回目）が画面の側でまだ終わっていないと、その間に来た間隔の知らせは、重なった読みとして
+  // 捨てられる（混んだ環境で、一覧の読み直しが始まらなかった）。一覧の読み直しが始まるまで、間隔を 1 つずつ進める
+  await expect
+    .poll(async () => {
+      if (listReads === 0) await page.clock.fastForward(30_000);
+      return listReads;
+    })
+    .toBe(1);
   // 読み直しの途中（待ちの印を出す 0.3 秒を過ぎても）：細い帯・薄い行・件数の「—」を出さない
   await page.clock.runFor(1_000);
   await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
