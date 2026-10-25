@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ActionButton, PendingText } from "@/components/ui/pending";
 import { Tabs } from "@/components/ui/tabs";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { handleAuthStatus, NETWORK_ERROR_MESSAGE } from "@/lib/client/api";
+import { decideModify, decideStatus, type ModifyDecision, type StatusBody } from "@/lib/client/modify-outcome";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 import { checkFieldValue, FIELD_LABELS, type CorrectionField, type CorrectionKind, type CorrectionValues } from "@/lib/correction-fields";
 import type { StudyView } from "@/lib/fields";
@@ -219,6 +220,13 @@ export function ModifyPanel({
   );
 }
 
+/** 欄を見える所へスクロールして、中の入力欄にフォーカスする */
+function revealAndFocus(form: HTMLFormElement | null, input: "input" | "textarea") {
+  if (!form) return;
+  form.scrollIntoView?.({ block: "nearest" });
+  form.querySelector<HTMLElement>(input)?.focus({ preventScroll: true });
+}
+
 /** 窓ごとの入力の欄（患者情報修正：患者ID・氏名の3つの組・生年月日・性別・受付番号。検査情報修正：検査日・検査名） */
 const NAME_PARTS = [
   { label: "英字氏名", index: 0 },
@@ -255,6 +263,16 @@ function CorrectionForm({
   const [checking, setChecking] = useState(false);
   const [authing, setAuthing] = useState(false);
   const base = `/api/studies/${encodeURIComponent(uid)}/modify`;
+  // 確かめの欄（確認の表と理由・再認証）を開いたら、その欄へスクロールして、入力欄にフォーカスする（docs/design-system/parts.md）
+  const confirmRef = useRef<HTMLFormElement>(null);
+  const reauthRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (preview) revealAndFocus(confirmRef.current, "textarea");
+  }, [preview]);
+  const reauthing = phase.kind === "reauth";
+  useEffect(() => {
+    if (reauthing) revealAndFocus(reauthRef.current, "input");
+  }, [reauthing]);
 
   /** 変えた項目だけ（変えていない項目は送らない。BFF は、要求に無い項目を変えない） */
   const changed = (): CorrectionValues => Object.fromEntries(fields.filter((f) => values[f] !== (current.values[f] ?? "")).map((f) => [f, values[f]!]));
@@ -297,27 +315,26 @@ function CorrectionForm({
     setPreview(res.data as unknown as Preview);
   }
 
-  function settle(result: PostResult, requestId: string) {
-    if (result.status === 403 && result.data.problems?.includes("reauth_required")) {
-      setPhase({ kind: "reauth", requestId });
-      return;
-    }
-    const outcome = result.data.outcome;
-    if (outcome === "modified") {
-      setPhase({ kind: "done", text: `修正しました（${Number(result.data.total ?? 1)} 件の検査）` });
-      onModified();
-    } else if (outcome === "created") {
-      setPhase({ kind: "done", text: "修正しました。修正した検査を新しく作りました（元の検査は残っています）" });
-      onModified();
-    } else if (outcome === "partial" || outcome === "unknown" || result.status === 0 || result.status === 202 || (result.status >= 500 && outcome !== "failed")) {
-      setPhase({ kind: "unknown", requestId, partial: outcome === "partial", note: typeof result.data.error === "string" ? result.data.error : undefined });
-      if (outcome === "partial") onModified();
-    } else {
-      // 409（確認の後に検査が変わった・結果不明の書き換えがある）は、確認からやり直す
-      if (result.status === 409) setPreview(null);
-      setPhase({ kind: "error", text: errorText(result) });
+  function apply(decision: ModifyDecision, requestId: string) {
+    switch (decision.kind) {
+      case "reauth":
+        setPhase({ kind: "reauth", requestId });
+        break;
+      case "done":
+        setPhase({ kind: "done", text: decision.text });
+        onModified();
+        break;
+      case "unknown":
+        setPhase({ kind: "unknown", requestId, partial: decision.partial, note: decision.note });
+        if (decision.partial) onModified();
+        break;
+      case "error":
+        if (decision.restart) setPreview(null);
+        setPhase({ kind: "error", text: decision.text });
+        break;
     }
   }
+  const settle = (result: PostResult, requestId: string) => apply(decideModify(result), requestId);
 
   const postModify = (requestId: string) =>
     postJson(base, { requestId, kind, values: changed(), reason, confirmToken: preview?.confirmToken ?? "", orthancId: current.orthancId }, screen.csrfToken);
@@ -357,14 +374,12 @@ function CorrectionForm({
       return;
     }
     handleAuthStatus(res.status);
-    const body = (await res.json().catch(() => ({}))) as { outcome?: string; error?: string; unresolvedWriteIds?: string[] };
-    if (body.outcome === "modified" || body.outcome === "created") {
-      setPhase({ kind: "done", text: "修正しました" });
-      onModified();
-    } else if (body.outcome === "failed") {
-      setPhase({ kind: "error", text: "修正されていません" });
+    const body = (await res.json().catch(() => ({}))) as StatusBody;
+    const decision = decideStatus(body);
+    if (decision.kind === "unknown") {
+      setPhase({ kind: "unknown", requestId, partial: decision.partial, note: decision.note, writeIds: body.unresolvedWriteIds });
     } else {
-      setPhase({ kind: "unknown", requestId, partial: body.outcome === "partial", note: body.error, writeIds: body.unresolvedWriteIds });
+      apply(decision, requestId);
     }
   }
 
@@ -410,7 +425,7 @@ function CorrectionForm({
                 <select
                   value={values.PatientSex ?? ""}
                   onChange={(e) => set("PatientSex", e.target.value)}
-                  className="h-8 w-full rounded-md border border-border bg-background px-2 text-value"
+                  className="h-8 w-full rounded-md border border-border-input bg-background px-2 text-value focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   data-testid="modify-PatientSex"
                 >
                   {Object.entries(SEX_LABELS).map(([v, label]) => (
@@ -440,18 +455,18 @@ function CorrectionForm({
           )}
           {!preview && (
             <div className="flex gap-2 sm:col-span-2">
-              <ActionButton type="submit" size="sm" variant="outline" pending={checking} data-testid={`modify-${kind}-check`}>
-                確認
-              </ActionButton>
               <Button type="button" size="sm" variant="outline" onClick={onClose}>
                 キャンセル
               </Button>
+              <ActionButton type="submit" size="sm" variant="outline" pending={checking} data-testid={`modify-${kind}-check`}>
+                確認
+              </ActionButton>
             </div>
           )}
         </form>
       )}
       {preview && editing && (
-        <form onSubmit={(e) => void submit(e)} className="space-y-2" data-testid="modify-confirm">
+        <form ref={confirmRef} onSubmit={(e) => void submit(e)} className="space-y-2" data-testid="modify-confirm">
           <table className="text-sm">
             <thead>
               <tr className="text-xs text-label">
@@ -523,22 +538,22 @@ function CorrectionForm({
               maxLength={500}
               required
               rows={2}
-              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-value"
+              className="w-full rounded-md border border-border-input bg-background px-2 py-1 text-sm text-value focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               data-testid="modify-reason"
             />
           </label>
           <div className="flex items-center gap-2">
-            <ActionButton type="submit" size="sm" pending={busy} disabled={reason.trim() === ""} data-testid="modify-submit">
-              修正する
-            </ActionButton>
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setPreview(null)}>
               キャンセル
             </Button>
+            <ActionButton type="submit" size="sm" pending={busy} disabled={reason.trim() === ""} data-testid="modify-submit">
+              修正する
+            </ActionButton>
           </div>
         </form>
       )}
       {phase.kind === "reauth" && (
-        <form onSubmit={(e) => void reauth(e)} aria-label="再認証" className="max-w-sm space-y-2" data-testid="modify-reauth">
+        <form ref={reauthRef} onSubmit={(e) => void reauth(e)} aria-label="再認証" className="max-w-sm space-y-2" data-testid="modify-reauth">
           <p className="text-label">修正にはパスワードの再入力が必要です</p>
           <Input name="password" type="password" autoComplete="current-password" aria-label="パスワード" required />
           {phase.error && (
@@ -547,12 +562,12 @@ function CorrectionForm({
             </p>
           )}
           <div className="flex gap-2">
-            <ActionButton type="submit" size="sm" pending={authing}>
-              認証して続行
-            </ActionButton>
             <Button type="button" size="sm" variant="outline" disabled={authing} onClick={() => setPhase({ kind: "edit" })}>
               キャンセル
             </Button>
+            <ActionButton type="submit" size="sm" pending={authing}>
+              認証して続行
+            </ActionButton>
           </div>
         </form>
       )}
@@ -593,7 +608,7 @@ function CorrectionForm({
                 maxLength={500}
                 rows={2}
                 aria-label="確認内容"
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-value"
+                className="w-full rounded-md border border-border-input bg-background px-2 py-1 text-sm text-value focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
               <Button type="submit" size="sm" variant="outline">
                 確認済みとして解除
