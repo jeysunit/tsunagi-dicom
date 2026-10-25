@@ -174,7 +174,11 @@ interface SourceLock {
    * この後の release は印を外さない
    */
   keep(): Promise<void>;
-  release(): Promise<void>;
+  /**
+   * 付け直しを止めて印を外す（keep の後は外さない）。止めるまで印が切れずに続いていた（途中の付け直しも失敗しなかった）か
+   * を返す。外せなくても投げない（期限で切れる）
+   */
+  release(): Promise<boolean>;
 }
 /**
  * 元の検査に付け替えの印を付ける（design.md §15.4）。Orthanc の Lua が、同じ StudyInstanceUID の C-STORE を印の間は断る。
@@ -240,6 +244,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   const timer = setInterval(() => void renew().catch(() => undefined), Math.max(ttl / 4, 10));
   timer.unref?.();
   let kept = false;
+  let releasing: Promise<boolean> | undefined;
   const stop = async () => {
     released = true;
     clearInterval(timer);
@@ -259,17 +264,22 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       kept = true;
       await stop();
     },
-    release: async () => {
+    // 2 回目からは 1 回目の答えを返す（外すのは 1 回）
+    release: () => releasing ??= (async () => {
+      // 止める時に切れていなかったか（止めた後は期限を見ない）と、途中の付け直しの答えを合わせて、外すまで続いていたかを決める
+      const expiredAtStop = !released && expired();
       await stop();
+      const held = failure === undefined && !expiredAtStop;
       if (kept) {
-        return;
+        return held;
       }
       try {
         await backend.unlockStudy(id);
       } catch {
         console.warn("HL7 の付け替えの印を外せなかった（期限で切れる）");
       }
-    }
+      return held;
+    })()
   };
 }
 type RemoveOutcome = {
@@ -402,18 +412,17 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
           })) : undefined;
         try {
           removed = await removeSource(backend, d, lock);
-          // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない。途中の付け直しの答えも待つ
-          if (await lock?.settledLost()) {
-            removed = { ...removed, lockLost: true };
-          }
         } catch (e) {
-          // 消す途中で印が切れた・付け直せなかったら、残りを消さずに部分反映として人に見せる
-          if (!lock?.lost()) {
+          // 消す途中で印が切れた・付け直せなかったら（途中の付け直しの答えも待つ）、残りを消さずに部分反映として人に見せる
+          if (!await lock?.settledLost()) {
             throw e;
           }
           removed = { lockLost: true };
         } finally {
-          await lock?.release();
+          // 外すまでに切れていれば（最後に消す間に届き直した画像を消したかもしれない）、成功にしない。確かめはこの後
+          if (lock && !await lock.release()) {
+            removed = { ...removed, lockLost: true };
+          }
         }
       }
       // 元を消す間の異常を見つけた後は、確かめに失敗しても解かずに残さず、部分反映として人に見せる
@@ -726,13 +735,15 @@ async function writeStudy(
     if (state === "Success" && lock) {
       // 仕事を待つ間に印が切れていれば、元を消さない
       removed = lock.lost() ? { lockLost: true } : await removeSource(backend, d, lock);
-      // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない。途中の付け直しの答えも待つ
-      if (await lock.settledLost()) {
+      // 外すまでに切れていれば（最後に消す間に届き直した画像を消したかもしれない）、成功にしない。照らし合わせと同じく、
+      // 外してから確かめる（確かめる間の付け直しの失敗で、結果が揺れない）
+      if (!await lock.release()) {
         removed = { ...removed, lockLost: true };
       }
     }
   } catch (e) {
-    if (lock?.lost()) {
+    // 途中の付け直しの答えも待つ
+    if (await lock?.settledLost()) {
       // 消す途中で印が切れた・付け直せなかった：残りは消さず、部分反映として人に見せる
       removed = { lockLost: true };
     } else {

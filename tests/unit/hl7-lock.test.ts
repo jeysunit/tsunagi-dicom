@@ -190,11 +190,40 @@ describe("付け替えの印", () => {
       }
       return lockStudy(id, until);
     });
-    // 消す要求の答えを 120 ミリ秒待つ間に、時計の付け直しが始まる（期限 200 ミリ秒。残りが半分を切る 100 ミリ秒の時計で）
+    // 消す要求の答えを待つ間に、時計の付け直しが始まる（期限 200 ミリ秒。残りが半分を切った時計で）
     const remove = orthanc.backend.deleteStudyInstances.bind(orthanc.backend);
     vi.spyOn(orthanc.backend, "deleteStudyInstances").mockImplementation(async (...args) => {
       await remove(...args);
-      await new Promise(r => setTimeout(r, 120));
+      for (let waited = 0; calls < 2 && waited < 180; waited += 5) await new Promise(r => setTimeout(r, 5));
+    });
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(calls).toBeGreaterThan(1);
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+  });
+
+  it("消した後の読み取りの失敗が、途中の付け直しの失敗より先に返っても、結果不明にせず部分反映で止める", async () => {
+    temp();
+    const lockStudy = orthanc.backend.lockStudy.bind(orthanc.backend);
+    let calls = 0;
+    vi.spyOn(orthanc.backend, "lockStudy").mockImplementation(async (id, until) => {
+      if (++calls > 1) {
+        await new Promise(r => setTimeout(r, 300));
+        throw new Error("synthetic renew failure");
+      }
+      return lockStudy(id, until);
+    });
+    const lookup = orthanc.backend.lookupStudyIds.bind(orthanc.backend);
+    let broken = false;
+    vi.spyOn(orthanc.backend, "lookupStudyIds").mockImplementation(async (uid) => {
+      if (broken) throw new Error("synthetic lookup failure");
+      return lookup(uid);
+    });
+    const remove = orthanc.backend.deleteStudyInstances.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "deleteStudyInstances").mockImplementation(async (...args) => {
+      await remove(...args);
+      // 付け直しが始まってから、消した後の引き当てが（付け直しの答えより先に）失敗する
+      for (let waited = 0; calls < 2 && waited < 180; waited += 5) await new Promise(r => setTimeout(r, 5));
+      broken = true;
     });
     expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
     expect(calls).toBeGreaterThan(1);
