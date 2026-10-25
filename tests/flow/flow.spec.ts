@@ -38,6 +38,7 @@ const SCP = { id: "dev-scp", aet: "DEV_SCP" };
 /** docker/dev/dtg/app_config.yaml の dicom-test-generator（DTG）の AE タイトル（ris-emulator の CT の予約の予定の AE タイトルと同じ） */
 const DTG_AET = "DTG_CT01";
 const dicomPort = process.env.ORTHANC_DICOM_PORT ?? "4242";
+const viewerPort = process.env.DEV_VIEWER_PORT ?? "18042";
 
 async function docker(args: string[], timeoutMs = 120_000): Promise<string> {
   try {
@@ -188,7 +189,13 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
     Containers: Record<string, unknown>;
   }[];
   expect(backend!.Internal).toBe(true);
-  expect(Object.keys(backend!.Containers).sort()).toEqual([orthanc.Id, tsunagi.Id, hl7Receiver.Id].sort());
+  const viewerProxy = await inspect(await containerId("viewer-proxy"));
+  expect(Object.keys(backend!.Containers).sort()).toEqual([orthanc.Id, tsunagi.Id, hl7Receiver.Id, viewerProxy.Id].sort());
+
+  // ビューアの入口（viewer-proxy）：ホストの 127.0.0.1 の 8080 だけを出し、backend（Orthanc へ）と web（ホストへ）に入る
+  expect(viewerProxy.Config.Image).toBe(`${project}-viewer-proxy:local`);
+  expect(viewerProxy.HostConfig.PortBindings).toEqual({ "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: viewerPort }] });
+  expect(Object.keys(viewerProxy.NetworkSettings.Networks).sort()).toEqual([net("backend"), net("web")].sort());
   // dicom のコンテナどうしの通信は、開発用の compose だけが許す（dev.env の ORTHANC_DICOM_ICC=true が届いている）
   const [dicom] = JSON.parse(await docker(["network", "inspect", net("dicom")])) as { Options: Record<string, string> }[];
   expect(dicom!.Options["com.docker.network.bridge.enable_icc"]).toBe("true");
@@ -234,6 +241,27 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   expect(orthancLog).toContain('Rejected Store request from remote DICOM modality with AET "FLOW_ECHO"');
   // 起動の確かめ（healthcheck）は DICOM につながない。AE タイトルの無い接続の記録が出ていない
   expect(orthancLog).not.toMatch(/invalid AET/i);
+});
+
+test("1b ビューア：入口は読み取り専用で、Orthanc の OHIF と Stone の画面が認証つきで届く", async () => {
+  const base = `http://127.0.0.1:${viewerPort}`;
+  const password = readFileSync(path.join(secretsDir, "backend_password.txt"), "utf8").replace(/\r?\n$/, "");
+  const basic = `Basic ${Buffer.from(`tsunagi:${password}`).toString("base64")}`;
+  const get = (url: string, headers: Record<string, string> = {}) => fetch(`${base}${url}`, { headers, redirect: "manual", signal: AbortSignal.timeout(10_000) });
+
+  // 認証なしは Orthanc が断る（入口は資格情報を持たない）
+  expect((await get("/ohif/app-config.js")).status).toBe(401);
+  expect((await get("/dicom-web/studies")).status).toBe(401);
+  // 認証つきなら、OHIF の設定と画面、Stone の画面が返る（tsunagi-dicom の「開く」が開く形：/ohif/viewer と /stone-webviewer/index.html）
+  expect((await get("/ohif/app-config.js", { authorization: basic })).status).toBe(200);
+  expect((await get("/ohif/viewer", { authorization: basic })).status).toBe(200);
+  expect((await get("/stone-webviewer/index.html", { authorization: basic })).status).toBe(200);
+  expect((await get("/dicom-web/studies", { authorization: basic })).status).toBeLessThan(300);
+  // 書き込みの方法は、認証つきでも Orthanc に届かず 405
+  for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
+    const res = await fetch(`${base}/instances`, { method, headers: { authorization: basic }, body: method === "DELETE" ? undefined : "x", signal: AbortSignal.timeout(10_000) });
+    expect(res.status, `${method} が通った`).toBe(405);
+  }
 });
 
 test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の送信 → storescp", async ({ page }) => {
