@@ -598,7 +598,7 @@ export function StudyDetailPanel({
                   variant="outline"
                   className="mt-px shrink-0"
                   aria-expanded={studyTagsOpen}
-                  aria-controls={studyTagsId}
+                  aria-controls={studyTagsOpen ? studyTagsId : undefined}
                   data-testid="study-tags-open"
                   onClick={() => setStudyTagsOpen((v) => !v)}
                 >
