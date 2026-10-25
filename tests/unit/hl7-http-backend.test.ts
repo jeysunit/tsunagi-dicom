@@ -144,6 +144,13 @@ describe("HL7 の Orthanc REST の要求", () => {
       state.fetch.mockResolvedValueOnce(new Response("", { status }));
       await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toBeInstanceOf(error);
     });
+    it("1 枚を消す前に beforeEach を呼び、投げれば残りを消さない", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      const beforeEach = vi.fn().mockRejectedValue(new Error("synthetic renew failure"));
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files }, beforeEach)).rejects.toThrow("synthetic");
+      expect(beforeEach).toHaveBeenCalledTimes(1);
+      expect(state.fetch.mock.calls.some(c => c[1]?.method === "DELETE")).toBe(false);
+    });
     it("写しの元（ModifiedFrom）を画像ごとに読み、無い画像は null にする", async () => {
       state.fetch
         .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1"), [two]: tag("1.2.3.2") }))

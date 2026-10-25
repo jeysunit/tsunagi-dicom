@@ -176,10 +176,14 @@ export function createFakeOrthanc(): FakeOrthanc {
     },
     // http.ts と同じく、印を見て消す画像の ID を決め、1 枚ずつ、消す直前に変更の記録で届き直しを確かめてから ID で消す。
     // Orthanc と同じく、消した画像の変更の記録も消える
-    async deleteStudyInstances(id: string, named: PatientInstance[], source: { since: number; files: Record<string, string> }) {
+    async deleteStudyInstances(
+      id: string, named: PatientInstance[], source: { since: number; files: Record<string, string> }, beforeEach?: () => Promise<void>,
+    ) {
       const { beforeDelete, duringDelete, wholeStudyDelete, changesFail, deleteFailAfter } = fake.next;
       fake.next = {};
       beforeDelete?.();
+      // 1 枚ごとの呼び出しは、消す枚数の分だけ先に呼ぶ（投げれば何も消さない）
+      for (let k = 0; k < named.length; k++) await beforeEach?.();
       fake.deleteCalls.push({ id, sops: named.map(i => i.SOPInstanceUID) });
       fake.events.push(`delete:${id}`);
       const names = new Set(named.map(triple));

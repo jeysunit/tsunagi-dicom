@@ -768,15 +768,18 @@ test("15 HL7 の A40：患者 ID を替え、Study・Series・SOP の UID を保
     body: JSON.stringify({ Level: "Study", Query: { PatientID: temporaryId }, Expand: false })
   })).toEqual([]);
   const rows = readAudit().filter((r) => r.action === "hl7" && r.detail.controlId === controlId);
+  // 付け替えの印を求めた行（lock）は、印を付ける前、request の前に残る（design.md §15.4）
   expect(rows.map((r) => `${r.detail.event}:${r.outcome}`)).toEqual([
     "received:success",
+    "lock:success",
     "request:success",
     "dispatch:success",
     "result:success",
     "ack:success"
   ]);
-  expect(rows[3]!.detail).toMatchObject({
-    writeId: rows[1]!.detail.writeId,
+  expect(rows[1]!.detail).toMatchObject({ writeId: rows[2]!.detail.writeId, oldOrthancId: oldId });
+  expect(rows[4]!.detail).toMatchObject({
+    writeId: rows[2]!.detail.writeId,
     oldOrthancId: oldId,
     newOrthancId: newId,
     before: expect.arrayContaining([expect.objectContaining({ PatientID: temporaryId })]),

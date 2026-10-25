@@ -165,10 +165,13 @@ interface SourceLock {
 }
 /**
  * 元の検査に付け替えの印を付ける（design.md §15.4）。Orthanc の Lua が、同じ StudyInstanceUID の C-STORE を印の間は断る。
- * 外せなくても投げない（期限で切れる）。付けられなければ投げる（Orthanc に印の設定が無い。書き換えない）
+ * 外せなくても投げない（期限で切れる）。付けられなければ投げる（Orthanc に印の設定が無い。書き換えない）。
+ * 印も Orthanc への書き込みなので、最初に付ける前に record で「求めた」ことを監査の記録に残し、残せなければ付けない
+ * （付け直しと外すことは、この 1 行に含める。docs/spec.md の 3.5）
  */
-async function lockSource(backend: Backend, id: string, options: ProcessOptions): Promise<SourceLock> {
+async function lockSource(backend: Backend, id: string, options: ProcessOptions, record: (ttlSeconds: number) => Promise<unknown>): Promise<SourceLock> {
   const ttl = options.lockTtlMs ?? LOCK_TTL_MS;
+  await record(Math.ceil(ttl / 1000));
   let until = 0;
   const renew = async () => {
     if (until - Date.now() > ttl / 2) {
@@ -193,7 +196,10 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions)
 type RemoveOutcome = {
   /** 消す前に元の検査にあった、書き換えていない画像（最中に届いた画像）が消えた */
   arrivalsLost?: true;
-  /** 替え先の書き換えた画像の ModifiedFrom が、元の画像の ID と合わない（写しが同じ UID の別の画像に置き換わった）。元は消さない */
+  /**
+   * 替え先の書き換えた画像の ModifiedFrom が、元の画像の ID と合わない（写しが同じ UID の別の画像に置き換わった）。
+   * 消す前に見つければ元は消さない。消した後に見つけたとき（確かめから消すまでの間に置き換わった）も、成功にしない
+   */
   foreignCopies?: true;
 };
 /**
@@ -219,18 +225,27 @@ async function removeSource(backend: Backend, d: WriteDetail, lock?: SourceLock)
   // 写しの確かめ：Orthanc は書き換えの写しに元の画像の ID（ModifiedFrom）を残す。写しの後に同じ UID の画像が
   // REST・STOW-RS で届いて置き換わると、ModifiedFrom が無くなる。元の画像の ID の無い前の版の記録では消さない
   const sourceIds = d.sourceFiles.ids;
-  const origins = Object.assign({}, ...await Promise.all(ids.map(id => backend.studyInstanceOrigins(id)))) as Record<string, string | null>;
-  if (!sourceIds || [...written].some(key => !sourceIds[key] || origins[key] !== sourceIds[key])) {
+  const copiesFromSource = async () => {
+    const origins = Object.assign({}, ...await Promise.all(ids.map(id => backend.studyInstanceOrigins(id)))) as Record<string, string | null>;
+    return Boolean(sourceIds) && [...written].every(key => sourceIds![key] && origins[key] === sourceIds![key]);
+  };
+  if (!await copiesFromSource()) {
     return { foreignCopies: true };
   }
   const source = await sourceInstances();
   const named = source.filter(i => written.has(triple(i)));
   if (named.length) {
-    await lock?.renew();
-    await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles);
+    // 消す間も、1 枚ごとに印の期限を確かめて延ばす（延ばせなければ消すのをやめる）
+    await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles, lock?.renew);
   }
   const left = new Set((await sourceInstances()).map(triple));
-  return source.every(i => written.has(triple(i)) || left.has(triple(i))) ? {} : { arrivalsLost: true };
+  const outcome: RemoveOutcome = source.every(i => written.has(triple(i)) || left.has(triple(i))) ? {} : { arrivalsLost: true };
+  // 確かめてから消すまでの間に、写しが REST・STOW-RS で置き換わった（印では止まらない）。元はもう消えたので、部分反映として
+  // 人に見せる（design.md §15.4 の残る隙）
+  if (named.length && !await copiesFromSource()) {
+    outcome.foreignCopies = true;
+  }
+  return outcome;
 }
 /**
  * 全画像の UID の組と属性を前後の値に照らす（design.md §4）。同じ StudyInstanceUID の検査が Orthanc に
@@ -270,7 +285,16 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
       let removed: RemoveOutcome = {};
       if (job.state === "Success" && d.after[0]!.PatientID !== d.before[0]!.PatientID) {
         const lock = (await backend.lookupStudyIds(d.StudyInstanceUID)).includes(d.oldOrthancId)
-          ? await lockSource(backend, d.oldOrthancId, options) : undefined;
+          ? await lockSource(backend, d.oldOrthancId, options, ttlSeconds => audit({
+            actorId: "hl7-receiver",
+            actorRole: "system",
+            authMode: "hl7",
+            action: "hl7",
+            outcome: "success",
+            patientId: d.before[0]!.PatientID,
+            studyInstanceUid: d.StudyInstanceUID,
+            detail: { event: "lock", writeId: d.writeId, oldOrthancId: d.oldOrthancId, ttlSeconds }
+          })) : undefined;
         try {
           removed = await removeSource(backend, d, lock);
         } finally {
@@ -480,11 +504,13 @@ export async function writeAndVerify(
   }
   // 患者 ID の変わる書き換え（A40・見回り）は元の検査が残り、後で元の画像を消す。書き換えの前から消し終えるまで、元の
   // 検査に付け替えの印を付け、同じ StudyInstanceUID の C-STORE を Orthanc に断らせる（design.md §15.4）
-  const lock = await lockSource(backend, id, options);
+  const writeId = randomUUID();
+  const lock = await lockSource(backend, id, options, ttlSeconds =>
+    row("lock", "success", { writeId, oldOrthancId: id, ttlSeconds }, before[0]!.PatientID, before[0]!.StudyInstanceUID));
   try {
     // モックは画像を受け取らないので待たない
     await new Promise(r => setTimeout(r, options.lockSettleMs ?? (backend.mock ? 0 : LOCK_SETTLE_MS)));
-    return await writeStudy(backend, plan, messageId, row, options, lock);
+    return await writeStudy(backend, plan, messageId, row, options, writeId, lock);
   } finally {
     await lock.release();
   }
@@ -495,13 +521,14 @@ async function writeStudy(
   messageId: string,
   row: AuditRow,
   options: ProcessOptions,
+  writeId: string = randomUUID(),
   lock?: SourceLock,
 ): Promise<boolean> {
   const { id, before, after, replace, alongside } = plan;
   // 患者 ID の変わる書き換えは、後で元の画像を消すので、書き換えの前のファイルの印を残す（design.md §15.4）
   const sourceFiles = lock ? await backend.studyInstanceFiles(id) : undefined;
   const d: WriteDetail = {
-    writeId: randomUUID(),
+    writeId,
     messageId,
     oldOrthancId: id,
     StudyInstanceUID: before[0]!.StudyInstanceUID,

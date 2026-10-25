@@ -586,10 +586,15 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     // 置き換わった画像）も消さない。Orthanc は画像を消すとその変更の記録も消すので、届き直しは消す前に確かめる。
     // 記録を読んでから消すまでの間に届き直した画像は消えうる（Orthanc の削除に条件を付けられない）。C-STORE はこの間、
     // 付け替えの印で Orthanc の Lua が断るので、残るのは REST・STOW-RS で届き直した画像だけ（design.md §15.4）
-    async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles) {
+    async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles, beforeEach?: () => Promise<void>) {
       const named = new Set(instances.map(instanceKey));
       for (const { instanceId, key, file } of await instanceFiles(id)) {
-        if (!named.has(key) || source.files[key] !== file || await arrivedSince(source.since, new Set([instanceId]))) {
+        if (!named.has(key) || source.files[key] !== file) {
+          continue;
+        }
+        // 印の期限を延ばしてから、届き直しを確かめて消す（確かめから消すまでを短く保つ）
+        await beforeEach?.();
+        if (await arrivedSince(source.since, new Set([instanceId]))) {
           continue;
         }
         const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });

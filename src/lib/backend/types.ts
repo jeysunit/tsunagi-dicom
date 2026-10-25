@@ -89,7 +89,13 @@ export interface Backend {
    * Orthanc の削除には条件を付けられないので、記録を読んでから消すまでの間に届き直した画像は消えうる。C-STORE は
    * 付け替えの印（lockStudy）の間 Orthanc の Lua が断るので、残るのは REST・STOW-RS で届き直した画像だけ（design.md §15.4）
    */
-  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[], source: SourceFiles): Promise<void>;
+  deleteStudyInstances(
+    orthancStudyId: string,
+    instances: PatientInstance[],
+    source: SourceFiles,
+    /** 1 枚を消す前に呼ぶ（付け替えの印の期限を延ばす）。投げれば、残りを消さずに投げる */
+    beforeEach?: () => Promise<void>,
+  ): Promise<void>;
   /**
    * 検査に付け替えの印（利用者のメタデータ TsunagiLock。値は期限の UNIX 秒）を付ける（design.md §15.4）。Orthanc の Lua
    * （deploy/orthanc/tsunagi-lock.lua）が、期限の切れていない印のある検査と同じ StudyInstanceUID の C-STORE を断る。

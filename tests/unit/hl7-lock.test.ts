@@ -97,6 +97,42 @@ describe("付け替えの印", () => {
     expect(orthanc.events.at(-1)).toMatch(/^unlock:/);
   });
 
+  it("印を付ける前に、求めたことを監査の記録に残し、残せなければ印を付けない", async () => {
+    temp();
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+    const events = rows.map(r => r.detail?.event);
+    expect(events.indexOf("lock")).toBeGreaterThan(-1);
+    expect(events.indexOf("lock")).toBeLessThan(events.indexOf("request"));
+    const lockRow = rows.find(r => r.detail?.event === "lock")!;
+    expect(lockRow.detail?.writeId).toBe(rows.find(r => r.detail?.event === "request")!.detail?.writeId);
+
+    // 記録に失敗すれば、印も書き換えも無い
+    temp("2.25.300");
+    const failing = async (row: AuditEntryInput) => {
+      if (row.detail?.event === "lock") throw new Error("synthetic audit failure");
+      rows.push(row);
+    };
+    const before = orthanc.events.length;
+    const ack = await processMessage(Buffer.from(a40(TEMP, "P000002")), "192.0.2.1", orthanc.backend, failing, options());
+    expect(ack).toContain("MSA|AE|");
+    expect(orthanc.events.slice(before)).toEqual([]);
+  });
+
+  it("元を消す間も印を延ばし、延ばせなければ残りを消さずに結果不明で止める", async () => {
+    temp();
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.1.9` });
+    const lockStudy = orthanc.backend.lockStudy.bind(orthanc.backend);
+    let calls = 0;
+    vi.spyOn(orthanc.backend, "lockStudy").mockImplementation(async (id, until) => {
+      if (++calls > 1) throw new Error("synthetic renew failure");
+      return lockStudy(id, until);
+    });
+    // 期限 1 ミリ秒：消す前の付け直しが、毎回 Orthanc を呼ぶ
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 1, pollMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(2);
+    expect(results().at(-1)).toMatchObject({ outcome: "unknown" });
+  });
+
   it("書き換えが失敗しても印を外す", async () => {
     temp();
     orthanc.next.state = "Failure";
@@ -145,6 +181,30 @@ describe("写しの確かめ（ModifiedFrom）", () => {
     expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(2);
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, foreignCopies: true, state: "Success" } });
     expect(orthanc.events.at(-1)).toMatch(/^unlock:/);
+  });
+
+  it("確かめてから消すまでの間に写しが置き換わったら、元を消した後でも成功にせず、部分反映で止める", async () => {
+    temp();
+    orthanc.next.beforeDelete = () => {
+      const copy = orthanc.instances.find(i => i.PatientID === "P000001")!;
+      orthanc.restStore({ ...copy });
+    };
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AE|");
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, foreignCopies: true, state: "Success" } });
+    expect(await sweep()).toMatchObject({ blocked: "結果の分からない書き換えがある" });
+  });
+
+  it("照らし合わせでも、確かめてから消すまでの間に写しが置き換わったら、成功にしない", async () => {
+    temp();
+    orthanc.next.state = "Running";
+    expect(await send(a40(TEMP, "P000001"), { jobTimeoutMs: 5 })).toContain("MSA|AE|");
+    for (const [jobId] of orthanc.jobs) orthanc.jobs.set(jobId, "Success");
+    orthanc.next.beforeDelete = () => {
+      const copy = orthanc.instances.find(i => i.PatientID === "P000001")!;
+      orthanc.restStore({ ...copy });
+    };
+    expect(await sweep()).toMatchObject({ blocked: "結果の分からない書き換えがある" });
+    expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, foreignCopies: true } });
   });
 
   it("元の画像の ID を持たない前の版の記録では、照らし合わせでも元を消さない", async () => {
