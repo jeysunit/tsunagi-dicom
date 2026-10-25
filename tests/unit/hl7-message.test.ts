@@ -132,7 +132,11 @@ describe("HL7 の解析と反映の中身", () => {
     "扱わない種類 %s",
     (type) => expect(update(changed("MSH", 8, type))).toMatchObject({ ok: false, code: "AR" })
   );
-  it("ORM CA は AR", () => expect(update(changed("ORC", 1, "CA", "orm"))).toMatchObject({ ok: false, code: "AR" }));
+  // RAD-13 の CA・DC・XO を受けるようにしたので、断るのは表に無い ORC-1 だけ（design.md §16）
+  it.each(["OC", "SC", "nw", ""])("ORM の ORC-1 %s は AR", (control) =>
+    expect(update(changed("ORC", 1, control, "orm"))).toMatchObject({ ok: false, code: "AR" }));
+  it.each(["NW", "CA", "DC", "XO"])("ORM の ORC-1 %s を受ける", (control) =>
+    expect(update(changed("ORC", 1, control, "orm"))).toMatchObject({ ok: true, command: { kind: "ORM", control } }));
   it.each(["", "1..2", "1.a", "1.02", "1." + "2".repeat(64)])(
     "UID を断る %s",
     (uid) => expect(update(changed("ZDS", 1, uid, "orm"))).toMatchObject({ ok: false, code: "AE" })

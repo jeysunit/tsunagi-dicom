@@ -6,7 +6,6 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { PatientBanner, type PatientBannerItem } from "@/components/ui/patient-banner";
 import { PendingText, useDelayedPending } from "@/components/ui/pending";
-import { Tabs } from "@/components/ui/tabs";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { PacsActions } from "@/components/studies/pacs-actions";
 import { Thumbnail } from "@/components/studies/thumbnail";
@@ -23,12 +22,13 @@ import { cn } from "@/lib/utils";
 // 見出しは、3 製品で共通の患者バナー（docs/design-system/components.md。2026-10-25 に、氏名などを数行に並べる形から替えた）。
 // バナーの並び：氏名（かな）・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名。
 // 値の無い項目は省く。受付番号だけは、無いときも「受付番号 —」を出す（無いこと自体が照合の手がかりになる）。
-// 英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数は、バナーに足さず「検査の情報」のタブに置く。
-// シリーズのタブには、サムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。DICOM の値を見る権限のある役割では、
+// 英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数は、バナーに足さず、UID の行の下の「検査の情報」に項目名と値の対で並べる
+// （タブに隠さない。前のタブは中身が数行で空白が大きかった）。
+// その下に、シリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。DICOM の値を見る権限のある役割では、
 // サムネイルを押すと、その下にシリーズの画像の場所（画像の一覧と、画像ごとのタグ）を開く。もう一度押すと閉じる。
 // UID は開け閉めせず、バナーの下に StudyInstanceUID、画像の場所の見出しに SeriesInstanceUID を、写すボタンつきで出す
 // （2026-10-24。前は下に「UID」と「DICOM タグ」のボタンがあり、画像の場所と役割が重なっていた。#57）。検査単位のタグ（要約）は、
-// 画像の場所の「検査のタグ」から見る。値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
+// 画像に関わらないので、Study UID の横の「検査のタグ」のボタンで、見出しの下に開け閉めする。値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
 
 export interface StudyDetailData {
   study: StudyView;
@@ -47,14 +47,17 @@ interface InfoRow {
   mono?: boolean;
 }
 
-/** 「検査の情報」：バナーに足さない、毎回は見ない値（英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数） */
+/**
+ * 「検査の情報」：バナーに足さない、毎回は見ない値（英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数）。
+ * タブに隠さず、詳細の上部（バナーと UID の下）に、項目名と値の対を折り返して並べる（空白の多いタブをやめた）
+ */
 function StudyInfo({ rows }: { rows: readonly InfoRow[] }) {
   return (
-    <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 pt-2" data-testid="detail-info">
+    <dl className="flex flex-wrap gap-x-6 gap-y-1" data-testid="detail-info">
       {rows.map((r) => (
-        <div key={r.label} className="contents" data-testid={r.testId}>
-          <dt className="text-xs text-label">{r.label}</dt>
-          <dd className={cn("break-words text-value", r.mono && "font-mono")}>{r.value}</dd>
+        <div key={r.label} className="flex min-w-0 items-baseline gap-2" data-testid={r.testId}>
+          <dt className="shrink-0 text-xs text-label">{r.label}</dt>
+          <dd className={cn("min-w-0 break-words text-value", r.mono && "font-mono")}>{r.value}</dd>
         </div>
       ))}
     </dl>
@@ -212,8 +215,8 @@ function instanceLabel(i: InstanceItem): string {
   return `${i.instanceNumber ? `#${i.instanceNumber}` : i.sopInstanceUid}${frames}`;
 }
 
-/** 画像の場所のタグの組：主なタグ（設定の INSTANCE_TAGS）・すべてのタグ（その画像の値の全部）・検査のタグ（検査単位の要約） */
-type TagSet = "configured" | "all" | "study";
+/** 画像の場所のタグの組：主なタグ（設定の INSTANCE_TAGS）・すべてのタグ（その画像の値の全部）。検査のタグ（検査単位の要約）は、画像に関わらないので、Study UID の横から開く */
+type TagSet = "configured" | "all";
 
 /** 切り替えの1つ（押した形を aria-pressed と地の色で示す） */
 function SegmentButton({ pressed, onClick, testId, children }: { pressed: boolean; onClick: () => void; testId: string; children: ReactNode }) {
@@ -288,17 +291,14 @@ function SeriesImages({
         <h3 className="text-sm font-bold break-words text-value">{title || <span className="font-normal text-label">（シリーズ名なし）</span>}</h3>
         {series.instanceCount != null && <span className="text-xs text-label">{series.instanceCount} 画像</span>}
         <PendingText pending={instances.isFetching} />
-        {/* 切り替えは、画像の一覧の読み込みが終わってから（読めなかった・画像が無いときも、検査のタグは見られるように出す） */}
-        {(items.length > 0 || !instances.isFetching) && (
+        {/* 切り替えは、画像の一覧の読み込みが終わってから。画像に関するタグだけ（検査のタグは、Study UID の横のボタンから） */}
+        {items.length > 0 && (
           <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="タグの表示">
             <SegmentButton pressed={tagSet === "configured"} onClick={() => onTagSet("configured")} testId="tag-set-configured">
               主なタグ
             </SegmentButton>
             <SegmentButton pressed={tagSet === "all"} onClick={() => onTagSet("all")} testId="tag-set-all">
               すべてのタグ
-            </SegmentButton>
-            <SegmentButton pressed={tagSet === "study"} onClick={() => onTagSet("study")} testId="tag-set-study">
-              検査のタグ
             </SegmentButton>
           </div>
         )}
@@ -349,10 +349,8 @@ function SeriesImages({
             ))}
           </ul>
           <div className="min-w-0 space-y-1">
-            {tagSet !== "study" && <UidLine label="SOPInstanceUID" uid={sop} />}
-            {tagSet === "study" ? (
-              <StudyTags uid={uid} />
-            ) : readSop === "" ? (
+            <UidLine label="SOPInstanceUID" uid={sop} />
+            {readSop === "" ? (
               <p className="p-2">
                 <PendingText pending />
               </p>
@@ -376,19 +374,17 @@ function SeriesImages({
           </div>
         </div>
       )}
-      {/* 画像の一覧が読めなかった・空のときも、検査のタグは見られる */}
-      {items.length === 0 && !instances.isFetching && tagSet === "study" && <StudyTags uid={uid} />}
     </section>
   );
 }
 
 /**
- * 画像の場所の「検査のタグ」の中身（docs/spec.md の 3.1）。検査単位の要約（QIDO-RS の検査の検索の1行。どの画像の値かは分からない）。
- * 画像ごとの値は、「主なタグ」「すべてのタグ」で見る
+ * 「検査のタグ」の中身（docs/spec.md の 3.1）。検査単位の要約（QIDO-RS の検査の検索の1行。どの画像の値かは分からない）。
+ * Study UID の横の「検査のタグ」から開く。画像ごとの値は、画像の場所の「主なタグ」「すべてのタグ」で見る
  */
-function StudyTags({ uid }: { uid: string }) {
+function StudyTags({ uid, panelId }: { uid: string; panelId: string }) {
   return (
-    <div className="space-y-1" data-testid="dicom-tags">
+    <div id={panelId} className="space-y-1" data-testid="dicom-tags">
       <p className="text-xs text-label">検査単位（要約）</p>
       <TagTable<{ values: DicomValueRow[] }>
         url={`/api/studies/${encodeURIComponent(uid)}/values`}
@@ -463,10 +459,13 @@ export function StudyDetailPanel({
   const changed = onChanged;
   // 画像の場所・タグ（権限のある役割だけ）
   const tagsShown = screen.can.allValues && uid !== "";
-  // サムネイルから開いた画像の場所（SeriesInstanceUID。同じ権限の役割だけ。行が替わると閉じる）と、主なタグ・すべてのタグ・検査のタグの切り替え
+  // サムネイルから開いた画像の場所（SeriesInstanceUID。同じ権限の役割だけ。行が替わると閉じる）と、主なタグ・すべてのタグの切り替え
   // （切り替えは、画像やシリーズを替えても保つ）
   const [openSeries, setOpenSeries] = useState<string | null>(null);
   const [tagSet, setTagSet] = useState<TagSet>("configured");
+  // 「検査のタグ」（検査単位の要約）。Study UID の横のボタンで開け閉めする（行が替わると閉じる）
+  const [studyTagsOpen, setStudyTagsOpen] = useState(false);
+  const studyTagsId = useId();
   const openedSeries = data?.series.find((s) => s.seriesInstanceUid === openSeries);
 
   // 患者バナー（氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名）。値の無い項目は PatientBanner が省く
@@ -586,8 +585,30 @@ export function StudyDetailPanel({
             kana={study.patientKana || undefined}
             items={bannerItems}
           />
-          {/* 検査の UID（写すボタンつき）。前は下の「UID」のボタンの中にあった（#57） */}
-          {uid && <UidLine label="StudyInstanceUID" uid={uid} testId="study-uid" />}
+          {/* 検査の UID（写すボタンつき）と、その横の「検査のタグ」。前は下の「UID」のボタンの中にあった（#57） */}
+          {uid && (
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <UidLine label="StudyInstanceUID" uid={uid} testId="study-uid" />
+              </div>
+              {tagsShown && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  className="mt-px shrink-0"
+                  aria-expanded={studyTagsOpen}
+                  aria-controls={studyTagsOpen ? studyTagsId : undefined}
+                  data-testid="study-tags-open"
+                  onClick={() => setStudyTagsOpen((v) => !v)}
+                >
+                  検査のタグ
+                </Button>
+              )}
+            </div>
+          )}
+          {/* 検査の情報：タブに隠さず、バナーと UID の下に並べる */}
+          {infoRows.length > 0 && <StudyInfo rows={infoRows} />}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ViewerMenu
@@ -604,17 +625,10 @@ export function StudyDetailPanel({
       {/* PACS の操作（送る・書き出し・削除。役割に許されたものだけ）。行が替わったら作り直す */}
       <PacsActions key={uid} study={study} screen={screen} onDeleted={(s) => (onDeleted ? onDeleted(s) : changed())} />
 
-      {infoRows.length > 0 ? (
-        <Tabs
-          label="検査の内容"
-          items={[
-            { id: "series", label: "シリーズ", content: seriesPanel },
-            { id: "info", label: "検査の情報", content: <StudyInfo rows={infoRows} />, readOnly: true },
-          ]}
-        />
-      ) : (
-        seriesPanel
-      )}
+      {/* 検査のタグ（検査単位の要約）。権限のある役割が、Study UID の横のボタンで開く */}
+      {tagsShown && studyTagsOpen && <StudyTags uid={uid} panelId={studyTagsId} />}
+
+      {seriesPanel}
     </section>
   );
 }
