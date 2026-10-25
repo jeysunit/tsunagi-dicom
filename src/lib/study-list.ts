@@ -94,7 +94,8 @@ export function computeFacets(
 ): StudyFacets {
   const facets: StudyFacets = {};
   if (fields.includes("modalities")) {
-    const base = views.filter((v) => matchesFilter(v, { ...filter, modality: undefined }));
+    // 群ごとの件数は、選んだモダリティを外した一覧の中の、その群の検査の数（複数選んでも、その群だけの数）
+    const base = views.filter((v) => matchesFilter(v, { ...filter, modalities: undefined }));
     const modality: NonNullable<StudyFacets["modality"]> = { all: base.length };
     for (const g of MODALITY_GROUPS) modality[g] = base.filter((v) => v.modalities && studyInGroup(v.modalities, g)).length;
     facets.modality = modality;
@@ -200,7 +201,8 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
         date: filter.date,
         ...(filter.from ? { from: filter.from } : {}),
         ...(filter.to ? { to: filter.to } : {}),
-        ...(filter.modality ? { modality: filter.modality } : {}),
+        // 選んだ群の名前（複数ならコンマで区切る）
+        ...(filter.modalities?.length ? { modality: filter.modalities.join(",") } : {}),
         query: !!filter.q,
         // 詳細条件は、効かせた条件の名前だけ（値は患者の値なので入れない）
         ...(Object.keys(advanced).length > 0 ? { conditions: Object.keys(advanced) } : {}),

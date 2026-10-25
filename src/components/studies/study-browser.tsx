@@ -24,7 +24,7 @@ import {
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
-import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
+import { MODALITY_GROUPS, modalityGroupOf, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
   DATE_LABELS,
@@ -256,14 +256,15 @@ function FilterBar({
         </button>
         {/* モダリティは、検索と詳細条件の後に置く。本文が狭いとき（左のナビを開いた 1280px）、検査日・検索・詳細条件が 1 段、モダリティが 1 段の 2 段に収まる */}
         <Segmented label="モダリティ">
-          <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all" dim={isZero(facets?.modality?.all)}>
+          <Chip pressed={!filter.modalities?.length} onClick={() => onChange({ ...filter, modalities: undefined })} testId="modality-all" dim={isZero(facets?.modality?.all)}>
             {withCount("すべて", facets?.modality?.all, facets?.atLeast?.list)}
           </Chip>
           {MODALITY_GROUPS.map((m) => (
             <Chip
               key={m}
-              pressed={filter.modality === m}
-              onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })}
+              pressed={!!filter.modalities?.includes(m)}
+              // 押すと、その群を足す・外す（複数選べる。どれかに合う検査を出す。全部外すと「すべて」）
+              onClick={() => onChange({ ...filter, modalities: toggleGroup(filter.modalities, m) })}
               testId={`modality-${m}`}
               dim={isZero(facets?.modality?.[m])}
             >
