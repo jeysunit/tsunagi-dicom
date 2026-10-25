@@ -43,7 +43,7 @@ export function ViewerDefaults({
             <dd>
               <select
                 aria-label={`${m} の標準のビューア`}
-                className="h-8 rounded-md border border-border bg-background px-2 text-value"
+                className="h-8 rounded-md border border-border-input bg-background px-2 text-value"
                 value={values[m] ?? ""}
                 disabled={openers.length === 0}
                 onChange={(e) => void save(m, e.target.value)}

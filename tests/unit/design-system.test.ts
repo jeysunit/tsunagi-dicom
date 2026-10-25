@@ -2,7 +2,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { Button } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
+import { Input } from "@/components/ui/input";
 import { PatientBanner } from "@/components/ui/patient-banner";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 
@@ -212,8 +214,8 @@ describe("ui-kit の tokens.css と globals.css", () => {
     expect([...stripComments(sample).matchAll(/--w-login\s*:/g)].length).toBe(2);
   });
 
-  it("写しの版は 1.0.0", () => {
-    expect(readFileSync("docs/design-system/ui-kit/VERSION", "utf8").trim()).toBe("1.0.0");
+  it("写しの版は 1.0.1", () => {
+    expect(readFileSync("docs/design-system/ui-kit/VERSION", "utf8").trim()).toBe("1.0.1");
   });
 });
 
@@ -237,6 +239,34 @@ describe("部品", () => {
     expect(canceled).toContain("取消");
     expect(canceled).toContain("—");
     expect(renderToStaticMarkup(badge("unknown", "結果不明"))).toContain("border-dashed");
+  });
+
+  // 区切りの線（border。白の上で約 1.5:1）を入力の部品の枠に使わない（docs/design-system/tokens.md の「入力の枠」）。
+  // 対比そのものは tests/unit/design-tokens.test.ts（トークン）と tests/e2e/ui-feel.spec.ts（画面で計算した色）で見る
+  it("入力欄と枠のボタンの枠は border-input（区切りの線の border ではない）", () => {
+    const classes = (html: string) => html.match(/class="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
+    const input = classes(renderToStaticMarkup(createElement(Input, { name: "a" })));
+    expect(input).toContain("border-border-input");
+    expect(input).not.toContain("border-border");
+    const outline = classes(renderToStaticMarkup(createElement(Button, { variant: "outline" }, "キャンセル")));
+    expect(outline).toContain("border-border-input");
+    expect(outline).not.toContain("border-border");
+  });
+
+  it("画面の選択欄（select）と複数行の入力欄（textarea）の枠は、どれも border-input", () => {
+    const found: string[] = [];
+    let count = 0;
+    for (const file of sourceFiles("src").filter((f) => f.endsWith(".tsx"))) {
+      const text = readFileSync(file, "utf8");
+      // 開きの札の中（次の `>` まで。属性の中の矢印の関数 `=>` は飛ばす）の className
+      for (const m of text.matchAll(/<(select|textarea)\b((?:=>|[^>])*)>/g)) {
+        count += 1;
+        const cls = m[2]!.match(/className="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
+        if (!cls.includes("border-border-input") || cls.includes("border-border")) found.push(`${file}: <${m[1]}> ${cls.join(" ")}`);
+      }
+    }
+    expect(count, "検査の目はある：select・textarea を見つけた").toBeGreaterThanOrEqual(7);
+    expect(found).toEqual([]);
   });
 
   it("件数の行：補足が無くても、高さ（min-h-7）を持つ。補足は件数と別の区画に出す", () => {
