@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeAuditHash } from "@/lib/audit";
+import { resetAuditAnchorState, writeAuditAnchor } from "@/lib/audit-anchor";
+import { auditTestConfig } from "./helpers/audit-config";
 import { createDb, type Db } from "@/lib/db";
 import { history, HistoryTampered, processMessage } from "@/lib/hl7/apply";
 import { sweepArrivals } from "@/lib/hl7/sweep";
@@ -175,6 +177,37 @@ describe("HL7 の経過の確かめ", () => {
     expect(await send(a40("ER9", "P000009"))).toContain("MSA|AE|");
     expect(await sweep()).toMatchObject({ count: 0, blocked: expect.stringContaining("鍵つきの値・つなぎと合わない") });
     expect(orthanc.modifyCalls).toHaveLength(calls);
+  });
+
+  it("先頭の控えを設定していれば、末尾を消して結果不明の書き換えを隠しても、止まったまま", async () => {
+    const anchorFile = path.join(dir, `anchors-${n}.jsonl`);
+    auditTestConfig.audit.anchorFile = anchorFile;
+    resetAuditAnchorState();
+    const quiet = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      // 起動の時の控え（記録が無いので、控えを始めた行を書いて控える）
+      expect(await writeAuditAnchor(current.db, anchorFile)).not.toBeNull();
+      temp(`${STUDY}.1.1`);
+      expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+      temp(`${STUDY}.2.1`);
+      orthanc.next.state = "Running";
+      expect(await sweepArrivals(orthanc.backend, undefined, { ...options, jobTimeoutMs: 0 })).toMatchObject({ blocked: "書き換えに失敗した" });
+      // 結果不明の書き換えまでを控えに書き出す
+      expect(await writeAuditAnchor(current.db, anchorFile)).not.toBeNull();
+      expect(await history()).not.toHaveLength(0);
+      // 書き換えの request から後ろを消す（残った前の部分は、つなぎとしては正しい）
+      await dropGuards(current.db);
+      const request = (await current.db.auditLog.findMany({ orderBy: { seq: "asc" } }))
+        .find(r => r.detail?.includes("\"type\":\"sweep\"") && r.detail.includes("\"event\":\"request\""))!;
+      await current.db.auditLog.deleteMany({ where: { seq: { gte: request.seq } } });
+      await expect(history()).rejects.toThrow("末尾が消された");
+      const calls = orthanc.modifyCalls.length;
+      expect(await sweep()).toMatchObject({ count: 0, blocked: expect.stringContaining("末尾が消された") });
+      expect(orthanc.modifyCalls).toHaveLength(calls);
+    } finally {
+      quiet.mockRestore();
+      auditTestConfig.audit.anchorFile = undefined;
+    }
   });
 
   it("行の間に差し込んだ行（つなぎの合わない行）は使わない", async () => {

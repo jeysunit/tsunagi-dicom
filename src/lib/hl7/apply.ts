@@ -2,6 +2,7 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { appendAudit, checkAuditRow, verifyAuditChain, type AuditEntryInput, type AuditOutcome } from "@/lib/audit";
+import { readAuditAnchors } from "@/lib/audit-anchor";
 import { auditKeyring } from "@/lib/audit-key";
 import { getDb } from "@/lib/db";
 import { getConfig } from "@/lib/config";
@@ -33,7 +34,16 @@ export class HistoryTampered extends BackendUnknownError {
  */
 export async function history(): Promise<HistoryRow[]> {
   const db = await getDb();
-  const chain = await verifyAuditChain(db);
+  // 先頭の控えを設定していれば、/api/audit/verify と同じく照らす（末尾を消して結果不明の書き換えや続きの A40 を
+  // 隠されても見つける）。控えを読めなければ止める
+  const anchorFile = getConfig().audit?.anchorFile;
+  let anchors;
+  try {
+    anchors = anchorFile ? await readAuditAnchors(anchorFile) : undefined;
+  } catch (e) {
+    throw new HistoryTampered(0, e instanceof Error ? e.message : "先頭の控えを読めない");
+  }
+  const chain = await verifyAuditChain(db, 1000, anchorFile ? { anchors, requireAnchors: true } : {});
   if (!chain.ok) {
     throw new HistoryTampered(chain.seq, chain.reason);
   }
@@ -164,14 +174,19 @@ async function removeSource(backend: Backend, d: WriteDetail): Promise<boolean> 
   if (!sameInstances(copied, [...d.alongside ?? [], ...d.after])) {
     return true;
   }
+  if (!d.sourceFiles) {
+    return true;
+  }
   const written = new Set(d.before.map(triple));
   const source = await sourceInstances();
   const named = source.filter(i => written.has(triple(i)));
-  if (!named.length || !d.sourceFiles) {
-    return true;
+  if (named.length) {
+    await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles);
   }
-  if (await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles)) {
-    // 消した画像が、印を読んだ後に届き直していた（届き直した中身を消したかもしれない）
+  // 書き換えた画像のどれかが、印を読んだ後に届き直していれば、届き直した中身を消したかもしれない。前の回で消し終えて
+  // 止まった後の照らし合わせでも、消した画像の ID と変更の記録で確かめる（画像の ID が分からなければ確かめられない）
+  const instanceIds = d.before.map(i => d.sourceFiles!.ids[triple(i)]);
+  if (instanceIds.some(id => !id) || await backend.arrivedSince(d.sourceFiles.since, instanceIds as string[])) {
     return false;
   }
   const left = new Set((await sourceInstances()).map(triple));

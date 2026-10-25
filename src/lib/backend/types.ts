@@ -78,17 +78,20 @@ export interface Backend {
    */
   modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
   /**
-   * 検査の画像ごとの、Orthanc が持つファイルの印（FileUuid）と、読む前の Orthanc の変更の記録（/changes）の位置。
-   * files の鍵は UID の組（Study・Series・SOP を `|` でつないだもの）。同じ UID の画像が届き直して置き換わると、印が変わる
+   * 検査の画像ごとの、Orthanc が持つファイルの印（FileUuid）と画像の ID、読む前の Orthanc の変更の記録（/changes）の位置。
+   * 鍵は UID の組（Study・Series・SOP を `|` でつないだもの）。同じ UID の画像が届き直して置き換わると、印が変わる
    */
   studyInstanceFiles(orthancStudyId: string): Promise<SourceFiles>;
   /**
    * 検査の画像のうち、UID の組（Study・Series・SOP）が instances のどれかと同じで、ファイルの印が source.files と同じ
-   * ものだけを 1 枚ずつ消す。ほかの画像（後から届いた画像・同じ UID で届き直した画像）は残す。すでに無い画像は飛ばす。
-   * 消した画像の ID に、source.since より後に届いた記録（変更の記録の NewInstance）があれば true（印を見てから消すまでの
-   * 間に届き直した画像を消したかもしれない）
+   * ものだけを 1 枚ずつ消す。ほかの画像（後から届いた画像・同じ UID で届き直した画像）は残す。すでに無い画像は飛ばす
    */
-  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[], source: SourceFiles): Promise<boolean>;
+  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[], source: SourceFiles): Promise<void>;
+  /**
+   * 変更の記録の since より後に、instanceIds のどれかの画像が届いた記録（NewInstance）があるか。読み切れなければ、あるとする。
+   * 印を見てから消すまでの間に届き直した画像を消したかを、消した後に（照らし合わせでも）確かめる（design.md §15.4）
+   */
+  arrivedSince(since: number, instanceIds: string[]): Promise<boolean>;
   /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
   /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */
@@ -287,6 +290,8 @@ export interface StudyPatient {
 export interface SourceFiles {
   since: number;
   files: Record<string, string>;
+  /** Orthanc の画像の ID（消した後も、変更の記録で届き直しを確かめるため） */
+  ids: Record<string, string>;
 }
 
 export interface PatientInstance extends StudyPatient {

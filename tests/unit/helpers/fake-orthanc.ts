@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { BackendError, type Backend, type JobState, type PatientInstance } from "@/lib/backend/types";
+import { BackendError, BackendUnknownError, type Backend, type JobState, type PatientInstance } from "@/lib/backend/types";
 
 /**
  * HL7 の書き換えの試験のための、画像ごとの小さな Orthanc。検査の ID は Orthanc と同じく患者 ID と
@@ -23,6 +23,8 @@ export interface FakeOrthanc {
   next: {
     state?: JobState; partial?: boolean; beforeModify?: () => void; wholeStudyDelete?: boolean;
     beforeDelete?: () => void; duringDelete?: () => void;
+    /** 次の変更の記録の読み取りを、結果不明で失敗させる */
+    changesFail?: boolean;
   };
   add(instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance;
   studyId(patientId: string, uid: string): string;
@@ -106,19 +108,31 @@ export function createFakeOrthanc(): FakeOrthanc {
         fake.instances.push(updated);
         arrivals.push(instanceIdOf(updated));
       }
-      const { wholeStudyDelete, beforeDelete, duringDelete } = fake.next;
-      fake.next = { wholeStudyDelete, beforeDelete, duringDelete };
+      const { wholeStudyDelete, beforeDelete, duringDelete, changesFail } = fake.next;
+      fake.next = { wholeStudyDelete, beforeDelete, duringDelete, changesFail };
       const jobId = randomUUID();
       jobs.set(jobId, state);
       return { jobId };
     },
     async studyInstanceFiles(id: string) {
-      return { since: arrivals.length, files: Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), fileOf(i)])) };
+      const list = fake.instances.filter(i => idOf(i) === id);
+      return {
+        since: arrivals.length,
+        files: Object.fromEntries(list.map(i => [triple(i), fileOf(i)])),
+        ids: Object.fromEntries(list.map(i => [triple(i), instanceIdOf(i)]))
+      };
+    },
+    async arrivedSince(since: number, instanceIds: string[]) {
+      if (fake.next.changesFail) {
+        fake.next.changesFail = false;
+        throw new BackendUnknownError();
+      }
+      return arrivals.slice(since).some(a => instanceIds.includes(a));
     },
     // http.ts と同じく、印を見て消す画像の ID を決めてから、ID で消す（印を見た後に置き換わった画像も消える）
     async deleteStudyInstances(id: string, named: PatientInstance[], source: { since: number; files: Record<string, string> }) {
-      const { beforeDelete, duringDelete, wholeStudyDelete } = fake.next;
-      fake.next = {};
+      const { beforeDelete, duringDelete, wholeStudyDelete, changesFail } = fake.next;
+      fake.next = { changesFail };
       beforeDelete?.();
       fake.deleteCalls.push({ id, sops: named.map(i => i.SOPInstanceUID) });
       const names = new Set(named.map(triple));
@@ -127,7 +141,6 @@ export function createFakeOrthanc(): FakeOrthanc {
         .map(instanceIdOf));
       duringDelete?.();
       fake.instances = fake.instances.filter(i => idOf(i) !== id || (!wholeStudyDelete && !doomed.has(instanceIdOf(i))));
-      return arrivals.slice(source.since).some(a => doomed.has(a));
     },
     async jobStatus(jobId: string) {
       const state = jobs.get(jobId);

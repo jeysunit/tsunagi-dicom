@@ -522,13 +522,22 @@ export function createMockBackend(): Backend {
       }
       return { jobId };
     },
-    async studyInstanceFiles() {
-      return { since: 0, files: {} };
+    // モックは画像のファイルを持たないので、印は SOP の UID から作る。届き直しは無い
+    async studyInstanceFiles(id: string) {
+      const list = await this.studyInstanceTags(id);
+      const key = (i: (typeof list)[number]) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
+      return {
+        since: 0,
+        files: Object.fromEntries(list.map((i) => [key(i), `mock-file-${i.SOPInstanceUID}`])),
+        ids: Object.fromEntries(list.map((i) => [key(i), `mock-instance-${i.SOPInstanceUID}`])),
+      };
     },
     async deleteStudyInstances(id: string) {
       if ((await restStudies()).some((s) => s.ID === id)) {
         throw new BackendError("モック：書き換えの元の検査が残っている");
       }
+    },
+    async arrivedSince() {
       return false;
     },
 

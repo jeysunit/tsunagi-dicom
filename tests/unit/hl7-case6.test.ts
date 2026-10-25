@@ -370,6 +370,23 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
       .toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true } });
   });
 
+  it("届き直した画像を消した後に変更の記録を読めずに止まっても、次の照らし合わせは成功にしない", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    const late = temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    orthanc.next.duringDelete = () => {
+      orthanc.instances = orthanc.instances.filter(i => i !== late);
+      temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });
+    };
+    orthanc.next.changesFail = true;
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "書き換えに失敗した" });
+    expect(rows.filter(r => r.detail?.event === "result").at(-1)).toMatchObject({ outcome: "unknown" });
+    // 元の画像はもう無いが、照らし合わせも消した画像の ID の届き直しを変更の記録で見つける
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "結果の分からない書き換えがある" });
+    expect(rows.filter(r => r.detail?.event === "reconcile").at(-1))
+      .toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true, matchesAfter: true } });
+  });
+
   it("書き換えた画像が替え先の検査に揃わなければ、元の画像を消さずに部分反映で止める", async () => {
     temp();
     await send(a40(TEMP, "P000001"));

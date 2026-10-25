@@ -516,15 +516,23 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     // 変更の記録の位置を先に読む（印を読んだ後に届いた画像は、位置より後の記録に必ず残る）
     async studyInstanceFiles(id: string) {
       const since = await lastChange();
-      return { since, files: Object.fromEntries((await instanceFiles(id)).map(f => [f.key, f.file])) };
+      const list = await instanceFiles(id);
+      return {
+        since,
+        files: Object.fromEntries(list.map(f => [f.key, f.file])),
+        ids: Object.fromEntries(list.map(f => [f.key, f.instanceId]))
+      };
+    },
+
+    async arrivedSince(since: number, instanceIds: string[]) {
+      return instanceIds.length > 0 && arrivedSince(since, new Set(instanceIds));
     },
 
     // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
     // 書き換えの前とファイルの印が違う画像（同じ UID で届き直して置き換わった画像）も消さない。Orthanc の削除には
-    // 印の条件を付けられないので、消した画像に印を読んだ後の届いた記録があれば true を返す（design.md §15.4）
+    // 印の条件を付けられないので、呼び手が後で arrivedSince で届き直しを確かめる（design.md §15.4）
     async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles) {
       const named = new Set(instances.map(instanceKey));
-      const deleted = new Set<string>();
       for (const { instanceId, key, file } of await instanceFiles(id)) {
         if (!named.has(key) || source.files[key] !== file) {
           continue;
@@ -540,9 +548,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         if (!res.ok) {
           throw new BackendError(`画像サーバーが画像の削除を断りました（${res.status}）`);
         }
-        deleted.add(instanceId);
       }
-      return deleted.size > 0 && await arrivedSince(source.since, deleted);
     },
 
     // 仕事の完了は呼び手が確かめる（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
