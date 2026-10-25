@@ -181,6 +181,11 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
     if (failure !== undefined) {
       throw failure;
     }
+    // 期限を過ぎていれば（BFF が止まっていたなど）、その間に C-STORE が入りえた。付け直して隠さずに、失敗として残す
+    if (until > 0 && Date.now() >= until) {
+      failure = new BackendUnknownError("付け替えの印の期限が切れたかもしれない");
+      throw failure;
+    }
     if (until - Date.now() > ttl / 2) {
       return;
     }
@@ -191,6 +196,11 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       failure ??= e;
       throw e;
     }
+    // 付け直しの答えが前の期限の後に来たら、その間は印が切れていたかもしれない
+    if (until > 0 && Date.now() >= until) {
+      failure ??= new BackendUnknownError("付け替えの印の期限が切れたかもしれない");
+      throw failure;
+    }
     until = next;
   };
   await renew();
@@ -199,13 +209,8 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   timer.unref?.();
   return {
     renew,
-    ensure: async () => {
-      // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる
-      if (failure === undefined && Date.now() >= until) {
-        throw new BackendUnknownError("付け替えの印の期限が切れたかもしれない");
-      }
-      await renew();
-    },
+    // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる（renew が確かめる）
+    ensure: renew,
     release: async () => {
       clearInterval(timer);
       try {

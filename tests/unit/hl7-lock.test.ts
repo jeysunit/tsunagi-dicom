@@ -92,7 +92,7 @@ describe("付け替えの印", () => {
       }
       return status(jobId);
     });
-    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 20, pollMs: 2 })).toContain("MSA|AA|");
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 60, pollMs: 4 })).toContain("MSA|AA|");
     expect(orthanc.events.filter(e => e.startsWith("lock:")).length).toBeGreaterThan(2);
     expect(orthanc.events.at(-1)).toMatch(/^unlock:/);
   });
@@ -137,6 +137,26 @@ describe("付け替えの印", () => {
     temp();
     // 期限 1 ミリ秒：消す直前には必ず過ぎている
     expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 1, pollMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.deleteCalls).toHaveLength(0);
+    expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(1);
+    expect(results().at(-1)).toMatchObject({ outcome: "unknown", detail: { reason: "付け替えの印の期限が切れたかもしれない" } });
+  });
+
+  it("BFF が期限より長く止まった後は、付け直しで隠さず、元を消さずに結果不明で止める", async () => {
+    temp();
+    orthanc.next.state = "Running";
+    const status = orthanc.backend.jobStatus.bind(orthanc.backend);
+    let polls = 0;
+    vi.spyOn(orthanc.backend, "jobStatus").mockImplementation(async (jobId) => {
+      if (++polls === 1) {
+        // イベントループを 150 ミリ秒止める（時計の付け直しも動けない）
+        const until = Date.now() + 150;
+        while (Date.now() < until) { /* 止める */ }
+        orthanc.jobs.set(jobId, "Success");
+      }
+      return status(jobId);
+    });
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 60, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
     expect(orthanc.deleteCalls).toHaveLength(0);
     expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(1);
     expect(results().at(-1)).toMatchObject({ outcome: "unknown", detail: { reason: "付け替えの印の期限が切れたかもしれない" } });
