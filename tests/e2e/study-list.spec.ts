@@ -219,10 +219,10 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   // バナーの項目は、見出しの並び（氏名・患者ID・生年月日・受付番号・検査日時・モダリティ）のとおり
   const labels = await banner.locator("dt").allTextContents();
   expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
-  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は 2 段に折り返す。
-  // 前は「バナー（氏名とかなの 2 行）と UID の 1 行で 96px 以内」だった。いまは、バナーは項目の 2 段まで（110px 以内）、UID の行は
+  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は 2〜3 段に折り返す（字体で折り返しの数が変わる。CI の機では 3 段で 144px だった）。
+  // 前は「バナー（氏名とかなの 2 行）と UID の 1 行で 96px 以内」だった。いまは、バナーは 3 段まで（150px 以内）、UID の行は
   // 折り返しても 4 行まで（80px 以内）を確かめる（「検査の情報」は含めない）
-  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(110);
+  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(150);
   expect((await detail.getByTestId("study-uid").boundingBox())!.height).toBeLessThanOrEqual(80);
   // StudyInstanceUID は見出しに常に出る（開け閉めしない）。下の「UID」「DICOM タグ」のボタンは無い
   await expect(detail.getByTestId("detail-uid-toggle")).toHaveCount(0);
