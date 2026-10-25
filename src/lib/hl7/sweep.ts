@@ -130,6 +130,8 @@ export function ordersForChain(links: Link[], orders: Order[]): Order[] {
   }));
 }
 
+const instanceKey = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
+
 function uniform(instances: PatientInstance[], keys: (keyof PatientInstance)[]): boolean {
   return instances.every(i => keys.every(k => i[k] === instances[0]![k]));
 }
@@ -181,6 +183,18 @@ export async function sweepArrivals(
     result.skipped++;
     console.warn(`HL7 の照合の後の画像を書き換えなかった：${visible(reason)}（${visible(patientId)}・${visible(uid)}）`);
   };
+  // 前に患者 ID を書き換えて移した画像（A40・見回りの成功した書き換え）の、元の患者 ID ごとの UID の組。
+  // 移した画像が元の患者 ID に戻っていれば、人が誤った統合を書き戻したものでありうるので、統合し直さない
+  const moved = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const done = (r.detail?.event === "result" || r.detail?.event === "reconcile") && r.outcome === "success";
+    const before = done ? r.detail?.before : undefined;
+    for (const i of Array.isArray(before) ? before as PatientInstance[] : []) {
+      const set = moved.get(i.PatientID) ?? new Set<string>();
+      set.add(instanceKey(i));
+      moved.set(i.PatientID, set);
+    }
+  }
   for (const source of [...new Set(aliases.map(a => a.from))]) {
     const links = resolveAlias(aliases, source);
     if (!links) {
@@ -215,6 +229,10 @@ export async function sweepArrivals(
       // findStudiesByPatientId は Orthanc の検査の要約で探すので、画像ごとの患者 ID も仮の患者 ID かを確かめる
       if (!before.every(i => i.PatientID === source)) {
         skip("画像の患者 ID が仮の患者 ID と違う", source, uid);
+        continue;
+      }
+      if (before.some(i => moved.get(source)?.has(instanceKey(i)))) {
+        skip("前に統合した画像が仮の患者 ID に戻っている（書き戻されたかもしれない）", source, uid);
         continue;
       }
       // 統合の前の画像と、氏名・生年月日・性別の空でない値が食い違えば、別の患者の画像でありうる

@@ -414,6 +414,23 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     warn.mockRestore();
   });
 
+  it("誤った A40 で移した 2 枚のうち 1 枚だけを人が書き戻しても、見回りは統合し直さない", async () => {
+    const warn = quietly();
+    const a = temp();
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.1.9` });
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+    // 1 枚目だけを、UID を保ったまま元の患者 ID と氏名へ書き戻す（2 枚目は統合した先に残る）
+    orthanc.instances = orthanc.instances.map(i => i.SOPInstanceUID === a.SOPInstanceUID
+      ? { ...i, PatientID: TEMP, PatientName: "UNKNOWN^MALE", PatientBirthDate: "", PatientSex: "M" } : i);
+    const calls = orthanc.modifyCalls.length;
+    const deletes = orthanc.deleteCalls.length;
+    expect(await sweep()).toEqual({ count: 0, skipped: 1 });
+    expect(orthanc.modifyCalls).toHaveLength(calls);
+    expect(orthanc.deleteCalls).toHaveLength(deletes);
+    expect(orthanc.instances.find(i => i.SOPInstanceUID === a.SOPInstanceUID)?.PatientID).toBe(TEMP);
+    warn.mockRestore();
+  });
+
   it("同じ UID の検査が仮の患者 2 人と統合した先の患者の 3 件にあれば、どれも書き換えない", async () => {
     const warn = quietly();
     temp();
