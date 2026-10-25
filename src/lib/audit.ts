@@ -43,6 +43,9 @@ export const AUDIT_ACTIONS = [
   "user_create",
   "user_status_change",
   "role_change",
+  // 管理者のパスワードを失くしたときに、コンテナの中のコマンドで一時のパスワードを出した（src/lib/auth/admin-reset.ts）。
+  // 画面・API からは使えない。detail の via は container_cli
+  "admin_password_reset",
   // 段 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
   // 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、段 3 で道を外すまでこの名前で記録した
   "study_state",
