@@ -14,7 +14,7 @@
 
 ## 3. 書き換えの部品の切り出し（先の PR）
 
-- [ ] 3.1 `src/lib/hl7/apply.ts` の UID を保つ書き換え・付け替えの印・名指しの削除・確かめ・照らし合わせを、HL7 に依らない場所に切り出す。HL7 の単体の試験と結合の試験（`tests/integration/orthanc.spec.ts` の 15〜21）が変えずに通ることを確かめる
+- [x] 3.1 `src/lib/hl7/apply.ts` の UID を保つ書き換え・付け替えの印・名指しの削除・確かめ・照らし合わせを、HL7 に依らない場所（`src/lib/keep-uid-write.ts`）に切り出す。HL7 の単体の試験と結合の試験（`tests/integration/orthanc.spec.ts` の 15〜21）が変えずに通ることを確かめる
 
 ## 4. 値の修正の道
 
