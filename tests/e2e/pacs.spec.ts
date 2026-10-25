@@ -162,6 +162,17 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
   await expect(page.locator('[data-modality="offline"]').getByTestId("echo-why")).toContainText("ホスト名・ポート番号・AEタイトルを確かめて");
 });
 
+test("接続先：確認そのものを終えられなかったときは、接続できなかったと書かない", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.route("**/api/modalities/dtg/echo", (route) => route.abort());
+  await page.goto("/modalities");
+  const row = page.locator('[data-modality="dtg"]');
+  await row.getByTestId("echo").click();
+  await expect(row.getByTestId("echo-why")).toContainText("サーバーに接続できませんでした");
+  await expect(page.getByTestId("echo-notice")).toContainText("dtg の接続確認を終えられませんでした");
+  await expect(page.getByTestId("echo-notice")).not.toContainText("dtg に接続できませんでした");
+});
+
 test("接続先：確認中は札を出し、その行のボタンを押せなくする。二度押しても要求は 1 回", async ({ page }) => {
   await asRole(page, "一般");
   let calls = 0;

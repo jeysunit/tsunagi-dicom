@@ -18,6 +18,8 @@ interface EchoResult {
   at: string;
   /** 失敗の理由の 1 句（なぜか＋次にすること）。成功のときは無い */
   reason?: string;
+  /** 失敗のうち、C-ECHO が通らなかったと BFF が正常に答えたもの。false は、確認そのものを終えられなかった（断られた要求・通信の失敗など） */
+  unreachable?: boolean;
 }
 
 type Row = EchoResult | "busy";
@@ -57,7 +59,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
       const at = formatDateTimeIn(new Date().toISOString(), timeZone, { seconds: true }).split(" ")[1] ?? "";
       const ok = result.ok && result.data.connected === true;
       const reason = ok ? undefined : result.ok ? unreachableReason(showAddress) : errorText(result);
-      const done: EchoResult = { ok, at, reason };
+      const done: EchoResult = { ok, at, reason, unreachable: !ok && result.ok };
       setResults((r) => ({ ...r, [id]: done }));
       return done;
     } finally {
@@ -74,7 +76,12 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
     setNotice(
       done.ok
         ? { kind: "ok", text: `${id} に接続できました（${done.at}）。` }
-        : { kind: "err", text: `${id} に接続できませんでした（${done.at}）。理由は、下の表の「最後の接続確認」に出ています。` },
+        : {
+            kind: "err",
+            text: done.unreachable
+              ? `${id} に接続できませんでした（${done.at}）。理由は、下の表の「最後の接続確認」に出ています。`
+              : `${id} の接続確認を終えられませんでした（${done.at}）。接続先につながるかは分かりません。理由は、下の表の「最後の接続確認」に出ています。`,
+          },
     );
   }
 
@@ -86,12 +93,17 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
     setNotice({ kind: "info", text: `${targets.length} 件の接続確認を受け付けました。結果は、下の表の「最後の接続確認」で分かります。` });
     const done = (await Promise.all(targets.map((id) => echo(id)))).filter((d): d is EchoResult => d !== null);
     if (seq !== noticeSeq.current) return;
-    const failed = done.filter((d) => !d.ok).length;
-    setNotice(
-      failed === 0
-        ? { kind: "ok", text: `${done.length} 件すべてに接続できました。` }
-        : { kind: "err", text: `${done.length} 件のうち ${failed} 件に接続できませんでした。理由は、下の表の「最後の接続確認」に出ています。` },
-    );
+    const unreachable = done.filter((d) => d.unreachable).length;
+    const unfinished = done.filter((d) => !d.ok && !d.unreachable).length;
+    if (unreachable === 0 && unfinished === 0) {
+      setNotice({ kind: "ok", text: `${done.length} 件すべてに接続できました。` });
+      return;
+    }
+    const parts = [
+      unreachable > 0 ? `${unreachable} 件に接続できませんでした` : "",
+      unfinished > 0 ? `${unfinished} 件は確認を終えられず、接続できるかは分かりません` : "",
+    ].filter(Boolean);
+    setNotice({ kind: "err", text: `${done.length} 件のうち、${parts.join("。")}。理由は、下の表の「最後の接続確認」に出ています。` });
   }
 
   return (
