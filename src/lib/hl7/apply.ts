@@ -421,8 +421,9 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
         try {
           removed = await removeSource(backend, d, lock);
         } catch (e) {
-          // 消す途中で印が切れた・付け直せなかったら（途中の付け直しの答えも待つ）、残りを消さずに部分反映として人に見せる
-          if (!await lock?.settledLost()) {
+          // 消す途中で印が切れた・付け直せなかったら（印を外し、途中の付け直しの答えと Orthanc の時計のずれも見て決める）、
+          // 残りを消さずに部分反映として人に見せる
+          if (!lock || await lock.release()) {
             throw e;
           }
           removed = { lockLost: true };
@@ -751,8 +752,8 @@ async function writeStudy(
       }
     }
   } catch (e) {
-    // 途中の付け直しの答えも待つ
-    if (await lock?.settledLost()) {
+    // 印を外し、外すまで続いていたか（途中の付け直しの答えと Orthanc の時計のずれも）で決める
+    if (lock && !await lock.release()) {
       // 消す途中で印が切れた・付け直せなかった：残りは消さず、部分反映として人に見せる
       removed = { lockLost: true };
     } else {

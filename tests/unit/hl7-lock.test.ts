@@ -261,6 +261,22 @@ describe("付け替えの印", () => {
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
   });
 
+  it("消した後の読み取りが失敗し、外す時の Orthanc の時計のずれの確かめも失敗すれば、結果不明にせず部分反映で止める", async () => {
+    temp();
+    vi.spyOn(orthanc.backend, "checkLockClock").mockRejectedValue(new Error("synthetic clock jump"));
+    const lookup = orthanc.backend.lookupStudyIds.bind(orthanc.backend);
+    let broken = false;
+    vi.spyOn(orthanc.backend, "lookupStudyIds").mockImplementation(async (uid) => {
+      if (broken) throw new Error("synthetic lookup failure");
+      return lookup(uid);
+    });
+    orthanc.next.duringDelete = () => {
+      broken = true;
+    };
+    expect(await send(a40(TEMP, "P000001"), { lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+  });
+
   it("付けた後にこの機の時計が巻き戻っても、期限の切れを見逃さない（単調な時計で見る）", async () => {
     temp();
     orthanc.next.duringDelete = () => {
