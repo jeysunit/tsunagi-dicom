@@ -252,7 +252,8 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   // 期待の変更（患者バナー。docs/design-system/components.md）：見出しは患者バナーにした。
   // バナー：氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名。和暦・紹介医などは「検査の情報」へ移した
   const head = detail.getByTestId("detail-head");
-  const banner = head.getByRole("region", { name: "患者" });
+  // 期待の変更（検査の詳細の見出し。parts.md の `.fb`）：バナーは区画の上に固定し、`detail-head`（検査の情報と UID）の外に置いた
+  const banner = detail.getByTestId("detail-banner").getByRole("region", { name: "患者" });
   await expect(banner).toContainText("試験 髙子");
   await expect(banner).toContainText("しけん たかこ");
   await expect(banner).toContainText("JP-TEST-0004");
@@ -872,7 +873,8 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
   expect((await rows(page).first().boundingBox())!.height).toBeLessThanOrEqual(30);
   // 詳細のパネルでは切らない（折り返す）
   await rows(page).first().click();
-  const head = page.getByTestId("detail-head");
+  // 期待の変更（parts.md の `.fb`）：氏名はバナー（`detail-banner`）にあり、切らない。かなとモダリティ・検査名は 1 行で切り、全文を title に出す（切らないのは氏名・患者ID・受付番号）
+  const head = page.getByTestId("detail-banner");
   await expect(head).toBeVisible();
   for (const sel of ["[data-testid=detail-name]", "p"]) {
     expect(await head.locator(sel).first().evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis");
@@ -1135,9 +1137,9 @@ test("詳細：受付番号はバナーに常に出し、英字氏名・和暦�
   const head = detail.getByTestId("detail-head");
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   await expect(page.getByTestId("detail-uid")).toHaveCount(0);
-  await expect(head.getByTestId("detail-accession")).toContainText("受付番号");
+  await expect(detail.getByTestId("detail-banner").getByTestId("detail-accession")).toContainText("受付番号");
   // バナーには足さない（見出しの中の「検査の情報」にある）
-  const banner = head.locator('[aria-label="患者"]');
+  const banner = detail.getByTestId("detail-banner").locator('[aria-label="患者"]');
   for (const id of ["detail-referring", "detail-alphabetic", "detail-counts"]) await expect(banner.getByTestId(id)).toHaveCount(0);
   // 「検査の情報」：タブに隠さず、見出しの下に並ぶ。シリーズのサムネイルも同じ画面に見える
   await expect(detail.getByRole("tablist")).toHaveCount(0);
@@ -1176,19 +1178,18 @@ test("詳細の見出し：受付番号が無いときも「受付番号 —」�
   await page.getByTestId("modality-CT").click();
   await rows(page).first().click();
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
-  const head = page.getByTestId("detail-head");
-  await expect(head.getByTestId("detail-accession")).toHaveText(/受付番号\s*—/);
-  // ほかの値の無い項目は、項目ごと省く（「検査の情報」にも出ない）
-  await expect(page.getByTestId("study-detail").getByTestId("detail-referring")).toHaveCount(0);
+  await expect(page.getByTestId("detail-banner").getByTestId("detail-accession")).toHaveText(/受付番号\s*—/);
+  // 期待の変更（parts.md の `.fb`・`.finfo`）：値の無い項目も項目名を残して「—」にする（検査を替えても、同じ項目が同じ位置にある）。
+  // 前は、値の無い項目を項目ごと省いていた
+  await expect(page.getByTestId("study-detail").getByTestId("detail-referring")).toHaveText(/紹介医\s*—/);
 });
 
 test("詳細の見出しは患者バナー：氏名・かな・患者 ID・生年月日と年齢・性別・検査日・モダリティ・検査名が、2 行（氏名とかな）に収まる", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await asRole(page, "一般");
   await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click();
-  const head = page.getByTestId("detail-head");
-  await expect(head).toContainText("JP-TEST-0004");
-  const banner = head.getByRole("region", { name: "患者" });
+  const banner = page.getByTestId("detail-banner").getByRole("region", { name: "患者" });
+  await expect(banner).toContainText("JP-TEST-0004");
   // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は氏名の右と下の 2 段に
   // 折り返す。前は 1280px の幅で氏名と同じ段に並び 64px 以内だった。いまは 3 段（150px 以内）まで（字体で段の数が変わる）
   expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(150);
@@ -1283,9 +1284,12 @@ test("サムネイルを押すと、下に画像の場所を開く：画像の�
   // 既定は「主なタグ」：既定の 25 のタグを、タグ・タグ名・VR・値で出す
   await expect(area.getByTestId("tag-set-configured")).toHaveAttribute("aria-pressed", "true");
   const table = area.getByTestId("instance-tags");
-  const sopLine = area.getByTestId("uid-line");
-  await expect(sopLine).toContainText("SOPInstanceUID");
-  const first = (await sopLine.locator("code").textContent())!;
+  // 期待の変更（検査の詳細の見出し。parts.md の `.uidrow`）：画像の UID は表の上の行に出さず、タグの表の 1 行目の (0008,0018) に固定し、その行に写すボタンを置く
+  await expect(area.getByTestId("uid-line")).toHaveCount(0);
+  await expect(table.locator("tbody tr").first()).toHaveAttribute("data-tag", "0008,0018");
+  await expect(table.getByRole("button", { name: "SOPInstanceUIDをコピー" })).toHaveCount(1);
+  const sopLine = table.locator('tr[data-tag="0008,0018"]').getByTestId("tag-value");
+  const first = (await sopLine.textContent())!;
   await expect(table.locator("tbody tr")).toHaveCount(25);
   await expect(table.locator("thead")).toHaveText(/タグ\s*タグ名\s*VR\s*値/);
   await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(`SOPインスタンスUID`);
@@ -1299,8 +1303,8 @@ test("サムネイルを押すと、下に画像の場所を開く：画像の�
 
   // 画像を替えると、その画像の値に替わる（画像ごとに値が違う）
   await list.getByRole("option", { name: "#2" }).click();
-  await expect(sopLine.locator("code")).not.toHaveText(first);
-  const second = (await sopLine.locator("code").textContent())!;
+  await expect(sopLine).not.toHaveText(first);
+  const second = (await sopLine.textContent())!;
   await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(second);
   await expect(table).not.toContainText(first);
   // 前の画像に戻しても、覚えた中身を出さずに読み直す（読むたびに権限の確かめと操作ログを通す）
@@ -1338,7 +1342,8 @@ test("画像の場所：上下の矢印のキーで画像を替える（検査�
   const list = area.getByTestId("instance-list");
   await expect(list.getByRole("option")).toHaveCount(4);
   await expect(area.getByTestId("instance-tags").locator("tbody tr")).toHaveCount(25);
-  const first = (await area.getByTestId("uid-line").locator("code").textContent())!;
+  const sopValue = area.getByTestId("instance-tags").locator('tr[data-tag="0008,0018"]').getByTestId("tag-value");
+  const first = (await sopValue.textContent())!;
   // キーで通り過ぎた画像の値は読まない（読むたびに操作ログに残る）。止まった画像だけを 0.3 秒後に読む
   const tagReads: string[] = [];
   page.on("request", (req) => {
@@ -1351,7 +1356,7 @@ test("画像の場所：上下の矢印のキーで画像を替える（検査�
   await page.keyboard.press("ArrowUp");
   await expect(list.getByRole("option", { name: "#2" })).toHaveAttribute("aria-selected", "true");
   await expect(list).toBeFocused();
-  const second = (await area.getByTestId("uid-line").locator("code").textContent())!;
+  const second = (await sopValue.textContent())!;
   expect(second).not.toBe(first);
   await expect(area.getByTestId("instance-tags").locator('tr[data-tag="0008,0018"]')).toContainText(second);
   expect(tagReads).toHaveLength(1);
@@ -1405,7 +1410,8 @@ test("画像の場所：通信が戻って詳細を取り直しても、開い�
   const seriesUid = (await area.getAttribute("data-series-uid"))!;
   await list.getByRole("option", { name: "#3" }).click();
   await expect(list.getByRole("option", { name: "#3" })).toHaveAttribute("aria-selected", "true");
-  const picked = (await area.getByTestId("uid-line").locator("code").textContent())!;
+  const pickedValue = area.getByTestId("instance-tags").locator('tr[data-tag="0008,0018"]').getByTestId("tag-value");
+  const picked = (await pickedValue.textContent())!;
 
   // 通信が切れて戻る（ブラウザーの offline → online）。詳細は取り直しになり、その間は画像の場所を隠す
   const reread = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/studies/${STUDY}` && r.request().method() === "GET");
@@ -1419,7 +1425,7 @@ test("画像の場所：通信が戻って詳細を取り直しても、開い�
   await expect(list.getByRole("option")).toHaveCount(4);
   await expect(list.getByRole("option", { name: "#3" })).toHaveAttribute("aria-selected", "true");
   await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "false");
-  await expect(area.getByTestId("uid-line").locator("code")).toHaveText(picked);
+  await expect(pickedValue).toHaveText(picked);
   await expect(area.getByTestId("instance-tags").locator('tr[data-tag="0008,0018"]')).toContainText(picked);
 });
 
