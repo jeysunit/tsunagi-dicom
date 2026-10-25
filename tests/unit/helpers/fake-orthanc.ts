@@ -170,6 +170,8 @@ export function createFakeOrthanc(): FakeOrthanc {
       fake.locks.set(id, until);
       fake.events.push(`lock:${id}`);
     },
+    // 偽の Orthanc は試験と同じ時計（試験が差し替えて、ずれを作る）
+    async checkLockClock() {},
     async unlockStudy(id: string) {
       fake.locks.delete(id);
       fake.events.push(`unlock:${id}`);

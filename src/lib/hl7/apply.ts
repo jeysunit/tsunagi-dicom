@@ -269,7 +269,15 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       // 止める時に切れていなかったか（止めた後は期限を見ない）と、途中の付け直しの答えを合わせて、外すまで続いていたかを決める
       const expiredAtStop = !released && expired();
       await stop();
-      const held = failure === undefined && !expiredAtStop;
+      let held = failure === undefined && !expiredAtStop;
+      // 印の間に Orthanc の時計が進んでいれば（付けた時に確かめたずれから外れていれば）、Lua は印を切れたと読んだかもしれない
+      if (held) {
+        try {
+          await backend.checkLockClock();
+        } catch {
+          held = false;
+        }
+      }
       if (kept) {
         return held;
       }

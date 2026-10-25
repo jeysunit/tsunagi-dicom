@@ -252,6 +252,15 @@ describe("付け替えの印", () => {
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
   });
 
+  it("印の間に Orthanc の時計が進んでいれば（外す時のずれの確かめが失敗すれば）、消し終えても成功にしない", async () => {
+    temp();
+    // 付ける時の確かめ（lockStudy の中）は通り、外す時の確かめだけが失敗する
+    vi.spyOn(orthanc.backend, "checkLockClock").mockRejectedValue(new Error("synthetic clock jump"));
+    expect(await send(a40(TEMP, "P000001"), { lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.deleteCalls).toHaveLength(1);
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+  });
+
   it("付けた後にこの機の時計が巻き戻っても、期限の切れを見逃さない（単調な時計で見る）", async () => {
     temp();
     orthanc.next.duringDelete = () => {

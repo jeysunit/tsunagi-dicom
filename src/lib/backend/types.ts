@@ -105,6 +105,11 @@ export interface Backend {
    * 比べるので、Orthanc の時計がこの機の時計と LOCK_CLOCK_TOLERANCE_MS より大きくずれている（測れないときも）と投げる
    */
   lockStudy(orthancStudyId: string, untilEpochSeconds: number): Promise<void>;
+  /**
+   * Orthanc の時計とこの機の時計のずれが LOCK_CLOCK_TOLERANCE_MS の内かを確かめ、外か読めなければ投げる（印を外す時に、
+   * 印の間に Orthanc の時計が進んで、Lua が印を切れたと読んだかもしれないことを見つける）
+   */
+  checkLockClock(): Promise<void>;
   /** 付け替えの印を外す。検査か印がもう無ければ何もしない */
   unlockStudy(orthancStudyId: string): Promise<void>;
   /**

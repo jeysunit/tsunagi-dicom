@@ -529,6 +529,21 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       };
     },
 
+    // Lua は Orthanc の時計で印の期限と比べるので、Orthanc の時計（/tools/now。UTC の秒まで）とのずれを確かめる。
+    // Orthanc の時刻は now から now + 1 秒の間、この機でそれを読んだ時刻は sent から received の間なので、ずれはその幅で見る
+    async checkLockClock() {
+      const sent = Date.now();
+      const clock = await call(orthancUrl, "tools/now");
+      const received = Date.now();
+      const now = Date.parse(orthancTime(clock.ok ? (await clock.text()).trim() : ""));
+      if (!clock.ok) {
+        await clock.body?.cancel();
+      }
+      if (!Number.isFinite(now) || Math.max(Math.abs(now - received), Math.abs(now + 1000 - sent)) > LOCK_CLOCK_TOLERANCE_MS) {
+        throw new BackendError("画像サーバーの時計を読めないか、この機の時計とずれています（付け替えの印を確かめられません）");
+      }
+    },
+
     // 印の値は期限の UNIX 秒（Orthanc の Lua が os.time() と比べる）。印の名前は Orthanc の UserMetadata に要る
     // （無ければ 404。検査が無いときも 404）
     async lockStudy(id: string, untilEpochSeconds: number) {
@@ -538,18 +553,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!Number.isSafeInteger(untilEpochSeconds) || untilEpochSeconds <= 0) {
         throw new BackendError("付け替えの印の期限が正しくありません", 400);
       }
-      // Lua は Orthanc の時計で期限と比べるので、付ける前に Orthanc の時計（/tools/now。UTC の秒まで）とのずれを確かめる。
-      // Orthanc の時刻は now から now + 1 秒の間、この機でそれを読んだ時刻は sent から received の間なので、ずれはその幅で見る
-      const sent = Date.now();
-      const clock = await call(orthancUrl, "tools/now");
-      const received = Date.now();
-      const now = Date.parse(orthancTime(clock.ok ? (await clock.text()).trim() : ""));
-      if (!clock.ok) {
-        await clock.body?.cancel();
-      }
-      if (!Number.isFinite(now) || Math.max(Math.abs(now - received), Math.abs(now + 1000 - sent)) > LOCK_CLOCK_TOLERANCE_MS) {
-        throw new BackendError("画像サーバーの時計を読めないか、この機の時計とずれているので、付け替えの印を付けません");
-      }
+      // 付ける前に、Orthanc の時計とのずれを確かめる
+      await this.checkLockClock();
       const res = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, {
         method: "PUT",
         headers: { "content-type": "text/plain" },
