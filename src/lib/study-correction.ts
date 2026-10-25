@@ -116,6 +116,28 @@ async function readStudy(backend: Backend, uid: string, orthancId: string): Prom
   return { orthancId, info, instances, alongside, mixed };
 }
 
+/**
+ * 値の修正の窓に最初に入れる、いまの値（選んだ検査の先頭の画像の患者の値と受付番号、検査の要約の検査日・検査名）と、
+ * 画像どうしで値の揃っていない項目。同じ UID の検査が複数あって選んでいなければ、選ぶための要点を添えて断る
+ */
+export async function readCurrent(backend: Backend, uid: string, orthancId?: string) {
+  const study = await readStudy(backend, uid, await selectStudy(backend, uid, orthancId));
+  const p = study.instances[0]!;
+  return {
+    orthancId: study.orthancId,
+    values: {
+      PatientID: p.PatientID,
+      PatientName: p.PatientName,
+      PatientBirthDate: p.PatientBirthDate,
+      PatientSex: p.PatientSex,
+      AccessionNumber: p.AccessionNumber,
+      StudyDate: study.info.studyDate,
+      StudyDescription: study.info.studyDescription,
+    },
+    mixed: study.mixed,
+  };
+}
+
 /** 状態の印に入れる、画像の UID の組と値（並びを決めて） */
 const instanceState = (list: PatientInstance[]) =>
   list.map((i) => [triple(i), ...KEEP_UID_VALUES.map((k) => i[k]), i.SpecificCharacterSet]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));

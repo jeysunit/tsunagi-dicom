@@ -1,16 +1,17 @@
 "use client";
 
-import { CheckCircle2, Download, Send, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Download, PencilLine, Send, Trash2, XCircle } from "lucide-react";
 import { useId, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/pending";
 import { DeletePanel } from "@/components/studies/delete-panel";
+import { ModifyPanel } from "@/components/studies/modify-panel";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { SendPanel, type SendActivity } from "@/components/studies/send-panel";
 import type { StudyView } from "@/lib/fields";
 import { cn } from "@/lib/utils";
 
-// 詳細のパネルの PACS の操作（docs/spec.md の 3.4・3.5）：送る（段 4）・書き出し（段 5）・削除（段 5。管理者だけ）。
+// 詳細のパネルの PACS の操作（docs/spec.md の 3.4・3.5）：送る（段 4）・書き出し（段 5）・値の修正（段 6）・削除（段 5。管理者だけ）。
 // 役割に許された操作だけのボタンを 1 行に並べ、押した操作の画面をその下に出す（1 つずつ）。
 // 行が替わったら、呼ぶ側が key に検査の UID を付けて作り直す（別の検査を送らない・消さないように）。
 // 画面の言葉は docs/spec.md の 2.2（送信・エクスポート（ZIP）・削除…）。
@@ -18,22 +19,26 @@ export function PacsActions({
   study,
   screen,
   onDeleted,
+  onModified,
   leading,
 }: {
   study: StudyView;
   screen: ScreenInfo;
   onDeleted: (study: StudyView) => void;
+  /** 値を修正できたあと（一覧と詳細を読み直す） */
+  onModified?: () => void;
   /** 操作の行の先頭に置く物（主の「開く」。詳細の操作は 1 行にそろえる） */
   leading?: React.ReactNode;
 }) {
-  const [open, setOpen] = useState<"send" | "delete" | null>(null);
+  const [open, setOpen] = useState<"send" | "modify" | "delete" | null>(null);
   // 送信の画面を閉じた後も、送信の状態を「送信」のボタンの横に出す（Orthanc の送信は閉じても続く。docs/spec.md の 3.4）
   const [activity, setActivity] = useState<SendActivity | null>(null);
   const sendId = useId();
   const deleteId = useId();
+  const modifyId = useId();
   const uid = study.studyInstanceUid ?? "";
-  if (!uid || !(leading || screen.can.send || screen.can.export || screen.can.delete)) return null;
-  const toggle = (which: "send" | "delete") => setOpen((v) => (v === which ? null : which));
+  if (!uid || !(leading || screen.can.send || screen.can.export || screen.can.modify || screen.can.delete)) return null;
+  const toggle = (which: "send" | "modify" | "delete") => setOpen((v) => (v === which ? null : which));
 
   return (
     <div className="w-full" data-testid="pacs-actions">
@@ -59,6 +64,13 @@ export function PacsActions({
             エクスポート（ZIP）
           </a>
         )}
+        {screen.can.modify && (
+          // 患者情報修正・検査情報修正（段 6）。窓の中で2つに分ける（操作の行の副は 3 つまで。docs/design-system/menu.md）
+          <Button type="button" size="sm" variant="outline" aria-expanded={open === "modify"} aria-controls={modifyId} data-testid="modify-open" onClick={() => toggle("modify")}>
+            <PencilLine aria-hidden />
+            修正…
+          </Button>
+        )}
         {screen.can.delete && (
           <>
             {/* 削除の左に、いつも 1rem 以上の間をあける（余りがあれば、間が広がって削除が右端に寄る）。入りきらなければ、削除は次の行の右端へ折り返す */}
@@ -72,6 +84,9 @@ export function PacsActions({
       </div>
       {screen.can.send && (
         <SendPanel study={study} screen={screen} open={open === "send"} panelId={sendId} onClose={() => setOpen(null)} onStatus={setActivity} />
+      )}
+      {screen.can.modify && open === "modify" && (
+        <ModifyPanel study={study} screen={screen} panelId={modifyId} onClose={() => setOpen(null)} onModified={() => onModified?.()} />
       )}
       {screen.can.delete && open === "delete" && (
         <DeletePanel study={study} screen={screen} panelId={deleteId} onClose={() => setOpen(null)} onDeleted={() => onDeleted(study)} />
