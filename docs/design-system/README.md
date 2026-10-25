@@ -39,7 +39,7 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 |---|---|
 | [tokens.md](tokens.md) | 色・文字・余白・角・影・枠線 |
 | [components.md](components.md) | 部品。使う場面・挙動と数値・使わない場面・NG と代わり・理由 |
-| [screen-types.md](screen-types.md) | 画面の型 A〜D と確認表 |
+| [screen-types.md](screen-types.md) | 画面の 7 つの型と確認表 |
 | [menu.md](menu.md) | 上の帯・左のナビ・見出しの行のメニューの決まり |
 | [glossary.md](glossary.md) | 画面の言葉の決まり。語の使い分けと、3 製品をまたいだ語の対照 |
 | [writing.md](writing.md) | 文言（誤り・知らせ・空の状態・確認の窓）の書き方 |
