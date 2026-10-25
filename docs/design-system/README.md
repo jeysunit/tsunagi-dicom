@@ -42,9 +42,13 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 | [screen-types.md](screen-types.md) | 画面の 7 つの型と確認表 |
 | [menu.md](menu.md) | 上の帯・左のナビ・見出しの行のメニューの決まり |
 | [glossary.md](glossary.md) | 画面の言葉の決まり。語の使い分けと、3 製品をまたいだ語の対照 |
+| [parts.md](parts.md) | 部品の HTML の構造・クラス・値。`src/components/ui` に同じ構造とクラスの名前で組む |
 | [writing.md](writing.md) | 文言（誤り・知らせ・空の状態・確認の窓）の書き方 |
+| [ui-kit/](ui-kit/) | 3 製品で同じ値の写し（`tokens.css`、版は `VERSION`） |
 | [scenarios.md](scenarios.md) | 検証のシナリオ。同じ 1 件の検査を 8 画面に通す |
 | [wireframes/](wireframes/) | 部品だけで組んだ画面の案（HTML。ブラウザで開く。データは架空） |
+
+ui-kit の写しは製品の側で直さない。`globals.css` の値はこの写しと同じにし、試験で確かめる。
 
 ## 部品の実装の場所
 
@@ -60,6 +64,6 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 | タグの表 | `src/components/studies/tag-grid.tsx` | あり。行の複数選択と「タグとタグ値をコピー」（計算は `src/lib/client/row-selection.ts`・`tag-copy.ts`） |
 | 状態の札 | `src/components/ui/status-badge.tsx` | 部品はある。使う画面は状態の列を足す PR から |
 | ボタン | `src/components/ui/button.tsx` | あり |
-| 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトが使う |
+| 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトと、ユーザー管理（役割の変更・無効にする・二要素認証のリセット）が使う |
 | 入力欄 | `src/components/ui/input.tsx` | あり |
 | 待ちの印 | `src/components/ui/pending.tsx` | あり |

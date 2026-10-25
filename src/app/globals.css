@@ -18,8 +18,9 @@
   /* 値（太字で出す） */
   --color-value: #1a1a1a;
   --color-border: #d2d2d2;
-  /* 入力欄・ボタンの輪郭。区切りの線（border）より濃く、地との対比を 3:1 以上にする */
-  --color-border-input: #8c8c8c;
+  /* 入力欄・ボタンの輪郭。区切りの線（border）より濃く、地との対比を 3:1 以上にする（検索の帯の muted-strong の上でも。
+     前の #8c8c8c は帯の上で 2.6:1 だった） */
+  --color-border-input: #7a7a7a;
   /* 一覧の行の hover などの、地との差の小さい色（選んだ行の地より薄く） */
   --color-muted: #eeeeee;
   /* 検索の条件の帯など、muted より一段濃い地 */
@@ -86,7 +87,7 @@ body:has([data-split-root]) {
   --color-label: #a3a3a3;
   --color-value: #ffffff;
   --color-border: #3a3a3a;
-  --color-border-input: #777777;
+  --color-border-input: #8a8a8a;
   --color-muted: #2d2d2d;
   --color-muted-strong: #383838;
   --color-hover: #333333;
