@@ -555,6 +555,8 @@ export function createMockBackend(): Backend {
       hl7Locks.set(id, untilEpochSeconds);
       hl7LockLog.push(`lock:${id}`);
     },
+    // モックは BFF と同じ時計
+    async checkLockClock() {},
     async unlockStudy(id: string) {
       hl7Locks.delete(id);
       hl7LockLog.push(`unlock:${id}`);

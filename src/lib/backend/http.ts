@@ -39,6 +39,7 @@ import {
   BackendError,
   BackendUnknownError,
   clampStudyLimit,
+  LOCK_CLOCK_TOLERANCE_MS,
   STUDY_LIMIT,
   type Backend,
   type InstanceSummary,
@@ -528,6 +529,21 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       };
     },
 
+    // Lua は Orthanc の時計で印の期限と比べるので、Orthanc の時計（/tools/now。UTC の秒まで）とのずれを確かめる。
+    // Orthanc の時刻は now から now + 1 秒の間、この機でそれを読んだ時刻は sent から received の間なので、ずれはその幅で見る
+    async checkLockClock() {
+      const sent = Date.now();
+      const clock = await call(orthancUrl, "tools/now");
+      const received = Date.now();
+      const now = Date.parse(orthancTime(clock.ok ? (await clock.text()).trim() : ""));
+      if (!clock.ok) {
+        await clock.body?.cancel();
+      }
+      if (!Number.isFinite(now) || Math.max(Math.abs(now - received), Math.abs(now + 1000 - sent)) > LOCK_CLOCK_TOLERANCE_MS) {
+        throw new BackendError("画像サーバーの時計を読めないか、この機の時計とずれています（付け替えの印を確かめられません）");
+      }
+    },
+
     // 印の値は期限の UNIX 秒（Orthanc の Lua が os.time() と比べる）。印の名前は Orthanc の UserMetadata に要る
     // （無ければ 404。検査が無いときも 404）
     async lockStudy(id: string, untilEpochSeconds: number) {
@@ -537,6 +553,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!Number.isSafeInteger(untilEpochSeconds) || untilEpochSeconds <= 0) {
         throw new BackendError("付け替えの印の期限が正しくありません", 400);
       }
+      // 付ける前に、Orthanc の時計とのずれを確かめる
+      await this.checkLockClock();
       const res = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, {
         method: "PUT",
         headers: { "content-type": "text/plain" },
@@ -547,6 +565,16 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!res.ok) {
         const hint = res.status === 404 ? `。Orthanc の UserMetadata に ${LOCK_METADATA} が要る` : "";
         throw new BackendError(`画像サーバーが付け替えの印を断りました（${res.status}）${hint}`);
+      }
+      // 印が確かに立ったことを読み直して確かめる（PUT の答えだけで信じない）。入口で道を絞るときに印の道を 1 つの
+      // 資格情報にまとめられるよう、書いたのと同じ資格情報で読む
+      const check = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, { credential: "write" });
+      const value = check.ok ? (await check.text()).trim() : "";
+      if (!check.ok) {
+        await check.body?.cancel();
+      }
+      if (value !== String(untilEpochSeconds)) {
+        throw new BackendError("付け替えの印を付けたのに、読み直すと値が違います");
       }
     },
 

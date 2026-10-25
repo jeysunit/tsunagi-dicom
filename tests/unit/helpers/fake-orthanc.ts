@@ -42,6 +42,8 @@ export interface FakeOrthanc {
   deleteCalls: { id: string; sops: string[] }[];
   /** 仕事の状態（試験が後から Success にする） */
   jobs: Map<string, JobState>;
+  /** 仕事の終わりの時刻（ISO 8601。無ければ最初に終わりを読んだ時刻） */
+  jobCompletedAt: Map<string, string>;
 }
 
 export function createFakeOrthanc(): FakeOrthanc {
@@ -84,6 +86,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     next: {},
     modifyCalls: [],
     jobs,
+    jobCompletedAt: new Map(),
     deleteCalls: [],
     locks: new Map(),
     lockRefused: false,
@@ -167,6 +170,8 @@ export function createFakeOrthanc(): FakeOrthanc {
       fake.locks.set(id, until);
       fake.events.push(`lock:${id}`);
     },
+    // 偽の Orthanc は試験と同じ時計（試験が差し替えて、ずれを作る）
+    async checkLockClock() {},
     async unlockStudy(id: string) {
       fake.locks.delete(id);
       fake.events.push(`unlock:${id}`);
@@ -203,8 +208,12 @@ export function createFakeOrthanc(): FakeOrthanc {
         throw new BackendUnknownError();
       }
     },
+    // 終わった仕事の終わりの時刻は、最初に終わりを読んだ時刻（試験が jobCompletedAt で替えられる。Orthanc と同じく秒まで）
     async jobStatus(jobId: string) {
       const state = jobs.get(jobId);
+      if (state && (state === "Success" || state === "Failure") && !fake.jobCompletedAt.has(jobId)) {
+        fake.jobCompletedAt.set(jobId, new Date().toISOString().replace(/\.\d+Z$/, "Z"));
+      }
       return state ? {
         id: jobId,
         state,
@@ -212,7 +221,7 @@ export function createFakeOrthanc(): FakeOrthanc {
         errorCode: 0,
         errorDescription: "",
         creationTime: "",
-        completionTime: null
+        completionTime: fake.jobCompletedAt.get(jobId) ?? null
       } : null;
     }
   };

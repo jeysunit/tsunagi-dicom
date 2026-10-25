@@ -170,18 +170,73 @@ describe("HL7 の Orthanc REST の要求", () => {
       await expect(backend().studyInstanceOrigins(id)).rejects.toBeInstanceOf(BackendError);
     });
   });
+  describe("引き当て", () => {
+    it("検査の ID だけを返し、ほかの Type は飛ばす", async () => {
+      state.fetch.mockResolvedValueOnce(Response.json([
+        { Type: "Patient", ID: "p", Path: "/patients/p" },
+        { Type: "Study", ID: id, Path: `/studies/${id}` }
+      ]));
+      expect(await backend().lookupStudyIds("1.2.3")).toEqual([id]);
+    });
+    it.each([
+      ["配列でない", {}],
+      ["null の要素", [{ Type: "Study", ID: id }, null]],
+      ["Type が無い", [{ ID: id }]],
+      ["知らない Type", [{ Type: "Stduy", ID: id }]],
+      ["検査の ID が読めない", [{ Type: "Study", ID: "not-an-id" }]]
+    ])("答えの形が違えば（%s）、黙って捨てずに投げる（あるはずの検査を無いと読まない）", async (_label, answer) => {
+      state.fetch.mockResolvedValueOnce(Response.json(answer));
+      await expect(backend().lookupStudyIds("1.2.3")).rejects.toThrow("引き当ての答えを読めません");
+    });
+  });
   describe("付け替えの印", () => {
-    it("期限の UNIX 秒を、利用者のメタデータ TsunagiLock に書く資格情報で PUT する", async () => {
-      state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+    // Orthanc の /tools/now の答え（UTC の秒まで。時間帯の印なし）
+    const orthancNow = (offsetMs = 0) =>
+      new Response(new Date(Date.now() + offsetMs).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, ""), { status: 200 });
+    it("Orthanc の時計を確かめてから、期限の UNIX 秒を、利用者のメタデータ TsunagiLock に書く資格情報で PUT し、読み直して確かめる", async () => {
+      state.fetch
+        .mockResolvedValueOnce(orthancNow())
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(new Response("1800000000", { status: 200 }));
       await backend().lockStudy(id, 1800000000);
-      const [url, init] = state.fetch.mock.calls[0]!;
+      expect(state.fetch.mock.calls[0]![0]).toBe("http://pacs.example.org/tools/now");
+      const [url, init] = state.fetch.mock.calls[1]!;
       expect(url).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
       expect(init.method).toBe("PUT");
       expect(init.body).toBe("1800000000");
       expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
+      const [checkUrl, checkInit] = state.fetch.mock.calls[2]!;
+      expect(checkUrl).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
+      expect(checkInit.method).toBe("GET");
+      expect(checkInit.headers.authorization).toBe(init.headers.authorization);
+    });
+    it.each([
+      ["6 秒進んでいる", () => orthancNow(6_000)],
+      ["6 秒遅れている", () => orthancNow(-6_000)],
+      ["読めない", () => new Response("not a time", { status: 200 })],
+      ["断られた", () => new Response("", { status: 403 })]
+    ])("Orthanc の時計が%sなら、印を付けずに投げる", async (_label, clock) => {
+      state.fetch.mockResolvedValueOnce(clock());
+      await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("時計");
+      expect(state.fetch).toHaveBeenCalledTimes(1);
+    });
+    it("Orthanc の時計が 3 秒のずれの内なら付ける", async () => {
+      state.fetch
+        .mockResolvedValueOnce(orthancNow(-3_000))
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(new Response("1800000000", { status: 200 }));
+      await backend().lockStudy(id, 1800000000);
+      expect(state.fetch).toHaveBeenCalledTimes(3);
+    });
+    it.each([
+      ["別の値", () => new Response("1700000000", { status: 200 })],
+      ["読めない", () => new Response("", { status: 404 })]
+    ])("PUT が成功しても、読み直した印が%sなら投げる", async (_label, readBack) => {
+      state.fetch.mockResolvedValueOnce(orthancNow()).mockResolvedValueOnce(new Response("", { status: 200 })).mockResolvedValueOnce(readBack());
+      await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("読み直すと値が違います");
     });
     it("Orthanc に印の名前（UserMetadata）が無ければ、設定の要ることを知らせて投げる", async () => {
-      state.fetch.mockResolvedValueOnce(new Response("", { status: 404 }));
+      state.fetch.mockResolvedValueOnce(orthancNow()).mockResolvedValueOnce(new Response("", { status: 404 }));
       await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("UserMetadata に TsunagiLock が要る");
     });
     it.each([0, -1, 1.5, Number.NaN])("期限 %s は送らない", async (until) => {
@@ -189,8 +244,9 @@ describe("HL7 の Orthanc REST の要求", () => {
       expect(state.fetch).not.toHaveBeenCalled();
     });
     it("通信が切れたら、結果不明ではなく書き換えない誤りにする", async () => {
-      state.fetch.mockRejectedValueOnce(new Error("synthetic transport failure"));
+      state.fetch.mockResolvedValueOnce(orthancNow()).mockRejectedValueOnce(new Error("synthetic transport failure"));
       const error = await backend().lockStudy(id, 1800000000).catch(e => e);
+      expect(state.fetch).toHaveBeenCalledTimes(2);
       expect(error).toBeInstanceOf(BackendError);
       expect(error).not.toBeInstanceOf(BackendUnknownError);
     });

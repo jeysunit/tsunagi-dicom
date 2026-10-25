@@ -34,7 +34,7 @@ flowchart LR
 | ファイル | 中身 |
 |---|---|
 | `docker/test/compose.yaml` | Orthanc・storescp・storescu（`scu`。profile `tools`）。待ち受けは 127.0.0.1 だけ |
-| `docker/test/orthanc/orthanc.json` | Orthanc の設定（秘密は無い）。送信先 `itest-scp`（`ITEST_SCP`・`storescp`・11112）を設定のファイルで登録する。HL7 の付け替えの印の Lua（`deploy/orthanc/tsunagi-lock.lua`。compose が読み込ませる）と `UserMetadata`（`TsunagiLock`）を足す |
+| `docker/test/orthanc/orthanc.json` | Orthanc の設定（秘密は無い）。送信先 `itest-scp`（`ITEST_SCP`・`storescp`・11112）を設定のファイルで登録する。HL7 の付け替えの印の Lua（`deploy/orthanc/tsunagi-lock.lua`。compose が読み込ませる）と `UserMetadata`（`TsunagiLock`）を足す。試験の Orthanc だけ `ExecuteLuaEnabled` を開け、Lua が印を確かめられないときに断ることを、`/tools/execute-script` で Orthanc の REST の失敗を差し替えて確かめる（施設の Orthanc では開けない） |
 | `docker/test/dcmtk/Dockerfile` | DCMTK のイメージ（Debian の公式のイメージと Debian の包みで作る。配布しない） |
 | `tests/integration/run.mjs` | 資格情報を作り、コンテナを立て、Playwright を流し、片付ける |
 | `tests/integration/orthanc.spec.ts` | 試験の本体 |

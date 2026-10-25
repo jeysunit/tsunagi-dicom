@@ -1023,6 +1023,65 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
   expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "DELETE" })).status).toBe(200);
   await storescuToOrthanc(more.batch);
   expect(await instances()).toBe(3);
+
+  // 読めない印の値は、確かめられないので断る（受ける側に倒さない）
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "PUT", body: "not-a-time", contentType: "text/plain" })).status).toBe(200);
+  const unreadable = { ...syntheticStudy("lock-unreadable", 56, 3), studyInstanceUid: study.studyInstanceUid };
+  writeDumps(unreadable);
+  await expect(storescuToOrthanc(unreadable.batch)).rejects.toThrow();
+  expect(await instances()).toBe(3);
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "DELETE" })).status).toBe(200);
+
+  // 引き当て・メタデータの読み取りに失敗したとき、読めない JSON が返ったときも断る。Orthanc の REST を壊せないので、
+  // 試験の Orthanc だけ /tools/execute-script を開け、同じ Lua の中で RestApiPost・RestApiGet を差し替えて filter を呼ぶ
+  // （差し替えは 1 回の実行の中で戻す。Orthanc は Lua を 1 つずつ動かすので、その間の C-STORE には効かない）
+  const filter = (post: string, get: string) => `
+    local realPost, realGet = RestApiPost, RestApiGet
+    RestApiPost = ${post}
+    RestApiGet = ${get}
+    local ok, answer = pcall(ReceivedCStoreInstanceFilter, { StudyInstanceUID = '${study.studyInstanceUid}' }, { RemoteAet = 'ITEST_LUA' }, {})
+    RestApiPost, RestApiGet = realPost, realGet
+    print(ok and tostring(answer) or 'error')`;
+  const found = `function() return '[{"Type":"Study","ID":"${id}"}]' end`;
+  const failing = "function() error('synthetic failure') end";
+  const returning = (json: string) => `function() return '${json}' end`;
+  const cases: [string, string, string, string][] = [
+    ["引き当ての失敗", failing, "realGet", "42752"],
+    ["引き当ての答えが読めない JSON", returning("not json"), "realGet", "42752"],
+    ["引き当ての答えが配列でない", returning("{}"), "realGet", "42752"],
+    ["引き当ての答えに検査の ID が無い", returning('[{"Type":"Study"}]'), "realGet", "42752"],
+    ["引き当ての答えが null だけ", returning("[null]"), "realGet", "42752"],
+    ["引き当ての答えの終わりに null", returning(`[{"Type":"Patient","ID":"x"}, null]`), "realGet", "42752"],
+    ["引き当ての答えに Type が無い", returning(`[{"ID":"${id}"}]`), "realGet", "42752"],
+    ["引き当ての答えの Type が知らない値", returning(`[{"Type":"Stduy","ID":"${id}"}]`), "realGet", "42752"],
+    ["メタデータの読み取りの失敗", found, failing, "42752"],
+    ["メタデータが読めない JSON", found, returning("not json"), "42752"],
+    // ?expand の効かない答え（名前の配列）を、印が無いと読まない
+    ["メタデータが名前の配列", found, returning('["TsunagiLock"]'), "42752"],
+    ["印の値が false", found, returning('{"TsunagiLock":false}'), "42752"],
+    ["印の値が null", found, returning('{"TsunagiLock":null}'), "42752"],
+    ["印の値が配列", found, returning('{"TsunagiLock":[1]}'), "42752"],
+    ["印の番号の値が物", found, returning('{"1024":{}}'), "42752"],
+    // 名前を \u で書いた null（Lua の文字列では \\ が 1 つの \ になる）
+    ["印の名前を \\u で書いた値が null", found, returning('{"\\\\u0054sunagiLock":null}'), "42752"],
+    ["印の値が負の無限大", found, returning('{"TsunagiLock":"-1e999"}'), "42752"],
+    ["印の値が小数", found, returning('{"TsunagiLock":"1.5"}'), "42752"],
+    ["印の値が 0", found, returning('{"TsunagiLock":"0"}'), "42752"],
+    // 比べるため：\u で書いた名前の、期限の切れていない印は断る
+    ["印の名前を \\u で書いた、期限の切れていない印", found, returning('{"\\\\u0054sunagiLock":"99999999999"}'), "42752"],
+    // 比べるため：文字列の中の null（ほかのメタデータの値）では断らない
+    ["ほかのメタデータの値の中の null", found, returning('{"Other":"note:null, \\\\"null\\\\""}'), "0"],
+    // 比べるため：期限の切れた印は受ける
+    ["期限の切れた印", found, returning('{"TsunagiLock":"1"}'), "0"],
+    // 比べるため：差し替えない引き当てと読み取りで、印が無ければ受ける
+    ["印が無い", "realPost", "realGet", "0"]
+  ];
+  for (const [label, post, get, expected] of cases) {
+    const response = await orthanc("tools/execute-script", { method: "POST", body: filter(post, get), contentType: "text/plain" });
+    expect(response.status, label).toBe(200);
+    // 答えは print の全部（filter が断ったときに残す行の後に、試験の print が来る）
+    expect((await response.text()).trim().split("\n").at(-1)?.trim(), label).toBe(expected);
+  }
 });
 
 // HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後（21 の前。21 は人が解いてから流す）に置く

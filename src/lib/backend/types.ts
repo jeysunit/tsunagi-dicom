@@ -101,9 +101,15 @@ export interface Backend {
   /**
    * 検査に付け替えの印（利用者のメタデータ TsunagiLock。値は期限の UNIX 秒）を付ける（design.md §15.4）。Orthanc の Lua
    * （deploy/orthanc/tsunagi-lock.lua）が、期限の切れていない印のある検査と同じ StudyInstanceUID の C-STORE を断る。
-   * 付け直せば期限が延びる。Orthanc の UserMetadata に TsunagiLock が無ければ投げる
+   * 付け直せば期限が延びる。Orthanc の UserMetadata に TsunagiLock が無ければ投げる。Lua は Orthanc の時計で期限と
+   * 比べるので、Orthanc の時計がこの機の時計と LOCK_CLOCK_TOLERANCE_MS より大きくずれている（測れないときも）と投げる
    */
   lockStudy(orthancStudyId: string, untilEpochSeconds: number): Promise<void>;
+  /**
+   * Orthanc の時計とこの機の時計のずれが LOCK_CLOCK_TOLERANCE_MS の内かを確かめ、外か読めなければ投げる（印を外す時に、
+   * 印の間に Orthanc の時計が進んで、Lua が印を切れたと読んだかもしれないことを見つける）
+   */
+  checkLockClock(): Promise<void>;
   /** 付け替えの印を外す。検査か印がもう無ければ何もしない */
   unlockStudy(orthancStudyId: string): Promise<void>;
   /**
@@ -242,6 +248,12 @@ export interface JobStatus {
   creationTime: string;
   completionTime: string | null;
 }
+
+/**
+ * 付け替えの印で許す、Orthanc とこの機の時計のずれ（design.md §15.4）。lockStudy はこれより大きくずれていれば投げ、
+ * BFF は印の期限のこれだけ前から、印が切れたかもしれないとみなす
+ */
+export const LOCK_CLOCK_TOLERANCE_MS = 5_000;
 
 /** 書き込みの要求の答えが分からなかった（時間切れ・通信の切れ。docs/spec.md の 3.5 の結果不明） */
 export class BackendUnknownError extends Error {
