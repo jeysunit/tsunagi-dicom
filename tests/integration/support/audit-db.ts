@@ -34,6 +34,21 @@ export function readAudit(): AuditRow[] {
   }
 }
 
+/**
+ * いちばん新しいログインのセッションの、画面の確認用の token（x-csrf-token。試験のたびに作るデータベースの値）。
+ * 画面の書き込みの API（/api/hl7/resolve）を試験から直に呼ぶときに、ログインした直後に読む。値は試験の報告に出さない
+ */
+export function latestCsrfToken(): string {
+  const db = new DatabaseSync(path.join(ITEST.workDir, "itest.db"), { readOnly: true });
+  try {
+    const row = db.prepare('SELECT "csrfToken" FROM "Session" ORDER BY "createdAt" DESC LIMIT 1').get() as { csrfToken?: string } | undefined;
+    if (!row?.csrfToken) throw new Error("ログインのセッションが無い");
+    return row.csrfToken;
+  } finally {
+    db.close();
+  }
+}
+
 /** 操作と検査の行を、要求の ID ごとに「phase:outcome」の並び（古い順）にまとめる。要求の ID の無い行（断った行など）は除く */
 export function requestTrails(rows: readonly AuditRow[], action: string, studyInstanceUid: string): Map<string, string[]> {
   const trails = new Map<string, string[]>();

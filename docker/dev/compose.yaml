@@ -43,8 +43,8 @@ services:
     # ris-emulator の Dockerfile から作る。版は commit で固定する（RIS_GIT_REF で替えられる）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-ris:local
     build:
-      # 既定は main の ae71765（照合 reconcile のある版。ris-emulator の #24 のマージ）
-      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-ae71765e7620275de38a5f09c71db1bdc7355d44}
+      # 既定は main の 3006b30（照合 reconcile と、ORM の取消 CA のある版。ris-emulator の #32 のマージ）
+      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-3006b3029bcb84e3ab56ab2c65c435bdaf11b5ad}
     environment:
       RIS_WEB_PASSWORD_FILE: /run/secrets/ris_web_password
       # Web 画面と MWL を、コンテナの中では 0.0.0.0 で待ち受ける（イメージの既定と同じ。設定ファイルより先に効く）
@@ -97,8 +97,8 @@ services:
     # dicom-test-generator の Dockerfile から作る。版は commit で固定する（DTG_GIT_REF で替えられる）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-dtg:local
     build:
-      # 既定は main の 52380eb（#19 のマージの後）
-      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-52380eb2c294309fa7a607696114ee4406c42e0e}
+      # 既定は main の 99eff67（緊急の患者の追加撮影 --append --study-uid のある版。dicom-test-generator の #78 のマージ）
+      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-99eff672c621b2bdbf17e1ad4aab93d1d450c7f9}
     environment:
       DTG_WEB_PASSWORD_FILE: /run/secrets/dtg_web_password
       # 検査日・時刻を日本の時刻で書く（Orthanc の TZ と同じ）

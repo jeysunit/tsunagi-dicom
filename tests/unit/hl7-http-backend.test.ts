@@ -88,12 +88,13 @@ describe("HL7 の Orthanc REST の要求", () => {
     const files = { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2" };
     const changes = (list: { ChangeType: string; ID: string }[], done = true, last = 20) =>
       state.fetch.mockResolvedValueOnce(Response.json({ Changes: list, Done: done, Last: last }));
-    it("変更の記録の位置を先に読み、画像ごとのファイルの印を、UID の組を鍵にして読む", async () => {
+    it("変更の記録の位置を先に読み、画像ごとのファイルの印と画像の ID を、UID の組を鍵にして読む", async () => {
       state.fetch.mockResolvedValueOnce(Response.json({ Changes: [], Done: true, Last: 7 }));
       listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
       expect(await backend().studyInstanceFiles(id)).toEqual({
         since: 7,
-        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" }
+        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" },
+        ids: { "1.2|1.2.3|1.2.3.1": one, "1.2|1.2.3|1.2.3.2": two, "1.2|1.2.3|1.2.3.3": late }
       });
       expect(state.fetch.mock.calls[0]![0]).toBe("http://pacs.example.org/changes?last");
       expect(state.fetch.mock.calls[2]![0]).toBe(`http://pacs.example.org/studies/${id}/instances`);
@@ -142,6 +143,121 @@ describe("HL7 の Orthanc REST の要求", () => {
       changes([]);
       state.fetch.mockResolvedValueOnce(new Response("", { status }));
       await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toBeInstanceOf(error);
+    });
+    it("変更の記録を読んだ後、1 枚を消す直前に beforeEach を呼び、投げれば残りを消さない", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      changes([]);
+      const beforeEach = vi.fn().mockRejectedValue(new Error("synthetic renew failure"));
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files }, beforeEach)).rejects.toThrow("synthetic");
+      expect(beforeEach).toHaveBeenCalledTimes(1);
+      expect(state.fetch.mock.calls.some(c => c[1]?.method === "DELETE")).toBe(false);
+    });
+    it("写しの元（ModifiedFrom）を画像ごとに読み、無い画像は null にする", async () => {
+      state.fetch
+        .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1"), [two]: tag("1.2.3.2") }))
+        .mockResolvedValueOnce(new Response(late, { status: 200 }))
+        .mockResolvedValueOnce(new Response("", { status: 404 }));
+      expect(await backend().studyInstanceOrigins(id)).toEqual({ "1.2|1.2.3|1.2.3.1": late, "1.2|1.2.3|1.2.3.2": null });
+      expect(state.fetch.mock.calls.map(c => c[0]).slice(1)).toEqual([
+        `http://pacs.example.org/instances/${one}/metadata/ModifiedFrom`,
+        `http://pacs.example.org/instances/${two}/metadata/ModifiedFrom`
+      ]);
+    });
+    it("写しの元を読めなければ投げる", async () => {
+      state.fetch
+        .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1") }))
+        .mockResolvedValueOnce(new Response("", { status: 500 }));
+      await expect(backend().studyInstanceOrigins(id)).rejects.toBeInstanceOf(BackendError);
+    });
+  });
+  describe("引き当て", () => {
+    it("検査の ID だけを返し、ほかの Type は飛ばす", async () => {
+      state.fetch.mockResolvedValueOnce(Response.json([
+        { Type: "Patient", ID: "p", Path: "/patients/p" },
+        { Type: "Study", ID: id, Path: `/studies/${id}` }
+      ]));
+      expect(await backend().lookupStudyIds("1.2.3")).toEqual([id]);
+    });
+    it.each([
+      ["配列でない", {}],
+      ["null の要素", [{ Type: "Study", ID: id }, null]],
+      ["Type が無い", [{ ID: id }]],
+      ["知らない Type", [{ Type: "Stduy", ID: id }]],
+      ["検査の ID が読めない", [{ Type: "Study", ID: "not-an-id" }]]
+    ])("答えの形が違えば（%s）、黙って捨てずに投げる（あるはずの検査を無いと読まない）", async (_label, answer) => {
+      state.fetch.mockResolvedValueOnce(Response.json(answer));
+      await expect(backend().lookupStudyIds("1.2.3")).rejects.toThrow("引き当ての答えを読めません");
+    });
+  });
+  describe("付け替えの印", () => {
+    // Orthanc の /tools/now の答え（UTC の秒まで。時間帯の印なし）
+    const orthancNow = (offsetMs = 0) =>
+      new Response(new Date(Date.now() + offsetMs).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, ""), { status: 200 });
+    it("Orthanc の時計を確かめてから、期限の UNIX 秒を、利用者のメタデータ TsunagiLock に書く資格情報で PUT し、読み直して確かめる", async () => {
+      state.fetch
+        .mockResolvedValueOnce(orthancNow())
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(new Response("1800000000", { status: 200 }));
+      await backend().lockStudy(id, 1800000000);
+      expect(state.fetch.mock.calls[0]![0]).toBe("http://pacs.example.org/tools/now");
+      const [url, init] = state.fetch.mock.calls[1]!;
+      expect(url).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
+      expect(init.method).toBe("PUT");
+      expect(init.body).toBe("1800000000");
+      expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
+      const [checkUrl, checkInit] = state.fetch.mock.calls[2]!;
+      expect(checkUrl).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
+      expect(checkInit.method).toBe("GET");
+      expect(checkInit.headers.authorization).toBe(init.headers.authorization);
+    });
+    it.each([
+      ["6 秒進んでいる", () => orthancNow(6_000)],
+      ["6 秒遅れている", () => orthancNow(-6_000)],
+      ["読めない", () => new Response("not a time", { status: 200 })],
+      ["断られた", () => new Response("", { status: 403 })]
+    ])("Orthanc の時計が%sなら、印を付けずに投げる", async (_label, clock) => {
+      state.fetch.mockResolvedValueOnce(clock());
+      await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("時計");
+      expect(state.fetch).toHaveBeenCalledTimes(1);
+    });
+    it("Orthanc の時計が 3 秒のずれの内なら付ける", async () => {
+      state.fetch
+        .mockResolvedValueOnce(orthancNow(-3_000))
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(new Response("1800000000", { status: 200 }));
+      await backend().lockStudy(id, 1800000000);
+      expect(state.fetch).toHaveBeenCalledTimes(3);
+    });
+    it.each([
+      ["別の値", () => new Response("1700000000", { status: 200 })],
+      ["読めない", () => new Response("", { status: 404 })]
+    ])("PUT が成功しても、読み直した印が%sなら投げる", async (_label, readBack) => {
+      state.fetch.mockResolvedValueOnce(orthancNow()).mockResolvedValueOnce(new Response("", { status: 200 })).mockResolvedValueOnce(readBack());
+      await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("読み直すと値が違います");
+    });
+    it("Orthanc に印の名前（UserMetadata）が無ければ、設定の要ることを知らせて投げる", async () => {
+      state.fetch.mockResolvedValueOnce(orthancNow()).mockResolvedValueOnce(new Response("", { status: 404 }));
+      await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("UserMetadata に TsunagiLock が要る");
+    });
+    it.each([0, -1, 1.5, Number.NaN])("期限 %s は送らない", async (until) => {
+      await expect(backend().lockStudy(id, until)).rejects.toBeInstanceOf(BackendError);
+      expect(state.fetch).not.toHaveBeenCalled();
+    });
+    it("通信が切れたら、結果不明ではなく書き換えない誤りにする", async () => {
+      state.fetch.mockResolvedValueOnce(orthancNow()).mockRejectedValueOnce(new Error("synthetic transport failure"));
+      const error = await backend().lockStudy(id, 1800000000).catch(e => e);
+      expect(state.fetch).toHaveBeenCalledTimes(2);
+      expect(error).toBeInstanceOf(BackendError);
+      expect(error).not.toBeInstanceOf(BackendUnknownError);
+    });
+    it("外すのは DELETE。検査か印がもう無い（404）ときは何もしない", async () => {
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 404 }));
+      await backend().unlockStudy(id);
+      const [url, init] = state.fetch.mock.calls[0]!;
+      expect(url).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
+      expect(init.method).toBe("DELETE");
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 403 }));
+      await expect(backend().unlockStudy(id)).rejects.toBeInstanceOf(BackendError);
     });
   });
   it.each([302, 502, 503, 504])("状態 %i は結果不明", async (status) => {

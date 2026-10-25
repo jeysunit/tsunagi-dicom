@@ -108,8 +108,27 @@ BFF は Orthanc に元の検査を消させてはならない（`KeepSource: fal
 
 #### Scenario: 書き換えの最中に届いた画像
 
-- **WHEN** 見回りが仮の患者 ID の検査を書き換えている最中に、同じ検査に仮の患者 ID の画像が届く
+- **WHEN** 見回りが仮の患者 ID の検査を書き換えている最中に、同じ検査に仮の患者 ID の画像が REST で届く
 - **THEN** 届いた画像は仮の患者 ID の検査に残り、見回りは部分反映として止まる
+
+### Requirement: 患者 ID の変わる書き換えの間は、同じ StudyInstanceUID の C-STORE を Orthanc に断らせる
+
+A40 と見回りの書き換えの前に、元の検査に付け替えの印（Orthanc の利用者のメタデータ `TsunagiLock`。値は期限の UNIX 秒）を付け、元の画像を消し終えたら・失敗したら外す。Orthanc の Lua は、期限の切れていない印のある検査と同じ StudyInstanceUID の C-STORE に `0xA700` を返す。元を消す前に、書き換えた画像の `ModifiedFrom` が元の画像の ID と同じかを確かめる。
+
+#### Scenario: 書き換えの最中の C-STORE
+
+- **WHEN** A40 か見回りが仮の患者 ID の検査を書き換えている最中に、同じ StudyInstanceUID の画像が C-STORE で届く
+- **THEN** Orthanc は送り手に `0xA700` を返して保存せず、書き換えが終わって印が外れた後の送り直しは保存する
+
+#### Scenario: 印を付けられない
+
+- **WHEN** Orthanc に `UserMetadata` の `TsunagiLock` が無く、印を付けられない
+- **THEN** BFF は患者 ID を書き換えず、A40 に AE を返す
+
+#### Scenario: 書き換えた画像が置き換わった
+
+- **WHEN** 書き換えの仕事が写した後、元を消す前に、統合した先の患者 ID で同じ UID の別の画像が REST で届き、写しが置き換わる
+- **THEN** BFF は元の画像を消さず、部分反映として止める
 
 #### Scenario: 覚えの行が書き換えられた
 

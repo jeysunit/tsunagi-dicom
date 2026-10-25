@@ -61,10 +61,10 @@ describe("操作の 1 行（docs/design-system/components.md の「ボタン」�
 });
 
 describe("サムネイルを押せるか（権限）", () => {
-  it("dicom.all_values のある役割：サムネイルはボタン（aria-pressed）。下の「UID」「DICOM タグ」のボタンは無く、検査の UID は見出しにある", () => {
+  it("dicom.all_values のある役割：サムネイルはボタン（aria-expanded）。下の「UID」「DICOM タグ」のボタンは無く、検査の UID は見出しにある", () => {
     const html = render(true);
     expect(html).toContain('data-testid="series-open"');
-    expect(html).toMatch(/<button[^>]*aria-pressed="false"[^>]*data-testid="series-open"/);
+    expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*data-testid="series-open"/);
     // 期待の変更（#57）：下のボタンをやめ、StudyInstanceUID を見出しの 3 行目に出す
     expect(html).not.toContain('data-testid="detail-tags-toggle"');
     expect(html).not.toContain('data-testid="detail-uid-toggle"');

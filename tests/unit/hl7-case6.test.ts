@@ -321,6 +321,28 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(orthanc.deleteCalls.at(-1)?.sops).toEqual([`${STUDY}.2.1`]);
   });
 
+  it("届いた画像が消えたことを見つけた後に、写しの確かめが失敗しても、部分反映で残す（自動で解かせない）", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    orthanc.next.beforeModify = () => void temp(STUDY, { SOPInstanceUID: `${STUDY}.3.1` });
+    orthanc.next.wholeStudyDelete = true;
+    // 消した後の写しの確かめ（ModifiedFrom の読み取り）から、読めなくなる
+    let deleted = false;
+    orthanc.next.duringDelete = () => {
+      deleted = true;
+    };
+    const origins = orthanc.backend.studyInstanceOrigins.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "studyInstanceOrigins").mockImplementation(async (id) => {
+      if (deleted) throw new Error("synthetic origins failure");
+      return origins(id);
+    });
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "画像の一部だけが書き換わった" });
+    const result = rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1)!;
+    expect(result).toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true } });
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "結果の分からない書き換えがある" });
+  });
+
   it("仕事の終わりを待ちきれずに止まっても、仕事が成功していれば、次の照らし合わせで元の画像を消して解く", async () => {
     temp();
     await send(a40(TEMP, "P000001"));

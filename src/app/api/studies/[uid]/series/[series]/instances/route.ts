@@ -28,11 +28,12 @@ export async function GET(_request: Request, { params }: Context) {
       detail: { ...detail, count: instances.length },
     });
     return Response.json({
-      instances: instances.map(({ sopInstanceUid, sopClassUid, instanceNumber, numberOfFrames }) => ({
+      instances: instances.map(({ sopInstanceUid, sopClassUid, instanceNumber, numberOfFrames, sliceLocation }) => ({
         sopInstanceUid,
         sopClassUid,
         instanceNumber,
         numberOfFrames,
+        sliceLocation,
       })),
     });
   } catch (error) {

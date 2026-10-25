@@ -94,7 +94,22 @@ function Segmented({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClick: () => void; children: React.ReactNode; testId?: string }) {
+/** 件数が 0 の見出しは薄く出す（押せるままにする。押すと 0 件になる、と分かる。docs/spec.md の 3.1） */
+const isZero = (n: number | undefined) => n === 0;
+
+function Chip({
+  pressed,
+  onClick,
+  children,
+  testId,
+  dim = false,
+}: {
+  pressed: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  testId?: string;
+  dim?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -104,8 +119,11 @@ function Chip({ pressed, onClick, children, testId }: { pressed: boolean; onClic
       className={cn(
         "inline-flex h-7 items-center whitespace-nowrap border-r border-border px-1.5 text-sm last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
         pressInset,
-        pressed ? "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active" : "bg-background text-foreground hover:bg-hover active:bg-pressed",
+        pressed
+          ? "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active"
+          : cn("bg-background hover:bg-hover active:bg-pressed", dim ? "text-label" : "text-foreground"),
       )}
+      data-dim={dim || undefined}
     >
       {children}
     </button>
@@ -151,10 +169,15 @@ function FilterBar({
   filter,
   facets,
   onChange,
+  filtered,
+  onClear,
 }: {
   filter: StudyFilter;
   facets: StudyFacets | undefined;
   onChange: (f: StudyFilter) => void;
+  /** 絞り込みが既定のままでない（戻す先がある） */
+  filtered: boolean;
+  onClear: () => void;
 }) {
   const [text, setText] = useState(filter.q ?? "");
   // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名）は「詳細条件」の中。どれかで絞っているときは最初から開く
@@ -189,11 +212,12 @@ function FilterBar({
   );
 
   return (
-    <div className="shrink-0 space-y-1.5" data-testid="study-filters">
+    // 検査日・検索・詳細条件・モダリティは、muted-strong の地の 1 つの帯に収める（docs/design-system/components.md の「検索の帯」）
+    <div className="shrink-0 space-y-1.5 rounded-md bg-muted-strong px-3 py-2" data-testid="study-filters">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <Segmented label="検査日">
           {FACET_DATES.map((d) => (
-            <Chip key={d} pressed={filter.date === d} onClick={() => onChange({ ...filter, date: d })} testId={`date-${d}`}>
+            <Chip key={d} pressed={filter.date === d} onClick={() => onChange({ ...filter, date: d })} testId={`date-${d}`} dim={isZero(facets?.date?.[d])}>
               {withCount(DATE_LABELS[d], facets?.date?.[d], facets?.atLeast?.date?.includes(d))}
             </Chip>
           ))}
@@ -230,16 +254,34 @@ function FilterBar({
         </button>
         {/* モダリティは、検索と詳細条件の後に置く。本文が狭いとき（左のナビを開いた 1280px）、検査日・検索・詳細条件が 1 段、モダリティが 1 段の 2 段に収まる */}
         <Segmented label="モダリティ">
-          <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all">
+          <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all" dim={isZero(facets?.modality?.all)}>
             {withCount("すべて", facets?.modality?.all, facets?.atLeast?.list)}
           </Chip>
           {MODALITY_GROUPS.map((m) => (
-            <Chip key={m} pressed={filter.modality === m} onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })} testId={`modality-${m}`}>
+            <Chip
+              key={m}
+              pressed={filter.modality === m}
+              onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })}
+              testId={`modality-${m}`}
+              dim={isZero(facets?.modality?.[m])}
+            >
               <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
               {withCount(m, facets?.modality?.[m], facets?.atLeast?.list)}
             </Chip>
           ))}
         </Segmented>
+        {/* 条件をクリア：帯の右に、いつも置く（位置を動かさない）。絞っていないときは薄く、押せない */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="ml-auto h-7 bg-background"
+          disabled={!(filtered || text !== "" || TEXT_FIELDS.some((k) => fields[k] !== ""))}
+          data-testid="filter-clear"
+          onClick={onClear}
+        >
+          条件をクリア
+        </Button>
       </div>
       {more && (
         <div
@@ -833,7 +875,7 @@ function Browser({
     <section ref={box} data-split-root className="@container relative flex min-h-0 flex-1 flex-col gap-2">
       {/* 絞り込みの帯と件数の行は、左右をまたいで上に置く（docs/design-system/screen-types.md の「型 B の変種」） */}
       <div inert={overlayOpen || undefined} className="shrink-0 space-y-3">
-        <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} />
+        <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} filtered={params !== ""} onClear={clearFilter} />
         {/* 件数の行（docs/design-system/components.md）：検索の欄が空かどうかで件数と自動更新の位置が動かない（#56） */}
         <CountRow
           aside={
