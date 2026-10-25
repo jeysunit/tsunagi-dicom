@@ -6,7 +6,7 @@ import { readAuditAnchors } from "@/lib/audit-anchor";
 import { getDb } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getBackend } from "@/lib/backend";
-import { BackendError, BackendUnknownError, type Backend, type PatientInstance, type SourceFiles } from "@/lib/backend/types";
+import { BackendError, BackendUnknownError, LOCK_CLOCK_TOLERANCE_MS, type Backend, type PatientInstance, type SourceFiles } from "@/lib/backend/types";
 import { visible } from "../../../hl7-receiver/visible";
 import { parseMessage } from "./message";
 import { extractUpdate, type Command } from "./update";
@@ -184,6 +184,9 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   const ttl = options.lockTtlMs ?? LOCK_TTL_MS;
   await record(Math.ceil(ttl / 1000));
   let until = 0;
+  // Lua は Orthanc の時計で比べる。lockStudy が時計のずれを margin の内と確かめるので、期限の margin 前から切れたとみなす
+  const margin = options.lockClockToleranceMs ?? LOCK_CLOCK_TOLERANCE_MS;
+  const expired = () => until > 0 && Date.now() >= until - margin;
   // 付け直しに一度でも失敗したら、それ以降の renew は投げる（呼び手は Orthanc への書き込みをやめる）
   let failure: unknown;
   // 外した後に、時計の付け直しが印を付け直さないように、外す前に止めて、途中の付け直しを待つ
@@ -204,7 +207,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       throw failure;
     }
     // 期限を過ぎていれば（BFF が止まっていたなど）、その間に C-STORE が入りえた。付け直して隠さずに、失敗として残す
-    if (until > 0 && Date.now() >= until) {
+    if (expired()) {
       failure = new BackendUnknownError("付け替えの印の期限が切れたかもしれない");
       throw failure;
     }
@@ -219,7 +222,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       throw e;
     }
     // 付け直しの答えが前の期限の後に来たら、その間は印が切れていたかもしれない
-    if (until > 0 && Date.now() >= until) {
+    if (expired()) {
       failure ??= new BackendUnknownError("付け替えの印の期限が切れたかもしれない");
       throw failure;
     }
@@ -239,7 +242,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
     renew,
     // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる（renew が確かめる）
     ensure: renew,
-    lost: () => failure !== undefined || (!released && Date.now() >= until),
+    lost: () => failure !== undefined || (!released && expired()),
     until: () => until,
     keep: async () => {
       kept = true;
@@ -416,6 +419,8 @@ export interface ProcessOptions {
   /** 付け替えの印の期限と、印を付けてから元の検査を読むまで待つ時間（試験で縮める。design.md §15.4） */
   lockTtlMs?: number;
   lockSettleMs?: number;
+  /** Orthanc の時計とのずれの許し（試験で期限を縮めるときに 0 にする。既定は LOCK_CLOCK_TOLERANCE_MS） */
+  lockClockToleranceMs?: number;
 }
 // 空欄を埋める基準を先に一つに決め、検査ごとの取り違えを防ぐ（design.md §9）。
 async function mergeAttributes(backend: Backend, command: Command, sources: PatientInstance[][]) {
@@ -628,11 +633,17 @@ async function writeStudy(
     ...(alongside?.length ? { alongside } : {}),
     ...(sourceFiles ? { sourceFiles } : {})
   };
+  // 元の検査を読む間に印が切れた・付け直せなかったら、その間の C-STORE を写しうるので、書き換えを始めない
+  await lock?.ensure();
   await row("request", "success", { ...d }, after[0]!.PatientID, d.StudyInstanceUID);
   let state: string | undefined;
   let refusal: string | undefined;
   let jobCreated = false;
   try {
+    // request を残す間に切れていても始めない（Orthanc に断られたときと同じく、書き換えなかった失敗として残す）
+    if (lock?.lost()) {
+      throw new BackendError("付け替えの印が切れたかもしれないので、書き換えを始めなかった");
+    }
     const { jobId } = await backend.modifyStudyKeepingUids(id, replace);
     jobCreated = true;
     // 照らし合わせが、仕事がこの期限より後に終わったかを確かめられるよう、印の期限を残す（BFF が仕事を待つ間に止まると、

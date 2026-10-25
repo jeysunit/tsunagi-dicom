@@ -14,6 +14,8 @@ local LOCK = 'TsunagiLock'
 local LOCK_NUMBER = '1024'
 -- Refused: Out of Resources（PS3.4 B.2.3。C-STORE の Failure）
 local REFUSED = 0xA700
+-- /tools/lookup の答えの Type
+local TYPES = { Patient = true, Study = true, Series = true, Instance = true }
 
 -- JSON の文字列を読む。最初の字が opening（'[' か '{'）でなければ（配列と物は Lua では同じ table になり、空なら見分けられない）、
 -- 読めなければ nil
@@ -53,7 +55,8 @@ local function refusal(studyUid)
   end
   local now = os.time()
   for _, r in ipairs(list) do
-    if type(r) ~= 'table' or type(r['Type']) ~= 'string' then
+    -- 知らない Type（綴りの違いなど）を、検査でないとして飛ばさない
+    if type(r) ~= 'table' or not TYPES[r['Type']] then
       return 'lookup unreadable'
     end
     if r['Type'] == 'Study' then

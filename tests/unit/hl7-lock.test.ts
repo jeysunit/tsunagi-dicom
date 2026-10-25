@@ -21,7 +21,9 @@ let rows: AuditEntryInput[];
 const audit = async (row: AuditEntryInput) => {
   rows.push(row);
 };
-const options = (extra: ProcessOptions = {}) => ({ readHistory: async () => rows, issuer: "RIS_EMU", allowWrite: true, pollMs: 1, ...extra });
+// 期限をミリ秒まで縮めるので、時計のずれの許しは 0 にする（偽の Orthanc は同じ時計）
+const options = (extra: ProcessOptions = {}) =>
+  ({ readHistory: async () => rows, issuer: "RIS_EMU", allowWrite: true, pollMs: 1, lockClockToleranceMs: 0, ...extra });
 const send = (text: string, extra: ProcessOptions = {}) => processMessage(Buffer.from(text), "192.0.2.1", orthanc.backend, audit, options(extra));
 const sweep = (extra: ProcessOptions = {}) => sweepArrivals(orthanc.backend, audit, options(extra));
 const temp = (uid = STUDY, extra: Record<string, string> = {}) =>
@@ -145,13 +147,18 @@ describe("付け替えの印", () => {
 
   it("元を消す直前に印の期限が過ぎていれば（その間に C-STORE が入りえた）、付け直して続けずに部分反映で止める", async () => {
     temp();
-    // 期限 1 ミリ秒で、写しを確かめるのに 20 ミリ秒かかる：消す直前には必ず過ぎている
+    // 期限 200 ミリ秒で、写しを確かめる間に BFF が 300 ミリ秒止まる（時計の付け直しも動かない）：消す直前には必ず過ぎている。
+    // 書き換えを始める前に切れると、書き換え自体を始めないので、止まるのは仕事の後にする
     const origins = orthanc.backend.studyInstanceOrigins.bind(orthanc.backend);
     vi.spyOn(orthanc.backend, "studyInstanceOrigins").mockImplementation(async (id) => {
-      await new Promise(r => setTimeout(r, 20));
+      const stalled = Date.now() + 300;
+      while (Date.now() < stalled) {
+        // 止まった BFF の代わり（時計を動かさない）
+      }
       return origins(id);
     });
-    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 1, pollMs: 0 })).toContain("MSA|AE|");
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.modifyCalls).toHaveLength(1);
     expect(orthanc.deleteCalls).toHaveLength(0);
     expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(1);
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
@@ -213,6 +220,33 @@ describe("付け替えの印", () => {
     await sweep();
     expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "success" });
     expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(0);
+  });
+
+  it("元の検査を読む間に印を付け直せなければ、書き換えを始めずに AE を返す", async () => {
+    temp();
+    const lockStudy = orthanc.backend.lockStudy.bind(orthanc.backend);
+    let calls = 0;
+    vi.spyOn(orthanc.backend, "lockStudy").mockImplementation(async (id, until) => {
+      if (++calls > 1) throw new Error("synthetic renew failure");
+      return lockStudy(id, until);
+    });
+    // 元のファイルの印を読むのに 60 ミリ秒かかる：その間に時計の付け直しが呼ばれて失敗する
+    const files = orthanc.backend.studyInstanceFiles.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "studyInstanceFiles").mockImplementation(async (id) => {
+      await new Promise(r => setTimeout(r, 60));
+      return files(id);
+    });
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 80, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(calls).toBeGreaterThan(1);
+    expect(orthanc.modifyCalls).toHaveLength(0);
+    expect(rows.some(r => r.detail?.event === "request")).toBe(false);
+  });
+
+  it("Orthanc の時計のずれの許しの分だけ、期限より前に印が切れたとみなす（書き換えを始めない）", async () => {
+    temp();
+    // 期限 1 秒・許し 2 秒：付けたときから、Orthanc では切れているかもしれない
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 1000, lockClockToleranceMs: 2000, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.modifyCalls).toHaveLength(0);
   });
 
   it("書き換えを求めた答えが来なければ（仕事ができて写しているかもしれない）、印を外さずに結果不明で止める", async () => {

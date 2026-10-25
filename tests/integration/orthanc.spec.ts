@@ -1050,6 +1050,8 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
     ["引き当ての答えが読めない JSON", returning("not json"), "realGet", "42752"],
     ["引き当ての答えが配列でない", returning("{}"), "realGet", "42752"],
     ["引き当ての答えに検査の ID が無い", returning('[{"Type":"Study"}]'), "realGet", "42752"],
+    ["引き当ての答えに Type が無い", returning(`[{"ID":"${id}"}]`), "realGet", "42752"],
+    ["引き当ての答えの Type が知らない値", returning(`[{"Type":"Stduy","ID":"${id}"}]`), "realGet", "42752"],
     ["メタデータの読み取りの失敗", found, failing, "42752"],
     ["メタデータが読めない JSON", found, returning("not json"), "42752"],
     // ?expand の効かない答え（名前の配列）を、印が無いと読まない
