@@ -8,6 +8,7 @@ import { PatientBanner, type PatientBannerItem } from "@/components/ui/patient-b
 import { PendingText, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { PacsActions } from "@/components/studies/pacs-actions";
+import { TagGrid } from "@/components/studies/tag-grid";
 import { Thumbnail } from "@/components/studies/thumbnail";
 import { ViewerMenu } from "@/components/studies/viewer-menu";
 import type { DicomValueRow } from "@/lib/all-values";
@@ -64,42 +65,58 @@ function StudyInfo({ rows }: { rows: readonly InfoRow[] }) {
   );
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="ghost"
-      // 読み上げ用の文字（sr-only は絶対位置）の基準をボタンにする。基準が無いと、詳細の場所の中で切れずに、頁の高さを押し広げる
-      className="relative h-6"
-      aria-label={`${label}をコピー`}
-      onClick={() => {
-        void navigator.clipboard.writeText(text).then(
-          () => {
-            setDone(true);
-            window.setTimeout(() => setDone(false), 1500);
-          },
-          () => undefined,
-        );
-      }}
-    >
-      {done ? <Check aria-hidden /> : <Copy aria-hidden />}
-      {/* 読み上げにも、コピーできたことを知らせる */}
-      <span role="status" className="sr-only">
-        {done ? "コピーしました" : ""}
-      </span>
-    </Button>
-  );
-}
+/** 写せたことを示す時間（ms）。値の地を光らせ、「コピーしました」を出す */
+const COPIED_MS = 1500;
 
-/** StudyInstanceUID・SeriesInstanceUID：行の幅いっぱいに 0.75rem・等幅・控えめの色、コピーのボタン付き */
+/**
+ * StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID：0.75rem・等幅・控えめの色で折り返して出し、写すボタンを値のすぐ右に置く。
+ * 値そのものを押しても写せる（文字をドラッグで選んだときは写さない）。写したら、値の地を一瞬 selected にして「コピーしました」を出す
+ */
 function UidLine({ label, uid, testId = "uid-line" }: { label: string; uid: string; testId?: string }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const timer = window.setTimeout(() => setDone(false), COPIED_MS);
+    return () => window.clearTimeout(timer);
+  }, [done]);
+  function copy() {
+    void navigator.clipboard.writeText(uid).then(
+      () => setDone(true),
+      () => undefined,
+    );
+  }
   return (
-    <div className="flex items-center gap-2" data-testid={testId}>
+    <div className="flex items-baseline gap-2" data-testid={testId}>
       <span className="shrink-0 text-xs text-label">{label}</span>
-      <code className="min-w-0 flex-1 font-mono text-[0.75rem] break-all text-label">{uid}</code>
-      <CopyButton text={uid} label={label} />
+      {/* 写すボタンは値のすぐ右（行の右端に離さない）。長い UID が折り返すときは、最後の行の末尾に付く */}
+      <span className="min-w-0">
+        {/* 値を押して写すのはマウスの近道（キーボードは隣のボタン）なので、読み上げには出さない */}
+        <code
+          role="presentation"
+          className={cn("cursor-copy rounded-sm font-mono text-[0.75rem] break-all text-label", done && "bg-selected")}
+          data-copied={done || undefined}
+          onClick={() => {
+            if (window.getSelection()?.isCollapsed === false) return;
+            copy();
+          }}
+        >
+          {uid}
+        </code>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="ml-1 h-6 align-middle"
+          aria-label={`${label}をコピー`}
+          onClick={copy}
+        >
+          {done ? <Check aria-hidden /> : <Copy aria-hidden />}
+        </Button>
+        {/* 見える知らせと、読み上げへの知らせ（常に置き、中身だけ替える） */}
+        <span role="status" className="ml-1 text-xs text-label" data-testid="uid-copied">
+          {done ? "コピーしました" : ""}
+        </span>
+      </span>
     </div>
   );
 }
@@ -150,51 +167,7 @@ function TagTable<T>({
           {query.error.message}
         </p>
       )}
-      {rows && (
-        <table className="w-full table-fixed text-xs">
-          <colgroup>
-            <col className="w-[5.5rem]" />
-            <col className="w-[7.5rem]" />
-            <col className="w-[2.5rem]" />
-            <col />
-          </colgroup>
-          <thead className="sticky top-0 bg-surface text-left text-label">
-            <tr>
-              <th scope="col" className="px-2 py-1 font-normal">
-                タグ
-              </th>
-              <th scope="col" className="px-2 py-1 font-normal">
-                タグ名
-              </th>
-              <th scope="col" className="px-2 py-1 font-normal">
-                VR
-              </th>
-              <th scope="col" className="px-2 py-1 font-normal">
-                値
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.tag} className="border-b border-border align-top last:border-0" data-tag={row.tag}>
-                <td className="px-2 py-1 font-mono whitespace-nowrap text-label">{row.tag}</td>
-                <td className="px-2 py-1 break-words text-label">{row.name}</td>
-                <td className="px-2 py-1 font-mono text-label">{row.vr}</td>
-                <td className="px-2 py-1 break-all" data-testid="tag-value">
-                  {row.value === null ? (
-                    <span className="text-label">—</span>
-                  ) : (
-                    <>
-                      {row.value}
-                      {row.length != null && <span className="text-label">…（全 {row.length.toLocaleString("ja-JP")} 文字）</span>}
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {rows && <TagGrid rows={rows} />}
     </div>
   );
 }
