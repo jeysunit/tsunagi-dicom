@@ -177,7 +177,13 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   let until = 0;
   // 付け直しに一度でも失敗したら、それ以降の renew は投げる（呼び手は Orthanc への書き込みをやめる）
   let failure: unknown;
+  // 外した後に、時計の付け直しが印を付け直さないように、外す前に止めて、途中の付け直しを待つ
+  let released = false;
+  let pending: Promise<void> | undefined;
   const renew = async () => {
+    if (released) {
+      return;
+    }
     if (failure !== undefined) {
       throw failure;
     }
@@ -190,11 +196,17 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       return;
     }
     const next = Date.now() + ttl;
+    const put = backend.lockStudy(id, Math.ceil(next / 1000));
+    pending = put;
     try {
-      await backend.lockStudy(id, Math.ceil(next / 1000));
+      await put;
     } catch (e) {
       failure ??= e;
       throw e;
+    } finally {
+      if (pending === put) {
+        pending = undefined;
+      }
     }
     // 付け直しの答えが前の期限の後に来たら、その間は印が切れていたかもしれない
     if (until > 0 && Date.now() >= until) {
@@ -212,7 +224,9 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
     // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる（renew が確かめる）
     ensure: renew,
     release: async () => {
+      released = true;
       clearInterval(timer);
+      await pending?.catch(() => undefined);
       try {
         await backend.unlockStudy(id);
       } catch {
@@ -555,6 +569,11 @@ async function writeStudy(
   const { id, before, after, replace, alongside } = plan;
   // 患者 ID の変わる書き換えは、後で元の画像を消すので、書き換えの前のファイルの印を残す（design.md §15.4）
   const sourceFiles = lock ? await backend.studyInstanceFiles(id) : undefined;
+  // 照合（planStudy）の後・印を付ける前に、同じ UID の画像が別の値で置き換わっていれば、その画像を照合していない。
+  // 印を付けた後（C-STORE はもう入らない）に読み直し、照合した画像と同じでなければ書き換えない
+  if (lock && !sameInstances(await backend.studyInstanceTags(id), before)) {
+    throw new BackendError("書き換えの前に検査の画像が変わった");
+  }
   const d: WriteDetail = {
     writeId,
     messageId,

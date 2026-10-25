@@ -178,6 +178,42 @@ describe("付け替えの印", () => {
     expect(locks()).toBeGreaterThan(2);
   });
 
+  it("照合の後・印の前に同じ UID の画像が別の値で置き換わっていれば、書き換えも記録もせずに AE を返す", async () => {
+    const original = temp();
+    const lockStudy = orthanc.backend.lockStudy.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "lockStudy").mockImplementationOnce(async (id, until) => {
+      // 印が付く直前に、同じ患者 ID・同じ UID で、別の氏名の画像が C-STORE で届く
+      expect(orthanc.cstore({ ...original, PatientName: "OTHER^PATIENT" })).toBe("stored");
+      return lockStudy(id, until);
+    });
+    const ack = await send(a40(TEMP, "P000001"));
+    expect(ack).toContain("MSA|AE|");
+    expect(ack).toContain("書き換えの前に検査の画像が変わった");
+    expect(orthanc.modifyCalls).toHaveLength(0);
+    expect(rows.some(r => r.detail?.event === "request")).toBe(false);
+    expect(orthanc.events.at(-1)).toMatch(/^unlock:/);
+  });
+
+  it("外した後に、途中の付け直しが印を付け直さない", async () => {
+    temp();
+    const lockStudy = orthanc.backend.lockStudy.bind(orthanc.backend);
+    let calls = 0;
+    vi.spyOn(orthanc.backend, "lockStudy").mockImplementation(async (id, until) => {
+      // 2 回目（時計の付け直し）の答えを遅らせる
+      if (++calls === 2) await new Promise(r => setTimeout(r, 40));
+      return lockStudy(id, until);
+    });
+    const status = orthanc.backend.jobStatus.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "jobStatus").mockImplementation(async (jobId) => {
+      await new Promise(r => setTimeout(r, 30));
+      return status(jobId);
+    });
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 40, pollMs: 0, lockSettleMs: 0 })).toBeTruthy();
+    await new Promise(r => setTimeout(r, 80));
+    expect(orthanc.events.at(-1)).toMatch(/^unlock:/);
+    expect(orthanc.locks.size).toBe(0);
+  });
+
   it("書き換えが失敗しても印を外す", async () => {
     temp();
     orthanc.next.state = "Failure";
