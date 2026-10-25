@@ -3,7 +3,7 @@ import type { StudyView } from "@/lib/fields";
 import type { SimpleDate } from "@/lib/format/japanese-date";
 import { parseDicomDate } from "@/lib/format/japanese-date";
 import { parsePatientNameForSearch, type ParsedPatientName } from "@/lib/format/patient-name";
-import { isModalityGroup, studyInGroup, type ModalityGroup } from "@/lib/modalities";
+import { orderGroups, parseGroups, studyInGroup, type ModalityGroup } from "@/lib/modalities";
 
 // 検査の一覧のすぐ絞れる見出し（docs/spec.md の 3.1）。
 // 検査日：今日・昨日・1週間・今月・全期間・期間の指定。モダリティ。横断の検索。
@@ -51,7 +51,8 @@ export interface StudyFilter {
   /** 期間の指定（`YYYY-MM-DD`）。date が range のときだけ使う */
   from?: string;
   to?: string;
-  modality?: ModalityGroup;
+  /** 選んだモダリティの群（複数選べる。どれかに合えば合う。見出しの順。無ければ絞らない） */
+  modalities?: ModalityGroup[];
   q?: string;
   // ── 詳細条件（docs/spec.md の 3.1。2026-10-21）。Orthanc の QIDO-RS の条件にする ──
   /** 生年月日（`YYYY-MM-DD`）。一致 */
@@ -120,7 +121,8 @@ export function parseFilter(params: Params): StudyFilter {
     if (from) filter.from = from;
     if (to) filter.to = to;
   }
-  if (isModalityGroup(modality)) filter.modality = modality;
+  const modalities = parseGroups(modality);
+  if (modalities.length > 0) filter.modalities = modalities;
   if (q) filter.q = q;
   const birth = isoDate(param(params, "birth"));
   if (birth) filter.birth = birth;
@@ -168,7 +170,7 @@ export function filterToSearchParams(filter: StudyFilter): URLSearchParams {
     if (filter.from) out.set("from", filter.from);
     if (filter.to) out.set("to", filter.to);
   }
-  if (filter.modality) out.set("modality", filter.modality);
+  if (filter.modalities?.length) out.set("modality", orderGroups(filter.modalities).join(","));
   if (filter.q) out.set("q", filter.q);
   for (const [key] of ADVANCED_KEYS) {
     const v = filter[key];
@@ -253,7 +255,9 @@ export function attachSearchNames(view: StudyView, patientName: unknown): void {
  * 第3〜5成分（ミドル・接頭・接尾）まで含めた値で当てる。項目が許可されている氏名の値だけを使う
  */
 export function matchesFilter(view: StudyView, filter: StudyFilter): boolean {
-  if (filter.modality && !(view.modalities && studyInGroup(view.modalities, filter.modality))) return false;
+  // 選んだ群のどれかに合えば合う（複数選んだときは「または」）
+  const groups = filter.modalities ?? [];
+  if (groups.length > 0 && !(view.modalities && groups.some((g) => studyInGroup(view.modalities!, g)))) return false;
   if (filter.q) {
     const needle = normalizeForSearch(filter.q);
     if (!needle) return true;

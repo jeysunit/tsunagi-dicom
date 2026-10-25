@@ -22,6 +22,23 @@ export function isModalityGroup(value: unknown): value is ModalityGroup {
   return typeof value === "string" && (MODALITY_GROUPS as readonly string[]).includes(value);
 }
 
+/** 群の並びを、見出しの順（MODALITY_GROUPS）にそろえ、重複を除く */
+export function orderGroups(groups: readonly ModalityGroup[]): ModalityGroup[] {
+  return MODALITY_GROUPS.filter((g) => groups.includes(g));
+}
+
+/** 選んだ群に、群を足す（もう入っていれば外す）。見出しの順にそろえる。空になれば undefined（絞らない） */
+export function toggleGroup(selected: readonly ModalityGroup[] | undefined, group: ModalityGroup): ModalityGroup[] | undefined {
+  const current = selected ?? [];
+  const next = orderGroups(current.includes(group) ? current.filter((g) => g !== group) : [...current, group]);
+  return next.length > 0 ? next : undefined;
+}
+
+/** コンマで区切った群の名前（`CT,MR`）を読む。群でない名前は捨てる。見出しの順にそろえる */
+export function parseGroups(value: string | undefined): ModalityGroup[] {
+  return orderGroups((value ?? "").split(",").filter(isModalityGroup));
+}
+
 /** DICOM の Modality の値が入る群。どれにも入らなければ null */
 export function modalityGroupOf(modality: string): ModalityGroup | null {
   const m = modality.trim().toUpperCase();
