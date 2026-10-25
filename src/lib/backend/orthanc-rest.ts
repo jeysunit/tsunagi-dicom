@@ -178,12 +178,21 @@ export function jobFromRest(json: unknown): JobStatus | null {
   };
 }
 
-/** /tools/lookup の答えのうち、検査（Type が Study）の ID の全部 */
+const LOOKUP_TYPES = new Set(["Patient", "Study", "Series", "Instance"]);
+/**
+ * /tools/lookup の答えのうち、検査（Type が Study）の ID の全部。形の違う答え（配列でない・要素が物でない・知らない Type・
+ * 検査の ID が読めない）は、黙って捨てずに投げる（あるはずの検査を無いと読み、元を残したまま成功にしない。design.md §15.4）
+ */
 export function studyIdsFromLookup(json: unknown): string[] {
-  if (!Array.isArray(json)) return [];
+  const unreadable = () => new BackendError("画像サーバーの引き当ての答えを読めません");
+  if (!Array.isArray(json)) throw unreadable();
   return json.flatMap((r) => {
-    const x = obj(r);
-    return x.Type === "Study" && isOrthancId(x.ID) ? [x.ID] : [];
+    if (typeof r !== "object" || r === null || Array.isArray(r)) throw unreadable();
+    const x = r as Record<string, unknown>;
+    if (typeof x.Type !== "string" || !LOOKUP_TYPES.has(x.Type)) throw unreadable();
+    if (x.Type !== "Study") return [];
+    if (!isOrthancId(x.ID)) throw unreadable();
+    return [x.ID];
   });
 }
 

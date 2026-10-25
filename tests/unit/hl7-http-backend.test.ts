@@ -170,6 +170,25 @@ describe("HL7 の Orthanc REST の要求", () => {
       await expect(backend().studyInstanceOrigins(id)).rejects.toBeInstanceOf(BackendError);
     });
   });
+  describe("引き当て", () => {
+    it("検査の ID だけを返し、ほかの Type は飛ばす", async () => {
+      state.fetch.mockResolvedValueOnce(Response.json([
+        { Type: "Patient", ID: "p", Path: "/patients/p" },
+        { Type: "Study", ID: id, Path: `/studies/${id}` }
+      ]));
+      expect(await backend().lookupStudyIds("1.2.3")).toEqual([id]);
+    });
+    it.each([
+      ["配列でない", {}],
+      ["null の要素", [{ Type: "Study", ID: id }, null]],
+      ["Type が無い", [{ ID: id }]],
+      ["知らない Type", [{ Type: "Stduy", ID: id }]],
+      ["検査の ID が読めない", [{ Type: "Study", ID: "not-an-id" }]]
+    ])("答えの形が違えば（%s）、黙って捨てずに投げる（あるはずの検査を無いと読まない）", async (_label, answer) => {
+      state.fetch.mockResolvedValueOnce(Response.json(answer));
+      await expect(backend().lookupStudyIds("1.2.3")).rejects.toThrow("引き当ての答えを読めません");
+    });
+  });
   describe("付け替えの印", () => {
     // Orthanc の /tools/now の答え（UTC の秒まで。時間帯の印なし）
     const orthancNow = (offsetMs = 0) =>
