@@ -40,6 +40,8 @@ export const PERMISSIONS = [
   "receive.view",
   // 機器の一覧（名前と AE タイトル。住所は許可の一覧の modality で絞る）と、つながるかの確かめ（C-ECHO）
   "modality.check",
+  // 上の帯の接続の状態を見る（画像サーバー・HL7 の受け口・接続先の直近の接続確認。読むだけで、相手に何も送らない）
+  "connection.view",
   // ほかの機器へ送る（書き込みの操作。docs/spec.md の 3.5 の共通の決まりを通す）
   "study.send",
   // 結果の分からない書き込みの操作を、管理者が確かめて記録に足す（照らし合わせ。docs/spec.md の 3.5）
@@ -61,6 +63,7 @@ const GENERAL: readonly Permission[] = [
   "viewer.remember",
   "receive.view",
   "modality.check",
+  "connection.view",
   "study.send",
   "study.export",
 ];

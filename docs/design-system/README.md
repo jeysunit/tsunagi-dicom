@@ -54,7 +54,7 @@ ui-kit の写しは製品の側で直さない。`globals.css` の値はこの�
 
 | 部品 | 実装 | 状態 |
 |---|---|---|
-| 上の帯 | `src/components/layout/site-header.tsx` | あり。ナビの開閉・製品名・表示・ユーザーのメニューを持つ。項目の置き方は [menu.md](menu.md) の「現状との差」 |
+| 上の帯 | `src/components/layout/site-header.tsx`（接続の状態は `conn-status.tsx`、表示は `theme-toggle.tsx`） | あり。左は ナビの開閉・製品名・版、右は 接続の状態・表示（絵の押しボタン 1 つ）・利用者（2 行）・画面ロック・ログアウト。項目の置き方は [menu.md](menu.md) の「現状との差」 |
 | 左のナビ | `src/components/layout/side-nav.tsx`（項目は `nav-items.ts`、開閉は `nav-toggle.tsx`） | あり |
 | 患者バナー | `src/components/ui/patient-banner.tsx` | あり。検査の詳細の見出し（`study-detail.tsx`）が使う。和暦・紹介医などは、見出しの下の「検査の情報」（項目名と値の対）へ置いた |
 | タブ | `src/components/ui/tabs.tsx` | 部品はある。使う画面は今は無い（検査の詳細は、「検査の情報」をタブに隠さず並べるようにした） |
@@ -62,7 +62,11 @@ ui-kit の写しは製品の側で直さない。`globals.css` の値はこの�
 | 件数の行 | `src/components/ui/count-row.tsx` | あり。検査の一覧が使う |
 | 一覧の表 | `src/components/ui/table.tsx` | あり。選んだ行の見た目は検査一覧（`study-browser.tsx`）と受信一覧（`received-list.tsx`）が同じ形で持つ |
 | タグの表 | `src/components/studies/tag-grid.tsx` | あり。行の複数選択と「タグとタグ値をコピー」（計算は `src/lib/client/row-selection.ts`・`tag-copy.ts`） |
-| 状態の札 | `src/components/ui/status-badge.tsx` | 部品はある。使う画面は状態の列を足す PR から |
+| 状態の札 | `src/components/ui/status-badge.tsx` | あり。上の帯の接続の状態（`conn-status.tsx`）が使う。表の状態の列は、その列を足す PR から |
+| 選択欄 | `src/components/ui/select.tsx` | あり。高さは `default` 32px・`sm` 28px、枠は `border-input`。標準の select をそのまま使う |
+| 知らせ | `src/components/ui/notice.tsx` | あり。`kind` は ok・warn・err・info。`role="alert"` は `alert` を付けた err（画面の上の誤り）だけで、ほかは `role="status"` |
+| 見出しの行 | `src/components/ui/page-header.tsx` | あり。h1（20px・行 28px・太字）に頁の名前だけ。補足は `note`（small）、右に `actions` |
+| 空の状態 | `src/components/ui/empty-state.tsx` | あり。事実・次の手・操作 1 つ。`kind="denied"` は権限の無い頁の型（黙って別の頁へ移さない） |
 | ボタン | `src/components/ui/button.tsx` | あり |
 | 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトが使う |
 | 入力欄 | `src/components/ui/input.tsx` | あり |

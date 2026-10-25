@@ -257,7 +257,9 @@ test("役割ごとにできる操作：一般は検査と画像を見られ、�
     ).status(),
   ).toBe(403);
   await page.goto("/admin/users");
-  await expect(page.getByRole("main").getByRole("alert")).toHaveText("管理者のみ利用できます");
+  // 期待の変更：alert の段落「管理者のみ利用できます」から、空の状態（denied）の「この画面は管理者だけが開けます。」に替えた
+  await expect(page.getByRole("main")).toContainText("この画面は管理者だけが開けます。");
+  await expect(page.getByRole("main").getByRole("link", { name: "検査一覧へ" })).toBeVisible();
   await context.close();
 });
 

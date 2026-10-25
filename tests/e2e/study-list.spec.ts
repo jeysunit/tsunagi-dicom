@@ -746,7 +746,8 @@ test("ビューア：▾ から「この検査は次から Stone」と覚え、�
 test("モダリティごとの既定のビューア：管理者が管理の画面で変え、ほかの役割は開けない", async ({ page }) => {
   await asRole(page, "一般");
   await page.goto("/admin/viewers");
-  await expect(page.getByText("管理者のみ利用できます")).toBeVisible();
+  // 期待の変更：「管理者のみ利用できます」から、空の状態（denied）の文に替えた
+  await expect(page.getByText("この画面は管理者だけが開けます。")).toBeVisible();
 
   await asRole(page, "管理者");
   await page.getByRole("navigation", { name: "ページ" }).getByRole("link", { name: "ビューア設定" }).click();
@@ -774,7 +775,7 @@ const headCount = async (page: Page) => Number(await page.getByTestId("study-cou
  * 待たないと、押す前の応答の値がたまたま期待と同じで通り抜け、古い見出しの件数を読んでしまう
  * （待ちの印は 0.3 秒たつまで出ないので、件数の表示だけでは新旧を見分けられない）
  */
-const listSettled = (page: Page) => expect(page.getByRole("heading", { level: 1 }).and(page.locator("[data-fetching]"))).toHaveCount(0);
+const listSettled = (page: Page) => expect(page.locator("[data-fetching]")).toHaveCount(0);
 /**
  * 見出しや検索を操作したあと、その条件の一覧の応答が来て、画面が取り直しを終えるまで待つ。
  * listSettled だけだと、取り直しが始まる前の「取り直し中でない」状態でも通り抜ける。そこで、操作の前に

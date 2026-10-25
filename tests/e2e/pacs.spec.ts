@@ -159,7 +159,12 @@ test("一般の画面には、普段使う頁の道があり、管理者だけ�
   await expect(nav.getByRole("link", { name: "接続先" })).toHaveCount(1);
   await expect(nav.getByRole("link", { name: "ビューア設定" })).toHaveCount(0);
   await page.goto("/admin/viewers");
-  await expect(page.getByRole("main").getByRole("alert")).toContainText("管理者のみ利用できます");
+  // 期待の変更：権限の無い頁は、alert の段落ではなく空の状態（denied）で出す。事実・次の手・検査一覧への道の 3 つ
+  const denied = page.getByRole("main");
+  await expect(denied).toContainText("この画面は管理者だけが開けます。");
+  await expect(denied).toContainText("管理者に役割の変更を頼んでください。");
+  await expect(denied.getByRole("link", { name: "検査一覧へ" })).toHaveAttribute("href", "/");
+  await expect(page).toHaveURL(/\/admin\/viewers$/);
   expect((await page.request.get("/api/admin/viewer-defaults")).status()).toBe(403);
   expect((await page.request.get("/api/receive-log")).status()).toBe(200);
   // 管理者には、ビューア設定の道がある

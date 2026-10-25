@@ -92,6 +92,10 @@ export const MODALITY_FIELDS = ["id", "aet", "host", "port", "manufacturer", "al
 export type ModalityField = (typeof MODALITY_FIELDS)[number];
 const MODALITY_NAME_FIELDS = ["id", "aet"] as const satisfies readonly ModalityField[];
 
+/** 上の帯の接続の状態の項目（docs/spec.md の 3.3）。接続先の名前と AE タイトルは、さらに modality の項目（id・aet）で絞る */
+export const CONNECTION_FIELDS = ["overall", "orthanc", "hl7", "modalities", "mock"] as const;
+export type ConnectionField = (typeof CONNECTION_FIELDS)[number];
+
 export interface FieldAllowlist {
   study: readonly StudyField[];
   series: readonly SeriesField[];
@@ -99,15 +103,17 @@ export interface FieldAllowlist {
   receive?: readonly ReceiveField[];
   /** 無ければ機器の項目を返さない */
   modality?: readonly ModalityField[];
+  /** 無ければ接続の状態の項目を返さない */
+  connection?: readonly ConnectionField[];
 }
 
 export type FieldAllowlistMap = Record<Role, FieldAllowlist>;
 
 /** 既定の役割の許可の一覧。どの既定の役割も、使える画面に要る項目をすべて見る（原則 8） */
 export const ROLE_FIELD_ALLOWLIST: FieldAllowlistMap = {
-  admin: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_FIELDS },
+  admin: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_FIELDS, connection: CONNECTION_FIELDS },
   // 接続先の住所（host・port）と許可は、システムの設定にあたるので管理者だけ（docs/spec.md の 3.6）
-  general: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
+  general: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS, connection: CONNECTION_FIELDS },
 };
 
 /** 受け取りの記録の1行（画面の API が返す形） */

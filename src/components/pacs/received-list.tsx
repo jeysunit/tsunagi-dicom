@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
+import { Select } from "@/components/ui/select";
 import { getJson } from "@/lib/client/api";
 import {
   forgetPreviousSeen,
@@ -124,19 +125,14 @@ export function ReceivedList({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5" role="group" aria-label="受信一覧の絞り込み" data-testid="received-filters">
         <label className="flex items-center gap-1.5">
           <span className="text-xs text-label">送信元 AE</span>
-          <select
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            className="h-7 rounded-md border border-border bg-background px-2 text-sm text-value"
-            data-testid="received-source"
-          >
+          <Select size="sm" value={source} onChange={(e) => setSource(e.target.value)} data-testid="received-source">
             <option value="">すべて</option>
             {sources.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <div className="relative w-56 max-w-full">
           <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-label" />

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityGroup } from "@/lib/modalities";
 import type { ViewerInfo } from "@/lib/viewers";
@@ -33,7 +35,7 @@ export function ViewerDefaults({
 
   return (
     <section className="max-w-[var(--w-settings)] space-y-4">
-      <h1 className="text-lg font-bold text-value">ビューア設定（モダリティ別）</h1>
+      <PageHeader title="ビューア設定" note="モダリティ別" />
       <p className="text-label">検査ごとの指定がない場合に使うビューアです</p>
       {openers.length === 0 && <p className="text-label">ビューアが設定されていません（VIEWER_OHIF_URL などを設定します）</p>}
       <dl className="divide-y divide-border rounded-md border border-border">
@@ -41,9 +43,8 @@ export function ViewerDefaults({
           <div key={m} className="flex items-center justify-between gap-4 px-4 py-2.5">
             <dt className="font-bold text-value">{m}</dt>
             <dd>
-              <select
+              <Select
                 aria-label={`${m} の標準のビューア`}
-                className="h-8 rounded-md border border-border bg-background px-2 text-value"
                 value={values[m] ?? ""}
                 disabled={openers.length === 0}
                 onChange={(e) => void save(m, e.target.value)}
@@ -57,7 +58,7 @@ export function ViewerDefaults({
                     {v.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </dd>
           </div>
         ))}

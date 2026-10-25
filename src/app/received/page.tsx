@@ -1,4 +1,7 @@
 import { ReceivedList } from "@/components/pacs/received-list";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Notice } from "@/components/ui/notice";
+import { PageHeader } from "@/components/ui/page-header";
 import { pageAccess } from "@/lib/auth/page-session";
 import { audit } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
@@ -6,7 +9,7 @@ import { BackendError } from "@/lib/backend/types";
 import type { ReceivedView } from "@/lib/fields";
 import { getConfig } from "@/lib/config";
 import { RECEIVE_LIMIT, receiveLogView } from "@/lib/receive-log";
-import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
+import { loadFailed } from "@/lib/ui-text";
 
 // 受け取りの記録の頁（docs/spec.md の 3.3。段 4）。Orthanc が受け取った検査を、新しい順に 1 件 1 行で出す。
 // いつ（受け取った時刻）・どの機器から（呼んできた AE タイトル）・何件（画像の数）・どの検査か。
@@ -20,11 +23,7 @@ export default async function ReceivedPage() {
   const access = await pageAccess("receive.view");
   if (access.kind === "locked") return null;
   if (access.kind === "forbidden") {
-    return (
-      <p role="alert" className="text-label">
-        {FORBIDDEN_PAGE}
-      </p>
-    );
+    return <EmptyState kind="denied" adminOnly={false} />;
   }
   const { session } = access;
   const { timeZone } = getConfig();
@@ -49,15 +48,18 @@ export default async function ReceivedPage() {
   } catch (error) {
     if (!(error instanceof BackendError)) console.error(error);
     return (
-      <p role="alert" className="text-label">
-        {error instanceof BackendError ? error.message : loadFailed("受信一覧")}
-      </p>
+      <>
+        <PageHeader title="受信一覧" className="mb-3" />
+        <Notice kind="err" alert>
+          {error instanceof BackendError ? error.message : loadFailed("受信一覧")}
+        </Notice>
+      </>
     );
   }
 
   return (
     <section className="space-y-2" data-testid="received-page">
-      <h1 className="text-lg font-bold text-value">受信一覧</h1>
+      <PageHeader title="受信一覧" />
       <ReceivedList initialItems={items} initialComplete={complete} timeZone={timeZone} limit={RECEIVE_LIMIT} />
     </section>
   );

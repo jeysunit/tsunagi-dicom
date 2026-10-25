@@ -1,12 +1,14 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronRight, ChevronsUpDown, Inbox, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsUpDown, Inbox, RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
+import { Notice } from "@/components/ui/notice";
+import { Select } from "@/components/ui/select";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { StudyDetailPanel } from "@/components/studies/study-detail";
 import { openInViewer, ViewerMenu } from "@/components/studies/viewer-menu";
@@ -339,10 +341,10 @@ function FilterBar({
           </span>
           <label className="flex items-center gap-1.5">
             <span className="shrink-0 text-xs text-label">性別</span>
-            <select
+            <Select
+              size="sm"
               value={filter.sex ?? ""}
               onChange={(e) => onChange({ ...filter, sex: (PATIENT_SEX as readonly string[]).includes(e.target.value) ? (e.target.value as PatientSex) : undefined })}
-              className="h-7 rounded-md border border-border bg-background px-2 text-sm text-value"
               data-testid="filter-sex"
             >
               <option value="">すべて</option>
@@ -351,7 +353,7 @@ function FilterBar({
                   {sexLabel(s)}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           {/* 一覧の上のモダリティの見出しに無い群（文書・レポート）。上の見出しと同じ選びに足される */}
           <span className="flex items-center gap-1.5">
@@ -981,13 +983,13 @@ function Browser({
             )
           }
         >
-          <h1 className="flex items-baseline gap-1" aria-live="polite" data-fetching={list.isFetching || undefined}>
+          <div className="flex items-baseline gap-1" aria-live="polite" data-fetching={list.isFetching || undefined}>
             {/* 取り直しの待ちの印が出ている間は、件数を「—」にする（古い件数を新しいものに見せない） */}
             <span className="text-lg font-bold text-value" data-testid="study-count">
               {data && !refetching ? `${data.count.count}${data.count.exact ? "" : " 以上"}` : "—"}
             </span>
             <span className="text-label">件</span>
-          </h1>
+          </div>
           <PendingText pending={fetching} />
           {/* 上限に届いて読みきれていないとき、並べ替えは読んだ範囲の中だけ（最初の並びは新しい順の先頭なので、替えたときだけ添える） */}
           {data && !data.count.exact && !isDefaultSort(sort) && (
@@ -996,18 +998,17 @@ function Browser({
             </span>
           )}
           {notice && (
-            <p role="status" className="flex items-center gap-1.5 border-l-4 border-success bg-surface px-2 text-sm text-success" data-testid="list-notice">
-              <CheckCircle2 aria-hidden className="size-4" />
+            <Notice kind="ok" className="py-0.5" data-testid="list-notice">
               {notice}
-            </p>
+            </Notice>
           )}
         </CountRow>
       </div>
 
       {list.isError && (
-        <p role="alert" className="text-danger">
+        <Notice kind="err" alert>
           {list.error.message}
-        </p>
+        </Notice>
       )}
       {/* その下を左右に分ける。行を選ぶまでは一覧が全幅。選ぶと、左に一覧（列を詰めた形）、右に詳細（残りの幅） */}
       <div ref={body} className="flex min-h-0 flex-1">

@@ -12,6 +12,7 @@ const GENERAL: Permission[] = [
   "viewer.remember",
   "receive.view",
   "modality.check",
+  "connection.view",
   "study.send",
   "study.export",
 ];
