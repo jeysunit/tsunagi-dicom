@@ -42,7 +42,9 @@ import {
   STUDY_LIMIT,
   type Backend,
   type InstanceSummary,
+  type PatientInstance,
   type ReceivedStudy,
+  type SourceFiles,
   type RelayRequest,
   type StudyQuery,
 } from "@/lib/backend/types";
@@ -61,6 +63,8 @@ const EXPORT_TIMEOUT_MS = 10 * 60_000;
 /** 書き出しの本文を流す間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
 const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
+/** 画像の UID の組（studyInstanceFiles の鍵） */
+const instanceKey = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
 /**
  * 書き込みの操作の答えのうち、Orthanc が受けなかったと確かめられないもの（docs/spec.md の 3.5 の結果不明）：
  * 手前の入口の 502・503・504（Orthanc が受けた後に、入口が待ちきれなかったことがある）と、移す答え（3xx）
@@ -145,6 +149,100 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     }
     return res.json();
+  }
+
+  /** 検査の全画像の Orthanc の画像の ID と、患者の値と UID の組（design.md §4） */
+  async function instanceTags(id: string): Promise<[string, PatientInstance][]> {
+    if (!isOrthancId(id)) {
+      throw new BackendError("検査の ID が正しくありません", 400);
+    }
+    const json = await restJsonOrNull(`studies/${id}/instances-tags?simplify`);
+    if (!json || typeof json !== "object" || Array.isArray(json)) {
+      throw new BackendError("画像のタグを読み込めません");
+    }
+    return Object.entries(json).map(([instanceId, raw]): [string, PatientInstance] => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new BackendError("画像のタグが正しくありません");
+      }
+      const tags = raw as Record<string, unknown>;
+      const get = (key: string) => {
+        const v = tags[key];
+        if (v === undefined) {
+          return "";
+        }
+        if (typeof v !== "string") {
+          throw new BackendError("画像のタグが正しくありません");
+        }
+        return v;
+      };
+      return [instanceId, {
+        PatientID: get("PatientID"),
+        PatientName: get("PatientName"),
+        PatientBirthDate: get("PatientBirthDate"),
+        PatientSex: get("PatientSex"),
+        AccessionNumber: get("AccessionNumber"),
+        StudyInstanceUID: get("StudyInstanceUID"),
+        SeriesInstanceUID: get("SeriesInstanceUID"),
+        SOPInstanceUID: get("SOPInstanceUID"),
+        SpecificCharacterSet: get("SpecificCharacterSet")
+      }];
+    });
+  }
+
+  /** Orthanc の変更の記録（/changes）のいまの位置 */
+  async function lastChange(): Promise<number> {
+    const json = await restJsonOrNull("changes?last");
+    const last = json && typeof json === "object" ? (json as { Last?: unknown }).Last : undefined;
+    if (typeof last !== "number" || !Number.isSafeInteger(last) || last < 0) {
+      throw new BackendError("画像サーバーの変更の記録を読み込めません");
+    }
+    return last;
+  }
+
+  /** since より後の変更の記録に、ids の画像が届いた記録（NewInstance）があるか。読み切れなければ、あるとする */
+  async function arrivedSince(since: number, ids: ReadonlySet<string>): Promise<boolean> {
+    let position = since;
+    for (let page = 0; page < 1000; page++) {
+      const json = await restJsonOrNull(`changes?since=${position}&limit=1000`);
+      const body = (json && typeof json === "object" ? json : {}) as { Changes?: unknown; Done?: unknown; Last?: unknown };
+      if (!Array.isArray(body.Changes) || typeof body.Last !== "number" || typeof body.Done !== "boolean") {
+        throw new BackendError("画像サーバーの変更の記録を読み込めません");
+      }
+      for (const change of body.Changes as { ChangeType?: unknown; ID?: unknown }[]) {
+        if (change?.ChangeType === "NewInstance" && typeof change.ID === "string" && ids.has(change.ID)) {
+          return true;
+        }
+      }
+      if (body.Done || body.Last <= position) {
+        return false;
+      }
+      position = body.Last;
+    }
+    return true;
+  }
+
+  /** 検査の全画像の、Orthanc の画像の ID・UID の組・ファイルの印（`/studies/{id}/instances` の FileUuid） */
+  async function instanceFiles(id: string): Promise<{ instanceId: string; key: string; file: string }[]> {
+    const tags = await instanceTags(id);
+    const json = await restJsonOrNull(`studies/${id}/instances`);
+    if (!Array.isArray(json)) {
+      throw new BackendError("画像の一覧を読み込めません");
+    }
+    const files = new Map<string, string>();
+    for (const raw of json) {
+      const { ID, FileUuid } = (raw ?? {}) as { ID?: unknown; FileUuid?: unknown };
+      if (typeof ID !== "string" || typeof FileUuid !== "string" || !FileUuid) {
+        throw new BackendError("画像のファイルの印を読み込めません");
+      }
+      files.set(ID, FileUuid);
+    }
+    return tags.map(([instanceId, instance]) => {
+      const file = files.get(instanceId);
+      if (!file || !isOrthancId(instanceId)) {
+        throw new BackendError("画像のファイルの印を読み込めません");
+      }
+      return { instanceId, key: instanceKey(instance), file };
+    });
   }
 
   /**
@@ -401,47 +499,53 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return studyPatientFromRest(await restJsonOrNull(`studies/${orthancStudyId}`));
     },
 
-    // 検査の要約だけでは部分反映を見落とすので、全画像を読む（design.md §4）。
-    async studyInstanceTags(id: string) {
+    // 届き終えていない検査を書き換えると、書き換えの最中に届いた画像が元の検査ごと消えうる（design.md §15）。
+    async studyIsStable(id: string) {
       if (!isOrthancId(id)) {
         throw new BackendError("検査の ID が正しくありません", 400);
       }
-      const json = await restJsonOrNull(`studies/${id}/instances-tags?simplify`);
-      if (!json || typeof json !== "object" || Array.isArray(json)) {
-        throw new BackendError("画像のタグを読み込めません");
-      }
-      return Object.values(json).map((raw): import("./types").PatientInstance => {
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          throw new BackendError("画像のタグが正しくありません");
-        }
-        const tags = raw as Record<string, unknown>;
-        const get = (key: string) => {
-          const v = tags[key];
-          if (v === undefined) {
-            return "";
-          }
-          if (typeof v !== "string") {
-            throw new BackendError("画像のタグが正しくありません");
-          }
-          return v;
-        };
-        return {
-          PatientID: get("PatientID"),
-          PatientName: get("PatientName"),
-          PatientBirthDate: get("PatientBirthDate"),
-          PatientSex: get("PatientSex"),
-          AccessionNumber: get("AccessionNumber"),
-          StudyInstanceUID: get("StudyInstanceUID"),
-          SeriesInstanceUID: get("SeriesInstanceUID"),
-          SOPInstanceUID: get("SOPInstanceUID"),
-          SpecificCharacterSet: get("SpecificCharacterSet")
-        };
-      });
+      const json = await restJsonOrNull(`studies/${id}`);
+      return Boolean(json && typeof json === "object" && (json as { IsStable?: unknown }).IsStable === true);
     },
 
-    // 仕事の完了は呼び手が確かめる（design.md §4）。元を消す（KeepSource: false）のは患者 ID が変わるときだけ。
-    // 患者 ID が同じなら OverwriteInstances で元の画像が置き換わり、元を消すと置き換えた画像ごと消える（2026-10-24 の開発の一式）
-    async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>, options: { removeSource: boolean }) {
+    // 検査の要約だけでは部分反映を見落とすので、全画像を読む（design.md §4）。
+    async studyInstanceTags(id: string) {
+      return (await instanceTags(id)).map(([, instance]) => instance);
+    },
+
+    // 変更の記録の位置を先に読む（印を読んだ後に届いた画像は、位置より後の記録に必ず残る）
+    async studyInstanceFiles(id: string) {
+      const since = await lastChange();
+      return { since, files: Object.fromEntries((await instanceFiles(id)).map(f => [f.key, f.file])) };
+    },
+
+    // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
+    // 書き換えの前とファイルの印が違う画像と、消す直前に変更の記録で届き直しの見える画像（同じ UID で届き直して
+    // 置き換わった画像）も消さない。Orthanc は画像を消すとその変更の記録も消すので、届き直しは消す前に確かめる。
+    // 記録を読んでから消すまでの間に届き直した画像は消えうる（Orthanc の削除に条件を付けられない。design.md §15.4）
+    async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles) {
+      const named = new Set(instances.map(instanceKey));
+      for (const { instanceId, key, file } of await instanceFiles(id)) {
+        if (!named.has(key) || source.files[key] !== file || await arrivedSince(source.since, new Set([instanceId]))) {
+          continue;
+        }
+        const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
+        await res.body?.cancel();
+        if (res.status === 404) {
+          continue;
+        }
+        if (!res.ok && isUncertainStatus(res.status)) {
+          throw new BackendUnknownError();
+        }
+        if (!res.ok) {
+          throw new BackendError(`画像サーバーが画像の削除を断りました（${res.status}）`);
+        }
+      }
+    },
+
+    // 仕事の完了は呼び手が確かめる（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
+    // OverwriteInstances で元の画像が置き換わる。患者 ID が変わると元の検査が残り、呼び手が deleteStudyInstances で消す
+    async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>) {
       if (!isOrthancId(orthancStudyId)) {
         throw new BackendError("検査の ID が正しくありません", 400);
       }
@@ -449,7 +553,6 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         Replace: replace,
         Keep: ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"],
         Force: true,
-        ...(options.removeSource ? { KeepSource: false } : {}),
         Asynchronous: true
       }), { write: true });
       if (!res.ok) {

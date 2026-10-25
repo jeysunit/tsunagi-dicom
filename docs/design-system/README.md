@@ -52,8 +52,8 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 |---|---|---|
 | 上の帯 | `src/components/layout/site-header.tsx` | あり。ナビの開閉・製品名・表示・ユーザーのメニューを持つ。項目の置き方は [menu.md](menu.md) の「現状との差」 |
 | 左のナビ | `src/components/layout/side-nav.tsx`（項目は `nav-items.ts`、開閉は `nav-toggle.tsx`） | あり |
-| 患者バナー | `src/components/ui/patient-banner.tsx` | あり。検査の詳細の見出し（`study-detail.tsx`）が使う。和暦・紹介医などは「検査の情報」のタブへ置いた |
-| タブ | `src/components/ui/tabs.tsx` | あり。検査の詳細（シリーズ・検査の情報）が使う |
+| 患者バナー | `src/components/ui/patient-banner.tsx` | あり。検査の詳細の見出し（`study-detail.tsx`）が使う。和暦・紹介医などは、見出しの下の「検査の情報」（項目名と値の対）へ置いた |
+| タブ | `src/components/ui/tabs.tsx` | 部品はある。使う画面は今は無い（検査の詳細は、「検査の情報」をタブに隠さず並べるようにした） |
 | 検索の帯 | `src/components/studies/study-browser.tsx` の `FilterBar` | あり |
 | 件数の行 | `src/components/ui/count-row.tsx` | あり。検査の一覧が使う |
 | 一覧の表 | `src/components/ui/table.tsx` | あり。選んだ行の見た目は検査一覧（`study-browser.tsx`）と受信一覧（`received-list.tsx`）が同じ形で持つ |

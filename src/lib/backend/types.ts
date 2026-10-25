@@ -71,16 +71,28 @@ export interface Backend {
   /** A40 の空欄を補うために、現在の患者の値を読む（design.md §9）。 */
   studyPatient(orthancStudyId: string): Promise<StudyPatient | null>;
   /**
-   * UID を保つ書き換えの仕事を作る（design.md §4）。removeSource は患者 ID が変わるときだけ true（KeepSource: false）。
-   * 患者 ID が変わらないと Orthanc の中の ID が元と同じなので、元を消すと書き換えた画像ごと消える
+   * UID を保つ書き換えの仕事を作る（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
+   * OverwriteInstances で元の画像が置き換わる。患者 ID が変わると書き換えた画像は別の検査になり、元の検査も残る。
+   * 元の画像は、書き換えた画像を確かめてから deleteStudyInstances で名指しで消す（Orthanc に元を消させると、
+   * 書き換えの最中に同じ検査へ届いた画像も一緒に消えうるため。design.md §15）
    */
-  modifyStudyKeepingUids(
-    orthancStudyId: string,
-    replace: Record<string, string>,
-    options: { removeSource: boolean },
-  ): Promise<{ jobId: string }>;
+  modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
+  /**
+   * 検査の画像ごとの、Orthanc が持つファイルの印（FileUuid）と、読む前の Orthanc の変更の記録（/changes）の位置。
+   * 鍵は UID の組（Study・Series・SOP を `|` でつないだもの）。同じ UID の画像が届き直して置き換わると、印が変わる
+   */
+  studyInstanceFiles(orthancStudyId: string): Promise<SourceFiles>;
+  /**
+   * 検査の画像のうち、UID の組（Study・Series・SOP）が instances のどれかと同じで、ファイルの印が source.files と同じ
+   * ものだけを 1 枚ずつ消す。消す直前に、変更の記録の source.since より後にその画像が届いた記録（NewInstance）があれば
+   * 消さない（同じ UID で届き直した画像）。ほかの画像（後から届いた画像）は残す。すでに無い画像は飛ばす。
+   * Orthanc の削除には条件を付けられないので、記録を読んでから消すまでの間に届き直した画像は消えうる（design.md §15.4）
+   */
+  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[], source: SourceFiles): Promise<void>;
   /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
+  /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */
+  studyIsStable(orthancStudyId: string): Promise<boolean>;
   /**
    * QIDO-RS の検査の検索（検査日の範囲で絞れる）。検査日の新しい順に limit 件まで。
    * QIDO-RS は返す順を決めていない（PS3.18 8.3.4.4）ので、limit を超える検査があれば、検査日の範囲で区切って
@@ -269,6 +281,12 @@ export interface StudyPatient {
   PatientSex: string;
   AccessionNumber: string;
   StudyInstanceUID: string;
+}
+
+/** 書き換えの前に読んだ、元の検査の画像ごとのファイルの印と、Orthanc の変更の記録の位置（design.md §15.4） */
+export interface SourceFiles {
+  since: number;
+  files: Record<string, string>;
 }
 
 export interface PatientInstance extends StudyPatient {

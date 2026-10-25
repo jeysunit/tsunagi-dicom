@@ -285,6 +285,11 @@ export interface AuditChainOptions {
    * 控えを1つ以上渡したときも、設定しているとみなす
    */
   requireAnchors?: boolean;
+  /**
+   * 確かめた行を 1 行ずつ渡す（食い違いの見つかった行と、その後の行は渡さない）。確かめた行をそのまま使い、確かめた後に
+   * 読み直して、その間に書き換えられた行を使うことを防ぐ（HL7 の経過。src/lib/hl7/apply.ts）
+   */
+  onRow?: (row: AuditRow) => void;
 }
 
 /**
@@ -414,6 +419,7 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
         }
         anchorsChecked += 1;
       }
+      options.onRow?.(row);
       prevHash = hash;
       expectedSeq += 1;
       checked += 1;
