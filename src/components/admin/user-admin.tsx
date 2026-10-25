@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
-import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CellMain, CellSub, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ROLE_LABELS, ROLES, isRole } from "@/lib/auth/roles";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 
@@ -173,7 +173,7 @@ export function UserAdmin({
       <Table data-testid="user-table">
         <TableCaption>{users.length} 件</TableCaption>
         <TableHeader>
-          <TableRow>
+          <tr className="h-7">
             <TableHead>ユーザーID</TableHead>
             <TableHead>表示名</TableHead>
             <TableHead>役割</TableHead>
@@ -182,13 +182,16 @@ export function UserAdmin({
             <TableHead>最終ログイン</TableHead>
             <TableHead>作成日</TableHead>
             <TableHead>操作</TableHead>
-          </TableRow>
+          </tr>
         </TableHeader>
         <TableBody>
           {users.map((u) => (
-            <TableRow key={u.id} data-username={u.username}>
-              <TableCell className="font-mono">{u.username}</TableCell>
-              <TableCell className="font-bold text-value">{u.displayName}</TableCell>
+            // 行の中に選択欄とボタン、補足の 2 行目があるので 40px の行（docs/design-system/parts.md の「一覧の表」）
+            <TableRow key={u.id} data-username={u.username} tall>
+              <TableCell className="font-mono whitespace-nowrap">{u.username}</TableCell>
+              <TableCell>
+                <CellMain>{u.displayName}</CellMain>
+              </TableCell>
               <TableCell>
                 <select
                   aria-label={`${u.username} の役割`}
@@ -209,13 +212,13 @@ export function UserAdmin({
               </TableCell>
               <TableCell>
                 {u.status === "active" ? "有効" : "無効"}
-                {u.lockedUntil && <span className="block text-xs text-label">ロック中（{u.lockedUntil} まで）</span>}
+                {u.lockedUntil && <CellSub>ロック中（{u.lockedUntil} まで）</CellSub>}
               </TableCell>
               <TableCell>{u.totpEnabled ? "設定済み" : "未設定"}</TableCell>
               <TableCell data-testid="last-login">
                 {u.lastLogin ?? "—"}
                 {u.lastLoginDaysAgo !== null && u.lastLoginDaysAgo >= 90 && (
-                  <span className="block text-xs text-label">{u.lastLoginDaysAgo} 日前</span>
+                  <CellSub>{u.lastLoginDaysAgo} 日前</CellSub>
                 )}
               </TableCell>
               <TableCell>{u.created}</TableCell>
