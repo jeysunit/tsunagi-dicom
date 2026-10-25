@@ -308,6 +308,9 @@ export function createMockBackend(): Backend {
     };
     return series.Instances.map((id) => {
       const tags = copied.get(id)?.MainDicomTags;
+      const instanceNumber = tags?.InstanceNumber ?? nextNumber();
+      // スライス位置の見本：画像の位置（ImagePositionPatient）の 3 つ目。画像サーバーが返さない形は、実機の側で試す
+      const z = Number(tags?.ImagePositionPatient?.split("\\")[2] ?? -55 + Number(instanceNumber) * 5);
       return {
         series,
         tags: tags ?? {},
@@ -317,8 +320,9 @@ export function createMockBackend(): Backend {
           patientId,
           sopInstanceUid: tags?.SOPInstanceUID ?? syntheticUid(id),
           sopClassUid: SOP_CLASS[series.MainDicomTags.Modality ?? ""] ?? SOP_CLASS.OT!,
-          instanceNumber: tags?.InstanceNumber ?? nextNumber(),
+          instanceNumber,
           numberOfFrames: null,
+          sliceLocation: Number.isFinite(z) ? z : null,
         },
       };
     });
