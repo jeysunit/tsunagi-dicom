@@ -767,6 +767,40 @@ test("モダリティごとの既定のビューア：管理者が管理の画�
   await expect(page.getByText("保存しました")).toBeVisible();
 });
 
+test("ビューア設定のすぐ保存：答えが届かないときは、保存済みの値を読んで照らし合わせる（書けていなければ戻し、書けていれば札を出す）", async ({ page }) => {
+  await asRole(page, "管理者");
+  await page.goto("/admin/viewers");
+  const ct = page.getByLabel("CT の標準のビューア");
+  await expect(ct).toHaveValue("ohif");
+
+  // 要求がサーバーに届かない：書けていないので、元の値に戻して理由を出す。札は出さない
+  await page.route("**/api/admin/viewer-defaults", async (route) => {
+    if (route.request().method() === "POST") await route.abort();
+    else await route.continue();
+  });
+  await ct.selectOption("stone");
+  await expect(page.getByRole("alert").filter({ hasText: "サーバーに接続できませんでした" })).toBeVisible();
+  await expect(ct).toHaveValue("ohif");
+  await expect(page.getByText("保存しました")).toHaveCount(0);
+
+  // 書けたあとで答えが失われる：書けているので、選んだ値のまま札を出す
+  await page.unroute("**/api/admin/viewer-defaults");
+  await page.route("**/api/admin/viewer-defaults", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fetch();
+      await route.abort();
+    } else await route.continue();
+  });
+  await ct.selectOption("stone");
+  await expect(page.getByText("保存しました")).toBeVisible();
+  await expect(ct).toHaveValue("stone");
+
+  // 戻す
+  await page.unroute("**/api/admin/viewer-defaults");
+  await ct.selectOption("ohif");
+  await expect(page.getByText("保存しました")).toBeVisible();
+});
+
 // ---- 1 行の一覧・件数つきの絞り込み・詰めた詳細（docs/spec.md の 3.1） ----
 
 const count = async (loc: ReturnType<Page["getByTestId"]>) => Number(/\((\d+)\)/.exec(await loc.innerText())![1]);

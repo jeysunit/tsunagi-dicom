@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getJson } from "@/lib/client/api";
 import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityGroup } from "@/lib/modalities";
 import type { ViewerInfo } from "@/lib/viewers";
@@ -32,7 +33,8 @@ export function ViewerDefaults({
 
   useEffect(() => () => window.clearTimeout(savedTimer.current), []);
 
-  // 値を 1 つ替える欄なので、選んだらすぐ保存する。失敗したら元の値に戻し、理由を出す（札は出さない）
+  // 値を 1 つ替える欄なので、選んだらすぐ保存する。断られたら元の値に戻して理由を出す（札は出さない）。
+  // 結果が分からないとき（通信の失敗・5xx）は、保存済みの値を読んで照らし合わせる
   async function save(modality: ModalityGroup, viewer: string) {
     // 保存の要求を出している間は、ほかの選び直しを受けない（欄の動きを止めず、古い答えで値が戻らないようにする）
     if (saving) return;
@@ -43,14 +45,32 @@ export function ViewerDefaults({
     setSaving(modality);
     setValues((v) => ({ ...v, [modality]: viewer }));
     const result = await postJson("/api/admin/viewer-defaults", { modality, viewer }, csrfToken);
+    let stored: boolean | null = result.ok;
+    if (!result.ok && (result.status === 0 || result.status >= 500)) {
+      // 答えが届かない・中で失敗した：サーバーに書けたかは分からない。いまの値を読んで照らし合わせる（読めなければ不明のまま）
+      stored = await readStored(modality, viewer);
+    }
     setSaving(null);
-    if (!result.ok) {
+    if (stored === true) {
+      setSaved(modality);
+      savedTimer.current = window.setTimeout(() => setSaved(null), SAVED_BADGE_MS);
+    } else if (stored === false) {
       setValues((v) => ({ ...v, [modality]: before }));
       setError(errorText(result));
-      return;
+    } else {
+      // 書けたか確かめられない：元の値へ戻したと断定しない（画面と保存済みの値がずれていないか、読み直して確かめてもらう）
+      setError("保存できたか確認できませんでした。ページを読み直して、設定を確かめてください");
     }
-    setSaved(modality);
-    savedTimer.current = window.setTimeout(() => setSaved(null), SAVED_BADGE_MS);
+  }
+
+  /** 保存済みの値を読み、いま選んだ値と同じか。読めなければ null */
+  async function readStored(modality: ModalityGroup, viewer: string): Promise<boolean | null> {
+    try {
+      const r = await getJson<{ defaults: Record<string, string | null> }>("/api/admin/viewer-defaults");
+      return r.defaults[modality] === viewer;
+    } catch {
+      return null;
+    }
   }
 
   return (
