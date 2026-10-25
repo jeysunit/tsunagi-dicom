@@ -163,9 +163,10 @@ describe("docs/design-system/tokens.md と globals.css の色", () => {
 
 /** CSS の `selector {` から最初の `}` までの塊から、`--<prefix>…` の宣言を名前と値（小文字）の対で返す */
 function declarations(text: string, selector: string, prefix: RegExp): Record<string, string> {
-  const start = text.indexOf(`${selector} {`);
+  const plain = stripComments(text);
+  const start = plain.indexOf(`${selector} {`);
   expect(start, selector).toBeGreaterThanOrEqual(0);
-  const body = stripComments(text.slice(start, text.indexOf("}", start)));
+  const body = plain.slice(start, plain.indexOf("}", start));
   return Object.fromEntries(
     [...body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)]
       .filter((d) => prefix.test(d[1]!))
@@ -194,6 +195,21 @@ describe("ui-kit の tokens.css と globals.css", () => {
     const layout = declarations(css, ":root", LAYOUT);
     expect(Object.keys(layout).length).toBeGreaterThan(5);
     expect(layout).toEqual(declarations(kit, ":root", LAYOUT));
+  });
+
+  it("比べた変数は、比べた塊の外で定義し直さない（後ろの塊で上書きすると、画面の値が写しとずれる）", () => {
+    const plain = stripComments(css);
+    const all = /^--(?:color|font|w|h)-/;
+    const blocks = [declarations(css, "@theme", all), declarations(css, '[data-theme="dark"]', all), declarations(css, ":root", all)];
+    const names = new Set(blocks.flatMap((b) => Object.keys(b)));
+    for (const name of names) {
+      const defined = blocks.filter((b) => name in b).length;
+      const count = [...plain.matchAll(new RegExp(`${name}\\s*:`, "g"))].length;
+      expect(count, name).toBe(defined);
+    }
+    // 検査の目はある：後ろの塊の上書きを拾う
+    const sample = `${css}\n:root { --w-login: 1px; }`;
+    expect([...stripComments(sample).matchAll(/--w-login\s*:/g)].length).toBe(2);
   });
 
   it("写しの版は 1.0.0", () => {
