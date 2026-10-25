@@ -226,6 +226,7 @@ function SeriesImages({
   onTagSet,
   sopPick,
   setSopPick,
+  panelId,
 }: {
   uid: string;
   series: SeriesView;
@@ -234,6 +235,8 @@ function SeriesImages({
   /** 選んだ画像の SOPInstanceUID（まだ選んでいなければ空）。詳細の取り直しで画像の場所を作り直しても戻れるよう、持ち主は親 */
   sopPick: string;
   setSopPick: (sop: string) => void;
+  /** サムネイルの aria-controls が指す id */
+  panelId: string;
 }) {
   const seriesUid = series.seriesInstanceUid ?? "";
   const listId = useId();
@@ -267,7 +270,7 @@ function SeriesImages({
   const title = [series.seriesNumber ? `#${series.seriesNumber}` : "", series.seriesDescription ?? ""].filter(Boolean).join(" ");
 
   return (
-    <section aria-label="画像" className="space-y-2 rounded-md border border-border p-2" data-testid="series-images" data-series-uid={seriesUid}>
+    <section aria-label="画像" id={panelId} className="space-y-2 rounded-md border border-border p-2" data-testid="series-images" data-series-uid={seriesUid}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h3 className="text-sm font-bold break-words text-value">{title || <span className="font-normal text-label">（シリーズ名なし）</span>}</h3>
         {series.instanceCount != null && <span className="text-xs text-label">{series.instanceCount} 画像</span>}
@@ -450,6 +453,7 @@ export function StudyDetailPanel({
   // 「検査のタグ」（検査単位の要約）。Study UID の横のボタンで開け閉めする（行が替わると閉じる）
   const [studyTagsOpen, setStudyTagsOpen] = useState(false);
   const studyTagsId = useId();
+  const seriesImagesId = useId();
   const openedSeries = data?.series.find((s) => s.seriesInstanceUid === openSeries);
 
   // 患者バナー（氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名）。値の無い項目は PatientBanner が省く
@@ -526,10 +530,11 @@ export function StudyDetailPanel({
               return (
                 <li key={s.seriesInstanceUid} className="w-32 shrink-0" data-testid="series-item">
                   {tagsShown && s.seriesInstanceUid ? (
-                    // 押すと下に画像の場所を開く。選んだサムネイルは、主の色の枠と aria-pressed で示す
+                    // 押すと下に画像の場所を開く。選んだサムネイルは、主の色の枠と aria-expanded で示す
                     <button
                       type="button"
-                      aria-pressed={pressed}
+                      aria-expanded={pressed}
+                      aria-controls={pressed ? seriesImagesId : undefined}
                       onClick={() => setOpenSeries(pressed ? null : (s.seriesInstanceUid ?? null))}
                       className={cn(
                         "w-full cursor-pointer space-y-1 rounded border bg-surface p-1.5 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -556,6 +561,7 @@ export function StudyDetailPanel({
           key={openedSeries.seriesInstanceUid}
           uid={uid}
           series={openedSeries}
+          panelId={seriesImagesId}
           tagSet={tagSet}
           onTagSet={setTagSet}
           sopPick={sopPicks[openedSeries.seriesInstanceUid ?? ""] ?? ""}

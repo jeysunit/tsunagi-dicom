@@ -1172,15 +1172,17 @@ test("サムネイルを押すと、下に画像の場所を開く：画像の�
   await expect(strip).toHaveAttribute("data-loaded", "true");
   await expect(page.getByTestId("series-images")).toHaveCount(0);
   const thumb = strip.getByTestId("series-open");
-  await expect(thumb).toHaveAttribute("aria-pressed", "false");
+  await expect(thumb).toHaveAttribute("aria-expanded", "false");
 
   const tagReads: string[] = [];
   page.on("request", (req) => {
     if (/\/instances\/[\d.]+\/tags$/.test(req.url())) tagReads.push(req.url());
   });
   await thumb.click();
-  await expect(thumb).toHaveAttribute("aria-pressed", "true");
+  await expect(thumb).toHaveAttribute("aria-expanded", "true");
   const area = page.getByTestId("series-images");
+  // aria-controls は、開いた画像の場所の id を指す
+  await expect(thumb).toHaveAttribute("aria-controls", (await area.getAttribute("id"))!);
   await expect(area).toContainText("#1 Chest Axial 5mm");
   // 画像の一覧：画像の番号の順。最初は先頭を選ぶ
   const list = area.getByTestId("instance-list");
@@ -1218,7 +1220,7 @@ test("サムネイルを押すと、下に画像の場所を開く：画像の�
 
   // 同じサムネイルをもう一度押すと閉じる
   await thumb.click();
-  await expect(thumb).toHaveAttribute("aria-pressed", "false");
+  await expect(thumb).toHaveAttribute("aria-expanded", "false");
   await expect(area).toHaveCount(0);
 });
 
@@ -1369,12 +1371,12 @@ test("画像の場所：別のサムネイルを押すと、そのシリーズ�
   await thumbs.nth(1).click();
   const area = page.getByTestId("series-images");
   const secondSeries = await area.getAttribute("data-series-uid");
-  await expect(thumbs.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(thumbs.nth(1)).toHaveAttribute("aria-expanded", "true");
   await expect(area.getByTestId("instance-list").getByRole("option").first()).toHaveAttribute("aria-selected", "true");
   await thumbs.nth(0).focus();
   await page.keyboard.press("Enter");
-  await expect(thumbs.nth(0)).toHaveAttribute("aria-pressed", "true");
-  await expect(thumbs.nth(1)).toHaveAttribute("aria-pressed", "false");
+  await expect(thumbs.nth(0)).toHaveAttribute("aria-expanded", "true");
+  await expect(thumbs.nth(1)).toHaveAttribute("aria-expanded", "false");
   await expect(area).not.toHaveAttribute("data-series-uid", secondSeries!);
   await page.keyboard.press(" ");
   await expect(area).toHaveCount(0);
