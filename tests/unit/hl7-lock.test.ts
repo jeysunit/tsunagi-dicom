@@ -263,6 +263,34 @@ describe("付け替えの印", () => {
     expect(orthanc.modifyCalls).toHaveLength(0);
   });
 
+  it("照らし合わせが印を付ける前の引き当てで元を見つけられなくても、印の無いまま元を消さない", async () => {
+    temp();
+    orthanc.next.state = "Running";
+    expect(await send(a40(TEMP, "P000001"), { jobTimeoutMs: 5 })).toContain("MSA|AE|");
+    for (const [jobId] of orthanc.jobs) {
+      orthanc.jobs.set(jobId, "Success");
+    }
+    // 照らし合わせが仕事の終わりを読んだ直後の引き当て（印を付けるかを決める）だけ、空を返す
+    const status = orthanc.backend.jobStatus.bind(orthanc.backend);
+    const lookup = orthanc.backend.lookupStudyIds.bind(orthanc.backend);
+    let empty = false;
+    vi.spyOn(orthanc.backend, "jobStatus").mockImplementation(async (jobId) => {
+      empty = true;
+      return status(jobId);
+    });
+    vi.spyOn(orthanc.backend, "lookupStudyIds").mockImplementation(async (uid) => {
+      if (empty) {
+        empty = false;
+        return [];
+      }
+      return lookup(uid);
+    });
+    await sweep();
+    expect(orthanc.deleteCalls).toHaveLength(0);
+    expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(1);
+    expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+  });
+
   it("書き換えを求めた答えが来なければ（仕事ができて写しているかもしれない）、印を外さずに結果不明で止める", async () => {
     temp();
     orthanc.next.state = "Running";

@@ -305,8 +305,12 @@ async function removeSource(backend: Backend, d: WriteDetail, lock?: SourceLock)
   const source = await sourceInstances();
   const named = source.filter(i => written.has(triple(i)));
   if (named.length) {
+    // 印の無いまま元を消さない（照らし合わせが印を付ける前の引き当てで元を見つけられず、その後に見つけたときなど）
+    if (!lock) {
+      return { lockLost: true };
+    }
     // 1 枚を消す直前ごとに、印が切れずに続いていることを確かめる（切れたかもしれなければ消すのをやめる）
-    await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles, lock?.ensure);
+    await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles, lock.ensure);
   }
   const left = new Set((await sourceInstances()).map(triple));
   const outcome: RemoveOutcome = source.every(i => written.has(triple(i)) || left.has(triple(i))) ? {} : { arrivalsLost: true };

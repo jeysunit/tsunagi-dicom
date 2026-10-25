@@ -30,6 +30,29 @@ local function parse(raw, opening)
   return value
 end
 
+-- JSON の文字列の外に null があるか（null は Lua では無いのと同じになり、ParseJson の後では見分けられない。
+-- 文字列の外の n は null にしか出ない）
+local function hasNull(raw)
+  local inString, escaped = false, false
+  for i = 1, #raw do
+    local c = string.sub(raw, i, i)
+    if inString then
+      if escaped then
+        escaped = false
+      elseif c == '\\' then
+        escaped = true
+      elseif c == '"' then
+        inString = false
+      end
+    elseif c == '"' then
+      inString = true
+    elseif c == 'n' then
+      return true
+    end
+  end
+  return false
+end
+
 -- 1 から続く番号だけを鍵に持つ table（JSON の配列）か
 local function isList(t)
   local n = 0
@@ -51,7 +74,7 @@ local function refusal(studyUid)
   -- 引き当ての答えは、{ Type, ID, Path } の配列
   local list = parse(found, '[')
   -- 配列の null の要素は Lua では無いのと同じになり、数えられない（正しい答えの要素はどれも物）
-  if list == nil or not isList(list) or string.find(found, '[%[,]%s*null') then
+  if list == nil or not isList(list) or hasNull(found) then
     return 'lookup unreadable'
   end
   local now = os.time()
@@ -78,8 +101,8 @@ local function refusal(studyUid)
         value = meta[LOCK_NUMBER]
       end
       -- JSON の null は Lua では無いのと同じになり、印の名前の値が null でも見分けられない（名前は \u で書かれうる）。
-      -- Orthanc のメタデータの値はどれも文字列で null は無いので、null の値が 1 つでもあれば読めない答えとする
-      if string.find(raw, ':%s*null') then
+      -- Orthanc のメタデータの値はどれも文字列で null は無いので、文字列の外に null が 1 つでもあれば読めない答えとする
+      if hasNull(raw) then
         return 'metadata unreadable'
       end
       if value ~= nil then
