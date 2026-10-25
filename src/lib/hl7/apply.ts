@@ -165,6 +165,8 @@ interface SourceLock {
   ensure(): Promise<void>;
   /** 付け直しに失敗した・期限を過ぎたことがある（その間に C-STORE が入りえた） */
   lost(): boolean;
+  /** 途中の付け直しの答えを待ってから lost を返す（消し終えた後に、印が続いていたかを決めるとき） */
+  settledLost(): Promise<boolean>;
   /** いまの期限（ミリ秒の時刻） */
   until(): number;
   /**
@@ -248,6 +250,10 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
     // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる（renew が確かめる）
     ensure: renew,
     lost: () => failure !== undefined || (!released && expired()),
+    settledLost: async () => {
+      await pending?.catch(() => undefined);
+      return failure !== undefined || (!released && expired());
+    },
     until: () => until,
     keep: async () => {
       kept = true;
@@ -396,8 +402,8 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
           })) : undefined;
         try {
           removed = await removeSource(backend, d, lock);
-          // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない
-          if (lock?.lost()) {
+          // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない。途中の付け直しの答えも待つ
+          if (await lock?.settledLost()) {
             removed = { ...removed, lockLost: true };
           }
         } catch (e) {
@@ -720,8 +726,8 @@ async function writeStudy(
     if (state === "Success" && lock) {
       // 仕事を待つ間に印が切れていれば、元を消さない
       removed = lock.lost() ? { lockLost: true } : await removeSource(backend, d, lock);
-      // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない
-      if (lock.lost()) {
+      // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない。途中の付け直しの答えも待つ
+      if (await lock.settledLost()) {
         removed = { ...removed, lockLost: true };
       }
     }
