@@ -147,6 +147,19 @@ describe("監査の記録", () => {
       expect(functions).toEqual(["appendAudit", "appendAuditIf", "appendAuditWith", "computeAuditHash", "computeAuditMac", "verifyAuditChain"]);
     });
 
+    it("verifyAuditChain の onRow：確かめた行だけを順に渡し、食い違いの行からは渡さない", async () => {
+      const db = await freshDb();
+      await appendMany(db, 3);
+      const seen: number[] = [];
+      expect(await verifyAuditChain(db, 2, { onRow: (r) => seen.push(r.seq) })).toEqual(okChain(3));
+      expect(seen).toEqual([1, 2, 3]);
+      await dropGuards(db);
+      await db.auditLog.update({ where: { seq: 2 }, data: { action: "login" } });
+      seen.length = 0;
+      expect(await verifyAuditChain(db, 2, { onRow: (r) => seen.push(r.seq) })).toMatchObject({ ok: false, seq: 2 });
+      expect(seen).toEqual([1]);
+    });
+
     it("appendAuditIf：書かないと決めたら行を足さず、書くときは同じつなぎに足す", async () => {
       const db = await freshDb();
       const input: AuditEntryInput = { actorId: "alice", actorRole: "admin", authMode: "dev", action: "send" };

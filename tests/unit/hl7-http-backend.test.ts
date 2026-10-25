@@ -56,46 +56,112 @@ describe("HL7 の Orthanc REST の要求", () => {
     });
     expect(state.fetch.mock.calls[0]![1].method).toBe("GET");
   });
-  it("UID を保ち、元を残さない要求を、書く資格情報で送る", async () => {
+  it.each([
+    ["患者 ID の変わる", { PatientID: "P2" }],
+    ["患者 ID の変わらない", { PatientName: "NEW^NAME" }]
+  ])("%s書き換えも、UID を保ち元を残す要求（KeepSource を付けない）を、書く資格情報で送る", async (_name, replace) => {
     state.fetch.mockResolvedValue(Response.json({ ID: newId }));
-    expect(await backend().modifyStudyKeepingUids(id, { PatientID: "P2" }, { removeSource: true })).toEqual({ jobId: newId });
+    expect(await backend().modifyStudyKeepingUids(id, replace)).toEqual({ jobId: newId });
     const [url, init] = state.fetch.mock.calls[0]!;
     expect(url).toBe(`http://pacs.example.org/studies/${id}/modify`);
     expect(JSON.parse(init.body)).toEqual({
-      Replace: { PatientID: "P2" },
+      Replace: replace,
       Keep: ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"],
       Force: true,
-      KeepSource: false,
       Asynchronous: true
     });
     expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
-  it("患者 ID の変わらない書き換えには KeepSource を付けない（付けると置き換えた画像ごと消える）", async () => {
-    state.fetch.mockResolvedValue(Response.json({ ID: newId }));
-    await backend().modifyStudyKeepingUids(id, { PatientName: "NEW^NAME" }, { removeSource: false });
-    const body = JSON.parse(state.fetch.mock.calls[0]![1].body);
-    expect(body).not.toHaveProperty("KeepSource");
-    expect(body).toMatchObject({ Replace: { PatientName: "NEW^NAME" }, Force: true, Asynchronous: true });
+  describe("元の画像の削除", () => {
+    const tag = (sop: string) => ({ PatientID: "T1", StudyInstanceUID: "1.2", SeriesInstanceUID: "1.2.3", SOPInstanceUID: sop });
+    const full = (sop: string) => ({ ...tag(sop), PatientName: "", PatientBirthDate: "", PatientSex: "", AccessionNumber: "", SpecificCharacterSet: "" });
+    const one = "00000000-00000000-00000000-00000000-0000000a";
+    const two = "00000000-00000000-00000000-00000000-0000000b";
+    const late = "00000000-00000000-00000000-00000000-0000000c";
+    /** 検査の画像のタグと、画像の一覧（FileUuid）の 2 つの答え */
+    const listing = (files: Record<string, string>) => {
+      state.fetch
+        .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1"), [two]: tag("1.2.3.2"), [late]: tag("1.2.3.3") }))
+        .mockResolvedValueOnce(Response.json(Object.entries(files).map(([ID, FileUuid]) => ({ ID, FileUuid }))));
+    };
+    const files = { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2" };
+    const changes = (list: { ChangeType: string; ID: string }[], done = true, last = 20) =>
+      state.fetch.mockResolvedValueOnce(Response.json({ Changes: list, Done: done, Last: last }));
+    it("変更の記録の位置を先に読み、画像ごとのファイルの印を、UID の組を鍵にして読む", async () => {
+      state.fetch.mockResolvedValueOnce(Response.json({ Changes: [], Done: true, Last: 7 }));
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      expect(await backend().studyInstanceFiles(id)).toEqual({
+        since: 7,
+        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" }
+      });
+      expect(state.fetch.mock.calls[0]![0]).toBe("http://pacs.example.org/changes?last");
+      expect(state.fetch.mock.calls[2]![0]).toBe(`http://pacs.example.org/studies/${id}/instances`);
+    });
+    it("ファイルの印が無ければ読めないとする", async () => {
+      state.fetch.mockResolvedValueOnce(Response.json({ Changes: [], Done: true, Last: 7 }));
+      listing({ [one]: "f1", [two]: "", [late]: "f3" });
+      await expect(backend().studyInstanceFiles(id)).rejects.toThrow("ファイルの印");
+    });
+    it("名指しで、ファイルの印が書き換えの前と同じ画像だけを、画像の ID で 1 枚ずつ、書く資格情報で消す", async () => {
+      // 2 枚目は同じ UID で届き直して印が変わった
+      listing({ [one]: "f1", [two]: "f2-resent", [late]: "f3" });
+      // 消す直前に、変更の記録でその画像の届き直しが無いかを読む（ほかの画像の記録は関係ない）
+      changes([{ ChangeType: "NewInstance", ID: late }]);
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+      await backend().deleteStudyInstances(id, [full("1.2.3.1"), full("1.2.3.2")], { since: 7, files });
+      expect(state.fetch.mock.calls.map(c => c[0])).toEqual([
+        `http://pacs.example.org/studies/${id}/instances-tags?simplify`,
+        `http://pacs.example.org/studies/${id}/instances`,
+        "http://pacs.example.org/changes?since=7&limit=1000",
+        `http://pacs.example.org/instances/${one}`
+      ]);
+      const init = state.fetch.mock.calls[3]![1];
+      expect(init.method).toBe("DELETE");
+      expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
+    });
+    it("消す直前に、変更の記録の続きの頁まで読み、位置より後に届き直した画像は消さない", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      changes([{ ChangeType: "StableStudy", ID: id }], false, 15);
+      changes([{ ChangeType: "NewInstance", ID: one }], true, 16);
+      await backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files });
+      expect(state.fetch.mock.calls.map(c => c[0]).slice(2)).toEqual([
+        "http://pacs.example.org/changes?since=7&limit=1000",
+        "http://pacs.example.org/changes?since=15&limit=1000"
+      ]);
+      expect(state.fetch.mock.calls.some(c => c[1]?.method === "DELETE")).toBe(false);
+    });
+    it("変更の記録の形が違えば、消さずに読めないとする", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      state.fetch.mockResolvedValueOnce(Response.json({ Changes: "x" }));
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toThrow("変更の記録");
+      expect(state.fetch.mock.calls.some(c => c[1]?.method === "DELETE")).toBe(false);
+    });
+    it.each([[502, BackendUnknownError], [403, BackendError]])("画像の削除の状態 %i を投げる", async (status, error) => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      changes([]);
+      state.fetch.mockResolvedValueOnce(new Response("", { status }));
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toBeInstanceOf(error);
+    });
   });
   it.each([302, 502, 503, 504])("状態 %i は結果不明", async (status) => {
     state.fetch.mockResolvedValue(new Response("", { status }));
-    await expect(backend().modifyStudyKeepingUids(id, {}, { removeSource: true })).rejects.toBeInstanceOf(BackendUnknownError);
+    await expect(backend().modifyStudyKeepingUids(id, {})).rejects.toBeInstanceOf(BackendUnknownError);
   });
   it("通信の切れと時間切れは結果不明", async () => {
     state.fetch.mockRejectedValue(new Error("synthetic transport failure"));
-    await expect(backend().modifyStudyKeepingUids(id, {}, { removeSource: true })).rejects.toBeInstanceOf(BackendUnknownError);
+    await expect(backend().modifyStudyKeepingUids(id, {})).rejects.toBeInstanceOf(BackendUnknownError);
   });
   it.each([{}, { ID: "bad" }])("応答 ID が読めなければ結果不明", async (body) => {
     state.fetch.mockResolvedValue(Response.json(body));
-    await expect(backend().modifyStudyKeepingUids(id, {}, { removeSource: true })).rejects.toBeInstanceOf(BackendUnknownError);
+    await expect(backend().modifyStudyKeepingUids(id, {})).rejects.toBeInstanceOf(BackendUnknownError);
   });
   it("400 の理由は秘密を写さず、OverwriteInstances の設定を知らせる", async () => {
     state.fetch.mockResolvedValue(new Response("OverwriteInstances synthetic-sensitive-value", { status: 400 }));
-    await expect(backend().modifyStudyKeepingUids(id, {}, { removeSource: true })).rejects.toThrow("OverwriteInstances が要る");
+    await expect(backend().modifyStudyKeepingUids(id, {})).rejects.toThrow("OverwriteInstances が要る");
     state.fetch.mockResolvedValue(new Response("synthetic-sensitive-value", { status: 400 }));
     try {
-      await backend().modifyStudyKeepingUids(id, {}, { removeSource: true });
+      await backend().modifyStudyKeepingUids(id, {});
       throw new Error("断られなかった");
     } catch (e) {
       expect(e).toBeInstanceOf(BackendError);
@@ -133,4 +199,18 @@ it("全画像の5つの値と UID の組を instances-tags から読む", async 
   ]);
   expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}/instances-tags?simplify`);
   expect(state.fetch.mock.calls[0]![1].headers.authorization).toBe(`Basic ${Buffer.from("reader:synthetic-read").toString("base64")}`);
+});
+it.each([
+  [{ ID: id, IsStable: true }, true],
+  [{ ID: id, IsStable: false }, false],
+  [{ ID: id, IsStable: "true" }, false],
+  [{ ID: id }, false]
+])("届き終えたかは IsStable が true のときだけ（%j）", async (body, stable) => {
+  state.fetch.mockResolvedValue(Response.json(body));
+  expect(await backend().studyIsStable(id)).toBe(stable);
+  expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}`);
+});
+it("届き終えたかを見る検査の ID の形を確かめる", async () => {
+  await expect(backend().studyIsStable("../x")).rejects.toMatchObject({ status: 400 });
+  expect(state.fetch).not.toHaveBeenCalled();
 });
