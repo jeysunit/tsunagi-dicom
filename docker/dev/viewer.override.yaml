@@ -1,0 +1,18 @@
+# 開発の一式だけの、ビューアの足し分（docker/dev/compose.yaml の include で、配る compose に重ねる）。
+# Orthanc に OHIF と Stone Web Viewer の plugin を入れ、tsunagi-dicom の「開く」が開く先（VIEWER_OHIF_URL・VIEWER_STONE_URL）を、
+# ホストの 127.0.0.1 の入口（viewer-proxy。GET と HEAD だけを通す。docker/dev/compose.yaml）にする。
+# ビューアは Orthanc の DICOMweb（/dicom-web）から直に画像を取る。ブラウザが Orthanc の認証（Basic）を聞く。
+# 配る compose（deploy/compose.yaml）は変えない。ホームラボなど施設の入口は、/ohif/viewer と /stone-webviewer/index.html の形で同じ。
+services:
+  tsunagi:
+    environment:
+      VIEWER_OHIF_URL: http://127.0.0.1:${DEV_VIEWER_PORT:-18042}/ohif
+      VIEWER_STONE_URL: http://127.0.0.1:${DEV_VIEWER_PORT:-18042}/stone-webviewer
+  orthanc:
+    environment:
+      OHIF_PLUGIN_ENABLED: "true"
+      STONE_WEB_VIEWER_PLUGIN_ENABLED: "true"
+    volumes:
+      # OHIF のデータソースを DICOMweb にする（plugin の既定は dicom-json で、「開く」が渡す StudyInstanceUIDs では読めない）。
+      # 相対のパスは deploy/ から数える。ほかの設定ファイルと同じ項目を持たない
+      - ../docker/dev/orthanc/ohif.json:/etc/orthanc/ohif.json:ro

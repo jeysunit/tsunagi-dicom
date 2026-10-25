@@ -17,6 +17,9 @@
 #   hl7.host で受け口にしてある。`--host hl7-receiver` を付けても同じ）。
 #   受け口のための token と発番元は hl7.override.yaml で tsunagi-dicom に渡す。患者 ID を変えない書き換え（A08・ORM）のために、
 #   Orthanc を OverwriteInstances: true にする（docker/dev/orthanc/site.json。同じ SOP Instance UID の送り直しは上書きになる）。
+# - ビューア：Orthanc に OHIF と Stone の plugin を入れ（viewer.override.yaml）、読み取り専用の入口 viewer-proxy（GET と HEAD だけ）を
+#   127.0.0.1:${DEV_VIEWER_PORT:-18042} に公開する。tsunagi-dicom の「開く」はこの入口の /ohif/viewer と /stone-webviewer/index.html を
+#   別のタブで開く（VIEWER_OHIF_URL・VIEWER_STONE_URL。viewer.override.yaml）。Orthanc の REST（8042）そのものはホストに出さない。
 # - Orthanc は送り元の IP アドレスを確かめない（docker/dev/orthanc/site.json の DicomCheckModalityHost: false。接続先の Host が
 #   コンテナの名前のため）。
 # - DTG の Web 画面は 127.0.0.1:${DEV_DTG_WEB_PORT:-18080}（利用者 dtg）、ris-emulator の Web 画面は
@@ -36,6 +39,7 @@ include:
   - path:
       - ../../deploy/compose.yaml
       - ./hl7.override.yaml
+      - ./viewer.override.yaml
     env_file: ./dev.env
 
 services:
@@ -173,6 +177,43 @@ services:
     depends_on:
       tsunagi:
         condition: service_healthy
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  viewer-proxy:
+    # Orthanc のビューア（OHIF・Stone。viewer.override.yaml で入れる）を、ホストの 127.0.0.1 に見せる読み取り専用の入口。
+    # GET と HEAD だけを Orthanc に通し、書き込みは 405 で断る。Orthanc の REST（8042）そのものはホストに出さない。
+    # 認証は Orthanc のもの（ブラウザが聞かれる）。この入口は資格情報を持たない。backend（Orthanc へ）と web（ホストへ出す）に入る
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-viewer-proxy:local
+    build:
+      context: ../..
+      dockerfile: docker/dev/viewer-proxy/Dockerfile
+    environment:
+      VIEWER_PROXY_UPSTREAM: http://orthanc:8042
+      TZ: Asia/Tokyo
+    ports:
+      - "127.0.0.1:${DEV_VIEWER_PORT:-18042}:8080"
+    networks:
+      - backend
+      - web
+    depends_on:
+      orthanc:
+        condition: service_healthy
+    healthcheck:
+      # 待ち受けているか（Orthanc は認証を求めるので 401 が返る。応答があればよい）
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:8080/system',r=>process.exit(0)).on('error',()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 20
     init: true
     read_only: true
     cap_drop:
