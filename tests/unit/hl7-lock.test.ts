@@ -230,6 +230,28 @@ describe("付け替えの印", () => {
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
   });
 
+  it("仕事の終わりを読めなかった後に、途中の付け直しが失敗すれば、結果不明にせず部分反映で止める", async () => {
+    temp();
+    orthanc.next.state = "Running";
+    const lockStudy = orthanc.backend.lockStudy.bind(orthanc.backend);
+    let calls = 0;
+    vi.spyOn(orthanc.backend, "lockStudy").mockImplementation(async (id, until) => {
+      if (++calls > 1) {
+        await new Promise(r => setTimeout(r, 300));
+        throw new Error("synthetic renew failure");
+      }
+      return lockStudy(id, until);
+    });
+    // 付け直しが始まってから、仕事の終わりの読み取りが（付け直しの答えより先に）失敗する
+    vi.spyOn(orthanc.backend, "jobStatus").mockImplementation(async () => {
+      for (let waited = 0; calls < 2 && waited < 180; waited += 5) await new Promise(r => setTimeout(r, 5));
+      throw new BackendUnknownError("synthetic job status failure");
+    });
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(calls).toBeGreaterThan(1);
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+  });
+
   it("付けた後にこの機の時計が巻き戻っても、期限の切れを見逃さない（単調な時計で見る）", async () => {
     temp();
     orthanc.next.duringDelete = () => {

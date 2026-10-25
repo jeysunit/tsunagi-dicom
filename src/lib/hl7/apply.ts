@@ -705,7 +705,8 @@ async function writeStudy(
     // 仕事ができて写しているかもしれない（仕事を作った後か、書き換えを求めた答えが来なかった。Orthanc が断ったと分かる
     // BackendError だけが、仕事の無いことを示す）
     const mayCopy = jobCreated || !(e instanceof BackendError);
-    if (mayCopy && lock?.lost()) {
+    // 途中の付け直しの答えも待つ
+    if (mayCopy && lock && await lock.settledLost()) {
       // 仕事の間に印が切れた・付け直せなかった：その間の C-STORE を写しが黙って上書きしえたので、照らし合わせで
       // 自動に解かず、元を消さずに部分反映として人に見せる（design.md §15.4）
       await lock.keep();
