@@ -25,6 +25,8 @@ process.env.ORTHANC_DICOM_PORT ??= "14242";
 // （開発用の一式の DTG 18080・ris-emulator 18081 とぶつけない）
 process.env.DEV_DTG_WEB_PORT ??= "18180";
 process.env.DEV_RIS_WEB_PORT ??= "18181";
+// （開発用の一式のビューアの入口 18042 とぶつけない）
+process.env.DEV_VIEWER_PORT ??= "18142";
 if (process.env.COMPOSE_PROJECT_NAME === "tsunagi-dev") {
   console.error("COMPOSE_PROJECT_NAME に tsunagi-dev（開発用の一式）は使えない。試験は終わったときに volume を消すため");
   process.exit(1);

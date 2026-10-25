@@ -24,7 +24,7 @@ import {
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
-import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
+import { DETAIL_GROUPS, LIST_GROUPS, modalityGroupOf, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
   DATE_LABELS,
@@ -183,8 +183,22 @@ function FilterBar({
 }) {
   const [text, setText] = useState(filter.q ?? "");
   // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名）は「詳細条件」の中。どれかで絞っているときは最初から開く
-  const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0);
+  // 一覧の上に出さないモダリティ（DOC・SR）も詳細条件の数に入れる（閉じていても、絞っていることが分かるように）
+  const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0) + DETAIL_GROUPS.filter((g) => filter.modalities?.includes(g)).length;
   const [more, setMore] = useState(conditions > 0);
+  /** モダリティの見出し 1 つ。押すと、その群を足す・外す（複数選べる。どれかに合う検査を出す。全部外すと「すべて」） */
+  const modalityChip = (m: ModalityGroup) => (
+    <Chip
+      key={m}
+      pressed={!!filter.modalities?.includes(m)}
+      onClick={() => onChange({ ...filter, modalities: toggleGroup(filter.modalities, m) })}
+      testId={`modality-${m}`}
+      dim={isZero(facets?.modality?.[m])}
+    >
+      <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
+      {withCount(m, facets?.modality?.[m], facets?.atLeast?.list)}
+    </Chip>
+  );
   const moreId = useId();
   const birthId = useId();
   // 詳細条件の文字の欄の字もここに持つ（300 ミリ秒の内に「詳細条件」を閉じても失わない）
@@ -256,21 +270,10 @@ function FilterBar({
         </button>
         {/* モダリティは、検索と詳細条件の後に置く。本文が狭いとき（左のナビを開いた 1280px）、検査日・検索・詳細条件が 1 段、モダリティが 1 段の 2 段に収まる */}
         <Segmented label="モダリティ">
-          <Chip pressed={!filter.modality} onClick={() => onChange({ ...filter, modality: undefined })} testId="modality-all" dim={isZero(facets?.modality?.all)}>
+          <Chip pressed={!filter.modalities?.length} onClick={() => onChange({ ...filter, modalities: undefined })} testId="modality-all" dim={isZero(facets?.modality?.all)}>
             {withCount("すべて", facets?.modality?.all, facets?.atLeast?.list)}
           </Chip>
-          {MODALITY_GROUPS.map((m) => (
-            <Chip
-              key={m}
-              pressed={filter.modality === m}
-              onClick={() => onChange({ ...filter, modality: filter.modality === m ? undefined : m })}
-              testId={`modality-${m}`}
-              dim={isZero(facets?.modality?.[m])}
-            >
-              <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
-              {withCount(m, facets?.modality?.[m], facets?.atLeast?.list)}
-            </Chip>
-          ))}
+          {LIST_GROUPS.map(modalityChip)}
         </Segmented>
         {/* 条件をクリア：帯の右に、いつも置く（位置を動かさない）。絞っていないときは薄く、押せない */}
         <Button
@@ -350,6 +353,11 @@ function FilterBar({
               ))}
             </select>
           </label>
+          {/* 一覧の上のモダリティの見出しに無い群（文書・レポート）。上の見出しと同じ選びに足される */}
+          <span className="flex items-center gap-1.5">
+            <span className="shrink-0 text-xs text-label">モダリティ</span>
+            <Segmented label="モダリティ（文書・レポート）">{DETAIL_GROUPS.map(modalityChip)}</Segmented>
+          </span>
           {fieldText("accession", "受付番号", "w-32")}
           {fieldText("desc", "検査名", "w-40")}
         </div>

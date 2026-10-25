@@ -910,8 +910,10 @@ test("件数は、ほかの見出しと検索を当てたあとの数になる�
   const n = await count(page.getByTestId("date-week"));
   await settledAfter(page, { modality: "MR", date: "week" }, () => page.getByTestId("date-week").click());
   await expect.poll(() => headCount(page)).toBe(n);
-  // モダリティの見出しは、検査日を当てた数
+  // モダリティの見出しは、検査日を当てた数。モダリティは複数選べる（押すと足される）ので、MR を外してから CT だけを選ぶ
+  // （旧：CT を押すと MR から CT に替わった → 新：足される。複数の選び方は study-modality.spec.ts）
   const ct = await count(page.getByTestId("modality-CT"));
+  await settledAfter(page, { date: "week" }, () => page.getByTestId("modality-MR").click());
   await settledAfter(page, { modality: "CT", date: "week" }, () => page.getByTestId("modality-CT").click());
   await expect.poll(() => headCount(page)).toBe(ct);
   // 横断の検索を当てると、全部の見出しの件数が絞られる
@@ -932,6 +934,8 @@ test("件数は役割を替えても、その役割の許可の一覧の中だ�
     expect(await count(page.getByTestId("date-all"))).toBe(8);
     expect(await count(page.getByTestId("modality-all"))).toBe(8);
     // モダリティの件数の合計は、複数のモダリティの検査の分だけ一覧より多くなりうるが、少なくはならない
+    // DOC・SR は一覧の上の見出しから詳細条件の中に移したので、詳細条件を開いて数える（旧：一覧の上にあった。件数の期待は同じ）
+    await page.getByTestId("filter-more").click();
     let sum = 0;
     for (const m of ["CT", "MR", "CR/DX", "US", "ES", "MG", "DOC", "SR"]) sum += await count(page.getByTestId(`modality-${m}`));
     expect(sum).toBeGreaterThanOrEqual(8);

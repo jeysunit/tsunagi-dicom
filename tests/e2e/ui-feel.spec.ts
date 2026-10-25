@@ -246,13 +246,15 @@ test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に�
     await new Promise((r) => setTimeout(r, 1500));
     await route.continue();
   });
+  // 旧：MR を押すと CT から MR に替わった（2 件）→ 新：モダリティは複数選べて押すと足される（CT と MR で 8 件）。
+  // 取り直しが要るよう、まだ読んでいない組み合わせにする
   await page.getByTestId("modality-MR").click();
   await expect(page.getByTestId("progress-bar")).toBeVisible();
   await expect(page.getByTestId("study-count")).toHaveText("—");
   await expect(page.getByTestId("study-table").locator("tbody")).toHaveAttribute("data-dim", "true");
   await expect(page.getByTestId("pending-text")).toContainText("読み込み中");
   // 終われば消える（画面全体を覆う幕は出さない）
-  await expect(page.getByTestId("study-count")).toHaveText("2", { timeout: 10_000 });
+  await expect(page.getByTestId("study-count")).toHaveText("8", { timeout: 10_000 });
   await expect(page.getByTestId("progress-bar")).toHaveCount(0);
   await page.unroute("**/api/studies?*");
 });
