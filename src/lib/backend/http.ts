@@ -592,11 +592,11 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         if (!named.has(key) || source.files[key] !== file) {
           continue;
         }
-        // 印の期限を延ばしてから、届き直しを確かめて消す（確かめから消すまでを短く保つ）
-        await beforeEach?.();
         if (await arrivedSince(source.since, new Set([instanceId]))) {
           continue;
         }
+        // 変更の記録を読み終えた後、消す直前に呼ぶ（読むのに時間がかかっても、その間に印が切れていれば消さない）
+        await beforeEach?.();
         const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
         await res.body?.cancel();
         if (res.status === 404) {

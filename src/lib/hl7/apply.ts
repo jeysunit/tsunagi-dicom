@@ -161,6 +161,8 @@ const LOCK_SETTLE_MS = 1_000;
 
 interface SourceLock {
   renew(): Promise<void>;
+  /** 印が切れずに続いていることを確かめ、要れば延ばす。切れたかもしれない・延ばせないときは投げる（元を消す直前に呼ぶ） */
+  ensure(): Promise<void>;
   release(): Promise<void>;
 }
 /**
@@ -173,18 +175,39 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   const ttl = options.lockTtlMs ?? LOCK_TTL_MS;
   await record(Math.ceil(ttl / 1000));
   let until = 0;
+  // 付け直しに一度でも失敗したら、それ以降の renew は投げる（呼び手は Orthanc への書き込みをやめる）
+  let failure: unknown;
   const renew = async () => {
+    if (failure !== undefined) {
+      throw failure;
+    }
     if (until - Date.now() > ttl / 2) {
       return;
     }
     const next = Date.now() + ttl;
-    await backend.lockStudy(id, Math.ceil(next / 1000));
+    try {
+      await backend.lockStudy(id, Math.ceil(next / 1000));
+    } catch (e) {
+      failure ??= e;
+      throw e;
+    }
     until = next;
   };
   await renew();
+  // 仕事を待つ間・元の検査を読む間・写しを確かめる間も切らさないように、期限の 4 分の 1 ごとに付け直す
+  const timer = setInterval(() => void renew().catch(() => undefined), Math.max(ttl / 4, 10));
+  timer.unref?.();
   return {
     renew,
+    ensure: async () => {
+      // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる
+      if (failure === undefined && Date.now() >= until) {
+        throw new BackendUnknownError("付け替えの印の期限が切れたかもしれない");
+      }
+      await renew();
+    },
     release: async () => {
+      clearInterval(timer);
       try {
         await backend.unlockStudy(id);
       } catch {
@@ -235,8 +258,8 @@ async function removeSource(backend: Backend, d: WriteDetail, lock?: SourceLock)
   const source = await sourceInstances();
   const named = source.filter(i => written.has(triple(i)));
   if (named.length) {
-    // 消す間も、1 枚ごとに印の期限を確かめて延ばす（延ばせなければ消すのをやめる）
-    await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles, lock?.renew);
+    // 1 枚を消す直前ごとに、印が切れずに続いていることを確かめる（切れたかもしれなければ消すのをやめる）
+    await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles, lock?.ensure);
   }
   const left = new Set((await sourceInstances()).map(triple));
   const outcome: RemoveOutcome = source.every(i => written.has(triple(i)) || left.has(triple(i))) ? {} : { arrivalsLost: true };

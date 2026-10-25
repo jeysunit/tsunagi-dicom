@@ -133,6 +133,31 @@ describe("付け替えの印", () => {
     expect(results().at(-1)).toMatchObject({ outcome: "unknown" });
   });
 
+  it("元を消す直前に印の期限が過ぎていれば（その間に C-STORE が入りえた）、付け直して続けずに結果不明で止める", async () => {
+    temp();
+    // 期限 1 ミリ秒：消す直前には必ず過ぎている
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 1, pollMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.deleteCalls).toHaveLength(0);
+    expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(1);
+    expect(results().at(-1)).toMatchObject({ outcome: "unknown", detail: { reason: "付け替えの印の期限が切れたかもしれない" } });
+  });
+
+  it("仕事を待つ間も、時計で印を付け直す", async () => {
+    temp();
+    orthanc.next.state = "Running";
+    const status = orthanc.backend.jobStatus.bind(orthanc.backend);
+    let polls = 0;
+    vi.spyOn(orthanc.backend, "jobStatus").mockImplementation(async (jobId) => {
+      // 1 回目の読み取りを 120 ミリ秒待たせる（その間は poll の付け直しが無い）
+      if (++polls === 1) await new Promise(r => setTimeout(r, 120));
+      if (polls === 2) orthanc.jobs.set(jobId, "Success");
+      return status(jobId);
+    });
+    const locks = () => orthanc.events.filter(e => e.startsWith("lock:")).length;
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 80, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AA|");
+    expect(locks()).toBeGreaterThan(2);
+  });
+
   it("書き換えが失敗しても印を外す", async () => {
     temp();
     orthanc.next.state = "Failure";

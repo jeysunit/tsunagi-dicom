@@ -93,7 +93,7 @@ export interface Backend {
     orthancStudyId: string,
     instances: PatientInstance[],
     source: SourceFiles,
-    /** 1 枚を消す前に呼ぶ（付け替えの印の期限を延ばす）。投げれば、残りを消さずに投げる */
+    /** 1 枚を消す直前（変更の記録を読んだ後）に呼ぶ（付け替えの印が続いているかを確かめる）。投げれば、残りを消さずに投げる */
     beforeEach?: () => Promise<void>,
   ): Promise<void>;
   /**
