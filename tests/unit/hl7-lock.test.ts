@@ -127,15 +127,26 @@ describe("付け替えの印", () => {
       if (++calls > 1) throw new Error("synthetic renew failure");
       return lockStudy(id, until);
     });
-    // 期限 1 ミリ秒：消す前の付け直しが、毎回 Orthanc を呼ぶ
-    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 1, pollMs: 0 })).toContain("MSA|AE|");
+    // 期限 400 ミリ秒（時計の付け直しは 100 ミリ秒ごと）で、写しを確かめるのに 300 ミリ秒かかる：その間に付け直しが呼ばれて失敗する
+    const origins = orthanc.backend.studyInstanceOrigins.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "studyInstanceOrigins").mockImplementation(async (id) => {
+      await new Promise(r => setTimeout(r, 300));
+      return origins(id);
+    });
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 400, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(calls).toBeGreaterThan(1);
     expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(2);
-    expect(results().at(-1)).toMatchObject({ outcome: "unknown" });
+    expect(results().at(-1)).toMatchObject({ outcome: "unknown", detail: { reason: "synthetic renew failure" } });
   });
 
   it("元を消す直前に印の期限が過ぎていれば（その間に C-STORE が入りえた）、付け直して続けずに結果不明で止める", async () => {
     temp();
-    // 期限 1 ミリ秒：消す直前には必ず過ぎている
+    // 期限 1 ミリ秒で、写しを確かめるのに 20 ミリ秒かかる：消す直前には必ず過ぎている
+    const origins = orthanc.backend.studyInstanceOrigins.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "studyInstanceOrigins").mockImplementation(async (id) => {
+      await new Promise(r => setTimeout(r, 20));
+      return origins(id);
+    });
     expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 1, pollMs: 0 })).toContain("MSA|AE|");
     expect(orthanc.deleteCalls).toHaveLength(0);
     expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(1);

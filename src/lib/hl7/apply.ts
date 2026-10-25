@@ -179,11 +179,18 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   let failure: unknown;
   // 外した後に、時計の付け直しが印を付け直さないように、外す前に止めて、途中の付け直しを待つ
   let released = false;
+  // 付け直しは 1 つずつ（時計と仕事を待つ間の呼び出しが重なれば、途中のものを待つ。古い期限で上書きしない）
   let pending: Promise<void> | undefined;
-  const renew = async () => {
+  const renew = (): Promise<void> => {
     if (released) {
-      return;
+      return Promise.resolve();
     }
+    pending ??= attempt().finally(() => {
+      pending = undefined;
+    });
+    return pending;
+  };
+  const attempt = async () => {
     if (failure !== undefined) {
       throw failure;
     }
@@ -196,17 +203,11 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       return;
     }
     const next = Date.now() + ttl;
-    const put = backend.lockStudy(id, Math.ceil(next / 1000));
-    pending = put;
     try {
-      await put;
+      await backend.lockStudy(id, Math.ceil(next / 1000));
     } catch (e) {
       failure ??= e;
       throw e;
-    } finally {
-      if (pending === put) {
-        pending = undefined;
-      }
     }
     // 付け直しの答えが前の期限の後に来たら、その間は印が切れていたかもしれない
     if (until > 0 && Date.now() >= until) {
