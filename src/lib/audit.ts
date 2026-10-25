@@ -165,31 +165,6 @@ function sameText(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/**
- * 1 行だけを、つなぎの全体を読まずに確かめる。prevHash が 1 つ前の行（seq − 1）の hash と同じで、hash が行の鍵で
- * 計算し直した値と同じか。鍵の無い行は、鍵つきを求めるとき（requireKey）は通さない（鍵を持たない者でも作り直せるため）。
- * 合えば null、合わなければ理由を返す。鍵の切り替えの決まりと先頭の控えは verifyAuditChain が見る
- */
-export function checkAuditRow(
-  row: AuditRow,
-  previousHash: string | undefined,
-  keyring: AuditKeyring = auditKeyring(),
-  requireKey = false,
-): string | null {
-  const expected = row.seq === 1 ? GENESIS_HASH : previousHash;
-  if (expected === undefined || row.prevHash !== expected) {
-    return "prevHash が前の行の hash と合わない";
-  }
-  const { hash, ...rest } = row;
-  if (row.keyId === null) {
-    if (requireKey) return "鍵の無い行";
-    return sameText(computeAuditHash(rest), hash) ? null : "行の中身が hash と合わない";
-  }
-  const key = keyring.byId.get(row.keyId);
-  if (!key) return "この行の鍵が無いので確かめられない";
-  return sameText(computeAuditMac(rest, key), hash) ? null : "行の中身が hash と合わない";
-}
-
 // 1つのプロセスの中で追記を一列に並べる（前の行の hash を読んでから書くため）。
 // ほかのプロセスと競ったときは prevHash の一意の制約で失敗し、つなぎは枝分かれしない。
 // Next.js は起動の時の処理（instrumentation の定期の片付け）と route handler を別々に組むことがあり、
@@ -310,6 +285,11 @@ export interface AuditChainOptions {
    * 控えを1つ以上渡したときも、設定しているとみなす
    */
   requireAnchors?: boolean;
+  /**
+   * 確かめた行を 1 行ずつ渡す（食い違いの見つかった行と、その後の行は渡さない）。確かめた行をそのまま使い、確かめた後に
+   * 読み直して、その間に書き換えられた行を使うことを防ぐ（HL7 の経過。src/lib/hl7/apply.ts）
+   */
+  onRow?: (row: AuditRow) => void;
 }
 
 /**
@@ -439,6 +419,7 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
         }
         anchorsChecked += 1;
       }
+      options.onRow?.(row);
       prevHash = hash;
       expectedSeq += 1;
       checked += 1;

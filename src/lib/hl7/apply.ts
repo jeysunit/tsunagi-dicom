@@ -1,9 +1,8 @@
 /* eslint-disable no-control-regex -- ASCII と制御文字の検証。 */
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { appendAudit, checkAuditRow, verifyAuditChain, type AuditEntryInput, type AuditOutcome } from "@/lib/audit";
+import { appendAudit, verifyAuditChain, type AuditEntryInput, type AuditOutcome, type AuditRow as StoredAuditRow } from "@/lib/audit";
 import { readAuditAnchors } from "@/lib/audit-anchor";
-import { auditKeyring } from "@/lib/audit-key";
 import { getDb } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getBackend } from "@/lib/backend";
@@ -28,8 +27,8 @@ export class HistoryTampered extends BackendUnknownError {
   }
 }
 /**
- * 監査の一本のつなぎから、HL7 の経過を古い順に読む（design.md §13）。使う前に、つなぎの全部を確かめ（行の action を
- * 書き換えて HL7 の行を隠されても見つける）、HL7 の行ごとにも鍵つきの値と前の行とのつなぎを確かめる（design.md §15.1）。
+ * 監査の一本のつなぎから、HL7 の経過を古い順に読む（design.md §13）。つなぎの全部を確かめ（行の action を書き換えて
+ * HL7 の行を隠されても見つける）、確かめた行のうち HL7 の行だけを返す（確かめた後に読み直さない。design.md §15.1）。
  * 覚え（remember）を持つ行は鍵つきだけを受ける。合わない行があれば投げる。
  */
 export async function history(): Promise<HistoryRow[]> {
@@ -43,23 +42,18 @@ export async function history(): Promise<HistoryRow[]> {
   } catch (e) {
     throw new HistoryTampered(0, e instanceof Error ? e.message : "先頭の控えを読めない");
   }
-  const chain = await verifyAuditChain(db, 1000, anchorFile ? { anchors, requireAnchors: true } : {});
+  // 鍵の無い行は、つなぎの決まりで最初の鍵つきの行より前だけに受ける（後ろに書き足された鍵の無い行は、偽の照らし
+  // 合わせ（manual）でありうる）。覚えを持つ行は、その前の部分でも鍵つきだけを受ける（鍵を持たない者でも作れるため）
+  const rows: StoredAuditRow[] = [];
+  const chain = await verifyAuditChain(db, 1000, {
+    ...(anchorFile ? { anchors, requireAnchors: true } : {}),
+    onRow: row => {
+      if (row.action === "hl7") rows.push(row);
+    }
+  });
   if (!chain.ok) {
     throw new HistoryTampered(chain.seq, chain.reason);
   }
-  const rows = await db.auditLog.findMany({ where: { action: "hl7" }, orderBy: { seq: "asc" } });
-  const previous = new Map<number, string>();
-  // SQLite の変数の数の上限を超えないように分けて読む
-  for (let i = 0; i < rows.length; i += 500) {
-    const seqs = rows.slice(i, i + 500).map(r => r.seq - 1);
-    for (const p of await db.auditLog.findMany({ where: { seq: { in: seqs } }, select: { seq: true, hash: true } })) {
-      previous.set(p.seq, p.hash);
-    }
-  }
-  const keyring = auditKeyring();
-  // 鍵の無い行は、最初の鍵つきの行より前だけで受ける（verifyAuditChain と同じ決まり）。後ろに鍵の無い行を書き足せば、
-  // 鍵を持たない者でも hash を作れるので、偽の照らし合わせ（manual）で結果不明の書き換えを解けてしまう
-  const firstKeyed = (await db.auditLog.findFirst({ where: { keyId: { not: null } }, orderBy: { seq: "asc" }, select: { seq: true } }))?.seq;
   return rows.map(r => {
     let detail: Record<string, unknown>;
     try {
@@ -67,10 +61,8 @@ export async function history(): Promise<HistoryRow[]> {
     } catch {
       throw new HistoryTampered(r.seq, "detail が JSON でない");
     }
-    const requireKey = detail?.remember !== undefined || (firstKeyed !== undefined && r.seq > firstKeyed);
-    const reason = checkAuditRow(r, previous.get(r.seq - 1), keyring, requireKey);
-    if (reason) {
-      throw new HistoryTampered(r.seq, reason);
+    if (detail?.remember !== undefined && r.keyId === null) {
+      throw new HistoryTampered(r.seq, "覚えを持つ行に鍵が無い");
     }
     return { ...r, action: "hl7" as const, outcome: r.outcome as AuditOutcome, detail };
   });
