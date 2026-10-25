@@ -15,6 +15,8 @@ Node.js 24 で `node hl7-receiver/main.ts` として動く。依存の包みは�
 | `HL7_READ_TIMEOUT_SECONDS` | `30`。接続・前の ACK から枠を待つ時間と、枠の開始から終わりまでの時間。それぞれに上限を置く |
 | `HL7_FORWARD_TIMEOUT_SECONDS` | `60`。BFF の応答を待つ時間 |
 | `HL7_MAX_CONNECTIONS` | `8` |
+| `HL7_SWEEP_URL` | `HL7_FORWARD_URL` と同じ場所の `sweep`（`/api/hl7/sweep`）。照合の後に届いた画像の書き換えを頼む先 |
+| `HL7_SWEEP_INTERVAL_SECONDS` | `60`。上の道を呼ぶ間（起きてから 5 秒後に 1 回目）。前の呼び出しが終わるまで次を呼ばない |
 
 MLLP に認証は無い。待ち受けは開発の一式の内側に置き、ホストにはポートを出さない。起動の設定は自分で渡す。配る compose には含めない。BFF の道は公開のポートからも届くので、token を読める相手を絞る。[安全と保守の方針](../docs/security-and-maintenance.md#hl7-の受け口) に注意を書く。
 
