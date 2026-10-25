@@ -59,10 +59,13 @@ test("受信一覧の「検査一覧で表示」：ボタンの形で、押す�
   await expect(page).not.toHaveURL(/studyUid=/);
 
   // 形の誤った UID・一覧に無い UID では、何も選ばない
+  // （何も選ばないときは、詳細の場所を出さず、一覧が全幅。案内の文は出さない）
   await page.goto(`/?${new URLSearchParams({ studyUid: "1.2.3" })}`);
-  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+  await expect(page.getByTestId("study-list-scroll")).toBeVisible();
+  await expect(page.getByTestId("detail-pane")).toHaveCount(0);
   await page.goto(`/?${new URLSearchParams({ studyUid: "1.2'3" })}`);
-  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+  await expect(page.getByTestId("study-list-scroll")).toBeVisible();
+  await expect(page.getByTestId("detail-pane")).toHaveCount(0);
 });
 
 test("受信一覧の絞り込み：送信元 AE・検索で絞り、前に開いた後に受信した行に「新着」を付ける。再読み込みで頁を読み直さずに読み直す", async ({ page }) => {

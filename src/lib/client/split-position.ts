@@ -1,11 +1,12 @@
-// 検査の一覧の、上（一覧）と下（詳細）の境目の位置。上の高さを、分ける場所の高さの百分率で持つ。
+// 検査の一覧の、左（一覧）と右（詳細）の境目の位置。一覧の幅を、分ける場所の幅の百分率で持つ（docs/spec.md の 3.1）。
 // 位置はブラウザの localStorage に覚える（利用者ごと＝この端末のこのブラウザごと。サーバーの利用者の設定には持たない：
 // 画面の幅や高さに依る好みで、アカウントを越えて持ち回る値ではないため）。読めない・書けないときは、頁を開いている間だけ覚える。
+// 上下に分けていたとき（一覧の高さの百分率）の覚えとは別の鍵にする（古い値を幅の百分率として読まないため）。
 
-export const SPLIT_KEY = "tsunagi-dicom.listSplit";
-export const SPLIT_MIN = 20;
-export const SPLIT_MAX = 80;
-export const SPLIT_DEFAULT = 60;
+export const SPLIT_KEY = "tsunagi-dicom.listWidth";
+export const SPLIT_MIN = 30;
+export const SPLIT_MAX = 75;
+export const SPLIT_DEFAULT = 55;
 export const SPLIT_STEP = 5;
 
 export function clampSplit(value: number): number {
@@ -24,9 +25,9 @@ export function parseSplit(raw: string | null): number {
 /** 境目に付けた矢印などのキーで動かした後の位置。対象外のキーは null */
 export function splitAfterKey(current: number, key: string): number | null {
   switch (key) {
-    case "ArrowUp":
+    case "ArrowLeft":
       return clampSplit(current - SPLIT_STEP);
-    case "ArrowDown":
+    case "ArrowRight":
       return clampSplit(current + SPLIT_STEP);
     case "Home":
       return SPLIT_MIN;

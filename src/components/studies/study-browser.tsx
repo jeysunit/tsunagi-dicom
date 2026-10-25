@@ -57,8 +57,6 @@ const DETAIL_DELAY_MS = 300;
 /** 削除が終わったことの知らせを出しておく時間（ミリ秒。docs/spec.md の 3.5） */
 const NOTICE_MS = 10_000;
 /** 一覧の最小の高さ（見出しと 7 行ほど。study-list-scroll の md:min-h-56 と同じ）と、絞り込みと一覧の間（gap-2） */
-const LIST_MIN_PX = 224;
-const TOP_GAP_PX = 8;
 
 const listKey =(filter: StudyFilter) => ["studies", filterToSearchParams(filter).toString()] as const;
 
@@ -341,23 +339,25 @@ function textWidth(text: string | undefined): number {
 const CELL_PAD = 18;
 /** モダリティ・検査の記述の列の最小の幅。一覧がこれより狭いときは、一覧の中で横にスクロールする */
 const DESC_MIN = 160;
+/** 詰めた形（詳細を開いている間）の、同じ列の最小の幅 */
+const DESC_MIN_COMPACT = 120;
 
 /**
  * 一覧の列（px。docs/spec.md の 3.1）。患者 ID・生年月日・年齢・性別は切らない（患者 ID の列は、出している行のいちばん長い値に合わせる）。
  * 氏名とかなも、いちばん長い値に合わせ、上限を超える値だけを `…` で切る（全文は title）。
  * モダリティ・検査の記述は残りの幅を取る。氏名の漢字とかなは別の列（かなは漢字の右）
  */
-function columnsFor(studies: readonly StudyView[], showAccession: boolean) {
+function columnsFor(studies: readonly StudyView[], showAccession: boolean, compact: boolean) {
   const widest = (pick: (s: StudyView) => string | undefined) => Math.max(0, ...studies.map((s) => textWidth(pick(s))));
   const fit = (pick: (s: StudyView) => string | undefined, min: number, max: number) =>
     Math.min(max, Math.max(min, widest(pick) + CELL_PAD));
-  return [
+  const all: readonly { readonly key: string; readonly width: number | undefined }[] = [
     { key: "date", width: 148 },
     // 患者 ID は DICOM の LO（64 字まで）。上限を置かずに値に合わせる（切らない）
     { key: "id", width: Math.max(80, widest((s) => s.patientId) + CELL_PAD) },
     // 受付番号（2026-10-21。詳細条件で絞れる項目を列に見せる）。SH（16 字まで）なので値に合わせ、上限を超える値だけを切る。
     // 役割の許可の一覧に無い（行に項目が無い）ときは、列ごと出さない
-    ...(showAccession ? [{ key: "accession", width: fit((s) => s.accessionNumber, 88, 160) } as const] : []),
+    ...(showAccession ? [{ key: "accession", width: fit((s) => s.accessionNumber, 88, 160) }] : []),
     { key: "name", width: fit((s) => s.patientName, 104, 240) },
     { key: "kana", width: fit((s) => s.patientKana, 96, 200) },
     { key: "birth", width: 104 },
@@ -366,8 +366,16 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean) {
     { key: "desc", width: undefined },
     { key: "count", width: 100 },
     { key: "viewer", width: 142 },
-  ] as const;
+  ];
+  // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・年齢・性別・モダリティと検査名。
+  // 省く値（受付番号・カナ・生年月日・Se/Im・開く）は、詳細の見出し・検査の情報・操作の行で見る
+  // 年齢と性別は短い値なので、詰めた形では幅を詰める（一覧が 560px ほどでも、横にスクロールせずに収める）
+  const narrow: Record<string, number> = { age: 56, sex: 56 };
+  return compact ? all.filter((c) => COMPACT_COLUMNS.includes(c.key)).map((c) => ({ ...c, width: narrow[c.key] ?? c.width })) : all;
 }
+
+/** 詳細を開いている間も残す列 */
+const COMPACT_COLUMNS: readonly string[] = ["date", "id", "name", "age", "sex", "desc"];
 
 /**
  * 一覧を読み直しても、見ていた行の位置を保つ（docs/spec.md の 3.1 の自動更新）。スクロールしているときは、見えている先頭の行を
@@ -417,7 +425,10 @@ function StudyRows({
   dim = false,
   empty,
   listKey,
+  compact = false,
 }: {
+  /** 詳細を開いている間（左右に分ける形の左）は、列を詰めた形にする（columnsFor） */
+  compact?: boolean;
   /** いまの絞り込み（URL の形）。替わったら、見ていた行の位置を保たない */
   listKey: string;
   studies: StudyView[];
@@ -435,8 +446,9 @@ function StudyRows({
   const tabStop = studies.some((s) => s.studyInstanceUid === selected) ? selected : (studies[0]?.studyInstanceUid ?? null);
   // 受付番号の列は、許可の一覧に受付番号がある役割だけ（行に項目がある。0 件のときは見出しを出す）
   const showAccession = studies.length === 0 || studies.some((s) => Object.hasOwn(s, "accessionNumber"));
-  const columns = columnsFor(studies, showAccession);
-  const minWidth = columns.reduce((sum, c) => sum + (c.width ?? DESC_MIN), 0);
+  const columns = columnsFor(studies, showAccession, compact);
+  const has = (key: string) => columns.some((c) => c.key === key);
+  const minWidth = columns.reduce((sum, c) => sum + (c.width ?? (compact ? DESC_MIN_COMPACT : DESC_MIN)), 0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const onScroll = useScrollAnchor(scrollRef, studies, listKey);
   return (
@@ -466,19 +478,23 @@ function StudyRows({
           <tr className="border-b border-border">
             <th className={cn("px-2 py-1 font-normal", CUT)}>検査日時</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>患者ID</th>
-            {showAccession && <th className={cn("px-2 py-1 font-normal", CUT)}>受付番号</th>}
+            {has("accession") && <th className={cn("px-2 py-1 font-normal", CUT)}>受付番号</th>}
             <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
-            <th className={cn("px-2 py-1 font-normal", CUT)}>カナ</th>
-            <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>
+            {has("kana") && <th className={cn("px-2 py-1 font-normal", CUT)}>カナ</th>}
+            {has("birth") && <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>}
             <th className={cn("px-2 py-1 font-normal", CUT)}>年齢</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>性別</th>
             <th className={cn("px-2 py-1 font-normal", CUT)}>モダリティ／検査名</th>
-            <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数／画像数">
-              Se/Im
-            </th>
-            <th className="px-2 py-1 font-normal">
-              <span className="sr-only">ビューア</span>
-            </th>
+            {has("count") && (
+              <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数／画像数">
+                Se/Im
+              </th>
+            )}
+            {has("viewer") && (
+              <th className="px-2 py-1 font-normal">
+                <span className="sr-only">ビューア</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody className={cn("transition-opacity", dim && "opacity-60")} data-dim={dim || undefined}>
@@ -545,7 +561,7 @@ function StudyRows({
                   <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
                     {s.patientId}
                   </td>
-                  {showAccession && (
+                  {has("accession") && (
                     <td className={cn(CELL, CUT, "font-mono")} title={s.accessionNumber} data-testid="accession-number">
                       {s.accessionNumber}
                     </td>
@@ -559,12 +575,16 @@ function StudyRows({
                       <span className="text-label">（氏名未登録）</span>
                     )}
                   </td>
-                  <td className={cn(CELL, CUT, "text-label")} title={s.patientKana} data-testid="patient-kana">
-                    {s.patientKana}
-                  </td>
-                  <td className={cn(CELL, "whitespace-nowrap tabular-nums")} title={birthTitle || undefined} data-testid="patient-birth">
-                    {formatSlashDate(s.patientBirthDate)}
-                  </td>
+                  {has("kana") && (
+                    <td className={cn(CELL, CUT, "text-label")} title={s.patientKana} data-testid="patient-kana">
+                      {s.patientKana}
+                    </td>
+                  )}
+                  {has("birth") && (
+                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} title={birthTitle || undefined} data-testid="patient-birth">
+                      {formatSlashDate(s.patientBirthDate)}
+                    </td>
+                  )}
                   <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-age">
                     {formatAge(s.patientBirthDate, s.studyDate)}
                   </td>
@@ -577,24 +597,28 @@ function StudyRows({
                     </span>
                     {s.studyDescription && <span className="text-label">{s.studyDescription}</span>}
                   </td>
-                  <td className={cn(CELL, CUT, "text-right")}>
-                    {s.seriesCount ?? "—"}
-                    <span className="text-label"> / </span>
-                    {s.instanceCount ?? "—"}
-                  </td>
-                  <td className={cn(CELL, "text-right")}>
-                    {uid && (
-                      <ViewerMenu
-                        compact
-                        studyUid={uid}
-                        defaultViewer={s.defaultViewer}
-                        rememberedViewer={s.rememberedViewer}
-                        viewerVersion={s.viewerVersion}
-                        screen={screen}
-                        onChanged={onChanged}
-                      />
-                    )}
-                  </td>
+                  {has("count") && (
+                    <td className={cn(CELL, CUT, "text-right")}>
+                      {s.seriesCount ?? "—"}
+                      <span className="text-label"> / </span>
+                      {s.instanceCount ?? "—"}
+                    </td>
+                  )}
+                  {has("viewer") && (
+                    <td className={cn(CELL, "text-right")}>
+                      {uid && (
+                        <ViewerMenu
+                          compact
+                          studyUid={uid}
+                          defaultViewer={s.defaultViewer}
+                          rememberedViewer={s.rememberedViewer}
+                          viewerVersion={s.viewerVersion}
+                          screen={screen}
+                          onChanged={onChanged}
+                        />
+                      )}
+                    </td>
+                  )}
                 </tr>
             );
           })}
@@ -703,7 +727,9 @@ function Browser({
 
   const split = useSyncExternalStore(subscribeSplit, getSplit, getServerSplit);
   const box = useRef<HTMLElement>(null);
-  const topId = useId();
+  /** 一覧と詳細を左右に分ける場所（境目の位置はこの幅に対する百分率） */
+  const body = useRef<HTMLDivElement>(null);
+  const listId = useId();
   const queryClient = useQueryClient();
   const initialKey = filterToSearchParams(initialFilter).toString();
   const params = filterToSearchParams(filter).toString();
@@ -778,7 +804,9 @@ function Browser({
     box.current?.querySelectorAll<HTMLElement>("tbody > tr[data-study-uid]")[i]?.focus({ preventScroll: true });
   }, [data, list.isFetching]);
   const selectedRow = selected ? data?.studies.find((s) => s.studyInstanceUid === selected) : undefined;
-  const overlayOpen = narrow && !!selectedRow;
+  /** 詳細を出しているか（出している間は、左右に分け、一覧の列を詰める。狭い画面では、一覧の上に重ねる） */
+  const detailOpen = !!selectedRow;
+  const overlayOpen = narrow && detailOpen;
   useEffect(() => {
     if (overlayOpen) paneRef.current?.focus({ preventScroll: true });
   }, [overlayOpen]);
@@ -788,33 +816,15 @@ function Browser({
     restoreUid.current = null;
     box.current?.querySelector<HTMLElement>(`tr[data-study-uid="${CSS.escape(uid)}"]`)?.focus({ preventScroll: true });
   }, [selectedRow]);
-  // 絞り込みの高さ（折り返しで変わる）を測り、上の場所の最小の高さに使う
-  const topRef = useRef<HTMLDivElement>(null);
-  const [filtersH, setFiltersH] = useState(0);
-  useEffect(() => {
-    const el = topRef.current?.firstElementChild;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setFiltersH(Math.ceil(el.getBoundingClientRect().height)));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
   const closeDetail = () => {
     restoreUid.current = selected;
     select(null, "click");
   };
 
   return (
-    <section ref={box} data-split-root className="relative flex min-h-0 flex-1 flex-col">
-      {/* 上の場所は、絞り込みの高さ＋一覧の最小の高さより縮まない。境目を上へ寄せても、一覧が消えず、絞り込みがはみ出さない */}
-      <div
-        id={topId}
-        ref={topRef}
-        inert={overlayOpen || undefined}
-        className="flex min-h-0 flex-1 flex-col gap-2 md:min-h-(--top-min) md:flex-none md:basis-(--split)"
-        style={{ "--split": `${split}%`, "--top-min": `${filtersH + TOP_GAP_PX + LIST_MIN_PX}px` } as React.CSSProperties}
-      >
-      {/* 条件の行と件数の行。測る対象（topRef の最初の子）は、この 2 つをまとめた入れ物 */}
-      <div className="shrink-0 space-y-3">
+    <section ref={box} data-split-root className="relative flex min-h-0 flex-1 flex-col gap-2">
+      {/* 絞り込みの帯と件数の行は、左右をまたいで上に置く（docs/design-system/screen-types.md の「型 B の変種」） */}
+      <div inert={overlayOpen || undefined} className="shrink-0 space-y-3">
         <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} />
         {/* 件数の行（docs/design-system/components.md）：検索の欄が空かどうかで件数と自動更新の位置が動かない（#56） */}
         <CountRow
@@ -853,8 +863,21 @@ function Browser({
           {list.error.message}
         </p>
       )}
+      {/* その下を左右に分ける。行を選ぶまでは一覧が全幅。選ぶと、左に一覧（列を詰めた形）、右に詳細（残りの幅） */}
+      <div ref={body} className="flex min-h-0 flex-1">
+      <div
+        id={listId}
+        inert={overlayOpen || undefined}
+        className={cn(
+          "flex min-h-0 min-w-0 flex-col",
+          // 一覧は詰めた形の列が読める幅（20rem）より、詳細は 25rem より縮まない
+          detailOpen ? "max-md:flex-1 md:max-w-[calc(100%-25rem)] md:min-w-80 md:flex-none md:basis-(--split)" : "flex-1",
+        )}
+        style={{ "--split": `${split}%` } as React.CSSProperties}
+      >
       {/* 0 件でも表の枠と見出しの行を出し、一覧の場所が分かるようにする（2026-10-21。空の場所が真っ白だった） */}
       <StudyRows
+        compact={detailOpen && !narrow}
         studies={data?.studies ?? []}
         // 前の絞り込みの行を出している間（placeholder）は、別の印にする（新しい絞り込みの行で、見ていた行の位置を戻さない）
         listKey={list.isPlaceholderData ? "placeholder" : `list:${params}`}
@@ -881,14 +904,16 @@ function Browser({
       />
       </div>
 
-      {/* 境目：上下に動かせる（矢印のキー・Home・End・ドラッグ）。狭い画面では上下に分けない */}
+      {selectedRow && (
+      <>
+      {/* 境目：左右に動かせる（矢印の左右・Home・End・ドラッグ）。狭い画面では左右に分けない */}
       {/* 動かせる境目は WAI-ARIA の focusable separator（widget）。jsx-a11y はこの形を知らないので、2つの規則だけ外す */}
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         role="separator"
-        aria-orientation="horizontal"
+        aria-orientation="vertical"
         aria-label="一覧と詳細の境界"
-        aria-controls={topId}
+        aria-controls={listId}
         aria-valuemin={SPLIT_MIN}
         aria-valuemax={SPLIT_MAX}
         aria-valuenow={split}
@@ -896,7 +921,7 @@ function Browser({
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         data-testid="split-handle"
-        className="group hidden h-3 shrink-0 cursor-row-resize touch-none items-center justify-center focus-visible:outline-none md:flex"
+        className="group hidden w-3 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-none md:flex"
         onKeyDown={(e) => {
           const next = splitAfterKey(split, e.key);
           if (next === null) return;
@@ -907,15 +932,15 @@ function Browser({
           e.currentTarget.setPointerCapture(e.pointerId);
         }}
         onPointerMove={(e) => {
-          if (!e.currentTarget.hasPointerCapture(e.pointerId) || !box.current) return;
-          const rect = box.current.getBoundingClientRect();
-          if (rect.height > 0) setSplit(((e.clientY - rect.top) / rect.height) * 100);
+          if (!e.currentTarget.hasPointerCapture(e.pointerId) || !body.current) return;
+          const rect = body.current.getBoundingClientRect();
+          if (rect.width > 0) setSplit(((e.clientX - rect.left) / rect.width) * 100);
         }}
       >
-        <span aria-hidden className="h-1 w-16 rounded-full bg-border group-hover:bg-label group-focus-visible:bg-ring" />
+        <span aria-hidden className="h-16 w-1 rounded-full bg-border group-hover:bg-label group-focus-visible:bg-ring" />
       </div>
 
-      {/* 下：選んだ検査の詳細。狭い画面では、選んだときだけ一覧の上に重ねて出す。詳細の中の Escape で閉じる（メニューが開いているときはメニューが先） */}
+      {/* 右：選んだ検査の詳細。狭い画面では、一覧の上に重ねて出す。詳細の中の Escape・× で閉じる（メニューが開いているときはメニューが先） */}
       {/* 枠そのものは操作の部品ではない（フォーカスを受けて Escape を拾うだけ）ので、この規則だけ外す */}
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
@@ -927,38 +952,30 @@ function Browser({
           if (e.currentTarget.querySelector("[role=menu]")) return;
           closeDetail();
         }}
-        className={cn(
-          "bg-surface focus-visible:outline-none max-md:absolute max-md:inset-0 max-md:z-30 max-md:overflow-auto md:min-h-0 md:flex-1 md:overflow-auto md:rounded-md md:border md:border-border",
-          !selectedRow && "max-md:hidden",
-        )}
+        className="bg-surface focus-visible:outline-none max-md:absolute max-md:inset-0 max-md:z-30 max-md:overflow-auto md:min-h-0 md:min-w-100 md:flex-1 md:overflow-auto md:rounded-md md:border md:border-border"
       >
-        {selectedRow ? (
-          <>
-            <button
-              type="button"
-              aria-label="詳細を閉じる"
-              onClick={closeDetail}
-              className={cn(
-                "sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:hidden",
-                pressFeedback,
-              )}
-            >
-              <X aria-hidden className="size-5" />
-            </button>
-            <StudyDetailPanel
-              key={selectedRow.studyInstanceUid}
-              row={selectedRow}
-              screen={screen}
-              onChanged={changed}
-              onDeleted={deleted}
-              fetchEnabled={loadedUid === selected}
-            />
-          </>
-        ) : (
-          <p className="p-4 text-label" data-testid="study-detail-empty">
-            検査を選択してください
-          </p>
-        )}
+        <button
+          type="button"
+          aria-label="詳細を閉じる"
+          onClick={closeDetail}
+          className={cn(
+            "sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            pressFeedback,
+          )}
+        >
+          <X aria-hidden className="size-5" />
+        </button>
+        <StudyDetailPanel
+          key={selectedRow.studyInstanceUid}
+          row={selectedRow}
+          screen={screen}
+          onChanged={changed}
+          onDeleted={deleted}
+          fetchEnabled={loadedUid === selected}
+        />
+      </div>
+      </>
+      )}
       </div>
     </section>
   );
