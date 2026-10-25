@@ -13,7 +13,7 @@ export default async function ChangePasswordStagePage() {
   if (state.kind !== "pending") redirect(state.kind === "anonymous" ? "/login" : "/");
   if (state.stage !== "change_password") redirect(STAGE_PATHS[state.stage]);
   return (
-    <section className="mx-auto max-w-sm space-y-4 pt-8">
+    <section className="mx-auto w-full max-w-[var(--w-login)] space-y-4 pt-8">
       <h1 className="text-lg font-bold text-value">パスワードの変更</h1>
       <p className="text-label">ログインを続けるには、パスワードを変更してください</p>
       <PasswordForm
