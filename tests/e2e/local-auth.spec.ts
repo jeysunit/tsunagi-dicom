@@ -335,6 +335,25 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   expect(after.checked).toBeGreaterThanOrEqual(before.checked + 5);
 });
 
+test("詳細の操作の行：開く・送信・エクスポートが同じ行の左から並び、削除は同じ行の右端に離れる", async () => {
+  const { page } = admin;
+  await page.goto("/");
+  await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
+  const group = page.getByTestId("study-detail").getByRole("group", { name: "検査の操作" });
+  const open = (await group.getByTestId("open-default").boundingBox())!;
+  const send = (await group.getByTestId("send-open").boundingBox())!;
+  const zip = (await group.getByTestId("export-zip").boundingBox())!;
+  const del = (await group.getByTestId("delete-open").boundingBox())!;
+  const area = (await group.boundingBox())!;
+  // 同じ 1 行（上の位置がそろう）で、左から 開く → 送信 → エクスポート
+  for (const b of [send, zip, del]) expect(Math.abs(b.y - open.y)).toBeLessThanOrEqual(4);
+  expect(open.x).toBeLessThan(send.x);
+  expect(send.x).toBeLessThan(zip.x);
+  // 削除は右端に離れる（エクスポートの右に十分な間がある）
+  expect(del.x + del.width).toBeGreaterThanOrEqual(area.x + area.width - 2);
+  expect(del.x).toBeGreaterThan(zip.x + zip.width + 16);
+});
+
 test("送信の手応え：押した直後から状態の枠、送っている間は進みと「閉じても送信は続きます」、閉じた後も状態が出て、終わったら「再送信…」", async () => {
   test.setTimeout(60_000);
   const { page } = admin;

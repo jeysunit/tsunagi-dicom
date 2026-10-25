@@ -12,7 +12,7 @@ import { detailKey, StudyDetailPanel, type StudyDetailData } from "@/components/
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 const SERIES = "1.2.826.0.1.3680043.8.498.1";
 
-function render(allValues: boolean, study: Partial<StudyDetailData["study"]> = {}): string {
+function render(allValues: boolean, study: Partial<StudyDetailData["study"]> = {}, can: Partial<ScreenInfo["can"]> = {}): string {
   const client = new QueryClient();
   const data: StudyDetailData = {
     study: { studyInstanceUid: STUDY, patientName: "試験 髙子", ...study },
@@ -23,7 +23,7 @@ function render(allValues: boolean, study: Partial<StudyDetailData["study"]> = {
   const screen: ScreenInfo = {
     viewers: [],
     timeZone: "Asia/Tokyo",
-    can: { rememberViewer: true, allValues, send: false, reconcile: false, export: false, delete: false },
+    can: { rememberViewer: true, allValues, send: false, reconcile: false, export: false, delete: false, ...can },
   };
   return renderToString(
     createElement(
@@ -33,6 +33,32 @@ function render(allValues: boolean, study: Partial<StudyDetailData["study"]> = {
     ),
   );
 }
+
+describe("操作の 1 行（docs/design-system/components.md の「ボタン」）", () => {
+  const all = { send: true, export: true, delete: true };
+
+  it("左から、主の「開く」・送信・エクスポート、削除は右端に離す。操作は同じ 1 つの group に入る", () => {
+    const html = render(true, {}, all);
+    const group = html.slice(html.indexOf('aria-label="検査の操作"'));
+    const at = (id: string) => group.indexOf(`data-testid="${id}"`);
+    expect(at("open-default")).toBeGreaterThan(-1);
+    expect(at("open-default")).toBeLessThan(at("send-open"));
+    expect(at("send-open")).toBeLessThan(at("export-zip"));
+    expect(at("export-zip")).toBeLessThan(at("delete-open"));
+    // 削除は、ほかの操作から間をあけて右端に離す（ml-auto）
+    expect(html).toMatch(/<button[^>]*class="[^"]*\bml-auto\b[^"]*"[^>]*data-testid="delete-open"/);
+    // 「開く」は 1 つだけ。一覧の行の外（詳細）の「開く」が主
+    expect(html.match(/data-testid="open-default"/g)).toHaveLength(1);
+  });
+
+  it("PACS の操作の権限が無い役割でも、「開く」は操作の行に出る", () => {
+    const html = render(true);
+    const group = html.slice(html.indexOf('aria-label="検査の操作"'));
+    expect(group).toContain('data-testid="open-default"');
+    expect(group).not.toContain('data-testid="send-open"');
+    expect(group).not.toContain('data-testid="delete-open"');
+  });
+});
 
 describe("サムネイルを押せるか（権限）", () => {
   it("dicom.all_values のある役割：サムネイルはボタン（aria-pressed）。下の「UID」「DICOM タグ」のボタンは無く、検査の UID は見出しにある", () => {

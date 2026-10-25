@@ -548,7 +548,7 @@ export function StudyDetailPanel({
 
   return (
     <section aria-label="検査の詳細" className="space-y-1.5 px-3 py-2" data-testid="study-detail" data-study-uid={uid}>
-      {/* 見出し：左に患者バナーと検査の UID、右にビューア */}
+      {/* 見出し：患者バナーと検査の UID */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         {/* 左の縦線は、一覧で選んだ行の縦線と同じ（どの行の詳細かを示す。docs/spec.md の 3.1） */}
         <div className="min-w-0 flex-1 basis-96 space-y-0.5 border-l-[3px] border-ring pl-2" data-testid="detail-head">
@@ -583,7 +583,15 @@ export function StudyDetailPanel({
           {/* 検査の情報：タブに隠さず、バナーと UID の下に並べる */}
           {infoRows.length > 0 && <StudyInfo rows={infoRows} />}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+      </div>
+
+      {/* 操作の 1 行：左から、主の「開く」・送信・エクスポート、削除は右端に離す（PACS の操作は役割に許されたものだけ）。行が替わったら作り直す */}
+      <PacsActions
+        key={uid}
+        study={study}
+        screen={screen}
+        onDeleted={(s) => (onDeleted ? onDeleted(s) : changed())}
+        leading={
           <ViewerMenu
             studyUid={uid}
             defaultViewer={study.defaultViewer}
@@ -592,11 +600,8 @@ export function StudyDetailPanel({
             screen={screen}
             onChanged={changed}
           />
-        </div>
-      </div>
-
-      {/* PACS の操作（送る・書き出し・削除。役割に許されたものだけ）。行が替わったら作り直す */}
-      <PacsActions key={uid} study={study} screen={screen} onDeleted={(s) => (onDeleted ? onDeleted(s) : changed())} />
+        }
+      />
 
       {/* 検査のタグ（検査単位の要約）。権限のある役割が、Study UID の横のボタンで開く */}
       {tagsShown && studyTagsOpen && <StudyTags uid={uid} panelId={studyTagsId} />}
