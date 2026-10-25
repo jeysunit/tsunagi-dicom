@@ -178,6 +178,24 @@ describe("付け替えの印", () => {
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
   });
 
+  it("付けた後にこの機の時計が巻き戻っても、期限の切れを見逃さない（単調な時計で見る）", async () => {
+    temp();
+    orthanc.next.duringDelete = () => {
+      // 消す間に、この機の時計が 10 分巻き戻り、BFF が 300 ミリ秒止まる（期限 200 ミリ秒）
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() - 600_000, shouldAdvanceTime: true });
+      const stalled = performance.now() + 300;
+      while (performance.now() < stalled) {
+        // 止まった BFF の代わり
+      }
+    };
+    try {
+      expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+  });
+
   it("印の切れを見つけた後に確かめが失敗しても、結果不明に戻さず部分反映で止める（自動で解かせない）", async () => {
     temp();
     const lookup = orthanc.backend.lookupStudyIds.bind(orthanc.backend);

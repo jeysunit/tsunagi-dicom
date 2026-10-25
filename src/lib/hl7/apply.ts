@@ -183,10 +183,13 @@ interface SourceLock {
 async function lockSource(backend: Backend, id: string, options: ProcessOptions, record: (ttlSeconds: number) => Promise<unknown>): Promise<SourceLock> {
   const ttl = options.lockTtlMs ?? LOCK_TTL_MS;
   await record(Math.ceil(ttl / 1000));
+  // 書いた期限（この機の時計の時刻。記録と照らし合わせに使う）と、同じ期限の単調な時計の上の値（切れたかを見る）
   let until = 0;
-  // Lua は Orthanc の時計で比べる。lockStudy が時計のずれを margin の内と確かめるので、期限の margin 前から切れたとみなす
+  let untilMono = 0;
+  // Lua は Orthanc の時計で比べる。lockStudy が付けるたびに時計のずれを margin の内と確かめるので、期限の margin 前から
+  // 切れたとみなす。切れたかは単調な時計で見る（付けた後にこの機の時計が巻き戻っても、切れを見逃さない）
   const margin = options.lockClockToleranceMs ?? LOCK_CLOCK_TOLERANCE_MS;
-  const expired = () => until > 0 && Date.now() >= until - margin;
+  const expired = () => untilMono > 0 && performance.now() >= untilMono - margin;
   // 付け直しに一度でも失敗したら、それ以降の renew は投げる（呼び手は Orthanc への書き込みをやめる）
   let failure: unknown;
   // 外した後に、時計の付け直しが印を付け直さないように、外す前に止めて、途中の付け直しを待つ
@@ -211,10 +214,11 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       failure = new BackendUnknownError("付け替えの印の期限が切れたかもしれない");
       throw failure;
     }
-    if (until - Date.now() > ttl / 2) {
+    if (untilMono - performance.now() > ttl / 2) {
       return;
     }
     const next = Date.now() + ttl;
+    const nextMono = performance.now() + ttl;
     try {
       await backend.lockStudy(id, Math.ceil(next / 1000));
     } catch (e) {
@@ -227,6 +231,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       throw failure;
     }
     until = next;
+    untilMono = nextMono;
   };
   await renew();
   // 仕事を待つ間・元の検査を読む間・写しを確かめる間も切らさないように、期限の 4 分の 1 ごとに付け直す
