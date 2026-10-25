@@ -16,7 +16,7 @@ export default async function AccountPage() {
   if (access.kind !== "ok" || !access.session.local) return null;
   const { row, user } = access.session.local;
   return (
-    <section className="max-w-sm space-y-6">
+    <section className="max-w-[var(--w-settings)] space-y-6">
       <h1 className="text-lg font-bold text-value">個人設定</h1>
       <div className="space-y-2">
         <h2 className="font-bold text-value">パスワードの変更</h2>
