@@ -37,6 +37,7 @@ export const TAG = {
   SOPClassUID: "00080016",
   SOPInstanceUID: "00080018",
   InstanceNumber: "00200013",
+  SliceLocation: "00201041",
   NumberOfFrames: "00280008",
 } as const;
 
@@ -65,6 +66,16 @@ export function personNameToString(pn: { Alphabetic?: string; Ideographic?: stri
 function numberValue(ds: DicomJsonDataset, tag: string): number | null {
   const v = values(ds, tag)[0];
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/** DS の値（符号・小数・指数）の形。空の値や数でない値は数にしない（Number("") は 0 になるため） */
+const DECIMAL_STRING = /^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\s*$/;
+
+/** スライス位置（DS）。数のときだけ返し、無い・空・数でない値は null */
+function sliceLocationValue(ds: DicomJsonDataset): number | null {
+  const v = values(ds, TAG.SliceLocation)[0];
+  const n = typeof v === "number" ? v : typeof v === "string" && DECIMAL_STRING.test(v) ? Number(v) : NaN;
   return Number.isFinite(n) ? n : null;
 }
 
@@ -114,6 +125,7 @@ export function instanceFromDicomJson(ds: DicomJsonDataset): InstanceSummary {
     sopClassUid: stringValue(ds, TAG.SOPClassUID),
     instanceNumber: stringValue(ds, TAG.InstanceNumber),
     numberOfFrames: numberValue(ds, TAG.NumberOfFrames),
+    sliceLocation: sliceLocationValue(ds),
   };
 }
 
