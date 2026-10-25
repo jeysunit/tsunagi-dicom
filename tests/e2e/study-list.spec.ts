@@ -1269,6 +1269,64 @@ test("画像の場所：上下の矢印のキーで画像を替える（検査�
   await expect(area.getByTestId("instance-tags").locator("tbody tr")).toHaveCount(25);
 });
 
+test("画像の場所：Home・End のキーで先頭・末尾の画像を選ぶ", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.getByTestId("series-open").click();
+  const area = page.getByTestId("series-images");
+  const list = area.getByTestId("instance-list");
+  await expect(list.getByRole("option")).toHaveCount(4);
+  await list.focus();
+  await page.keyboard.press("End");
+  await expect(list.getByRole("option", { name: "#4" })).toHaveAttribute("aria-selected", "true");
+  await expect(list).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "true");
+  // 先頭でもう一度 Home を押しても動かない
+  await page.keyboard.press("Home");
+  await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "true");
+  // 検査一覧で選んだ行は替わらない
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", STUDY);
+});
+
+test("画像の場所：通信が戻って詳細を取り直しても、開いたシリーズと選んだ画像は先頭へ戻らない", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.getByTestId("series-open").click();
+  const area = page.getByTestId("series-images");
+  const list = area.getByTestId("instance-list");
+  await expect(list.getByRole("option")).toHaveCount(4);
+  const seriesUid = (await area.getAttribute("data-series-uid"))!;
+  await list.getByRole("option", { name: "#3" }).click();
+  await expect(list.getByRole("option", { name: "#3" })).toHaveAttribute("aria-selected", "true");
+  const picked = (await area.getByTestId("uid-line").locator("code").textContent())!;
+
+  // 通信が切れて戻る（ブラウザーの offline → online）。詳細は取り直しになり、その間は画像の場所を隠す
+  const reread = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/studies/${STUDY}` && r.request().method() === "GET");
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+  });
+  await reread;
+  // 同じシリーズが開いたまま、選んだ画像（#3）に戻る。先頭（#1）には戻らない
+  await expect(area).toHaveAttribute("data-series-uid", seriesUid);
+  await expect(list.getByRole("option")).toHaveCount(4);
+  await expect(list.getByRole("option", { name: "#3" })).toHaveAttribute("aria-selected", "true");
+  await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "false");
+  await expect(area.getByTestId("uid-line").locator("code")).toHaveText(picked);
+  await expect(area.getByTestId("instance-tags").locator('tr[data-tag="0008,0018"]')).toContainText(picked);
+});
+
+test("画像の場所：通信が切れたときの文は、ブラウザーの英語でなく日本語で出す", async ({ page }) => {
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.route(/\/api\/studies\/[\d.]+\/series\/[\d.]+\/instances$/, (route) => route.abort("connectionfailed"));
+  await page.getByTestId("series-open").click();
+  const alert = page.getByTestId("series-images").getByRole("alert");
+  await expect(alert).toHaveText("サーバーに接続できません");
+  await expect(page.getByTestId("series-images")).not.toContainText("Failed to fetch");
+});
+
 test("画像の場所の値：HTML の形の値は文字のまま。長い値は 1024 文字で切り、全体の文字数を添える。バイナリは中身を出さない", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
@@ -1394,8 +1452,14 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   version += 1;
   arrived = true;
   hold = new Promise<void>((resolve) => (release = resolve));
-  await page.clock.fastForward(30_000);
-  await expect.poll(() => listReads).toBe(1);
+  // 前の版の読み（上の 2 回目）が画面の側でまだ終わっていないと、その間に来た間隔の知らせは、重なった読みとして
+  // 捨てられる（混んだ環境で、一覧の読み直しが始まらなかった）。一覧の読み直しが始まるまで、間隔を 1 つずつ進める
+  await expect
+    .poll(async () => {
+      if (listReads === 0) await page.clock.fastForward(30_000);
+      return listReads;
+    })
+    .toBe(1);
   // 読み直しの途中（待ちの印を出す 0.3 秒を過ぎても）：細い帯・薄い行・件数の「—」を出さない
   await page.clock.runFor(1_000);
   await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
