@@ -14,19 +14,32 @@ import { cn } from "@/lib/utils";
 // 役割に許された操作だけのボタンを 1 行に並べ、押した操作の画面をその下に出す（1 つずつ）。
 // 行が替わったら、呼ぶ側が key に検査の UID を付けて作り直す（別の検査を送らない・消さないように）。
 // 画面の言葉は docs/spec.md の 2.2（送信・エクスポート（ZIP）・削除…）。
-export function PacsActions({ study, screen, onDeleted }: { study: StudyView; screen: ScreenInfo; onDeleted: (study: StudyView) => void }) {
+export function PacsActions({
+  study,
+  screen,
+  onDeleted,
+  leading,
+}: {
+  study: StudyView;
+  screen: ScreenInfo;
+  onDeleted: (study: StudyView) => void;
+  /** 操作の行の先頭に置く物（主の「開く」。詳細の操作は 1 行にそろえる） */
+  leading?: React.ReactNode;
+}) {
   const [open, setOpen] = useState<"send" | "delete" | null>(null);
   // 送信の画面を閉じた後も、送信の状態を「送信」のボタンの横に出す（Orthanc の送信は閉じても続く。docs/spec.md の 3.4）
   const [activity, setActivity] = useState<SendActivity | null>(null);
   const sendId = useId();
   const deleteId = useId();
   const uid = study.studyInstanceUid ?? "";
-  if (!uid || !(screen.can.send || screen.can.export || screen.can.delete)) return null;
+  if (!uid || !(leading || screen.can.send || screen.can.export || screen.can.delete)) return null;
   const toggle = (which: "send" | "delete") => setOpen((v) => (v === which ? null : which));
 
   return (
     <div className="w-full" data-testid="pacs-actions">
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="検査の操作">
+      {/* 左から、主（開く）・送信・エクスポート。削除は、間をあけて右端に離す（日々の操作と取り違えない） */}
+      <div className="flex flex-wrap items-start gap-2" role="group" aria-label="検査の操作">
+        {leading}
         {screen.can.send && (
           <Button type="button" size="sm" variant="outline" aria-expanded={open === "send"} aria-controls={sendId} data-testid="send-open" onClick={() => toggle("send")}>
             <Send aria-hidden />
@@ -47,10 +60,14 @@ export function PacsActions({ study, screen, onDeleted }: { study: StudyView; sc
           </a>
         )}
         {screen.can.delete && (
-          <Button type="button" size="sm" variant="outline" aria-expanded={open === "delete"} aria-controls={deleteId} className="text-danger" data-testid="delete-open" onClick={() => toggle("delete")}>
-            <Trash2 aria-hidden />
-            削除…
-          </Button>
+          <>
+            {/* 削除の左に、いつも 1rem 以上の間をあける（余りがあれば、間が広がって削除が右端に寄る）。入りきらなければ、削除は次の行の右端へ折り返す */}
+            <span aria-hidden className="grow basis-4" />
+            <Button type="button" size="sm" variant="outline" aria-expanded={open === "delete"} aria-controls={deleteId} className="ml-auto text-danger" data-testid="delete-open" onClick={() => toggle("delete")}>
+              <Trash2 aria-hidden />
+              削除…
+            </Button>
+          </>
         )}
       </div>
       {screen.can.send && (
