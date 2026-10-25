@@ -4,7 +4,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from "@pla
 import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
 import { newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
-import { readAudit, requestTrails } from "./support/audit-db";
+import { latestCsrfToken, readAudit, requestTrails } from "./support/audit-db";
 import { startGate, type Gate } from "./support/gate";
 import { observe, writeObservations } from "./support/observations";
 import { listJobs, lookupStudy, orthanc, orthancJson, waitFor, type OrthancJob } from "./support/orthanc";
@@ -548,7 +548,7 @@ test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像�
   // 送った 3 枚が、画像の番号の順に並ぶ。画面へ返すのは選ぶのに要る値だけ
   expect(instances.map((i) => i.sopInstanceUid)).toEqual(A.sopInstanceUids);
   expect(instances.map((i) => i.instanceNumber)).toEqual(["1", "2", "3"]);
-  expect(Object.keys(instances[0]!).sort()).toEqual(["instanceNumber", "numberOfFrames", "sopClassUid", "sopInstanceUid"]);
+  expect(Object.keys(instances[0]!).sort()).toEqual(["instanceNumber", "numberOfFrames", "sliceLocation", "sopClassUid", "sopInstanceUid"]);
 
   // 1 枚の値の全部。その画像の SOPInstanceUID と画像の番号が入り、ほかの画像のものではない
   const second = A.sopInstanceUids[1]!;
@@ -768,15 +768,18 @@ test("15 HL7 の A40：患者 ID を替え、Study・Series・SOP の UID を保
     body: JSON.stringify({ Level: "Study", Query: { PatientID: temporaryId }, Expand: false })
   })).toEqual([]);
   const rows = readAudit().filter((r) => r.action === "hl7" && r.detail.controlId === controlId);
+  // 付け替えの印を求めた行（lock）は、印を付ける前、request の前に残る（design.md §15.4）
   expect(rows.map((r) => `${r.detail.event}:${r.outcome}`)).toEqual([
     "received:success",
+    "lock:success",
     "request:success",
     "dispatch:success",
     "result:success",
     "ack:success"
   ]);
-  expect(rows[3]!.detail).toMatchObject({
-    writeId: rows[1]!.detail.writeId,
+  expect(rows[1]!.detail).toMatchObject({ writeId: rows[2]!.detail.writeId, oldOrthancId: oldId });
+  expect(rows[4]!.detail).toMatchObject({
+    writeId: rows[2]!.detail.writeId,
     oldOrthancId: oldId,
     newOrthancId: newId,
     before: expect.arrayContaining([expect.objectContaining({ PatientID: temporaryId })]),
@@ -982,8 +985,107 @@ test("18 HL7 照合の後に仮の患者 ID で届いた画像を、統合した
     expect(t).toMatchObject({ PatientID: finalId, AccessionNumber: "" });
 });
 
-// HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後に置く
-test("19 HL7 見回りの書き換えの最中に届いた画像は、本物の Orthanc で消えずに残り、部分反映で止まる（2026-10-25）", async () => {
+/** Orthanc のログに残った、付け替えの印で C-STORE を断った行の数（deploy/orthanc/tsunagi-lock.lua） */
+const lockRefusals = async () => (await compose(["logs", "--no-color", "orthanc"])).split("\n").filter(l => l.includes("tsunagi-lock: refused")).length;
+/** 試験から Orthanc の REST へ、架空の患者の画像を 1 枚入れる（REST・STOW-RS で届く画像の代わり。付け替えの印では断られない） */
+async function restCreate(tags: Record<string, string>) {
+  return orthancJson<{ ID: string }>("tools/create-dicom", {
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({ Tags: { SOPClassUID: "1.2.840.10008.5.1.4.1.1.7", Modality: "OT", SpecificCharacterSet: "ISO_IR 192", ...tags }, Force: true })
+  });
+}
+
+test("20 付け替えの印：期限の切れていない印のある検査と同じ StudyInstanceUID の C-STORE を、Orthanc の Lua が断る（2026-10-25）", async () => {
+  const study = syntheticStudy("lock-first", 56, 1);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [id] = await waitFor("印の試験の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  const lock = (until: number) => orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "PUT", body: String(until), contentType: "text/plain" });
+  const instances = async () => (await orthancJson<unknown[]>(`studies/${id}/instances`)).length;
+
+  // 印の間：同じ Study の新しいシリーズを送ると、storescu は失敗し、Orthanc には入らない
+  expect((await lock(Math.floor(Date.now() / 1000) + 60)).status).toBe(200);
+  const refusedBefore = await lockRefusals();
+  const more = { ...syntheticStudy("lock-more", 56, 2), studyInstanceUid: study.studyInstanceUid };
+  writeDumps(more);
+  await expect(storescuToOrthanc(more.batch)).rejects.toThrow();
+  expect(await instances()).toBe(1);
+  await waitFor("Orthanc のログに断った行が残る", lockRefusals, n => n > refusedBefore, 10_000);
+
+  // 期限の切れた印では断らない
+  expect((await lock(Math.floor(Date.now() / 1000) - 5)).status).toBe(200);
+  await storescuToOrthanc(more.batch);
+  expect(await instances()).toBe(3);
+
+  // 印を外した後の送り直しも受ける（同じ UID の送り直しは上書き）
+  expect((await lock(Math.floor(Date.now() / 1000) + 60)).status).toBe(200);
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "DELETE" })).status).toBe(200);
+  await storescuToOrthanc(more.batch);
+  expect(await instances()).toBe(3);
+
+  // 読めない印の値は、確かめられないので断る（受ける側に倒さない）
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "PUT", body: "not-a-time", contentType: "text/plain" })).status).toBe(200);
+  const unreadable = { ...syntheticStudy("lock-unreadable", 56, 3), studyInstanceUid: study.studyInstanceUid };
+  writeDumps(unreadable);
+  await expect(storescuToOrthanc(unreadable.batch)).rejects.toThrow();
+  expect(await instances()).toBe(3);
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "DELETE" })).status).toBe(200);
+
+  // 引き当て・メタデータの読み取りに失敗したとき、読めない JSON が返ったときも断る。Orthanc の REST を壊せないので、
+  // 試験の Orthanc だけ /tools/execute-script を開け、同じ Lua の中で RestApiPost・RestApiGet を差し替えて filter を呼ぶ
+  // （差し替えは 1 回の実行の中で戻す。Orthanc は Lua を 1 つずつ動かすので、その間の C-STORE には効かない）
+  const filter = (post: string, get: string) => `
+    local realPost, realGet = RestApiPost, RestApiGet
+    RestApiPost = ${post}
+    RestApiGet = ${get}
+    local ok, answer = pcall(ReceivedCStoreInstanceFilter, { StudyInstanceUID = '${study.studyInstanceUid}' }, { RemoteAet = 'ITEST_LUA' }, {})
+    RestApiPost, RestApiGet = realPost, realGet
+    print(ok and tostring(answer) or 'error')`;
+  const found = `function() return '[{"Type":"Study","ID":"${id}"}]' end`;
+  const failing = "function() error('synthetic failure') end";
+  const returning = (json: string) => `function() return '${json}' end`;
+  const cases: [string, string, string, string][] = [
+    ["引き当ての失敗", failing, "realGet", "42752"],
+    ["引き当ての答えが読めない JSON", returning("not json"), "realGet", "42752"],
+    ["引き当ての答えが配列でない", returning("{}"), "realGet", "42752"],
+    ["引き当ての答えに検査の ID が無い", returning('[{"Type":"Study"}]'), "realGet", "42752"],
+    ["引き当ての答えが null だけ", returning("[null]"), "realGet", "42752"],
+    ["引き当ての答えの終わりに null", returning(`[{"Type":"Patient","ID":"x"}, null]`), "realGet", "42752"],
+    ["引き当ての答えに Type が無い", returning(`[{"ID":"${id}"}]`), "realGet", "42752"],
+    ["引き当ての答えの Type が知らない値", returning(`[{"Type":"Stduy","ID":"${id}"}]`), "realGet", "42752"],
+    ["メタデータの読み取りの失敗", found, failing, "42752"],
+    ["メタデータが読めない JSON", found, returning("not json"), "42752"],
+    // ?expand の効かない答え（名前の配列）を、印が無いと読まない
+    ["メタデータが名前の配列", found, returning('["TsunagiLock"]'), "42752"],
+    ["印の値が false", found, returning('{"TsunagiLock":false}'), "42752"],
+    ["印の値が null", found, returning('{"TsunagiLock":null}'), "42752"],
+    ["印の値が配列", found, returning('{"TsunagiLock":[1]}'), "42752"],
+    ["印の番号の値が物", found, returning('{"1024":{}}'), "42752"],
+    // 名前を \u で書いた null（Lua の文字列では \\ が 1 つの \ になる）
+    ["印の名前を \\u で書いた値が null", found, returning('{"\\\\u0054sunagiLock":null}'), "42752"],
+    ["印の値が負の無限大", found, returning('{"TsunagiLock":"-1e999"}'), "42752"],
+    ["印の値が小数", found, returning('{"TsunagiLock":"1.5"}'), "42752"],
+    ["印の値が 0", found, returning('{"TsunagiLock":"0"}'), "42752"],
+    // 比べるため：\u で書いた名前の、期限の切れていない印は断る
+    ["印の名前を \\u で書いた、期限の切れていない印", found, returning('{"\\\\u0054sunagiLock":"99999999999"}'), "42752"],
+    // 比べるため：文字列の中の null（ほかのメタデータの値）では断らない
+    ["ほかのメタデータの値の中の null", found, returning('{"Other":"note:null, \\\\"null\\\\""}'), "0"],
+    // 比べるため：期限の切れた印は受ける
+    ["期限の切れた印", found, returning('{"TsunagiLock":"1"}'), "0"],
+    // 比べるため：差し替えない引き当てと読み取りで、印が無ければ受ける
+    ["印が無い", "realPost", "realGet", "0"]
+  ];
+  for (const [label, post, get, expected] of cases) {
+    const response = await orthanc("tools/execute-script", { method: "POST", body: filter(post, get), contentType: "text/plain" });
+    expect(response.status, label).toBe(200);
+    // 答えは print の全部（filter が断ったときに残す行の後に、試験の print が来る）
+    expect((await response.text()).trim().split("\n").at(-1)?.trim(), label).toBe(expected);
+  }
+});
+
+// HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後（21 の前。21 は人が解いてから流す）に置く
+test("19 HL7 見回りの書き換えの最中の C-STORE は断られ、REST で届いた画像は消えずに残って部分反映で止まる（2026-10-25）", async () => {
   const token = process.env.ITEST_HL7_TOKEN;
   if (!token) {
     throw Error("試験の HL7 token が無い");
@@ -999,10 +1101,20 @@ test("19 HL7 見回りの書き換えの最中に届いた画像は、本物の 
   writeDumps(late);
   await storescuToOrthanc(late.batch);
   await waitFor("同じ UID の検査が 2 件", () => lookupStudy(first.studyInstanceUid), ids => ids.length === 2);
-  // 見回りが書き換えの仕事を作った直後に、仮の患者 ID の 3 つめのシリーズを届ける
+  // 見回りが書き換えの仕事を作った直後に、仮の患者 ID の 3 つめのシリーズを C-STORE で送り（付け替えの印で断られる）、
+  // 4 つめのシリーズを REST で入れる（印では止まらない）
   const during = { ...syntheticStudy("hl7-race-during", 55, 1, { accessionNumber: "", patientName: "UNKNOWN^MALE" }), studyInstanceUid: first.studyInstanceUid };
   writeDumps(during);
-  gate.onceAfterModify(() => storescuToOrthanc(during.batch));
+  const restSop = newUid();
+  let cstore = "";
+  gate.onceAfterModify(async () => {
+    cstore = await storescuToOrthanc(during.batch).then(() => "stored", () => "failed");
+    await restCreate({
+      PatientID: first.patientId, PatientName: "UNKNOWN^MALE", PatientBirthDate: first.patientBirthDate, PatientSex: first.patientSex,
+      StudyInstanceUID: first.studyInstanceUid, SeriesInstanceUID: newUid(), SOPInstanceUID: restSop
+    });
+  });
+  const refusedBefore = await lockRefusals();
   const sweep = async () => {
     const response = await fetch(`${bffUrl}/api/hl7/sweep`, {
       method: "POST",
@@ -1012,24 +1124,78 @@ test("19 HL7 見回りの書き換えの最中に届いた画像は、本物の 
     expect(response.status).toBe(200);
     return await response.json() as { ok: boolean; count: number; skipped: number; blocked?: string };
   };
-  // 届き終える（StableAge は 2 秒）までは書き換えない。書き換えれば、最中に届いた画像のために部分反映で止まる
+  // 届き終える（StableAge は 2 秒）までは書き換えない。書き換えれば、REST で最中に届いた画像のために部分反映で止まる
   const result = await waitFor("見回りが書き換えを試す", sweep, r => r.count > 0 || r.blocked !== undefined, 60_000);
   expect(result).toMatchObject({ ok: true, count: 0, blocked: "画像の一部だけが書き換わった" });
+  // 最中の C-STORE は、付け替えの印で断られた（送り手には失敗が返り、Orthanc には入っていない）
+  expect(cstore).toBe("failed");
+  expect(await lockRefusals()).toBeGreaterThan(refusedBefore);
 
-  // 最中に届いた画像は、仮の患者 ID のまま Orthanc に残っている（Orthanc に元を消させないため）
   const sops = async () => {
     const tags = (await Promise.all((await lookupStudy(first.studyInstanceUid)).map(id =>
       orthancJson<Record<string, Record<string, string>>>(`studies/${id}/instances-tags?simplify`)))).flatMap(t => Object.values(t));
     return tags.map(t => ({ sop: t.SOPInstanceUID, patientId: t.PatientID }));
   };
   const now = await sops();
-  expect(now.filter(i => i.sop === during.sopInstanceUids[0])).toEqual([{ sop: during.sopInstanceUids[0], patientId: first.patientId }]);
+  expect(now.some(i => i.sop === during.sopInstanceUids[0])).toBe(false);
+  // REST で最中に届いた画像は、仮の患者 ID のまま Orthanc に残っている（Orthanc に元を消させないため）
+  expect(now.filter(i => i.sop === restSop)).toEqual([{ sop: restSop, patientId: first.patientId }]);
   // どの画像も失っていない（書き換えた画像は統合した先にあり、元の画像は名指しで消したか、そのまま残っている）
-  for (const sop of [...first.sopInstanceUids, ...late.sopInstanceUids, ...during.sopInstanceUids])
+  for (const sop of [...first.sopInstanceUids, ...late.sopInstanceUids])
     expect(now.some(i => i.sop === sop)).toBe(true);
   const results = readAudit().filter(r => r.action === "hl7" && r.detail.type === "sweep" && r.detail.event === "result"
     && r.studyInstanceUid === first.studyInstanceUid);
   expect(results.at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, state: "Success" } });
+  expect(results.at(-1)!.detail.foreignCopies).toBeUndefined();
+
+  // 書き換えが終われば印は外れ、断られた C-STORE の送り直しは保存される（仮の患者 ID のまま、後から届いた画像として残る）
+  await storescuToOrthanc(during.batch);
+  expect((await sops()).filter(i => i.sop === during.sopInstanceUids[0])).toEqual([{ sop: during.sopInstanceUids[0], patientId: first.patientId }]);
   // 次の見回りも、人が解くまで書き換えない
   expect(await sweep()).toMatchObject({ count: 0, blocked: "結果の分からない書き換えがある" });
+});
+
+test("21 HL7 A40：書き換えた画像が元を消す前に REST で同じ UID の別の画像に置き換わると、ModifiedFrom が合わず、元を消さずに部分反映で止まる（2026-10-25）", async ({ browser }) => {
+  test.setTimeout(180_000);
+  // 19 の部分反映を、管理者が /api/hl7/resolve で解く（解くまで HL7 の書き換えは止まったまま）
+  const pending = readAudit().filter(r => r.action === "hl7" && r.detail.event === "result" && r.detail.partial === true).at(-1);
+  expect(pending).toBeTruthy();
+  const fresh = await newContext(browser);
+  try {
+    const user = adminUser();
+    await submitLogin(fresh.page, user.username, user.changed);
+    await expect(fresh.page).toHaveURL(`${bffUrl}/`);
+    const resolved = await fresh.page.request.post("/api/hl7/resolve", {
+      headers: { origin: bffUrl, "x-csrf-token": latestCsrfToken() },
+      data: { writeId: pending!.detail.writeId, note: "結合の試験：19 の部分反映を確かめた" }
+    });
+    expect(resolved.status()).toBe(200);
+  } finally {
+    await fresh.context.close();
+  }
+
+  const study = syntheticStudy("hl7-foreign-copy", 57, 2);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [oldId] = await waitFor("仮の患者の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  const finalId = "JP-TEST-HL7-FOREIGN";
+  // 仕事が写し終えた後、BFF が元を消す前に、統合した先の患者 ID・同じ値・同じ UID で、中身の違う画像を REST で入れる
+  // （OverwriteInstances で写しが置き換わり、ModifiedFrom が無くなる）
+  const [sop] = study.sopInstanceUids;
+  gate.onceJobSucceeded(async () => {
+    await restCreate({
+      PatientID: finalId, PatientName: "ITEST^FOREIGN", PatientBirthDate: "19700101", PatientSex: study.patientSex,
+      AccessionNumber: study.accessionNumber, StudyInstanceUID: study.studyInstanceUid, SeriesInstanceUID: study.seriesInstanceUid,
+      SOPInstanceUID: sop!, InstitutionName: "ITEST FOREIGN"
+    });
+  });
+  expect(await sendHl7("A40", finalId, { old: study.patientId, name: "ITEST^FOREIGN", birth: "19700101" })).toContain("MSA|AE|");
+  // 元の検査は消さずに残る（どの画像も失っていない）
+  const source = await orthancJson<Record<string, Record<string, string>>>(`studies/${oldId}/instances-tags?simplify`);
+  expect(Object.values(source).map(t => t.SOPInstanceUID).sort()).toEqual([...study.sopInstanceUids].sort());
+  expect(Object.values(source).every(t => t.PatientID === study.patientId)).toBe(true);
+  const result = readAudit().filter(r => r.action === "hl7" && r.detail.event === "result" && r.studyInstanceUid === study.studyInstanceUid).at(-1);
+  expect(result).toMatchObject({ outcome: "failed", detail: { partial: true, foreignCopies: true, state: "Success" } });
+  // 付け替えの印は外れている
+  expect((await orthanc(`studies/${oldId}/metadata/TsunagiLock`)).status).toBe(404);
 });

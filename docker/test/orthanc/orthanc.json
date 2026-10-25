@@ -21,6 +21,11 @@
   "StableAge": 2,
   "SaveJobs": false,
   "OverwriteInstances": true,
+  "LuaScripts": ["/lua/tsunagi-lock.lua"],
+  "ExecuteLuaEnabled": true,
+  "UserMetadata": {
+    "TsunagiLock": 1024
+  },
   "StorageCompression": false,
   "DicomWeb": {
     "Enable": true,

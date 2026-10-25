@@ -153,7 +153,7 @@ describe("画像単位の DICOM タグ（dicom.all_values。docs/spec.md の 3.1
     expect(res.status).toBe(200);
     const { instances } = await res.json();
     expect(instances).toHaveLength(4);
-    for (const i of instances) expect(Object.keys(i).sort()).toEqual(["instanceNumber", "numberOfFrames", "sopClassUid", "sopInstanceUid"]);
+    for (const i of instances) expect(Object.keys(i).sort()).toEqual(["instanceNumber", "numberOfFrames", "sliceLocation", "sopClassUid", "sopInstanceUid"]);
     expect(instances.map((i: { instanceNumber: string }) => i.instanceNumber)).toEqual(["1", "2", "3", "4"]);
     const row = await lastAudit("view_study");
     expect(row).toMatchObject({ outcome: "success", actorRole: "general", studyInstanceUid: STUDY, patientId: "JP-TEST-0004" });

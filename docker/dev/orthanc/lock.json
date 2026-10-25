@@ -1,0 +1,6 @@
+{
+  "LuaScripts": ["/lua/tsunagi-lock.lua"],
+  "UserMetadata": {
+    "TsunagiLock": 1024
+  }
+}
