@@ -50,7 +50,8 @@ local function refusal(studyUid)
   end
   -- 引き当ての答えは、{ Type, ID, Path } の配列
   local list = parse(found, '[')
-  if list == nil or not isList(list) then
+  -- 配列の null の要素は Lua では無いのと同じになり、数えられない（正しい答えの要素はどれも物）
+  if list == nil or not isList(list) or string.find(found, '[%[,]%s*null') then
     return 'lookup unreadable'
   end
   local now = os.time()
