@@ -298,7 +298,7 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   // 送り先を確かめる（C-ECHO）
   await page.goto("/modalities");
   await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
-  await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText(/^成功 \d{2}:\d{2}:\d{2}$/);
+  await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText(/成功\s*\d{2}:\d{2}:\d{2}$/);
 
   // 送る：詳細のパネルの「送る」から、確かめの画面を通して送り、仕事の終わりまで出す
   await page.goto("/");

@@ -150,7 +150,7 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
 
   // すべて接続確認：失敗があっても全部の行に結果が出て、件数を知らせる
   await page.getByTestId("echo-all").click();
-  await expect(page.getByTestId("echo-notice")).toContainText("3 件のうち 1 件に接続できませんでした");
+  await expect(page.getByTestId("echo-notice")).toContainText("3 件のうち、1 件に接続できませんでした");
   await expect(page.getByTestId("echo-result")).toHaveCount(3);
   await expect(page.getByTestId("echo-all")).toBeEnabled();
 

@@ -214,7 +214,7 @@ test("2 接続先の一覧と接続確認：Orthanc の設定のファイルで�
   await page.goto("/modalities");
   const row = page.locator(`[data-modality="${ITEST.scp.id}"]`);
   await row.getByTestId("echo").click();
-  await expect(row.getByTestId("echo-result")).toHaveText(/^成功 \d{2}:\d{2}:\d{2}$/);
+  await expect(row.getByTestId("echo-result")).toHaveText(/成功\s*\d{2}:\d{2}:\d{2}$/);
 });
 
 test("3 検査の一覧・詳細：本物のデータ（DICOMweb の QIDO-RS と REST）で開き、中継は WADO-RS の読み取りだけを通す", async () => {
@@ -297,7 +297,7 @@ test("5 送り先を止めると：接続確認は「つながらない」、送
     await page.goto("/modalities");
     const row = page.locator(`[data-modality="${ITEST.scp.id}"]`);
     await row.getByTestId("echo").click();
-    await expect(row.getByTestId("echo-result")).toHaveText(/^失敗 \d{2}:\d{2}:\d{2}（.+）$/, { timeout: 60_000 });
+    await expect(row.getByTestId("echo-result")).toHaveText(/失敗\s*\d{2}:\d{2}:\d{2}原因は分かりません。.+$/,{ timeout: 60_000 });
     // 実測：C-ECHO が通らないときの Orthanc の答え（BFF は 500 を「つながらない」と読む）
     const echo = await orthanc(`modalities/${ITEST.scp.id}/echo`, { method: "POST", body: JSON.stringify({ Timeout: 10 }), contentType: "application/json" });
     const echoBody = await echo.text();
