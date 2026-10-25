@@ -144,7 +144,7 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
   await expect(page.getByTestId("echo-notice")).toContainText("dtg に接続できました");
   await page.locator('[data-modality="offline"]').getByTestId("echo").click();
   const offline = page.locator('[data-modality="offline"]').getByTestId("echo-result");
-  await expect(offline).toHaveText(/失敗\s*\d{2}:\d{2}:\d{2}原因は分かりません。管理者に、登録の確かめを頼んでください。$/);
+  await expect(offline).toHaveText(/失敗\s*\d{2}:\d{2}:\d{2}原因は分かりません。管理者に、登録の確認を頼んでください。$/);
   // 相手が答えなかったのか断られたのかは応答から分からないので、「応答がありません」などとは書かない
   await expect(offline).not.toContainText("応答がありません");
 
@@ -159,7 +159,7 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
   await expect(page.locator('[data-modality="dtg"]')).toContainText("192.0.2.20:11112");
   await expect(page.getByRole("columnheader", { name: "ホスト名:ポート番号" })).toBeVisible();
   await page.locator('[data-modality="offline"]').getByTestId("echo").click();
-  await expect(page.locator('[data-modality="offline"]').getByTestId("echo-why")).toContainText("ホスト名・ポート番号・AEタイトルを確かめて");
+  await expect(page.locator('[data-modality="offline"]').getByTestId("echo-why")).toContainText("ホスト名・ポート番号・AEタイトルを確認して");
 });
 
 test("接続先：確認そのものを終えられなかったときは、接続できなかったと書かない", async ({ page }) => {
