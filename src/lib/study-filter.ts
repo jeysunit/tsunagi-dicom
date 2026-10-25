@@ -2,6 +2,7 @@ import type { StudyQuery } from "@/lib/backend/types";
 import type { StudyView } from "@/lib/fields";
 import type { SimpleDate } from "@/lib/format/japanese-date";
 import { parseDicomDate } from "@/lib/format/japanese-date";
+import { parsePatientNameForSearch, type ParsedPatientName } from "@/lib/format/patient-name";
 import { orderGroups, parseGroups, studyInGroup, type ModalityGroup } from "@/lib/modalities";
 
 // 検査の一覧のすぐ絞れる見出し（docs/spec.md の 3.1）。
@@ -225,19 +226,33 @@ export function normalizeForSearch(value: string): string {
     .replace(/\s+/g, "");
 }
 
-/** 横断の検索に使う項目（患者 ID・氏名の漢字・かな・英字・受付番号・検査の記述） */
-const SEARCH_FIELDS = [
-  "patientId",
-  "patientName",
-  "patientKana",
-  "patientNameAlphabetic",
-  "accessionNumber",
-  "studyDescription",
-] as const satisfies readonly (keyof StudyView)[];
+/** 横断の検索で、全体が一致するときだけ合う項目（患者 ID・受付番号。「025」で「1025」を出さない。docs/spec.md の 3.1） */
+const EXACT_FIELDS = ["patientId", "accessionNumber"] as const satisfies readonly (keyof StudyView)[];
+/** 横断の検索で、値に含まれていれば合う項目（検査の記述） */
+const PARTIAL_FIELDS = ["studyDescription"] as const satisfies readonly (keyof StudyView)[];
+/** 氏名の項目と、検索に使う氏名の値の名前。氏名は、第3〜5成分まで含めて含まれていれば合う */
+const NAME_FIELDS = [
+  ["patientName", "name"],
+  ["patientKana", "kana"],
+  ["patientNameAlphabetic", "alphabetic"],
+] as const satisfies readonly (readonly [keyof StudyView, keyof ParsedPatientName])[];
+
+/**
+ * 検索にだけ使う氏名（第3〜5成分まで含めた値）。画面の API には返さないので、行の object に結びつけて持つ
+ * （StudyView には載せない。許可の一覧の項目でもない）
+ */
+const searchNames = new WeakMap<StudyView, ParsedPatientName>();
+
+/** 行の氏名の検索用の値（PN の元の値から作る）を、その行に結びつける */
+export function attachSearchNames(view: StudyView, patientName: unknown): void {
+  searchNames.set(view, parsePatientNameForSearch(patientName));
+}
 
 /**
  * 許可の一覧で絞った後の1行が、モダリティ・横断の検索に合うか。
- * 項目が許可されていない（view に無い）ときは、その項目では合わない（隠した項目では探せない）
+ * 項目が許可されていない（view に無い）ときは、その項目では合わない（隠した項目では探せない）。
+ * 患者 ID・受付番号は全体の一致、氏名（漢字・かな・英字）と検査の記述は含むか。氏名は、画面に出す値（姓と名）でなく、
+ * 第3〜5成分（ミドル・接頭・接尾）まで含めた値で当てる。項目が許可されている氏名の値だけを使う
  */
 export function matchesFilter(view: StudyView, filter: StudyFilter): boolean {
   // 選んだ群のどれかに合えば合う（複数選んだときは「または」）
@@ -245,9 +260,16 @@ export function matchesFilter(view: StudyView, filter: StudyFilter): boolean {
   if (groups.length > 0 && !(view.modalities && groups.some((g) => studyInGroup(view.modalities!, g)))) return false;
   if (filter.q) {
     const needle = normalizeForSearch(filter.q);
-    if (needle && !SEARCH_FIELDS.some((k) => typeof view[k] === "string" && normalizeForSearch(view[k]).includes(needle))) {
-      return false;
-    }
+    if (!needle) return true;
+    const exact = EXACT_FIELDS.some((k) => typeof view[k] === "string" && normalizeForSearch(view[k]) === needle);
+    const partial = PARTIAL_FIELDS.some((k) => typeof view[k] === "string" && normalizeForSearch(view[k]).includes(needle));
+    const full = searchNames.get(view);
+    const name = NAME_FIELDS.some(([field, key]) => {
+      const shown = view[field];
+      if (typeof shown !== "string") return false;
+      return normalizeForSearch(full ? full[key] : shown).includes(needle);
+    });
+    if (!(exact || partial || name)) return false;
   }
   return true;
 }
