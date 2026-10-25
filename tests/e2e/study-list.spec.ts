@@ -222,8 +222,13 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   // バナーの項目は、見出しの並び（氏名・患者ID・生年月日・受付番号・検査日時・モダリティ）のとおり
   const labels = await banner.locator("dt").allTextContents();
   expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
-  // UID は、バナーの下の 1 行。高さは、バナー（氏名とかなの 2 行）と UID の 1 行ぶん
-  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(BANNER_HEAD_MAX);
+  // UID は、バナーの下の 1 行。高さは、バナー（氏名とかなの 2 行）と UID の 1 行ぶん。その下の「検査の情報」（項目名と値の対）は含めない
+  expect(
+    await head.evaluate((el) => {
+      const info = el.querySelector("[data-testid=detail-info]");
+      return el.getBoundingClientRect().height - (info ? info.getBoundingClientRect().height + 2 : 0);
+    }),
+  ).toBeLessThanOrEqual(BANNER_HEAD_MAX);
   // StudyInstanceUID は見出しに常に出る（開け閉めしない）。下の「UID」「DICOM タグ」のボタンは無い
   await expect(detail.getByTestId("detail-uid-toggle")).toHaveCount(0);
   await expect(detail.getByTestId("detail-tags-toggle")).toHaveCount(0);
@@ -235,9 +240,10 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   await expect(strip.getByTestId("series-item")).toHaveCount(1);
   await expect(strip).toContainText("Chest Axial 5mm");
   await expect(strip).toHaveCSS("background-color", "rgb(27, 27, 27)");
-  // 一般にもシリーズの画像の場所（主なタグ・すべてのタグ・検査のタグ）がある（前は医師に無かった。役割を2つにした。docs/spec.md の 3.6）
+  // 一般にもシリーズの画像の場所（主なタグ・すべてのタグ）と、Study UID の横の「検査のタグ」がある（前は医師に無かった。役割を2つにした。docs/spec.md の 3.6）
   await strip.getByTestId("series-open").first().click();
-  await expect(detail.getByTestId("tag-set-study")).toHaveCount(1);
+  await expect(detail.getByTestId("tag-set-all")).toHaveCount(1);
+  await expect(detail.getByTestId("study-tags-open")).toHaveCount(1);
 
   // もう一度押しても閉じない（下の詳細は選んだ行のものを出し続ける）。Escape で選びを外すと案内に戻る
   // （期待の変更：行の下に開く形をやめ、もう一度押して閉じる動きを、Escape に替えた。docs/spec.md の 3.1）
@@ -558,9 +564,8 @@ test("応答の順が逆になっても、古い応答が新しい選びを上�
 test("一般は DICOM タグを見られる。どの役割にも検査の状態の印は無い（段 3 で外した）", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
-  // 期待の変更（#57）：検査のタグは、シリーズの画像の場所の「検査のタグ」から見る
-  await page.getByTestId("series-open").first().click();
-  await page.getByTestId("tag-set-study").click();
+  // 期待の変更：検査のタグは、Study UID の横の「検査のタグ」のボタンから見る（前は画像の場所の切り替えの中。#57）
+  await page.getByTestId("study-tags-open").click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
 
   for (const role of ["管理者", "一般"] as const) {
@@ -966,8 +971,10 @@ test("詳細の「検査のタグ」：画像の一覧が読めなくても、�
   await page.getByTestId("series-open").first().click();
   const area = page.getByTestId("series-images");
   await expect(area.getByRole("alert")).toBeVisible();
-  await area.getByTestId("tag-set-study").click();
-  await expect(area.getByTestId("all-values")).toContainText("0010,0020");
+  // 検査のタグは画像に関わらないので、画像の場所の切り替えは出ず、Study UID の横のボタンから見る
+  await expect(area.getByTestId("tag-set-configured")).toHaveCount(0);
+  await page.getByTestId("study-tags-open").click();
+  await expect(page.getByTestId("all-values")).toContainText("0010,0020");
   await page.unroute("**/series/*/instances");
 });
 
@@ -981,33 +988,20 @@ test("詳細：受付番号はバナーに常に出し、英字氏名・和暦�
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   await expect(page.getByTestId("detail-uid")).toHaveCount(0);
   await expect(head.getByTestId("detail-accession")).toContainText("受付番号");
-  // バナーには足さない
-  for (const id of ["detail-referring", "detail-alphabetic", "detail-counts"]) await expect(head.getByTestId(id)).toHaveCount(0);
-  // 「検査の情報」のタブ：最初はシリーズのタブが開いている。押すと、バナーに足さない値が出る
-  const tabs = detail.getByRole("tablist", { name: "検査の内容" });
-  await expect(tabs.getByRole("tab", { name: "シリーズ" })).toHaveAttribute("aria-selected", "true");
-  await expect(detail.getByTestId("detail-info")).toBeHidden();
-  await tabs.getByRole("tab", { name: "検査の情報" }).click();
-  await expect(tabs.getByRole("tab", { name: "検査の情報" })).toHaveAttribute("aria-selected", "true");
-  const info = detail.getByTestId("detail-info");
+  // バナーには足さない（見出しの中の「検査の情報」にある）
+  const banner = head.locator('[aria-label="患者"]');
+  for (const id of ["detail-referring", "detail-alphabetic", "detail-counts"]) await expect(banner.getByTestId(id)).toHaveCount(0);
+  // 「検査の情報」：タブに隠さず、見出しの下に並ぶ。シリーズのサムネイルも同じ画面に見える
+  await expect(detail.getByRole("tablist")).toHaveCount(0);
+  const info = head.getByTestId("detail-info");
   await expect(info).toBeVisible();
-  await expect(detail.getByTestId("series-strip")).toBeHidden();
+  await expect(detail.getByTestId("series-strip")).toBeVisible();
   await expect(info.getByTestId("detail-referring")).toHaveText(/紹介医\s*試験 医師/);
   await expect(info.getByTestId("detail-alphabetic")).toContainText("Shiken Takako");
   await expect(info).toContainText("1960/07/15（昭和35年）");
   await expect(info.getByTestId("detail-counts")).toHaveText(/シリーズ \/ 画像\s*1 \/ 4/);
-  // 左右の矢印のキーでタブを移す。シリーズに戻ると、サムネイルがまた出る
-  await tabs.getByRole("tab", { name: "検査の情報" }).press("ArrowLeft");
-  await expect(tabs.getByRole("tab", { name: "シリーズ" })).toHaveAttribute("aria-selected", "true");
-  await expect(detail.getByTestId("series-strip")).toBeVisible();
-  // 押せる物の無い「検査の情報」も、Tab キーでフォーカスを受ける（キーボードで読み・スクロールできる）。見えていないパネルには移らない
-  await tabs.getByRole("tab", { name: "検査の情報" }).click();
-  await page.keyboard.press("Tab");
-  await expect(detail.getByRole("tabpanel", { name: "検査の情報" })).toBeFocused();
-  await tabs.getByRole("tab", { name: "シリーズ" }).click();
-  await expect(detail.getByRole("tabpanel", { name: "検査の情報", includeHidden: true })).toBeHidden();
-  // 見出しは、バナー（氏名とかなの 2 行）と UID の 1 行に収まる
-  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(BANNER_HEAD_MAX);
+  // 見出し（バナー・UID・検査の情報）は、情報の行の分だけ高くなるが、バナー（2 行）と UID の 1 行と、情報の 1〜2 行に収まる
+  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(BANNER_HEAD_MAX + 48);
 });
 
 test("詳細の見出し：受付番号が無いときも「受付番号 —」を出す（無いこと自体が照合の手がかり）", async ({ page }) => {
@@ -1054,17 +1048,45 @@ test("詳細の見出しは患者バナー：氏名・かな・患者 ID・生�
   expect(strip.y + Math.min(strip.height, 80)).toBeLessThanOrEqual(pane.y + pane.height);
 });
 
-// 期待の変更（#57）：下の「DICOM タグ」のボタン（開け閉め）をやめ、検査単位の要約は画像の場所の「検査のタグ」から見る。
-// ボタンの位置が動かないことの確かめは、切り替えの並び（主なタグ・すべてのタグ・検査のタグ）が動かないことに移した
-test("詳細の「検査のタグ」：画像の場所の切り替えから見る。切り替えても並びの位置は動かない。検査単位（要約）だけを出す", async ({ page }) => {
+// 期待の変更：「検査のタグ」は画像に関わらないので、画像の場所の切り替えから外し、Study UID の横のボタンで開け閉めする（前は #57 で切り替えの 3 つめにした）。
+// 切り替えの並び（主なタグ・すべてのタグ）の位置が動かないことの確かめは残す
+test("詳細の「検査のタグ」：Study UID の横のボタンで開け閉めする。検査単位（要約）だけを出し、画像の場所の切り替えには入らない", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   await expect(page.getByTestId("detail-tags-toggle")).toHaveCount(0);
   await expect(page.getByTestId("dicom-tags")).toHaveCount(0);
+
+  // ボタンは Study UID の行の右（UID と同じ行）にある。押すまでは閉じている
+  const open = page.getByTestId("study-tags-open");
+  await expect(open).toHaveText("検査のタグ");
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  const line = (await page.getByTestId("study-uid").boundingBox())!;
+  const button = (await open.boundingBox())!;
+  expect(button.y).toBeLessThan(line.y + line.height);
+  expect(button.x).toBeGreaterThan(line.x);
+
+  await open.click();
+  await expect(open).toHaveAttribute("aria-expanded", "true");
+  // 中身は検査単位（要約）だけ。画像単位の表と、画像の SOPInstanceUID は出さない
+  const tags = page.getByTestId("dicom-tags");
+  await expect(tags).toContainText("検査単位（要約）");
+  await expect(tags.getByTestId("all-values")).toContainText("0010,0020");
+  await expect(page.getByTestId("instance-tags")).toHaveCount(0);
+  await expect(page.getByTestId("instance-values")).toHaveCount(0);
+  await expect(page.getByTestId("uid-line")).toHaveCount(0);
+
+  // もう一度押すと閉じる
+  await open.click();
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await expect(tags).toHaveCount(0);
+
+  // 画像の場所の切り替えは、画像に関するタグの 2 つだけ。切り替えても並びの位置は動かない
   await page.getByTestId("series-open").first().click();
   const area = page.getByTestId("series-images");
   await expect(area.getByTestId("tag-set-configured")).toHaveAttribute("aria-pressed", "true");
+  await expect(area.getByRole("group", { name: "タグの表示" }).getByRole("button")).toHaveText(["主なタグ", "すべてのタグ"]);
+  await expect(area.getByTestId("tag-set-study")).toHaveCount(0);
   const place = (testId: string) =>
     page.getByTestId(testId).evaluate((el) => {
       // 詳細の場所はスクロールするので、画像の場所の頭からの位置で比べる
@@ -1072,25 +1094,13 @@ test("詳細の「検査のタグ」：画像の場所の切り替えから見�
       const top = el.closest("[data-testid=series-images]")!.getBoundingClientRect();
       return { x: r.left - top.left, y: r.top - top.top };
     });
-  const before = await place("tag-set-study");
-  await area.getByTestId("tag-set-study").click();
-  await expect(area.getByTestId("tag-set-study")).toHaveAttribute("aria-pressed", "true");
-  expect(await place("tag-set-study")).toEqual(before);
-
-  // 中身は検査単位（要約）だけ。画像単位の表と、画像の SOPInstanceUID は出さない
-  const tags = area.getByTestId("dicom-tags");
-  await expect(tags).toContainText("検査単位（要約）");
-  await expect(tags.getByTestId("all-values")).toContainText("0010,0020");
-  await expect(tags.getByRole("button")).toHaveCount(0);
-  await expect(area.getByTestId("instance-tags")).toHaveCount(0);
-  await expect(area.getByTestId("instance-values")).toHaveCount(0);
-  await expect(area.getByTestId("uid-line")).toHaveCount(0);
-
-  // 主なタグに戻すと、画像単位の表に戻り、切り替えの位置は動かない
+  const before = await place("tag-set-all");
+  await area.getByTestId("tag-set-all").click();
+  await expect(area.getByTestId("tag-set-all")).toHaveAttribute("aria-pressed", "true");
+  expect(await place("tag-set-all")).toEqual(before);
   await area.getByTestId("tag-set-configured").click();
-  await expect(tags).toHaveCount(0);
   await expect(area.getByTestId("instance-tags")).toBeVisible();
-  expect(await place("tag-set-study")).toEqual(before);
+  expect(await place("tag-set-all")).toEqual(before);
 });
 
 // 移した試験：前は「DICOM タグ」の画像単位で、シリーズと画像を選ぶ欄から確かめていた（2026-10-21）。
