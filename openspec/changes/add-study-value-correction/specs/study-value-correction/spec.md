@@ -20,24 +20,43 @@ BFF は、値の修正の要求を、属性の訂正（PatientID・PatientName�
 - **WHEN** 種類が `attribute` で、直す項目が StudyDescription の要求が来る
 - **THEN** BFF は 400 を返し、Orthanc は変わらない
 
+### Requirement: 値の修正は項目の有無と空の値を分ける
+
+BFF は、要求に無い項目を変えてはならない（SHALL NOT）。空の文字列の項目は、タグを残したまま値を空にしなければならない（SHALL。PatientName・PatientBirthDate・PatientSex・AccessionNumber・StudyDate は Type 2）。患者 ID を空にする要求は断る（SHALL）。
+
+#### Scenario: 空だった生年月日を前の値に戻す
+
+- **WHEN** 生年月日が空の患者に生年月日を入れた後、生年月日を空の文字列にする属性の訂正を求める
+- **THEN** 全部の画像の PatientBirthDate がタグを残したまま空になり、UID は変わらない
+
+#### Scenario: 患者 ID を空にする
+
+- **WHEN** 患者 ID を空の文字列にする要求が来る
+- **THEN** BFF は 400 を返し、Orthanc は変わらない
+
 ### Requirement: 属性の訂正は UID を保つ
 
-BFF は、属性の訂正で、検査の全部の画像の Study・Series・SOP Instance UID を保たなければならない（SHALL。IHE RAD TF-2 Rev. 23.0 の 4.14.4.1.3・4.13.4.3）。患者 ID を変える訂正は、付け替えの印を付けてから書き換え、書き換えた画像が揃ったことを確かめてから元の画像を名指しで消さなければならない（SHALL）。Orthanc に元の検査を消させてはならない（SHALL NOT。`KeepSource: false` を渡さない）。新しい患者 ID の患者が Orthanc にすでにあり、氏名・生年月日・性別が違うときは、書き換えてはならない（SHALL NOT）。
+BFF は、属性の訂正で、検査の全部の画像の Study・Series・SOP Instance UID を保たなければならない（SHALL。IHE RAD TF-2 Rev. 23.0 の 4.14.4.1.3・4.13.4.3）。患者 ID を変える訂正は、付け替えの印を付けてから書き換え、書き換えた画像が揃ったことを確かめてから元の画像を名指しで消さなければならない（SHALL）。Orthanc に元の検査を消させてはならない（SHALL NOT。`KeepSource: false` を渡さない）。氏名・生年月日・性別の訂正は、同じ患者 ID の Orthanc の全部の検査に当てなければならない（SHALL。PS3.3 C.7.1.1）。患者 ID の付け替えと受付番号の訂正は、選んだ1つの検査だけに当てる（SHALL）。患者 ID の付け替えで替え先の患者が Orthanc にあるときは、氏名・生年月日・性別をその患者の値にそろえ、利用者が確かめの画面で入力した値がその患者の値と違えば、書き換えてはならない（SHALL NOT）。
 
 #### Scenario: 氏名の訂正
 
-- **WHEN** 一般の利用者が、理由を付け、再認証の後に、ある検査の氏名を直す
-- **THEN** 全部の画像の氏名が直した値になり、Study・Series・SOP Instance UID は変わらず、同じ UID の検査は1件だけになる
+- **WHEN** 一般の利用者が、理由を付け、再認証の後に、検査が2件ある患者の氏名を直す
+- **THEN** 2件の検査の全部の画像の氏名が直した値になり、Study・Series・SOP Instance UID は変わらず、同じ UID の検査はそれぞれ1件だけになる
 
-#### Scenario: 患者 ID の訂正
+#### Scenario: 患者 ID の付け替え
 
-- **WHEN** 管理者が、ある検査の患者 ID を、Orthanc にまだ無い患者 ID に直す
-- **THEN** 全部の画像が新しい患者 ID の検査に移り、UID は変わらず、元の患者 ID の下にその UID の画像は残らない
+- **WHEN** 管理者が、ある検査の患者 ID を、Orthanc にまだ無い患者 ID に付け替える
+- **THEN** その検査の全部の画像が新しい患者 ID の検査に移り、UID は変わらず、元の患者 ID の下にその UID の画像は残らず、元の患者のほかの検査は変わらない
 
-#### Scenario: 替え先の患者の属性が違う
+#### Scenario: 替え先の患者の値と入力が違う
 
-- **WHEN** 直す先の患者 ID の患者が Orthanc にあり、生年月日が違う
+- **WHEN** 付け替える先の患者 ID の患者が Orthanc にあり、利用者が入力した生年月日がその患者の値と違う
 - **THEN** BFF は書き換えずに断り、Orthanc は変わらない
+
+#### Scenario: 確かめの後に検査が変わった
+
+- **WHEN** 利用者が確かめの画面を開いた後、実行の前に、HL7 の A40 がその検査を別の患者へ移す
+- **THEN** BFF は書き換えずに 409 を返し、Orthanc は A40 の後のまま変わらない
 
 #### Scenario: 書き換えの後の確かめが合わない
 
