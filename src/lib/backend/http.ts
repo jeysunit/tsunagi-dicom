@@ -360,6 +360,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const query = new URLSearchParams();
       query.append("includefield", TAG.InstanceNumber);
       query.append("includefield", TAG.NumberOfFrames);
+      // スライス位置は、画像サーバーが返したときだけ一覧に添える（返さなくてもよい）
+      query.append("includefield", TAG.SliceLocation);
       // 監査の記録の「どの患者」に使う
       query.append("includefield", TAG.PatientID);
       const rows = await getJson<DicomJsonDataset[]>(

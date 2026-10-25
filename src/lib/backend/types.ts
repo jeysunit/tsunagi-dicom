@@ -46,6 +46,8 @@ export interface InstanceSummary {
   sopClassUid: string;
   instanceNumber: string;
   numberOfFrames: number | null;
+  /** スライス位置 SliceLocation (0020,1041)。画像サーバーの QIDO-RS が返し、値が数のときだけ（それ以外は null）。並びには使わない */
+  sliceLocation: number | null;
 }
 
 /** 検査の検索の条件。日付は DICOM の DA（YYYYMMDD）。画像サーバーへは QIDO-RS の条件として渡す */

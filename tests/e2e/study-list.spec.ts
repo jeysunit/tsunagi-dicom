@@ -83,8 +83,51 @@ test("すぐ絞れる見出し：期間の指定・モダリティ・横断の�
   await page.getByTestId("study-search").fill("該当しない語");
   // 文言は docs/spec.md の 2.2（合う検査が無い→該当する検査はありません）。条件をクリアで、すべての検査に戻る
   await expect(page.getByText("該当する検査はありません")).toBeVisible();
-  await page.getByRole("button", { name: "条件をクリア" }).click();
+  // 「条件をクリア」は、帯の右と、空の案内の中の 2 つある（期待の変更：帯の右にいつも置くようにした。2026-10-25）。空の案内の中のほうを押す
+  await page.getByTestId("study-list-empty").getByRole("button", { name: "条件をクリア" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
+});
+
+test("絞り込みの帯：muted-strong の地の 1 つの帯。「条件をクリア」は帯の右にいつもあり、絞っているときだけ押せる。件数 0 の見出しは薄いが押せる", async ({ page }) => {
+  await asRole(page, "一般");
+  const band = page.getByTestId("study-filters");
+  const clear = band.getByTestId("filter-clear");
+  // 帯の地は muted-strong（明るい地で #e2e2e2）で、検査日・検索・詳細条件・モダリティ・クリアが同じ帯の中にある
+  expect(await band.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(226, 226, 226)");
+  for (const id of ["date-all", "study-search", "filter-more", "modality-all"]) await expect(band.getByTestId(id)).toBeVisible();
+  // 絞っていないときは、位置はそのままで、押せない
+  await expect(clear).toBeDisabled();
+  const idle = (await clear.boundingBox())!;
+  const bandBox = (await band.boundingBox())!;
+  expect(idle.x + idle.width).toBeGreaterThan(bandBox.x + bandBox.width - 24);
+
+  // 絞ると押せるようになり、位置は動かない。押すと、すべての検査に戻る（検索の欄の字も消える）
+  await page.getByTestId("study-search").fill("JP-TEST-0004");
+  await expect(clear).toBeEnabled();
+  expect(await clear.boundingBox()).toEqual(idle);
+  await clear.click();
+  await expect(page.getByTestId("study-search")).toHaveValue("");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(clear).toBeDisabled();
+
+  // 打ちかけの字（絞り込みに反映する前）でも押せる
+  await page.getByTestId("study-search").pressSequentially("あ");
+  await expect(clear).toBeEnabled();
+  await clear.click();
+  await expect(clear).toBeDisabled();
+
+  // 件数が 0 の見出しは、薄い文字（label）で出し、押せるままにする。件数のある見出しは通常の文字
+  const zero = band.locator("[data-testid^=modality-][data-dim]").first();
+  await expect(zero).toBeVisible();
+  await expect(zero).toContainText("(0)");
+  const color = (id: string) => band.getByTestId(id).evaluate((el) => getComputedStyle(el).color);
+  const normal = await color("date-all");
+  const dimmed = await zero.evaluate((el) => getComputedStyle(el).color);
+  expect(dimmed).not.toBe(normal);
+  await expect(zero).toBeEnabled();
+  await zero.click();
+  await expect(page.getByTestId("study-count")).toHaveText("0");
+  await expect(zero).toHaveAttribute("aria-pressed", "true");
 });
 
 test("0 件でも一覧の場所が分かる：表の枠と見出しの行を出し、空の案内は表の中。絞り込みが既定なら「条件をクリア」を出さない", async ({ page }) => {
@@ -104,11 +147,13 @@ test("0 件でも一覧の場所が分かる：表の枠と見出しの行を出
   await page.route(/\/api\/studies$/, (route) =>
     route.fulfill({ json: { count: { count: 0, exact: true }, studies: [], facets: { modality: { all: 0 } } } }),
   );
-  await page.getByRole("button", { name: "条件をクリア" }).click();
+  await table.getByRole("button", { name: "条件をクリア" }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByTestId("study-count")).toHaveText("0");
   await expect(table.getByTestId("study-list-empty")).toBeVisible();
-  await expect(page.getByRole("button", { name: "条件をクリア" })).toHaveCount(0);
+  // 期待の変更（絞り込みの帯の右の「条件をクリア」は、いつも置く。2026-10-25）：案内の中の戻す先の無いボタンは出さず、帯のボタンは押せない
+  await expect(table.getByRole("button", { name: "条件をクリア" })).toHaveCount(0);
+  await expect(page.getByTestId("filter-clear")).toBeDisabled();
   await expect(table.locator("thead")).toContainText("患者ID");
 });
 
@@ -119,7 +164,7 @@ test("0 件の案内は、狭い画面でも見えている幅の中に出る（
   const list = (await page.getByTestId("study-list-scroll").boundingBox())!;
   const empty = page.getByTestId("study-table").getByTestId("study-list-empty");
   await expect(empty).toBeVisible();
-  for (const target of [empty, page.getByRole("button", { name: "条件をクリア" })]) {
+  for (const target of [empty, empty.getByRole("button", { name: "条件をクリア" })]) {
     const box = (await target.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(list.x);
     expect(box.x + box.width).toBeLessThanOrEqual(list.x + list.width);
@@ -911,7 +956,8 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
   await expect(page.getByTestId("filter-more")).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("filter-accession")).toHaveValue("該当しない");
   await expect(page.getByTestId("study-count")).toHaveText("0");
-  await page.getByRole("button", { name: "条件をクリア" }).click();
+  // 帯の右の「条件をクリア」を押す（0 件の案内の中にも同じ名前のボタンがある）
+  await page.getByTestId("filter-clear").click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await expect(page.getByTestId("filter-more-count")).toHaveCount(0);
 });
@@ -1125,7 +1171,8 @@ test("サムネイルを押すと、下に画像の場所を開く：画像の�
   await expect(area).toContainText("#1 Chest Axial 5mm");
   // 画像の一覧：画像の番号の順。最初は先頭を選ぶ
   const list = area.getByTestId("instance-list");
-  await expect(list.getByRole("option")).toHaveText(["#1", "#2", "#3", "#4"]);
+  // 期待の変更（スライス位置。2026-10-25）：画像サーバー（モック）がスライス位置を返すので、番号の横に「-50 mm」を添える
+  await expect(list.getByRole("option")).toHaveText(["#1 -50 mm", "#2 -45 mm", "#3 -40 mm", "#4 -35 mm"]);
   await expect(list.getByRole("option", { name: "#1" })).toHaveAttribute("aria-selected", "true");
   // 既定は「主なタグ」：既定の 25 のタグを、タグ・タグ名・VR・値で出す
   await expect(area.getByTestId("tag-set-configured")).toHaveAttribute("aria-pressed", "true");
@@ -1160,6 +1207,21 @@ test("サムネイルを押すと、下に画像の場所を開く：画像の�
   await thumb.click();
   await expect(thumb).toHaveAttribute("aria-pressed", "false");
   await expect(area).toHaveCount(0);
+});
+
+test("画像の一覧のスライス位置：返したときだけ番号の横に添え、返さない・数でない値は番号だけ。並びは画像の番号の順のまま", async ({ page }) => {
+  // 画像サーバーが返さない形（実の Orthanc の既定）：スライス位置が null の行と、数のある行を混ぜる
+  await page.route(/\/api\/studies\/[\d.]+\/series\/[\d.]+\/instances$/, async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { instances: { sliceLocation: number | null }[] };
+    body.instances.forEach((i, n) => (i.sliceLocation = n === 1 ? 12.5 : n === 2 ? 3.14159 : null));
+    await route.fulfill({ response: res, json: body });
+  });
+  await asRole(page, "一般");
+  await row(page).click();
+  await page.getByTestId("series-strip").getByTestId("series-open").click();
+  const list = page.getByTestId("series-images").getByTestId("instance-list");
+  await expect(list.getByRole("option")).toHaveText(["#1", "#2 12.5 mm", "#3 3.14 mm", "#4"]);
 });
 
 test("画像の場所：上下の矢印のキーで画像を替える（検査一覧の行は動かない）。「すべてのタグ」は値の全部で、画像を替えても保つ", async ({ page }) => {

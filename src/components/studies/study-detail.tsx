@@ -180,12 +180,16 @@ interface InstanceItem {
   sopClassUid: string;
   instanceNumber: string;
   numberOfFrames: number | null;
+  /** スライス位置（mm）。画像サーバーが返したときだけ数、それ以外は null */
+  sliceLocation: number | null;
 }
 
-/** 画像の一覧の 1 行の文字（画像の番号。無ければ SOPInstanceUID。複数フレームの画像はフレームの数も） */
+/** 画像の一覧の 1 行の文字（画像の番号。無ければ SOPInstanceUID。スライス位置があれば「12.5 mm」。複数フレームの画像はフレームの数も） */
 function instanceLabel(i: InstanceItem): string {
   const frames = i.numberOfFrames != null && i.numberOfFrames > 1 ? `（${i.numberOfFrames} フレーム）` : "";
-  return `${i.instanceNumber ? `#${i.instanceNumber}` : i.sopInstanceUid}${frames}`;
+  // 小数 2 位までに丸める（DS の「-55.0000」のような桁を並べない）
+  const slice = i.sliceLocation != null && Number.isFinite(i.sliceLocation) ? ` ${Math.round(i.sliceLocation * 100) / 100} mm` : "";
+  return `${i.instanceNumber ? `#${i.instanceNumber}` : i.sopInstanceUid}${slice}${frames}`;
 }
 
 /** 画像の場所のタグの組：主なタグ（設定の INSTANCE_TAGS）・すべてのタグ（その画像の値の全部）。検査のタグ（検査単位の要約）は、画像に関わらないので、Study UID の横から開く */

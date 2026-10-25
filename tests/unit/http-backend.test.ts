@@ -95,6 +95,8 @@ beforeAll(async () => {
           "00080018": { vr: "UI", Value: [sop] },
           "00100020": { vr: "LO", Value: ["JP-TEST-0001"] },
           "00200013": { vr: "IS", Value: [n] },
+          // スライス位置（DS）。画像サーバーが返したときだけ一覧に添える
+          ...(n === 1 ? { "00201041": { vr: "DS", Value: ["12.50"] } } : {}),
         });
         res.writeHead(200, { "content-type": "application/dicom+json" });
         res.end(JSON.stringify([row("1.2.3", "4.5.6", "7.8.9", 1), row("9.9.9", "4.5.6", "7.8.10", 2), row("1.2.3", "9.9.9", "7.8.11", 3), row(null, null, "7.8.12", 4)]));
@@ -317,10 +319,10 @@ describe("実の画像サーバーへの接続", () => {
     const found = await b.searchInstances("1.2.3", "4.5.6");
     const list = new URL(seen.at(-1)!.url, "https://x");
     expect(list.pathname).toBe("/dicom-web/studies/1.2.3/series/4.5.6/instances");
-    expect(list.searchParams.getAll("includefield")).toEqual(["00200013", "00280008", "00100020"]);
+    expect(list.searchParams.getAll("includefield")).toEqual(["00200013", "00280008", "00201041", "00100020"]);
     // 答えの検査・シリーズの UID が求めたものと違う行・UID の無い行は返さない
     expect(found.map((i) => i.sopInstanceUid)).toEqual(["7.8.9"]);
-    expect(found[0]).toMatchObject({ patientId: "JP-TEST-0001", instanceNumber: "1" });
+    expect(found[0]).toMatchObject({ patientId: "JP-TEST-0001", instanceNumber: "1", sliceLocation: 12.5 });
 
     const ds = await b.instanceDataset("1.2.3", "4.5.6", "7.8.9");
     expect(seen.at(-1)).toMatchObject({ url: "/dicom-web/studies/1.2.3/series/4.5.6/instances/7.8.9/metadata", method: "GET", accept: "application/dicom+json" });
