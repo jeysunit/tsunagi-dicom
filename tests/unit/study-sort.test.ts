@@ -76,14 +76,42 @@ describe("並べ替え", () => {
     expect(uids(sortStudies([sa, kata, hira], { key: "kana", dir: "asc" }))).toEqual(["kata", "hira", "sa"]);
   });
 
-  it("年齢：昇順は若い順（生年月日の新しい順）", () => {
-    const old = view("old", { patientBirthDate: "19400101" });
-    const young = view("young", { patientBirthDate: "20150101" });
+  it("年齢：昇順は若い順", () => {
+    const old = view("old", { patientBirthDate: "19400101", studyDate: "20260101" });
+    const young = view("young", { patientBirthDate: "20150101", studyDate: "20260101" });
     const none = view("none");
     expect(uids(sortStudies([old, none, young], { key: "age", dir: "asc" }))).toEqual(["young", "old", "none"]);
     expect(uids(sortStudies([old, none, young], { key: "age", dir: "desc" }))).toEqual(["old", "young", "none"]);
     // 生年月日の列は生年月日の順
     expect(uids(sortStudies([young, old], { key: "birth", dir: "asc" }))).toEqual(["old", "young"]);
+  });
+
+  it("年齢：列に出す、検査日の時点の満年齢で比べる（検査日が違っても）", () => {
+    // 2000 年生まれを 2025 年に検査（25歳）と、1990 年生まれを 2000 年に検査（10歳）
+    const adult = view("adult", { patientBirthDate: "20000101", studyDate: "20250601" });
+    const child = view("child", { patientBirthDate: "19900101", studyDate: "20000601" });
+    const noDate = view("noDate", { patientBirthDate: "19800101" });
+    expect(uids(sortStudies([adult, noDate, child], { key: "age", dir: "asc" }))).toEqual(["child", "adult", "noDate"]);
+    expect(uids(sortStudies([adult, noDate, child], { key: "age", dir: "desc" }))).toEqual(["adult", "child", "noDate"]);
+    // 同じ年齢は読んだ順のまま
+    const same = view("same", { patientBirthDate: "20000101", studyDate: "20250101" });
+    expect(uids(sortStudies([adult, same], { key: "age", dir: "asc" }))).toEqual(["adult", "same"]);
+  });
+
+  it("検査日時：検査日の無い行は、昇順でも降順でも最後", () => {
+    const dated = view("dated", { studyDate: "20260101", studyTime: "0900" });
+    const undated = view("undated");
+    expect(uids(sortStudies([undated, dated], { key: "date", dir: "asc" }))).toEqual(["dated", "undated"]);
+    expect(uids(sortStudies([undated, dated], { key: "date", dir: "desc" }))).toEqual(["dated", "undated"]);
+  });
+
+  it("患者 ID・受付番号：全角半角・大文字小文字の違いは同じ値として、読んだ順のまま", () => {
+    const upper = view("upper", { patientId: "ABC1", accessionNumber: "ACC1" });
+    const lower = view("lower", { patientId: "abc1", accessionNumber: "acc1" });
+    const wide = view("wide", { patientId: "ＡＢＣ１", accessionNumber: "ＡＣＣ１" });
+    const after = view("after", { patientId: "abc2", accessionNumber: "acc2" });
+    expect(uids(sortStudies([after, wide, lower, upper], { key: "id", dir: "asc" }))).toEqual(["wide", "lower", "upper", "after"]);
+    expect(uids(sortStudies([after, wide, lower, upper], { key: "accession", dir: "asc" }))).toEqual(["wide", "lower", "upper", "after"]);
   });
 
   it("モダリティ／検査名：モダリティ、検査名の順", () => {

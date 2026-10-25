@@ -1,4 +1,5 @@
 import type { StudyView } from "@/lib/fields";
+import { formatAge } from "@/lib/format/japanese-date";
 import { normalizeForSearch } from "@/lib/study-filter";
 
 // 検査の一覧の列見出しでの並べ替え（docs/spec.md の 3.1）。
@@ -28,25 +29,28 @@ const collator = new Intl.Collator("ja", { numeric: true });
 
 /**
  * 並べ替えの値。文字は全角半角・大文字小文字・かなをそろえる。氏名は、かなの氏名があればそれ（五十音順）、無ければ氏名。
- * 年齢は生年月日の逆（若い順が昇順）なので、値の無い行を最後にするために、方向だけ入れ替える（sortStudies）
+ * 年齢は、列に出している検査日の時点の満年齢（formatAge）。読めない値は空（最後に置く）
  */
 function sortValue(view: StudyView, key: SortKey): string {
   switch (key) {
     case "date":
-      return `${view.studyDate ?? ""}${(view.studyTime ?? "").padEnd(6, "0")}`;
+      return view.studyDate ? `${view.studyDate}${(view.studyTime ?? "").padEnd(6, "0")}` : "";
     case "id":
-      return view.patientId ?? "";
+      return normalizeForSearch(view.patientId ?? "");
     case "accession":
-      return view.accessionNumber ?? "";
+      return normalizeForSearch(view.accessionNumber ?? "");
     case "name":
       return normalizeForSearch(view.patientKana || view.patientName || "");
     case "kana":
       return normalizeForSearch(view.patientKana ?? "");
     case "birth":
-    case "age":
       return view.patientBirthDate ?? "";
+    case "age": {
+      const age = Number.parseInt(formatAge(view.patientBirthDate, view.studyDate), 10);
+      return Number.isNaN(age) ? "" : String(age).padStart(3, "0");
+    }
     case "sex":
-      return view.patientSex ?? "";
+      return normalizeForSearch(view.patientSex ?? "");
     case "desc":
       return normalizeForSearch([view.modalities?.join(" "), view.studyDescription].filter(Boolean).join(" "));
   }
@@ -54,8 +58,7 @@ function sortValue(view: StudyView, key: SortKey): string {
 
 /** 並べ替えた新しい配列を返す（同じ値の行は、渡された順のまま） */
 export function sortStudies(studies: readonly StudyView[], sort: StudySort): StudyView[] {
-  // 年齢の昇順は、生年月日の新しい順
-  const sign = (sort.dir === "asc" ? 1 : -1) * (sort.key === "age" ? -1 : 1);
+  const sign = sort.dir === "asc" ? 1 : -1;
   const keyed = studies.map((view, index) => ({ view, index, value: sortValue(view, sort.key) }));
   keyed.sort((a, b) => {
     if (a.value === "" || b.value === "") {
