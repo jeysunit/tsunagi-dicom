@@ -80,12 +80,12 @@ function jisOf(char: string): string | undefined {
  * 文字を ISO-2022-JP（ISO 2022 IR 87）の 7 bit の文字の並びにする。ASCII に戻してから区切り（`^`・`=`・`\`）を書く。
  * dump の `[…]` の中に入るので、JIS の 2 バイトに `[`・`\`・`]` が出る文字は断る
  */
-export function encodeIso2022Jp(text: string): string {
+export function encodeIso2022Jp(text: string, backToG0 = "\x1b(B"): string {
   let out = "";
   let kanji = false;
   for (const ch of text) {
     if (ch.charCodeAt(0) < 0x80) {
-      if (kanji) out += "\x1b(B";
+      if (kanji) out += backToG0;
       kanji = false;
       out += ch;
       continue;
@@ -97,8 +97,14 @@ export function encodeIso2022Jp(text: string): string {
     kanji = true;
     out += jis;
   }
-  return kanji ? `${out}\x1b(B` : out;
+  return kanji ? `${out}${backToG0}` : out;
 }
+
+/**
+ * 先頭の値が ISO 2022 IR 13 の画像の氏名・検査名。PS3.5 の H.3.2 の例と同じく、区切りの前で G0 を
+ * ISO-IR 14（JIS X 0201 のローマ字。ESC ( J）に戻す
+ */
+export const encodeIso2022JpAfterIr13 = (text: string): string => encodeIso2022Jp(text, "\x1b(J");
 
 /**
  * ISO 2022 IR 13（JIS X 0201）の 1 バイトの並びにする。半角カナ（U+FF61〜U+FF9F）は 0xA1〜0xDF、ASCII はそのまま

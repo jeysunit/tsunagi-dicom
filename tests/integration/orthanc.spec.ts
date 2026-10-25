@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { compose, findscuStudy, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc, type FindAnswer } from "./support/docker";
-import { encodeIr13, encodeIso2022Kr, newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
+import { encodeIr13, encodeIso2022JpAfterIr13, encodeIso2022Kr, newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
 import { latestCsrfToken, readAudit, requestTrails } from "./support/audit-db";
 import { startGate, type Gate } from "./support/gate";
@@ -634,7 +634,7 @@ test("22 文字の集合の組み合わせ：Orthanc が日本語・ハングル
     // 規格どおりの組。1 つ目が空（ASCII の G0 のまま）なら崩れない（対照）
     { key: "jis-empty-ir87", charset: "\\ISO 2022 IR 87", encode: undefined, text: jp },
     // 規格どおりの組（PS3.5 Annex H の H.3-2 と同じ）。Orthanc は 1 つ目（IR 13 = Shift_JIS）で全体を読む
-    { key: "jis-ir13-ir87", charset: "ISO 2022 IR 13\\ISO 2022 IR 87", encode: undefined, text: jp },
+    { key: "jis-ir13-ir87", charset: "ISO 2022 IR 13\\ISO 2022 IR 87", encode: encodeIso2022JpAfterIr13, text: jp },
     // 1 つ目が明示の ASCII（IR 6）の組
     { key: "jis-ir6-ir87", charset: "ISO 2022 IR 6\\ISO 2022 IR 87", encode: undefined, text: jp },
     // 1 つの値の ISO_IR 13（半角カナ。コード拡張を使わない）
