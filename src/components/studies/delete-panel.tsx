@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ActionButton, PendingText } from "@/components/ui/pending";
+import { ConfirmActions, ConfirmPanel } from "@/components/ui/confirm-panel";
+import { PendingText } from "@/components/ui/pending";
+import { ReauthForm } from "@/components/ui/reauth-form";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { getJson } from "@/lib/client/api";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 import type { StudyView } from "@/lib/fields";
-import { formatSlashDate } from "@/lib/format/japanese-date";
+import { formatBirthLine, formatSlashDate } from "@/lib/format/japanese-date";
 
 // 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確かめの画面：消す検査を並べ、「戻せない」ことを示し、
 // 理由を書いてから「削除する」を押す。大事な操作なので、BFF が再認証を求めたら、パスワードを入れてから続ける（TOTP は求めない）。
@@ -169,7 +170,42 @@ export function DeletePanel({
 
   const busy = phase.kind === "busy";
   return (
-    <div id={panelId} role="group" aria-label="検査の削除" className="mt-2 space-y-2 rounded-md border border-danger bg-surface p-3" data-testid="delete-panel">
+    <ConfirmPanel
+      id={panelId}
+      label="検査の削除"
+      tone="danger"
+      testId="delete-panel"
+      confirmTestId="delete-confirm"
+      focusReady={preview !== null}
+      summary={
+        preview
+          ? {
+              name: preview.patientName,
+              patientId: preview.patientId,
+              birthLine: formatBirthLine(study.patientBirthDate, study.patientSex, preview.studyDate),
+            }
+          : undefined
+      }
+      details={
+        preview && (
+          // 確かめの画面：消す検査を表の形で並べ、取り消せないことを示す（docs/spec.md の 3.5）
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+            <dt className="text-xs text-label">削除する検査</dt>
+            <dd>
+              {formatSlashDate(preview.studyDate)} {study.modalities?.join("・")}／{preview.seriesCount} シリーズ・{preview.instanceCount} 画像
+            </dd>
+          </dl>
+        )
+      }
+      reversible={
+        preview && (
+          <>
+            <p className="font-bold text-danger">この操作は取り消せません。</p>
+            <p className="text-xs text-label">元に戻すには、再度インポートするか送信元から再送します</p>
+          </>
+        )
+      }
+    >
       {previewError && (
         <p role="alert" className="text-danger" data-testid="delete-preview-error">
           {previewError}
@@ -179,21 +215,6 @@ export function DeletePanel({
         <p className="min-h-5">
           <PendingText pending>削除する検査を確認しています…</PendingText>
         </p>
-      )}
-      {preview && (
-        // 確かめの画面：消す検査を表の形で並べ、取り消せないことを示す（docs/spec.md の 3.5）
-        <div className="space-y-1 text-sm" data-testid="delete-confirm">
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-            <dt className="text-xs text-label">削除する検査</dt>
-            <dd>
-              <span className="font-bold text-value">{preview.patientId}</span>
-              {preview.patientName ? ` ${preview.patientName}` : ""}／{formatSlashDate(preview.studyDate)} {study.modalities?.join("・")}／
-              {preview.seriesCount} シリーズ・{preview.instanceCount} 画像
-            </dd>
-          </dl>
-          <p className="font-bold text-danger">この操作は取り消せません。</p>
-          <p className="text-xs text-label">元に戻すには、再度インポートするか送信元から再送します</p>
-        </div>
       )}
       {preview && phase.kind !== "deleted" && phase.kind !== "reauth" && phase.kind !== "unknown" && (
         <form onSubmit={(e) => void submit(e)} className="space-y-2">
@@ -216,35 +237,35 @@ export function DeletePanel({
               data-testid="delete-reason"
             />
           </label>
-          <div className="flex items-center gap-2">
-            <ActionButton type="submit" size="sm" variant="danger" pending={busy} disabled={reason.trim() === ""} data-testid="delete-submit">
-              削除する
-            </ActionButton>
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onClose}>
-              キャンセル
-            </Button>
-          </div>
+          <ConfirmActions
+            confirmLabel="削除する"
+            confirmTestId="delete-submit"
+            confirmVariant="danger"
+            confirmDisabled={reason.trim() === ""}
+            pending={busy}
+            cancelDisabled={busy}
+            onCancel={onClose}
+          />
         </form>
       )}
       {phase.kind === "reauth" && (
-        <form onSubmit={(e) => void reauth(e)} aria-label="再認証" className="max-w-sm space-y-2" data-testid="delete-reauth">
-          {/* 再認証はパスワードだけ。一度通れば REAUTH_MINUTES の間は聞き直さない（docs/spec.md の 3.6） */}
-          <p className="text-label">削除にはパスワードの再入力が必要です</p>
-          <Input name="password" type="password" autoComplete="current-password" aria-label="パスワード" required />
-          {phase.error && (
-            <p role="alert" className="text-sm text-danger">
-              {phase.error}
-            </p>
-          )}
-          <div className="flex gap-2">
-            <ActionButton type="submit" size="sm" pending={authing}>
-              認証して削除
-            </ActionButton>
+        // 再認証はパスワードだけ。一度通れば REAUTH_MINUTES の間は聞き直さない（docs/spec.md の 3.6）
+        <ReauthForm
+          ariaLabel="再認証"
+          testId="delete-reauth"
+          className="max-w-sm"
+          message="削除にはパスワードの再入力が必要です"
+          error={phase.error}
+          pending={authing}
+          submitLabel="認証して削除"
+          focusOnMount
+          onSubmit={(e) => void reauth(e)}
+          secondary={
             <Button type="button" size="sm" variant="outline" disabled={authing} onClick={() => setPhase({ kind: "idle" })}>
               キャンセル
             </Button>
-          </div>
-        </form>
+          }
+        />
       )}
       {busy && (
         <p>
@@ -287,6 +308,6 @@ export function DeletePanel({
           {phase.text}
         </p>
       )}
-    </div>
+    </ConfirmPanel>
   );
 }

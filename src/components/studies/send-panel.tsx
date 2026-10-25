@@ -3,12 +3,13 @@
 import { CheckCircle2, RotateCcw, Send, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ActionButton, ProgressBar, Spinner } from "@/components/ui/pending";
+import { ConfirmActions, ConfirmPanel } from "@/components/ui/confirm-panel";
+import { ProgressBar, Spinner } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { getJson } from "@/lib/client/api";
 import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityView, StudyView } from "@/lib/fields";
-import { formatDateTimeIn, formatSlashDate } from "@/lib/format/japanese-date";
+import { formatBirthLine, formatDateTimeIn, formatSlashDate } from "@/lib/format/japanese-date";
 import { cn } from "@/lib/utils";
 
 // ほかの機器へ送る（docs/spec.md の 3.4。段 4）。詳細のパネルの「送信」から、登録された機器を選び、
@@ -131,6 +132,7 @@ export function SendPanel({
   if (!screen.can.send || !uid) return null;
 
   const chosen = modalities?.find((m) => m.id === target);
+  const hasTargets = modalities !== null && modalities.length > 0;
 
   async function send() {
     if (!target) return;
@@ -199,50 +201,65 @@ export function SendPanel({
   return (
     <>
       {open && (
-        <div id={panelId} role="group" aria-label="検査の送信" className="mt-2 space-y-2 rounded-md border border-border bg-surface p-3" data-testid="send-panel">
+        <ConfirmPanel
+          id={panelId}
+          label="検査の送信"
+          testId="send-panel"
+          confirmTestId="send-confirm"
+          focusReady={hasTargets}
+          summary={
+            hasTargets
+              ? {
+                  name: study.patientName ?? "",
+                  patientId: study.patientId ?? "",
+                  birthLine: formatBirthLine(study.patientBirthDate, study.patientSex, study.studyDate),
+                }
+              : undefined
+          }
+          details={
+            hasTargets && (
+              <>
+                <label className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-label">送信先</span>
+                  <select
+                    className="h-7 rounded-md border border-border bg-background px-2 text-value"
+                    value={target}
+                    disabled={inFlight}
+                    onChange={(e) => {
+                      setTarget(e.target.value);
+                      // 送信先を選び直したら、新しい送信の確かめの画面に戻る
+                      if (!inFlight) setPhase({ kind: "idle" });
+                    }}
+                    data-testid="send-modality"
+                  >
+                    {modalities?.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.id}（AE: {m.aet}）
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {/* 確かめの画面：送る検査と送り先を2行の表に並べる */}
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                  <dt className="text-xs text-label">送信する検査</dt>
+                  <dd>
+                    {formatSlashDate(study.studyDate)} {study.modalities?.join("・")}／{study.instanceCount ?? "—"} 画像
+                  </dd>
+                  <dt className="text-xs text-label">送信先</dt>
+                  <dd className="font-bold text-value">
+                    {chosen?.id}（{chosen?.aet}）
+                  </dd>
+                </dl>
+              </>
+            )
+          }
+        >
           {loadError && (
             <p role="alert" className="text-danger">
               {loadError}
             </p>
           )}
           {modalities && modalities.length === 0 && <p className="text-label">送信先が登録されていません（Orthanc の設定で登録します）</p>}
-          {modalities && modalities.length > 0 && (
-            <>
-              <label className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-label">送信先</span>
-                <select
-                  className="h-7 rounded-md border border-border bg-background px-2 text-value"
-                  value={target}
-                  disabled={inFlight}
-                  onChange={(e) => {
-                    setTarget(e.target.value);
-                    // 送信先を選び直したら、新しい送信の確かめの画面に戻る
-                    if (!inFlight) setPhase({ kind: "idle" });
-                  }}
-                  data-testid="send-modality"
-                >
-                  {modalities.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.id}（AE: {m.aet}）
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {/* 確かめの画面：送る検査と送り先を2行の表に並べる */}
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm" data-testid="send-confirm">
-                <dt className="text-xs text-label">送信する検査</dt>
-                <dd>
-                  <span className="font-bold text-value">{study.patientId}</span>
-                  {study.patientName ? ` ${study.patientName}` : ""}／{formatSlashDate(study.studyDate)} {study.modalities?.join("・")}／
-                  {study.instanceCount ?? "—"} 画像
-                </dd>
-                <dt className="text-xs text-label">送信先</dt>
-                <dd className="font-bold text-value">
-                  {chosen?.id}（{chosen?.aet}）
-                </dd>
-              </dl>
-            </>
-          )}
           <SendStatus
             phase={phase}
             timeZone={screen.timeZone}
@@ -251,31 +268,38 @@ export function SendPanel({
             onReread={() => setPhase((p) => (p.kind === "job" ? { ...p, readError: undefined } : p))}
             onResolve={screen.can.reconcile ? (id, delivered, note) => void resolve(id, delivered, note) : undefined}
           />
-          {modalities && modalities.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              {!sent && (
-                <ActionButton type="button" size="sm" disabled={!target} data-testid="send-submit" icon={<Send aria-hidden />} onClick={() => void send()}>
-                  送信する
-                </ActionButton>
-              )}
-              {canResend && (
-                // 確かめの画面に戻す（送るのは、そこで「送信する」を押したとき。新しい要求の ID になる）
-                <Button type="button" size="sm" variant="outline" onClick={() => setPhase({ kind: "idle" })} data-testid="send-again">
-                  <RotateCcw aria-hidden />
-                  再送信…
-                </Button>
-              )}
-              <Button type="button" size="sm" variant="outline" disabled={phase.kind === "sending"} onClick={close} data-testid="send-close">
-                {sent ? "閉じる" : "キャンセル"}
-              </Button>
-              {continuesNote && (
-                <span className="text-xs text-label" data-testid="send-continues">
-                  閉じても送信は続きます
-                </span>
-              )}
-            </div>
+          {hasTargets && (
+            <ConfirmActions
+              confirmLabel="送信する"
+              confirmTestId="send-submit"
+              confirmIcon={<Send aria-hidden />}
+              confirmDisabled={!target}
+              // 送信を始めたら（受け付けた後・結果不明を含む）実行のボタンを外し、重ねて送らない
+              hideConfirm={sent}
+              onConfirm={() => void send()}
+              cancelLabel={sent ? "閉じる" : "キャンセル"}
+              cancelTestId="send-close"
+              cancelDisabled={phase.kind === "sending"}
+              onCancel={close}
+              extra={
+                canResend && (
+                  // 確かめの画面に戻す（送るのは、そこで「送信する」を押したとき。新しい要求の ID になる）
+                  <Button type="button" size="sm" variant="outline" onClick={() => setPhase({ kind: "idle" })} data-testid="send-again">
+                    <RotateCcw aria-hidden />
+                    再送信…
+                  </Button>
+                )
+              }
+              note={
+                continuesNote && (
+                  <span className="text-xs text-label" data-testid="send-continues">
+                    閉じても送信は続きます
+                  </span>
+                )
+              }
+            />
           )}
-        </div>
+        </ConfirmPanel>
       )}
     </>
   );
