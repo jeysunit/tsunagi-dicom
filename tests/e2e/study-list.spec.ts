@@ -1544,6 +1544,9 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   const scrolled = await list.evaluate((el) => el.scrollTop);
   expect(scrolled).toBeGreaterThan(0);
   const rowTop = (await target.boundingBox())!.y;
+  // ポインタを一覧の外へ出す（期待の変更：ポインタが一覧の上にある間は、新しい行を差し込まずに待つようにした（H4）。
+  // ここでは差し込む側を見るので、行を押した後にポインタを件数の行へ移す。待つ側は下の別の試験で見る）
+  await page.getByTestId("study-count").hover();
 
   // 30 秒たつと版を読む。版が変わらなければ、一覧は読み直さない（検索も監査の記録も増やさない）
   await page.clock.fastForward(30_000);
@@ -1611,4 +1614,199 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   const res = await ct;
   expect(new URL(res.url()).searchParams.get("refresh")).toBeNull();
   await expect(page.getByTestId("modality-CT")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("自動更新：ポインタが一覧の上にある間とキーを押してから 3 秒の間は、新しい行を差し込まず「新着 n 件」を出す。押すと差し込み、選んだ検査はそのまま", async ({
+  page,
+}) => {
+  await asRole(page, "一般");
+  await page.goto("about:blank");
+  const real = (await (await page.request.get("/api/studies/version")).json()) as { version: string };
+  let version = Number(real.version);
+  await page.route("**/api/studies/version", (route) => route.fulfill({ json: { version: String(version) } }));
+  // 版が変わるたびに、新しく届いた検査（合成）を先頭に 1 件ずつ足す
+  const NEW = ["1.2.826.0.1.3680043.8.498.999999991", "1.2.826.0.1.3680043.8.498.999999992"];
+  let arrived = 0;
+  let listReads = 0;
+  await page.route(/\/api\/studies(\?[^/]*)?$/, async (route) => {
+    listReads += 1;
+    const res = await route.fetch();
+    const body = await res.json();
+    for (const uid of NEW.slice(0, arrived)) {
+      body.studies.unshift({ ...body.studies[0], studyInstanceUid: uid, patientId: `JP-TEST-${uid.slice(-1)}`, studyDate: "20261021" });
+      body.count.count += 1;
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.clock.install();
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+  await expect(page.getByTestId("list-new")).toHaveCount(0);
+
+  // 先頭の行を押して選ぶ。ポインタは一覧の上に置いたまま
+  const first = rows(page).first();
+  const uid = (await first.getAttribute("data-study-uid"))!;
+  await first.click({ position: { x: 100, y: 12 } });
+  await expect(first).toHaveAttribute("aria-selected", "true");
+  const top = (await first.boundingBox())!.y;
+
+  // 版が変わり、一覧は読み直す（新着の数を出すため）が、行は差し込まない。押そうとしている行の位置は動かない
+  version += 1;
+  arrived = 1;
+  await expect
+    .poll(async () => {
+      if (listReads === 0) await page.clock.fastForward(30_000);
+      return listReads;
+    })
+    .toBe(1);
+  await expect(page.getByTestId("list-new")).toHaveText("新着 1 件");
+  await expect(rows(page)).toHaveCount(8);
+  await expect(rows(page).first()).toHaveAttribute("data-study-uid", uid);
+  expect((await rows(page).first().boundingBox())!.y).toBe(top);
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+
+  // ポインタが上にある間は、次の間隔でも差し込まない。もう 1 件届けば数が増える
+  version += 1;
+  arrived = 2;
+  await expect
+    .poll(async () => {
+      if (listReads === 1) await page.clock.fastForward(30_000);
+      return listReads;
+    })
+    .toBe(2);
+  await expect(page.getByTestId("list-new")).toHaveText("新着 2 件");
+  await expect(rows(page)).toHaveCount(8);
+
+  // 「新着 2 件」を押すと差し込む。選んだ検査（StudyInstanceUID）は選んだまま
+  await page.getByTestId("list-new").click();
+  await expect(rows(page)).toHaveCount(10);
+  await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEW[1]!);
+  await expect(page.getByTestId("study-count")).toHaveText("10");
+  await expect(page.getByTestId("list-new")).toHaveCount(0);
+  await expect(row(page, uid)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
+  expect(listReads).toBe(2);
+
+  // キーボード：一覧の中でキーを押してから 3 秒の間は差し込まない（ポインタは一覧の外）
+  await page.getByTestId("study-count").hover();
+  await row(page, uid).focus();
+  await page.keyboard.press("ArrowDown");
+  const NEXT = "1.2.826.0.1.3680043.8.498.999999993";
+  NEW.push(NEXT);
+  version += 1;
+  arrived = 3;
+  // 版を読むのは押してから 3 秒の内（間隔を 1 つ進める代わりに、タブが見えるようになった知らせで読ませる）
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange", { bubbles: true })));
+  await expect.poll(() => listReads).toBe(3);
+  await expect(page.getByTestId("list-new")).toHaveText("新着 1 件");
+  await expect(rows(page)).toHaveCount(10);
+
+  // 待つ理由が無くなった（3 秒を過ぎ、ポインタも一覧の外）後の、次の版の読み取りで差し込む
+  await page.clock.fastForward(30_000);
+  await expect(rows(page)).toHaveCount(11);
+  await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEXT);
+  await expect(page.getByTestId("list-new")).toHaveCount(0);
+});
+
+test("自動更新の差し込みを待つかは、答えが届いた時に決める。利用者の絞り込みの答えを待つ間の読み直しでは、前の絞り込みの一覧を残さない", async ({
+  page,
+}) => {
+  await asRole(page, "一般");
+  await page.goto("about:blank");
+  const real = (await (await page.request.get("/api/studies/version")).json()) as { version: string };
+  let version = Number(real.version);
+  let versionReads = 0;
+  await page.route("**/api/studies/version", (route) => {
+    versionReads += 1;
+    return route.fulfill({ json: { version: String(version) } });
+  });
+  let arrived = 0;
+  let listReads = 0;
+  // 一覧の答えを止めておく（届く前にポインタを動かす・絞り込みを替えるため）
+  let gate: Promise<void> | null = null;
+  let open = () => {};
+  await page.route(/\/api\/studies(\?[^/]*)?$/, async (route) => {
+    listReads += 1;
+    if (gate) await gate;
+    // 取り消された要求（画面が捨てた要求）の答えは捨てる
+    try {
+      const res = await route.fetch();
+      const body = await res.json();
+      for (let i = 0; i < arrived; i++) {
+        body.studies.unshift({ ...body.studies[0], studyInstanceUid: `1.2.826.0.1.3680043.8.498.99999998${i}`, patientId: `JP-TEST-R${i}` });
+        body.count.count += 1;
+      }
+      await route.fulfill({ response: res, json: body });
+    } catch {
+      // 取り消された要求
+    }
+  });
+  await page.clock.install();
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+
+  // 1. 読み直しを始めた時はポインタが一覧の外。答えが届く前にポインタを一覧へ移すと、差し込まずに待つ
+  await page.getByTestId("study-count").hover();
+  version += 1;
+  arrived = 1;
+  gate = new Promise<void>((resolve) => (open = resolve));
+  await expect
+    .poll(async () => {
+      if (listReads === 0) await page.clock.fastForward(30_000);
+      return listReads;
+    })
+    .toBe(1);
+  await rows(page).nth(2).hover();
+  gate = null;
+  open();
+  await expect(page.getByTestId("list-new")).toHaveText("新着 1 件");
+  await expect(rows(page)).toHaveCount(8);
+  await page.getByTestId("list-new").click();
+  await expect(rows(page)).toHaveCount(9);
+
+  // 2. 絞り込み（CT）の答えを待つ間に、ポインタを一覧（前の絞り込みの行）に置いたまま版が変わっても、
+  //    答えが届いたら CT の一覧を出す（前の絞り込みの一覧を、新しい絞り込みの控えにしない）
+  gate = new Promise<void>((resolve) => (open = resolve));
+  await page.getByTestId("modality-CT").click();
+  await expect.poll(() => listReads).toBe(2);
+  await rows(page).nth(2).hover();
+  version += 1;
+  arrived = 2;
+  // 版の変わりを読ませる（一覧の読み直しは、待っている絞り込みの要求の答えを待つ形になり、要求は増えないことがある）
+  const before = versionReads;
+  await expect
+    .poll(async () => {
+      if (versionReads === before) await page.clock.fastForward(30_000);
+      return versionReads;
+    })
+    .toBeGreaterThan(before);
+  gate = null;
+  open();
+  // CT は見本で 6 件。読み直しの答えには、届いた 2 件を足している
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(rows(page)).toHaveCount(8);
+  await expect(page.getByTestId("list-new")).toHaveCount(0);
+
+  // 3. 前に開いた絞り込み（すべて。覚えている一覧は古くなっている）に戻し、覚えている一覧を出しながら取り直している間に
+  //    版が変わっても、答えが届いたら取り直した一覧を出す
+  await page.clock.fastForward(31_000);
+  gate = new Promise<void>((resolve) => (open = resolve));
+  await page.getByTestId("modality-CT").click();
+  await expect(page.getByTestId("modality-CT")).toHaveAttribute("aria-pressed", "false");
+  await expect(rows(page)).toHaveCount(9);
+  await rows(page).nth(2).hover();
+  version += 1;
+  arrived = 3;
+  const before3 = versionReads;
+  await expect
+    .poll(async () => {
+      if (versionReads === before3) await page.clock.fastForward(30_000);
+      return versionReads;
+    })
+    .toBeGreaterThan(before3);
+  gate = null;
+  open();
+  await expect(page.getByTestId("study-count")).toHaveText("11");
+  await expect(rows(page)).toHaveCount(11);
+  await expect(page.getByTestId("list-new")).toHaveCount(0);
 });

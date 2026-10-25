@@ -60,6 +60,6 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 | タグの表 | `src/components/studies/tag-grid.tsx` | あり。行の複数選択と「タグとタグ値をコピー」（計算は `src/lib/client/row-selection.ts`・`tag-copy.ts`） |
 | 状態の札 | `src/components/ui/status-badge.tsx` | 部品はある。使う画面は状態の列を足す PR から |
 | ボタン | `src/components/ui/button.tsx` | あり |
-| 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトが使う |
+| 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトと、ユーザー管理（役割の変更・無効にする・二要素認証のリセット）が使う |
 | 入力欄 | `src/components/ui/input.tsx` | あり |
 | 待ちの印 | `src/components/ui/pending.tsx` | あり |
