@@ -56,7 +56,8 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 | タブ | `src/components/ui/tabs.tsx` | 部品はある。使う画面は今は無い（検査の詳細は、「検査の情報」をタブに隠さず並べるようにした） |
 | 検索の帯 | `src/components/studies/study-browser.tsx` の `FilterBar` | あり |
 | 件数の行 | `src/components/ui/count-row.tsx` | あり。検査の一覧が使う |
-| 一覧の表 | `src/components/ui/table.tsx` | あり |
+| 一覧の表 | `src/components/ui/table.tsx` | あり。選んだ行の見た目は検査一覧（`study-browser.tsx`）と受信一覧（`received-list.tsx`）が同じ形で持つ |
+| タグの表 | `src/components/studies/tag-grid.tsx` | あり。行の複数選択と「タグとタグ値をコピー」（計算は `src/lib/client/row-selection.ts`・`tag-copy.ts`） |
 | 状態の札 | `src/components/ui/status-badge.tsx` | 部品はある。使う画面は状態の列を足す PR から |
 | ボタン | `src/components/ui/button.tsx` | あり |
 | 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトが使う |

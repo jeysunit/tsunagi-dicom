@@ -66,6 +66,8 @@ export function ReceivedList({
   const [onlyNew, setOnlyNew] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 選んだ行（クリック・矢印のキー）。行の鍵で持つので、絞り込みや再読み込みで並びが変わっても同じ行を指す
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
 
   // 前に開いたときの受信日時（頁を開いている間は替えない）。見た受信日時を覚え、頁を離れたら忘れる
   const previous = useSyncExternalStore(subscribePreviousSeen, getPreviousSeen, getServerPreviousSeen);
@@ -87,6 +89,21 @@ export function ReceivedList({
     );
   });
   const filtered = !!source || !!needle || onlyNew;
+  // 行の鍵：検査と受信日時。同じ組が重なる行（受信日時が無い行など）は、読んだ並びの何番目かを添える。絞り込みで並びが変わっても、鍵は変わらない
+  const keys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return new Map(
+      items.map((r) => {
+        const base = `${r.study.studyInstanceUid ?? "row"}-${r.receivedAt ?? ""}`;
+        const n = seen.get(base) ?? 0;
+        seen.set(base, n + 1);
+        return [r, n === 0 ? base : `${base}#${n}`] as const;
+      }),
+    );
+  }, [items]);
+  const keyOf = (r: ReceivedView) => keys.get(r) ?? "";
+  // 矢印のキーの止まり先（フォーカスを受ける行は 1 つ）。選んだ行が表に無いときは先頭
+  const tabStopKey = shown.some((r) => keyOf(r) === pickedKey) ? pickedKey : shown[0] ? keyOf(shown[0]) : null;
 
   async function reload() {
     setReloading(true);
@@ -208,17 +225,51 @@ export function ReceivedList({
                   </td>
                 </tr>
               )}
-              {shown.map((r, i) => {
+              {shown.map((r) => {
                 const desc = [r.study.modalities?.join("・"), r.study.studyDescription].filter(Boolean).join(" ");
                 const origin = originText(r.origin);
                 const fresh = isNewArrival(r.receivedAt, previous);
                 const href = studyListHref(r);
+                const rowKey = keyOf(r);
+                const isPicked = rowKey === pickedKey;
                 return (
                   <tr
-                    key={`${r.study.studyInstanceUid ?? "row"}-${r.receivedAt ?? i}`}
-                    className={cn("border-b border-border last:border-0", fresh && "bg-selected/50")}
+                    key={rowKey}
+                    // 選んだ行は、検査一覧と同じ（selected の地と左 3px の線）。新着の薄い地より優先する
+                    className={cn(
+                      "cursor-pointer border-b border-border last:border-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+                      isPicked
+                        ? "bg-selected font-bold [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-ring)]"
+                        : cn("hover:bg-muted", fresh && "bg-selected/50"),
+                    )}
                     data-testid="received-row"
                     data-new={fresh || undefined}
+                    data-selected={isPicked || undefined}
+                    aria-selected={isPicked}
+                    tabIndex={rowKey === tabStopKey ? 0 : -1}
+                    onClick={(e) => {
+                      // 行の中のリンク（検査一覧で表示）は、選ぶ操作にしない
+                      if ((e.target as HTMLElement).closest("a")) return;
+                      setPickedKey(rowKey);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                        e.preventDefault();
+                        const next = (e.key === "ArrowDown" ? e.currentTarget.nextElementSibling : e.currentTarget.previousElementSibling) as HTMLElement | null;
+                        const nextKey = next?.dataset.rowKey;
+                        if (!next || !nextKey) return;
+                        next.focus({ preventScroll: true });
+                        next.scrollIntoView({ block: "nearest" });
+                        setPickedKey(nextKey);
+                      } else if (e.key === " ") {
+                        e.preventDefault();
+                        setPickedKey(rowKey);
+                      } else if (e.key === "Escape") {
+                        setPickedKey(null);
+                      }
+                    }}
+                    data-row-key={rowKey}
                   >
                     <td className={CELL} data-testid="received-at">
                       {fresh && (
