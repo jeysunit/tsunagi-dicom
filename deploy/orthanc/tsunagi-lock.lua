@@ -84,7 +84,7 @@ local function refusal(studyUid)
       end
       if value ~= nil then
         -- 値は期限の UNIX 秒（BFF は正の整数の文字列を書く）。符号・小数・指数・無限大・false・物・配列などは読めない値
-        local untilSeconds = type(value) == 'string' and string.match(value, '^%d+$') and tonumber(value) or nil
+        local untilSeconds = type(value) == 'string' and string.match(value, '^[1-9]%d*$') and tonumber(value) or nil
         if untilSeconds == nil then
           return 'lock value unreadable'
         end

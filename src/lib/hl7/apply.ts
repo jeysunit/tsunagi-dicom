@@ -380,6 +380,10 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
           })) : undefined;
         try {
           removed = await removeSource(backend, d, lock);
+          // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない
+          if (lock?.lost()) {
+            removed = { ...removed, lockLost: true };
+          }
         } catch (e) {
           // 消す途中で印が切れた・付け直せなかったら、残りを消さずに部分反映として人に見せる
           if (!lock?.lost()) {
@@ -695,6 +699,10 @@ async function writeStudy(
     if (state === "Success" && lock) {
       // 仕事を待つ間に印が切れていれば、元を消さない
       removed = lock.lost() ? { lockLost: true } : await removeSource(backend, d, lock);
+      // 最後に消す間に切れていれば（その間に届き直した画像を消したかもしれない）、成功にしない
+      if (lock.lost()) {
+        removed = { ...removed, lockLost: true };
+      }
     }
   } catch (e) {
     if (lock?.lost()) {

@@ -164,6 +164,20 @@ describe("付け替えの印", () => {
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
   });
 
+  it("最後に消す間に印の期限が過ぎれば、消し終えても成功にせず部分反映で止める", async () => {
+    temp();
+    orthanc.next.duringDelete = () => {
+      // 消す要求の答えを待つ間に BFF が 300 ミリ秒止まる（期限 200 ミリ秒。時計の付け直しも動かない）
+      const stalled = Date.now() + 300;
+      while (Date.now() < stalled) {
+        // 止まった BFF の代わり
+      }
+    };
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.deleteCalls).toHaveLength(1);
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+  });
+
   it("BFF が期限より長く止まった後は、付け直しで隠さず、元を消さずに部分反映で止める", async () => {
     temp();
     orthanc.next.state = "Running";
