@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
-import { newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
+import { compose, findscuStudy, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc, type FindAnswer } from "./support/docker";
+import { encodeIr13, encodeIso2022Kr, newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
 import { latestCsrfToken, readAudit, requestTrails } from "./support/audit-db";
 import { startGate, type Gate } from "./support/gate";
@@ -622,6 +622,72 @@ test("14 画像ごとの主なタグ：ISO 2022 IR 87 の検査の氏名と検�
   const table = page.getByTestId("series-images").getByTestId("instance-tags");
   await expect(table.locator('tr[data-tag="0010,0010"]')).toContainText("試験^花子=しけん^はなこ");
   await expect(table.locator('tr[data-tag="0008,1030"]')).toContainText("頭部単純");
+});
+
+// 13（検査を 1001 件足す）より前に流す
+test("22 文字の集合の組み合わせ：Orthanc が日本語・ハングルを読み崩す組と崩さない組を測って固める（今の振る舞いを記録する試験）", async () => {
+  test.setTimeout(180_000);
+  const jp = { name: "ITEST^HANAKO=試験^花子=しけん^はなこ", description: "頭部単純" };
+  const kana = { name: "ITEST^HANAKO=ｼｹﾝ^ﾊﾅｺ", description: "ｽｷｬﾝ" };
+  const kr = { name: "ITEST^HANAKO=시험^하나", description: "두부" };
+  const cases = [
+    // 規格どおりの組。1 つ目が空（ASCII の G0 のまま）なら崩れない（対照）
+    { key: "jis-empty-ir87", charset: "\\ISO 2022 IR 87", encode: undefined, text: jp },
+    // 規格どおりの組（PS3.5 Annex H の H.3-2 と同じ）。Orthanc は 1 つ目（IR 13 = Shift_JIS）で全体を読む
+    { key: "jis-ir13-ir87", charset: "ISO 2022 IR 13\\ISO 2022 IR 87", encode: undefined, text: jp },
+    // 1 つ目が明示の ASCII（IR 6）の組
+    { key: "jis-ir6-ir87", charset: "ISO 2022 IR 6\\ISO 2022 IR 87", encode: undefined, text: jp },
+    // 1 つの値の ISO_IR 13（半角カナ。コード拡張を使わない）
+    { key: "ir13-single", charset: "ISO_IR 13", encode: encodeIr13, text: kana },
+    // 韓国語（KS X 1001）：1 つ目が空の組と、1 つ目が IR 6 の組
+    { key: "kr-empty-ir149", charset: "\\ISO 2022 IR 149", encode: encodeIso2022Kr, text: kr },
+    { key: "kr-ir6-ir149", charset: "ISO 2022 IR 6\\ISO 2022 IR 149", encode: encodeIso2022Kr, text: kr },
+  ];
+  // Orthanc 1.13.0 が REST に返す値。崩れる組は、崩れた値そのものを固める（Orthanc が直したら、この試験が落ちて気づく）。
+  // 崩れる理由：(0008,0005) の空でない最初の値だけで全体を読み（FromDcmtkBridge::DetectEncoding）、ESC の列は読み替えずに取り除く
+  const expected: Record<string, { name: string; description: string; found: number }> = {
+    "jis-empty-ir87": { ...jp, found: 1 },
+    "jis-ir13-ir87": { name: "ITEST^HANAKO=;n83^2V;R=$7$1$s^$O$J$3", description: "F,ItC1=c", found: 0 },
+    "jis-ir6-ir87": { name: "ITEST^HANAKO=$B;n83(B^$B2V;R(B=$B$7$1$s(B^$B$O$J$3(B", description: "$BF,ItC1=c(B", found: 0 },
+    "ir13-single": { ...kana, found: 1 },
+    "kr-empty-ir149": { ...kr, found: 1 },
+    "kr-ir6-ir149": { name: "ITEST^HANAKO=$)C^", description: "$)C", found: 0 },
+  };
+  const result: Record<string, { name: string | undefined; description: string | undefined; found: number }> = {};
+  const cfind: Record<string, { empty: FindAnswer; utf8: FindAnswer }> = {};
+  for (const [i, c] of cases.entries()) {
+    const s = syntheticStudy(`charset-${c.key}`, 60 + i, 1, {
+      charset: c.charset,
+      encode: c.encode,
+      patientName: c.text.name,
+      studyDescription: c.text.description,
+    });
+    writeDumps(s);
+    await storescuToOrthanc(s.batch);
+    const ids = await waitFor(`Orthanc に ${s.batch} が入る`, () => lookupStudy(s.studyInstanceUid), (v) => v.length === 1);
+    const study = await orthancJson<{ PatientMainDicomTags: { PatientName?: string }; MainDicomTags: { StudyDescription?: string } }>(`studies/${ids[0]}`);
+    // 索引（検索）：正しい氏名（2 つ目の組）を条件にして見つかるか。崩れた値は索引にも入るので、見つからない
+    const hits = await orthancJson<string[]>("tools/find", {
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify({ Level: "Study", Query: { PatientName: `*${c.text.name.split("=")[1]}*`, PatientID: s.patientId }, Limit: 10 }),
+    });
+    result[c.key] = { name: study.PatientMainDicomTags.PatientName, description: study.MainDicomTags.StudyDescription, found: hits.length };
+    cfind[c.key] = { empty: await findscuStudy(s.patientId), utf8: await findscuStudy(s.patientId, "ISO_IR 192") };
+  }
+  observe("charset.cfind", cfind);
+  observe("charset.combinations", result);
+  expect(result).toEqual(expected);
+  // C-FIND の答え：問い合わせの文字の集合（空・ISO_IR 192）に関わらず、Orthanc の DefaultEncoding（この試験の設定では未指定。
+  // ISO_IR 100）で返す。Latin-1 に無い字（漢字・かな・ハングル）は消える。正しく読めた組も同じ
+  const ascii = (s: string) => s.replace(/\P{ASCII}/gu, "");
+  const expectedFind = Object.fromEntries(
+    Object.entries(expected).map(([key, e]) => {
+      const answer = { characterSet: "ISO_IR 100", patientName: ascii(e.name), studyDescription: ascii(e.description) };
+      return [key, { empty: answer, utf8: answer }];
+    }),
+  );
+  expect(cfind).toEqual(expectedFind);
 });
 
 test("13 上限を超えたとき：検査が 1000 件を超えても、いちばん新しい検査が一覧に出て、件数は「以上」になる（2026-10-21）", async () => {

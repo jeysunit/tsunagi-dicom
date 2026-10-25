@@ -16,10 +16,12 @@ export interface SyntheticStudy {
   /** DICOM の PN（ローマ字=漢字=かな）。文字の集合は charset */
   patientName: string;
   /**
-   * 文字の集合（SpecificCharacterSet）。既定は ISO_IR 192（UTF-8）。`\ISO 2022 IR 87` のときは、氏名と検査名を
-   * ISO-2022-JP（JIS X 0208 を ESC $ B で切り替える形）で書く
+   * 文字の集合（SpecificCharacterSet）。既定は ISO_IR 192（UTF-8）。ほかの値のときは、氏名と検査名を encode で
+   * 書く（既定は ISO-2022-JP。JIS X 0208 を ESC $ B で切り替える形）
    */
-  charset: "ISO_IR 192" | "\\ISO 2022 IR 87";
+  charset: string;
+  /** 氏名と検査名を、charset の符号の並び（1 文字が 1 バイトの文字列。latin1 で書く）にする。ISO_IR 192 では使わない */
+  encode?: (text: string) => string;
   studyInstanceUid: string;
   seriesInstanceUid: string;
   accessionNumber: string;
@@ -37,7 +39,7 @@ export function syntheticStudy(
   index: number,
   instances: number,
   extra: Partial<
-    Pick<SyntheticStudy, "patientBirthDate" | "patientSex" | "referringPhysicianName" | "studyDescription" | "accessionNumber" | "patientName" | "charset">
+    Pick<SyntheticStudy, "patientBirthDate" | "patientSex" | "referringPhysicianName" | "studyDescription" | "accessionNumber" | "patientName" | "charset" | "encode">
   > = {},
 ): SyntheticStudy {
   return {
@@ -98,12 +100,63 @@ export function encodeIso2022Jp(text: string): string {
   return kanji ? `${out}\x1b(B` : out;
 }
 
+/**
+ * ISO 2022 IR 13（JIS X 0201）の 1 バイトの並びにする。半角カナ（U+FF61〜U+FF9F）は 0xA1〜0xDF、ASCII はそのまま
+ */
+export function encodeIr13(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    if (code < 0x80) out += ch;
+    else if (code >= 0xff61 && code <= 0xff9f) out += String.fromCharCode(code - 0xff61 + 0xa1);
+    else throw new Error(`ISO 2022 IR 13 で書けない文字：${ch}`);
+  }
+  return out;
+}
+
+/** KS X 1001 の 1 文字から、EUC-KR の 2 バイトへの表。Node の EUC-KR の読み取りから逆に作る */
+let ksTable: Map<string, string> | undefined;
+function ksOf(char: string): string | undefined {
+  if (!ksTable) {
+    ksTable = new Map();
+    const decoder = new TextDecoder("euc-kr");
+    for (let hi = 0xb0; hi <= 0xc8; hi++) {
+      for (let lo = 0xa1; lo <= 0xfe; lo++) {
+        const text = decoder.decode(Uint8Array.from([hi, lo]));
+        if (text.length === 1 && text !== "�" && !ksTable.has(text)) ksTable.set(text, String.fromCharCode(hi, lo));
+      }
+    }
+  }
+  return ksTable.get(char);
+}
+
+/**
+ * ISO 2022 IR 149（KS X 1001）の並びにする。ハングルの前に G1 への指示（ESC $ ) C）を置き、2 バイト（0xB0〜0xC8、
+ * 0xA1〜0xFE）を 8 bit のまま書く。ASCII はそのまま
+ */
+export function encodeIso2022Kr(text: string): string {
+  let out = "";
+  let designated = false;
+  for (const ch of text) {
+    if (ch.charCodeAt(0) < 0x80) {
+      out += ch;
+      continue;
+    }
+    const ks = ksOf(ch);
+    if (!ks) throw new Error(`ISO 2022 IR 149 で書けない文字：${ch}`);
+    if (!designated) out += "\x1b$)C";
+    designated = true;
+    out += ks;
+  }
+  return out;
+}
+
 const PIXELS = Array.from({ length: 64 }, (_, i) => (i * 4).toString(16).padStart(2, "0")).join("\\");
 
 function dump(study: SyntheticStudy, sopInstanceUid: string, instanceNumber: number): string {
   const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-  // ISO 2022 IR 87 の検査は、文字の値を ISO-2022-JP の 7 bit の並びで書く（ファイルは ASCII だけになる）
-  const text = study.charset === "ISO_IR 192" ? (s: string) => s : encodeIso2022Jp;
+  // ISO_IR 192 以外の検査は、文字の値を charset の符号の並びで書く（既定は ISO-2022-JP の 7 bit。ASCII だけになる）
+  const text = study.charset === "ISO_IR 192" ? (s: string) => s : (study.encode ?? encodeIso2022Jp);
   return [
     `(0008,0005) CS [${study.charset}]`,
     // CT Image Storage
@@ -143,6 +196,6 @@ export function writeDumps(study: SyntheticStudy): void {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   study.sopInstanceUids.forEach((uid, i) => {
-    writeFileSync(path.join(dir, `img${String(i + 1).padStart(4, "0")}.dump`), dump(study, uid, i + 1), "utf8");
+    writeFileSync(path.join(dir, `img${String(i + 1).padStart(4, "0")}.dump`), dump(study, uid, i + 1), study.charset === "ISO_IR 192" ? "utf8" : "latin1");
   });
 }
