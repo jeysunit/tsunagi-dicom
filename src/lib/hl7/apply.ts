@@ -316,8 +316,15 @@ async function removeSource(backend: Backend, d: WriteDetail, lock?: SourceLock)
   const outcome: RemoveOutcome = source.every(i => written.has(triple(i)) || left.has(triple(i))) ? {} : { arrivalsLost: true };
   // 確かめてから消すまでの間に、写しが REST・STOW-RS で置き換わった（印では止まらない）。元はもう消えたので、部分反映として
   // 人に見せる（design.md §15.4 の残る隙）
-  if (named.length && !await copiesFromSource()) {
-    outcome.foreignCopies = true;
+  // 最中に届いた画像の消失を見つけた後は、この確かめが失敗しても見つけたことを失わない（部分反映として返す）
+  try {
+    if (named.length && !await copiesFromSource()) {
+      outcome.foreignCopies = true;
+    }
+  } catch (e) {
+    if (!outcome.arrivalsLost) {
+      throw e;
+    }
   }
   return outcome;
 }
