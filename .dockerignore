@@ -4,6 +4,7 @@
 openspec
 node_modules
 .next
+dist
 .e2e
 data
 coverage

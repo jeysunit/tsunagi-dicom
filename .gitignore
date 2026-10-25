@@ -10,6 +10,8 @@ pnpm-debug.log*
 # Next.js
 .next/
 out/
+# npm run build:cli の出力（コンテナの中で流すコマンド）
+dist/
 next-env.d.ts
 
 # 試験の出力

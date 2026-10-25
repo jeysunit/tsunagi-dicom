@@ -22,6 +22,8 @@ FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 RUN npm run build
+# コンテナの中で流すコマンド（管理者のパスワードを失くしたとき。docs/security-and-maintenance.md の 4）を1つのファイルにまとめる
+RUN npm run build:cli
 
 # ── 起動の時に migration を流す Prisma の CLI だけ ──
 FROM ${NODE_IMAGE} AS prisma-cli
@@ -54,6 +56,14 @@ WORKDIR /app
 # アプリのファイルは root のもののまま（node の利用者からは読むだけ）
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# docker compose exec tsunagi node cli/reset-admin-password.mjs --user <ユーザーID>（画面・API からは使えない）
+COPY --from=builder /app/dist/cli ./cli
+# コマンドが読む better-sqlite3 は、standalone が Prisma のアダプターの下に持つもの。そこへ道をつなぎ、
+# 道が切れたら（Next.js の出力の並びが変わったら）ここで作りが止まるように、動かして確かめる
+RUN mkdir -p /app/cli/node_modules \
+  && ln -s ../../node_modules/@prisma/adapter-better-sqlite3/node_modules/better-sqlite3 /app/cli/node_modules/better-sqlite3 \
+  && node -e "require('module').createRequire('/app/cli/x.cjs')('better-sqlite3')" \
+  && node /app/cli/reset-admin-password.mjs --help > /dev/null
 COPY --from=prisma-cli /opt/prisma-cli /opt/prisma-cli
 COPY docker/entrypoint.sh /usr/local/bin/tsunagi-entrypoint
 USER node
