@@ -16,6 +16,7 @@ import type { SimpleDate } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, primaryGroup, studyInGroup } from "@/lib/modalities";
 import {
   advancedQuery,
+  attachSearchNames,
   blockedConditions,
   dateQuery,
   DEFAULT_FILTER,
@@ -69,7 +70,10 @@ async function decorate(deps: ListDeps, studies: StudySummary[]) {
     const remembered = memory.get(s.studyInstanceUid) ?? EMPTY_VIEWER_MEMORY;
     const group = primaryGroup(s.modalities);
     const viewer = resolveDefaultViewer(remembered.rememberedViewer, group && defaults ? defaults[group] : null, deps.viewers ?? []);
-    return { summary: s, view: projectStudy(studyRecord(s, remembered, viewer), allowlist) };
+    const view = projectStudy(studyRecord(s, remembered, viewer), allowlist);
+    // 氏名の検索は第3〜5成分まで含める（画面に出す値は姓と名のまま。検索にだけ使うので、行の object に結びつけて持つ）
+    attachSearchNames(view, s.patientName);
+    return { summary: s, view };
   });
 }
 

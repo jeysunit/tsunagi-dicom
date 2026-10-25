@@ -3,6 +3,7 @@ import type { StudyView } from "@/lib/fields";
 import {
   dateQuery,
   filterToSearchParams,
+  attachSearchNames,
   matchesFilter,
   normalizeForSearch,
   parseFilter,
@@ -87,7 +88,8 @@ describe("モダリティ・横断の検索", () => {
     expect(filterToSearchParams(parseFilter(new URLSearchParams("status=bookmarked&modality=CT"))).toString()).toBe("modality=CT");
   });
 
-  it.each(["JP-TEST-0001", "jp-test", "山田太郎", "山田 太郎", "やまだ", "ヤマダ", "ﾔﾏﾀﾞ", "yamada taro", "ACC-0001", "胸部"])(
+  // 患者 ID・受付番号は全体の一致（全角半角・大文字小文字はそろえる）。氏名と検査の記述は含む
+  it.each(["JP-TEST-0001", "ｊｐ-test-0001", "山田太郎", "山田 太郎", "やまだ", "ヤマダ", "ﾔﾏﾀﾞ", "yamada taro", "ACC-0001-1", "acc-0001-1", "胸部"])(
     "「%s」で探せる",
     (q) => {
       expect(matchesFilter(row(), { date: "all", q })).toBe(true);
@@ -98,13 +100,72 @@ describe("モダリティ・横断の検索", () => {
     expect(matchesFilter(row(), { date: "all", q: "鈴木" })).toBe(false);
   });
 
+  // 旧：「jp-test」「ACC-0001」で患者 ID・受付番号の一部に合った → 新：全体の一致だけ
+  it.each(["jp-test", "0001", "JP-TEST-000", "ACC-0001", "0001-1"])("患者 ID・受付番号の一部（「%s」）には合わない", (q) => {
+    expect(matchesFilter(row(), { date: "all", q })).toBe(false);
+  });
+
+  it("「025」で「1025」に合わない：患者 ID・受付番号は全体が一致するものだけ", () => {
+    expect(matchesFilter(row({ patientId: "1025", accessionNumber: "A1025" }), { date: "all", q: "025" })).toBe(false);
+    expect(matchesFilter(row({ patientId: "025" }), { date: "all", q: "025" })).toBe(true);
+    expect(matchesFilter(row({ accessionNumber: "025" }), { date: "all", q: "025" })).toBe(true);
+    // 前後・途中の空白はそろえる
+    expect(matchesFilter(row({ patientId: "025" }), { date: "all", q: " 0 25 " })).toBe(true);
+  });
+
+  it("氏名と検査の記述は含むかで探す（患者 ID・受付番号と同じ語でも、氏名・記述の側が含めば合う）", () => {
+    expect(matchesFilter(row({ patientName: "山田 025" }), { date: "all", q: "025" })).toBe(true);
+    expect(matchesFilter(row({ studyDescription: "胸部CT 025" }), { date: "all", q: "025" })).toBe(true);
+  });
+
+  it("氏名の検索は第3〜5成分（ミドル・接頭・接尾）まで含める。画面に出す値は姓と名のまま", () => {
+    const view = row({ patientName: "Doe John", patientKana: "", patientNameAlphabetic: "Doe John" });
+    attachSearchNames(view, "Doe^John^Michael^Dr^Jr.");
+    for (const q of ["Michael", "Dr", "Jr.", "doe john michael", "John Michael Dr Jr."]) {
+      expect(matchesFilter(view, { date: "all", q }), q).toBe(true);
+    }
+    expect(matchesFilter(view, { date: "all", q: "Smith" })).toBe(false);
+    // 表示の値は変わらない
+    expect(view.patientName).toBe("Doe John");
+    expect(view.patientNameAlphabetic).toBe("Doe John");
+    // 結びつけていない行は、画面に出す値で探す
+    expect(matchesFilter(row({ patientName: "Doe John", patientKana: "", patientNameAlphabetic: "Doe John" }), { date: "all", q: "Michael" })).toBe(false);
+  });
+
+  it("氏名の検索は、画面の項目が許可されている氏名の値だけを使う（隠した氏名は、第3〜5成分でも探せない）", () => {
+    const pn = "Yamada^Taro^Michael=山田^太郎^^様=やまだ^たろう^みちる";
+    const all = row();
+    attachSearchNames(all, pn);
+    expect(matchesFilter(all, { date: "all", q: "Michael" })).toBe(true);
+    expect(matchesFilter(all, { date: "all", q: "様" })).toBe(true);
+    expect(matchesFilter(all, { date: "all", q: "みちる" })).toBe(true);
+
+    // 漢字とかなを許可しない役割：英字の第3成分だけ当たる
+    const alphabeticOnly = row();
+    delete alphabeticOnly.patientName;
+    delete alphabeticOnly.patientKana;
+    attachSearchNames(alphabeticOnly, pn);
+    expect(matchesFilter(alphabeticOnly, { date: "all", q: "Michael" })).toBe(true);
+    expect(matchesFilter(alphabeticOnly, { date: "all", q: "様" })).toBe(false);
+    expect(matchesFilter(alphabeticOnly, { date: "all", q: "みちる" })).toBe(false);
+
+    // 氏名を許可しない役割：氏名では探せない
+    const none = row();
+    delete none.patientName;
+    delete none.patientKana;
+    delete none.patientNameAlphabetic;
+    attachSearchNames(none, pn);
+    expect(matchesFilter(none, { date: "all", q: "Michael" })).toBe(false);
+    expect(matchesFilter(none, { date: "all", q: "山田" })).toBe(false);
+  });
+
   it("許可されていない項目（view に無い項目）では探せない", () => {
     const hidden = row();
     delete hidden.patientName;
     delete hidden.patientKana;
     delete hidden.patientNameAlphabetic;
     expect(matchesFilter(hidden, { date: "all", q: "山田" })).toBe(false);
-    expect(matchesFilter(hidden, { date: "all", q: "JP-TEST" })).toBe(true);
+    expect(matchesFilter(hidden, { date: "all", q: "JP-TEST-0001" })).toBe(true);
   });
 
   it("検索の字のそろえ方", () => {
