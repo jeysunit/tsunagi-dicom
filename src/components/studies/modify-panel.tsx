@@ -49,7 +49,7 @@ type Phase =
   | { kind: "busy" }
   | { kind: "reauth"; requestId: string; error?: string }
   | { kind: "done"; text: string }
-  | { kind: "unknown"; requestId: string; partial?: boolean; note?: string; writeIds?: string[] }
+  | { kind: "unknown"; requestId: string; partial?: boolean; note?: string; writeIds?: string[]; hl7?: boolean }
   | { kind: "error"; text: string };
 
 const SEX_LABELS: Record<string, string> = { "": "（なし）", M: "M（男性）", F: "F（女性）", O: "O（その他）" };
@@ -61,6 +61,28 @@ function shown(field: string, value: string): string {
   if (field === "PatientSex") return SEX_LABELS[value] ?? value;
   if (field === "PatientName") return value.split("=").filter(Boolean).join("／");
   return value;
+}
+
+interface PendingItem {
+  /** 値の修正の要求ID（HL7 の書き換えは無い） */
+  requestId: string | null;
+  kind: "attribute" | "content" | "hl7";
+  writeIds: string[];
+}
+
+/** この検査の、管理者の確かめを待っている修正（読めなければ空。新しい修正は BFF が断る） */
+async function readPending(uid: string): Promise<PendingItem[]> {
+  try {
+    const res = await fetch(`/api/studies/${encodeURIComponent(uid)}/modify`, { credentials: "same-origin", cache: "no-store" });
+    if (!res.ok) {
+      handleAuthStatus(res.status);
+      return [];
+    }
+    const body = (await res.json()) as { pending?: PendingItem[] };
+    return Array.isArray(body.pending) ? body.pending : [];
+  } catch {
+    return [];
+  }
 }
 
 async function readCurrent(uid: string, orthancId?: string): Promise<{ current?: Current; candidates?: Candidate[]; error?: string }> {
@@ -94,7 +116,10 @@ export function ModifyPanel({
   const [current, setCurrent] = useState<Current | null>(null);
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // この検査の、管理者の確かめを待っている修正（窓を閉じた・頁を読み直した後も、状態の確認と解除の道へ戻す）
+  const [pending, setPending] = useState<PendingItem[]>([]);
   const fetchCurrent = useCallback((orthancId?: string) => {
+    void readPending(uid).then(setPending);
     void readCurrent(uid, orthancId).then((r) => {
       if (r.current) {
         setCurrent(r.current);
@@ -141,7 +166,23 @@ export function ModifyPanel({
           </ul>
         </div>
       )}
-      {current && (
+      {current && pending[0] && (
+        // 待っている修正があれば、新しい修正の欄の代わりに、その修正の状態の確認と解除の道を出す
+        <CorrectionForm
+          key={pending[0].requestId ?? pending[0].writeIds.join(",")}
+          kind={pending[0].kind === "content" ? "content" : "attribute"}
+          uid={uid}
+          current={current}
+          screen={screen}
+          onClose={onClose}
+          onModified={() => {
+            onModified();
+            fetchCurrent(current.orthancId);
+          }}
+          initialPhase={{ kind: "unknown", requestId: pending[0].requestId ?? "", writeIds: pending[0].writeIds, hl7: pending[0].kind === "hl7" }}
+        />
+      )}
+      {current && !pending[0] && (
         <>
           {current.mixed.length > 0 && (
             <p className="text-sm text-danger" data-testid="modify-mixed">
@@ -183,6 +224,7 @@ function CorrectionForm({
   screen,
   onClose,
   onModified,
+  initialPhase,
 }: {
   kind: CorrectionKind;
   uid: string;
@@ -190,6 +232,8 @@ function CorrectionForm({
   screen: ScreenInfo;
   onClose: () => void;
   onModified: () => void;
+  /** 待っている修正を開き直したとき（状態の確認と解除の道から始める） */
+  initialPhase?: Phase;
 }) {
   const fields: readonly CorrectionField[] = kind === "attribute"
     ? ["PatientID", "PatientName", "PatientBirthDate", "PatientSex", "AccessionNumber"]
@@ -198,7 +242,7 @@ function CorrectionForm({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [problem, setProblem] = useState<{ field: string | null; text: string } | null>(null);
   const [reason, setReason] = useState("");
-  const [phase, setPhase] = useState<Phase>({ kind: "edit" });
+  const [phase, setPhase] = useState<Phase>(initialPhase ?? { kind: "edit" });
   const [checking, setChecking] = useState(false);
   const [authing, setAuthing] = useState(false);
   const base = `/api/studies/${encodeURIComponent(uid)}/modify`;
@@ -488,15 +532,21 @@ function CorrectionForm({
       {phase.kind === "unknown" && (
         <div role="alert" className="space-y-1" data-testid="modify-status">
           <p className="text-danger">
-            {phase.partial
-              ? "一部だけが修正されました。管理者が確認するまで、値の修正はできません"
-              : "修正の結果を確認できません。再実行せずに状態を確認してください"}
+            {phase.hl7
+              ? "この検査に、結果不明のHL7の更新があります。管理者が確認するまで、値の修正はできません"
+              : phase.partial
+                ? "一部だけが修正されました。管理者が確認するまで、値の修正はできません"
+                : "修正の結果を確認できません。再実行せずに状態を確認してください"}
           </p>
           {phase.note && <p className="text-sm text-label">{phase.note}</p>}
-          <p className="font-mono text-xs text-label">要求ID {phase.requestId}</p>
-          <Button type="button" size="sm" variant="outline" onClick={() => void status(phase.requestId)}>
-            状態を確認
-          </Button>
+          {phase.requestId && (
+            <>
+              <p className="font-mono text-xs text-label">要求ID {phase.requestId}</p>
+              <Button type="button" size="sm" variant="outline" onClick={() => void status(phase.requestId)}>
+                状態を確認
+              </Button>
+            </>
+          )}
           {screen.can.reconcile && (kind === "content" || (phase.writeIds?.length ?? 0) > 0) && (
             <form onSubmit={(e) => void resolve(e, phase.requestId, phase.writeIds ?? [])} aria-label="結果不明の修正の解除" className="space-y-1 pt-2" data-testid="modify-resolve">
               <p className="text-xs text-label">管理者：Orthanc のジョブと画像の値を確認してから解除してください</p>
