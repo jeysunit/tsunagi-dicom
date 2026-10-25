@@ -355,6 +355,21 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1)).toMatchObject({ detail: { partial: true } });
   });
 
+  it("印を見てから消すまでの間に同じ UID の画像が届き直して消えたら、見つけて部分反映で止める", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    const late = temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    orthanc.next.duringDelete = () => {
+      orthanc.instances = orthanc.instances.filter(i => i !== late);
+      temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });
+    };
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "画像の一部だけが書き換わった" });
+    // 届き直した画像は（Orthanc に条件つきの削除が無いので）消えたが、成功にはしない
+    expect(orthanc.instances.some(i => i.PatientID === TEMP)).toBe(false);
+    expect(rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1))
+      .toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true } });
+  });
+
   it("書き換えた画像が替え先の検査に揃わなければ、元の画像を消さずに部分反映で止める", async () => {
     temp();
     await send(a40(TEMP, "P000001"));

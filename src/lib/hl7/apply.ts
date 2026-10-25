@@ -6,7 +6,7 @@ import { auditKeyring } from "@/lib/audit-key";
 import { getDb } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { getBackend } from "@/lib/backend";
-import { BackendError, BackendUnknownError, type Backend, type PatientInstance } from "@/lib/backend/types";
+import { BackendError, BackendUnknownError, type Backend, type PatientInstance, type SourceFiles } from "@/lib/backend/types";
 import { visible } from "../../../hl7-receiver/visible";
 import { parseMessage } from "./message";
 import { extractUpdate, type Command } from "./update";
@@ -130,7 +130,7 @@ export interface WriteDetail {
    * 患者 ID の変わる書き換えの前に読んだ、元の検査の画像ごとのファイルの印（design.md §15.4）。元の画像は、印が
    * これと同じものだけを消す（書き換えの後に同じ UID で届き直した画像を消さない）。無ければ元を消さない
    */
-  sourceFiles?: Record<string, string>;
+  sourceFiles?: SourceFiles;
 }
 /** 人が解くまで、期限を設けず結果不明と部分反映を拾う（design.md §10）。 */
 export function unresolved(rows: HistoryRow[]): WriteDetail[] {
@@ -170,7 +170,10 @@ async function removeSource(backend: Backend, d: WriteDetail): Promise<boolean> 
   if (!named.length || !d.sourceFiles) {
     return true;
   }
-  await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles);
+  if (await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles)) {
+    // 消した画像が、印を読んだ後に届き直していた（届き直した中身を消したかもしれない）
+    return false;
+  }
   const left = new Set((await sourceInstances()).map(triple));
   return source.every(i => written.has(triple(i)) || left.has(triple(i)));
 }

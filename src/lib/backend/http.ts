@@ -44,6 +44,7 @@ import {
   type InstanceSummary,
   type PatientInstance,
   type ReceivedStudy,
+  type SourceFiles,
   type RelayRequest,
   type StudyQuery,
 } from "@/lib/backend/types";
@@ -186,6 +187,38 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         SpecificCharacterSet: get("SpecificCharacterSet")
       }];
     });
+  }
+
+  /** Orthanc の変更の記録（/changes）のいまの位置 */
+  async function lastChange(): Promise<number> {
+    const json = await restJsonOrNull("changes?last");
+    const last = json && typeof json === "object" ? (json as { Last?: unknown }).Last : undefined;
+    if (typeof last !== "number" || !Number.isSafeInteger(last) || last < 0) {
+      throw new BackendError("画像サーバーの変更の記録を読み込めません");
+    }
+    return last;
+  }
+
+  /** since より後の変更の記録に、ids の画像が届いた記録（NewInstance）があるか。読み切れなければ、あるとする */
+  async function arrivedSince(since: number, ids: ReadonlySet<string>): Promise<boolean> {
+    let position = since;
+    for (let page = 0; page < 1000; page++) {
+      const json = await restJsonOrNull(`changes?since=${position}&limit=1000`);
+      const body = (json && typeof json === "object" ? json : {}) as { Changes?: unknown; Done?: unknown; Last?: unknown };
+      if (!Array.isArray(body.Changes) || typeof body.Last !== "number" || typeof body.Done !== "boolean") {
+        throw new BackendError("画像サーバーの変更の記録を読み込めません");
+      }
+      for (const change of body.Changes as { ChangeType?: unknown; ID?: unknown }[]) {
+        if (change?.ChangeType === "NewInstance" && typeof change.ID === "string" && ids.has(change.ID)) {
+          return true;
+        }
+      }
+      if (body.Done || body.Last <= position) {
+        return false;
+      }
+      position = body.Last;
+    }
+    return true;
   }
 
   /** 検査の全画像の、Orthanc の画像の ID・UID の組・ファイルの印（`/studies/{id}/instances` の FileUuid） */
@@ -480,16 +513,20 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return (await instanceTags(id)).map(([, instance]) => instance);
     },
 
+    // 変更の記録の位置を先に読む（印を読んだ後に届いた画像は、位置より後の記録に必ず残る）
     async studyInstanceFiles(id: string) {
-      return Object.fromEntries((await instanceFiles(id)).map(f => [f.key, f.file]));
+      const since = await lastChange();
+      return { since, files: Object.fromEntries((await instanceFiles(id)).map(f => [f.key, f.file])) };
     },
 
     // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
-    // 書き換えの前とファイルの印が違う画像（同じ UID で届き直して置き換わった画像）も消さない（design.md §15.4）
-    async deleteStudyInstances(id: string, instances: PatientInstance[], files: Record<string, string>) {
+    // 書き換えの前とファイルの印が違う画像（同じ UID で届き直して置き換わった画像）も消さない。Orthanc の削除には
+    // 印の条件を付けられないので、消した画像に印を読んだ後の届いた記録があれば true を返す（design.md §15.4）
+    async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles) {
       const named = new Set(instances.map(instanceKey));
+      const deleted = new Set<string>();
       for (const { instanceId, key, file } of await instanceFiles(id)) {
-        if (!named.has(key) || files[key] !== file) {
+        if (!named.has(key) || source.files[key] !== file) {
           continue;
         }
         const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
@@ -503,7 +540,9 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         if (!res.ok) {
           throw new BackendError(`画像サーバーが画像の削除を断りました（${res.status}）`);
         }
+        deleted.add(instanceId);
       }
+      return deleted.size > 0 && await arrivedSince(source.since, deleted);
     },
 
     // 仕事の完了は呼び手が確かめる（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら

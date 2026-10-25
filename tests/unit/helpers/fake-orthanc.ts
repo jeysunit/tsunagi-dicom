@@ -17,7 +17,13 @@ export interface FakeOrthanc {
    * 読んだ後に呼ぶ（最中に届いた画像を作る）。wholeStudyDelete は、次の画像の削除で名指しに関わらず検査ごと消す
    * （画像の削除を誤る Orthanc）
    */
-  next: { state?: JobState; partial?: boolean; beforeModify?: () => void; wholeStudyDelete?: boolean; beforeDelete?: () => void };
+  /**
+   * beforeDelete は削除の前（ファイルの印を見る前）、duringDelete は印を見た後で消す前に呼ぶ（届き直しを作る）
+   */
+  next: {
+    state?: JobState; partial?: boolean; beforeModify?: () => void; wholeStudyDelete?: boolean;
+    beforeDelete?: () => void; duringDelete?: () => void;
+  };
   add(instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance;
   studyId(patientId: string, uid: string): string;
   modifyCalls: { id: string; replace: Record<string, string> }[];
@@ -38,6 +44,9 @@ export function createFakeOrthanc(): FakeOrthanc {
     if (!files.has(i)) files.set(i, randomUUID());
     return files.get(i)!;
   };
+  // Orthanc の画像の ID（検査と UID の組で決まる）と、変更の記録（届いた画像の ID の並び。位置は並びの長さ）
+  const instanceIdOf = (i: PatientInstance) => `${idOf(i)}|${triple(i)}`;
+  const arrivals: string[] = [];
   const fake: FakeOrthanc = {
     instances: [],
     unstable: new Set(),
@@ -58,6 +67,7 @@ export function createFakeOrthanc(): FakeOrthanc {
         ...instance
       };
       fake.instances.push(full);
+      arrivals.push(instanceIdOf(full));
       return full;
     },
     backend: undefined as unknown as Backend
@@ -94,23 +104,30 @@ export function createFakeOrthanc(): FakeOrthanc {
         // 書き換えた先の検査の同じ SOP の画像は上書きする。患者 ID が変われば先の検査は別なので、元は残る
         fake.instances = fake.instances.filter(i => !(triple(i) === triple(updated) && idOf(i) === idOf(updated)));
         fake.instances.push(updated);
+        arrivals.push(instanceIdOf(updated));
       }
-      fake.next = { wholeStudyDelete: fake.next.wholeStudyDelete, beforeDelete: fake.next.beforeDelete };
+      const { wholeStudyDelete, beforeDelete, duringDelete } = fake.next;
+      fake.next = { wholeStudyDelete, beforeDelete, duringDelete };
       const jobId = randomUUID();
       jobs.set(jobId, state);
       return { jobId };
     },
     async studyInstanceFiles(id: string) {
-      return Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), fileOf(i)]));
+      return { since: arrivals.length, files: Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), fileOf(i)])) };
     },
-    async deleteStudyInstances(id: string, named: PatientInstance[], files: Record<string, string>) {
-      fake.next.beforeDelete?.();
+    // http.ts と同じく、印を見て消す画像の ID を決めてから、ID で消す（印を見た後に置き換わった画像も消える）
+    async deleteStudyInstances(id: string, named: PatientInstance[], source: { since: number; files: Record<string, string> }) {
+      const { beforeDelete, duringDelete, wholeStudyDelete } = fake.next;
+      fake.next = {};
+      beforeDelete?.();
       fake.deleteCalls.push({ id, sops: named.map(i => i.SOPInstanceUID) });
       const names = new Set(named.map(triple));
-      const whole = fake.next.wholeStudyDelete;
-      fake.next = {};
-      fake.instances = fake.instances.filter(i => idOf(i) !== id
-        || (!whole && !(names.has(triple(i)) && files[triple(i)] === fileOf(i))));
+      const doomed = new Set(fake.instances
+        .filter(i => idOf(i) === id && names.has(triple(i)) && source.files[triple(i)] === fileOf(i))
+        .map(instanceIdOf));
+      duringDelete?.();
+      fake.instances = fake.instances.filter(i => idOf(i) !== id || (!wholeStudyDelete && !doomed.has(instanceIdOf(i))));
+      return arrivals.slice(source.since).some(a => doomed.has(a));
     },
     async jobStatus(jobId: string) {
       const state = jobs.get(jobId);

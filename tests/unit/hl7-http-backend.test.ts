@@ -85,12 +85,21 @@ describe("HL7 の Orthanc REST の要求", () => {
         .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1"), [two]: tag("1.2.3.2"), [late]: tag("1.2.3.3") }))
         .mockResolvedValueOnce(Response.json(Object.entries(files).map(([ID, FileUuid]) => ({ ID, FileUuid }))));
     };
-    it("画像ごとのファイルの印を、UID の組を鍵にして読む", async () => {
+    const files = { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2" };
+    const changes = (list: { ChangeType: string; ID: string }[], done = true, last = 20) =>
+      state.fetch.mockResolvedValueOnce(Response.json({ Changes: list, Done: done, Last: last }));
+    it("変更の記録の位置を先に読み、画像ごとのファイルの印を、UID の組を鍵にして読む", async () => {
+      state.fetch.mockResolvedValueOnce(Response.json({ Changes: [], Done: true, Last: 7 }));
       listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
-      expect(await backend().studyInstanceFiles(id)).toEqual({ "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" });
-      expect(state.fetch.mock.calls[1]![0]).toBe(`http://pacs.example.org/studies/${id}/instances`);
+      expect(await backend().studyInstanceFiles(id)).toEqual({
+        since: 7,
+        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" }
+      });
+      expect(state.fetch.mock.calls[0]![0]).toBe("http://pacs.example.org/changes?last");
+      expect(state.fetch.mock.calls[2]![0]).toBe(`http://pacs.example.org/studies/${id}/instances`);
     });
     it("ファイルの印が無ければ読めないとする", async () => {
+      state.fetch.mockResolvedValueOnce(Response.json({ Changes: [], Done: true, Last: 7 }));
       listing({ [one]: "f1", [two]: "", [late]: "f3" });
       await expect(backend().studyInstanceFiles(id)).rejects.toThrow("ファイルの印");
     });
@@ -98,18 +107,29 @@ describe("HL7 の Orthanc REST の要求", () => {
       // 2 枚目は同じ UID で届き直して印が変わった
       listing({ [one]: "f1", [two]: "f2-resent", [late]: "f3" });
       state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
-      await backend().deleteStudyInstances(id, [full("1.2.3.1"), full("1.2.3.2")], { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2" });
-      expect(state.fetch).toHaveBeenCalledTimes(3);
+      // 印を読んだ後の記録に、消した画像の届いた記録は無い（届き直した 2 枚目は消していない）
+      changes([{ ChangeType: "NewInstance", ID: two }]);
+      expect(await backend().deleteStudyInstances(id, [full("1.2.3.1"), full("1.2.3.2")], { since: 7, files })).toBe(false);
+      expect(state.fetch).toHaveBeenCalledTimes(4);
       expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}/instances-tags?simplify`);
       const [url, init] = state.fetch.mock.calls[2]!;
       expect(url).toBe(`http://pacs.example.org/instances/${one}`);
       expect(init.method).toBe("DELETE");
       expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
+      expect(state.fetch.mock.calls[3]![0]).toBe("http://pacs.example.org/changes?since=7&limit=1000");
+    });
+    it("消した画像に、印を読んだ後の届いた記録があれば true（続きの頁も読む）", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+      changes([{ ChangeType: "StableStudy", ID: id }], false, 15);
+      changes([{ ChangeType: "NewInstance", ID: one }], true, 16);
+      expect(await backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).toBe(true);
+      expect(state.fetch.mock.calls[4]![0]).toBe("http://pacs.example.org/changes?since=15&limit=1000");
     });
     it.each([[502, BackendUnknownError], [403, BackendError]])("画像の削除の状態 %i を投げる", async (status, error) => {
       listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
       state.fetch.mockResolvedValueOnce(new Response("", { status }));
-      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { "1.2|1.2.3|1.2.3.1": "f1" })).rejects.toBeInstanceOf(error);
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toBeInstanceOf(error);
     });
   });
   it.each([302, 502, 503, 504])("状態 %i は結果不明", async (status) => {
