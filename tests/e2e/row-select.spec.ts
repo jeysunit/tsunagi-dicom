@@ -156,10 +156,10 @@ test("タグの表：右クリックのメニューで、選んだ行を「(タ�
   await tr("0008,0018").click({ button: "right" });
   const menu = page.getByTestId("tag-menu");
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole("menuitem")).toHaveText("タグとタグ値をコピー");
-  await expect(menu.getByRole("menuitem")).toBeFocused();
+  await expect(menu.getByRole("menuitem")).toHaveText(["全部の列", "タグと値", "値だけ"]);
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
   await expect(selectedTags(table)).toHaveCount(1);
-  await menu.getByRole("menuitem").click();
+  await menu.getByTestId("tag-copy-all").click();
   await expect(menu).toHaveCount(0);
   const sop = (await table.locator('tr[data-tag="0008,0018"] [data-testid=tag-value]').textContent())!;
   expect(await clipboard(page)).toBe(`(0008,0018)\tSOPインスタンスUID\tUI\t${sop}`);
@@ -169,7 +169,7 @@ test("タグの表：右クリックのメニューで、選んだ行を「(タ�
   await tr("0020,0013").click();
   await tr("0028,0010").click({ modifiers: ["ControlOrMeta"] });
   await tr("0028,0010").click({ button: "right" });
-  await page.getByTestId("tag-copy").click();
+  await page.getByTestId("tag-copy-all").click();
   const lines = (await clipboard(page)).split("\n");
   expect(lines).toHaveLength(2);
   expect(lines[0]).toMatch(/^\(0020,0013\)\t画像番号\tIS\t\d+$/);
@@ -177,8 +177,44 @@ test("タグの表：右クリックのメニューで、選んだ行を「(タ�
   // 値が無いタグは、値の欄が空
   await tr("0018,0050").click();
   await tr("0018,0050").click({ button: "right" });
-  await page.getByTestId("tag-copy").click();
+  await page.getByTestId("tag-copy-all").click();
   expect(await clipboard(page)).toMatch(/^\(0018,0050\)\tスライス厚\t[A-Z]*\t$/);
+});
+
+test("タグの表：メニューの「タグと値」「値だけ」と、表の上の「n 行を選択」「コピー」（件数つき）", async ({ page }) => {
+  const table = await openTagTable(page);
+  const tr = (tag: string) => table.locator(`tr[data-tag="${tag}"]`);
+  const count = page.getByTestId("tag-selection-count");
+  const button = page.getByTestId("tag-copy-button");
+  // 選ぶまでは「コピー」が押せない。表の上の行の高さは、選びの有無で変わらない
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveText("コピー");
+  const bar = table.locator("div.sticky").first();
+  const before = (await bar.boundingBox())!;
+  // ページが動いても比べられるよう、表の上の行から最初の行までの間で見る
+  const gap = async () => (await table.locator("thead").boundingBox())!.y - (await bar.boundingBox())!.y;
+  const gapBefore = await gap();
+
+  await tr("0020,0013").click();
+  await tr("0028,0010").click({ modifiers: ["ControlOrMeta"] });
+  await expect(count).toHaveText("2 行を選択");
+  await expect(button).toHaveText("コピー（2 行）");
+  expect((await bar.boundingBox())!.height).toBe(before.height);
+  expect(await gap()).toBe(gapBefore);
+
+  await button.click();
+  const all = (await clipboard(page)).split("\n");
+  expect(all).toHaveLength(2);
+  expect(all[0]).toMatch(/^\(0020,0013\)\t画像番号\tIS\t\d+$/);
+  await expect(page.getByTestId("tag-copy-notice")).toHaveText("2 行をコピーしました");
+  await expect(count).toHaveText("");
+
+  await tr("0028,0010").click({ button: "right" });
+  await page.getByTestId("tag-copy-tag-value").click();
+  expect((await clipboard(page)).split("\n")).toEqual(expect.arrayContaining([expect.stringMatching(/^\(0020,0013\)\t\d+$/)]));
+  await tr("0028,0010").click({ button: "right" });
+  await page.getByTestId("tag-copy-value").click();
+  expect((await clipboard(page)).split("\n").every((l) => /^\d+$/.test(l))).toBe(true);
 });
 
 test("タグの表：キーボードの Ctrl+C と、メニューのキーでも写せる。Esc でメニューを閉じるとフォーカスが行に戻る", async ({ page }) => {
@@ -250,5 +286,29 @@ test("UID の写すボタンは、UID のすぐ右にある（行の右端に離
   expect(button.x - (code.x + code.width)).toBeLessThanOrEqual(24);
   expect(button.x + button.width).toBeLessThan(lineBox.x + lineBox.width - 4);
   await line.getByRole("button", { name: "StudyInstanceUIDをコピー" }).click();
+  expect(await clipboard(page)).toBe(STUDY);
+});
+
+test("UID を写すと、値の地が一瞬 selected に替わり「コピーしました」が出る。値そのものを押しても写せる", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
+  const line = page.getByTestId("study-uid");
+  const code = line.locator("code");
+  const notice = line.getByTestId("uid-copied");
+  const before = await background(code);
+  await expect(notice).toHaveText("");
+
+  await line.getByRole("button", { name: "StudyInstanceUIDをコピー" }).click();
+  await expect(notice).toHaveText("コピーしました");
+  await expect(code).toHaveAttribute("data-copied", "true");
+  expect(await background(code)).not.toBe(before);
+  // しばらくすると戻る
+  await expect(notice).toHaveText("", { timeout: 5000 });
+  expect(await background(code)).toBe(before);
+
+  // 値そのものを押しても写せる
+  await page.evaluate(() => navigator.clipboard.writeText("x"));
+  await code.click();
+  await expect(notice).toHaveText("コピーしました");
   expect(await clipboard(page)).toBe(STUDY);
 });

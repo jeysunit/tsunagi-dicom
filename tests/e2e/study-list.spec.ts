@@ -1081,7 +1081,8 @@ test("詳細の「検査のタグ」：画像の場所の切り替えから見�
   const tags = area.getByTestId("dicom-tags");
   await expect(tags).toContainText("検査単位（要約）");
   await expect(tags.getByTestId("all-values")).toContainText("0010,0020");
-  await expect(tags.getByRole("button")).toHaveCount(0);
+  // 押せる物は、検査のタグの表の上の「コピー」だけ（UID のコピーなどは無い）
+  await expect(tags.getByRole("button")).toHaveText(["コピー"]);
   await expect(area.getByTestId("instance-tags")).toHaveCount(0);
   await expect(area.getByTestId("instance-values")).toHaveCount(0);
   await expect(area.getByTestId("uid-line")).toHaveCount(0);

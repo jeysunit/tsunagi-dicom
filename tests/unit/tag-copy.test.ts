@@ -33,6 +33,24 @@ describe("tagRowText", () => {
   });
 });
 
+describe("写す形式", () => {
+  const row = { tag: "0008,0020", name: "検査日", vr: "DA", value: "20261024" };
+  it("タグと値：タグと値の 2 列", () => {
+    expect(tagRowText(row, "tag-value")).toBe("(0008,0020)\t20261024");
+  });
+  it("値だけ：値の 1 列。値が無ければ空", () => {
+    expect(tagRowText(row, "value")).toBe("20261024");
+    expect(tagRowText({ ...row, value: null }, "value")).toBe("");
+  });
+  it("どの形式でも、切った値は全体の文字数を添え、バイナリの表示はそのまま写す", () => {
+    expect(tagRowText({ ...row, value: "abc", length: 2000 }, "value")).toBe("abc…（全 2000 文字）");
+    expect(tagRowText({ tag: "7FE0,0010", name: "画素データ", vr: "OW", value: "（バイナリ）" }, "tag-value")).toBe("(7FE0,0010)\t（バイナリ）");
+  });
+  it("複数の行も形式に従う", () => {
+    expect(tagRowsText([row, { ...row, value: "20260101" }], "value")).toBe("20261024\n20260101");
+  });
+});
+
 describe("tagRowsText", () => {
   it("複数の行は改行でつなぎ、末尾に改行を付けない", () => {
     const text = tagRowsText([

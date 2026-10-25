@@ -9,14 +9,16 @@ import {
   type PickModifiers,
   type RowSelection,
 } from "@/lib/client/row-selection";
-import { tagRowsText, type CopyableTagRow } from "@/lib/client/tag-copy";
+import { Button } from "@/components/ui/button";
+import { tagRowsText, type CopyableTagRow, type CopyFormat } from "@/lib/client/tag-copy";
 import { cn } from "@/lib/utils";
 
 // DICOM タグの表（タグ・タグ名・VR・値）の本体。行を選べる（docs/design-system/components.md の「タグの表」）：
 // - 選び方：クリックで 1 行、Shift で範囲、Ctrl（Mac は Cmd）で足す・外す。矢印のキーで動いた行を選び（Shift で範囲）、
 //   Space で足す・外す、Ctrl／Cmd + A で全部、Esc で外す。選んだ行は `selected` の地と左 3px の線（一覧の表と同じ）。
-// - 写す：選んだ行の上で右クリック（またはメニューのキー・Shift + F10）で「タグとタグ値をコピー」、Ctrl／Cmd + C でも同じ中身を写す。
-//   中身は 1 行 1 タグで、タグ・タグ名・VR・値のタブ区切り（src/lib/client/tag-copy.ts）。
+// - 写す：表の上の「コピー」と Ctrl／Cmd + C は「全部の列」（タグ・タグ名・VR・値）。選んだ行の上で右クリック（またはメニューのキー・
+//   Shift + F10）で出るメニューは「全部の列」「タグと値」「値だけ」。中身は 1 行 1 タグのタブ区切り（src/lib/client/tag-copy.ts）。
+// - 表の上の 28px の行は常に出し、「n 行を選択」と「コピー」（件数つき）を置く（選びの有無で表を動かさない）。写した知らせもここに出す。
 // - 浮くメニューは標準の popover に任せる（暗幕・Esc で閉じる動きを自前で書かない）。
 // 行を読み直したら（表が出し直されたら）選びは捨てる。TagTable が読み込み中は表を出さないので、そのたびにここが作り直される。
 
@@ -26,6 +28,11 @@ interface MenuPosition {
 }
 
 const MENU_WIDTH = 224;
+const MENU_ITEMS: readonly { format: CopyFormat; label: string }[] = [
+  { format: "all", label: "全部の列" },
+  { format: "tag-value", label: "タグと値" },
+  { format: "value", label: "値だけ" },
+];
 const NOTICE_MS = 2500;
 
 export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
@@ -75,18 +82,23 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
     setNotice(ok ? `${count} 行をコピーしました` : "コピーできませんでした");
   }
 
-  /** メニューの「タグとタグ値をコピー」：選んだ行を写す（選びが空なら動いている行） */
-  async function copyFromMenu() {
+  /** 選んだ行を、形式を指して写す（選びが空なら動いている行） */
+  async function copyRows(format: CopyFormat) {
     const rowsToCopy = picked.length > 0 ? picked : rows[active] ? [rows[active]] : [];
-    setMenu(null);
-    menuRef.current?.hidePopover();
-    focusRow(active);
     try {
-      await navigator.clipboard.writeText(tagRowsText(rowsToCopy));
+      await navigator.clipboard.writeText(tagRowsText(rowsToCopy, format));
       announce(rowsToCopy.length, true);
     } catch {
       announce(rowsToCopy.length, false);
     }
+  }
+
+  /** メニューの項目：メニューを閉じ、フォーカスを行へ戻してから写す */
+  function copyFromMenu(format: CopyFormat) {
+    setMenu(null);
+    menuRef.current?.hidePopover();
+    focusRow(active);
+    void copyRows(format);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTableRowElement>, index: number) {
@@ -129,6 +141,25 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
         announce(picked.length, true);
       }}
     >
+      {/* 表の上の 28px の行：左に選んだ行の数（知らせが出ている間は知らせ）、右に「コピー」（件数つき）。選びの有無で表を動かさない */}
+      <div className="sticky top-0 z-10 flex h-7 items-center justify-between gap-2 border-b border-border bg-surface px-2 text-xs">
+        <span className="min-w-0 truncate text-label">
+          <span data-testid="tag-selection-count">{notice ? "" : picked.length > 0 ? `${picked.length} 行を選択` : ""}</span>
+          <span role="status" data-testid="tag-copy-notice">
+            {notice}
+          </span>
+        </span>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          disabled={picked.length === 0}
+          onClick={() => void copyRows("all")}
+          data-testid="tag-copy-button"
+        >
+          {picked.length > 0 ? `コピー（${picked.length} 行）` : "コピー"}
+        </Button>
+      </div>
       <table className="w-full table-fixed text-xs" role="grid" aria-multiselectable="true" aria-label="DICOM タグ">
         <colgroup>
           <col className="w-[5.5rem]" />
@@ -136,7 +167,7 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
           <col className="w-[2.5rem]" />
           <col />
         </colgroup>
-        <thead className="sticky top-0 bg-surface text-left text-label">
+        <thead className="sticky top-7 bg-surface text-left text-label">
           <tr>
             <th scope="col" className="px-2 py-1 font-normal">
               タグ
@@ -205,10 +236,6 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
           })}
         </tbody>
       </table>
-      {/* 写せたかどうかを、画面と読み上げの両方に知らせる。表を下へスクロールしていても見えるよう、枠の下に貼る */}
-      <p role="status" className={cn("sticky bottom-0 bg-surface px-2 py-1 text-xs text-label", !notice && "sr-only")} data-testid="tag-copy-notice">
-        {notice}
-      </p>
       {menu && (
         <div
           ref={menuRef}
@@ -227,15 +254,18 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
             }
           }}
         >
-          <button
-            type="button"
-            role="menuitem"
-            className="flex h-7 w-full items-center px-3 text-left hover:bg-hover focus-visible:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-            data-testid="tag-copy"
-            onClick={() => void copyFromMenu()}
-          >
-            タグとタグ値をコピー
-          </button>
+          {MENU_ITEMS.map((item) => (
+            <button
+              key={item.format}
+              type="button"
+              role="menuitem"
+              className="flex h-7 w-full items-center px-3 text-left hover:bg-hover focus-visible:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+              data-testid={`tag-copy-${item.format}`}
+              onClick={() => copyFromMenu(item.format)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
