@@ -4,6 +4,10 @@
 export const MODALITY_GROUPS = ["CT", "MR", "CR/DX", "US", "ES", "MG", "DOC", "SR"] as const;
 export type ModalityGroup = (typeof MODALITY_GROUPS)[number];
 
+/** 詳細条件の中にだけ出すモダリティ（文書・レポート）。一覧の上の見出し（すべて・CT・MR・CR/DX・US・ES・MG）には出さない */
+export const DETAIL_GROUPS: readonly ModalityGroup[] = ["DOC", "SR"];
+export const LIST_GROUPS: readonly ModalityGroup[] = MODALITY_GROUPS.filter((g) => !DETAIL_GROUPS.includes(g));
+
 /** 群に入る DICOM の Modality の値 */
 const MEMBERS: Record<ModalityGroup, readonly string[]> = {
   CT: ["CT"],
