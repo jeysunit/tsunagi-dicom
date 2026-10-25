@@ -88,9 +88,29 @@ export interface Backend {
    * 検査の画像のうち、UID の組（Study・Series・SOP）が instances のどれかと同じで、ファイルの印が source.files と同じ
    * ものだけを 1 枚ずつ消す。消す直前に、変更の記録の source.since より後にその画像が届いた記録（NewInstance）があれば
    * 消さない（同じ UID で届き直した画像）。ほかの画像（後から届いた画像）は残す。すでに無い画像は飛ばす。
-   * Orthanc の削除には条件を付けられないので、記録を読んでから消すまでの間に届き直した画像は消えうる（design.md §15.4）
+   * Orthanc の削除には条件を付けられないので、記録を読んでから消すまでの間に届き直した画像は消えうる。C-STORE は
+   * 付け替えの印（lockStudy）の間 Orthanc の Lua が断るので、残るのは REST・STOW-RS で届き直した画像だけ（design.md §15.4）
    */
-  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[], source: SourceFiles): Promise<void>;
+  deleteStudyInstances(
+    orthancStudyId: string,
+    instances: PatientInstance[],
+    source: SourceFiles,
+    /** 1 枚を消す直前（変更の記録を読んだ後）に呼ぶ（付け替えの印が続いているかを確かめる）。投げれば、残りを消さずに投げる */
+    beforeEach?: () => Promise<void>,
+  ): Promise<void>;
+  /**
+   * 検査に付け替えの印（利用者のメタデータ TsunagiLock。値は期限の UNIX 秒）を付ける（design.md §15.4）。Orthanc の Lua
+   * （deploy/orthanc/tsunagi-lock.lua）が、期限の切れていない印のある検査と同じ StudyInstanceUID の C-STORE を断る。
+   * 付け直せば期限が延びる。Orthanc の UserMetadata に TsunagiLock が無ければ投げる
+   */
+  lockStudy(orthancStudyId: string, untilEpochSeconds: number): Promise<void>;
+  /** 付け替えの印を外す。検査か印がもう無ければ何もしない */
+  unlockStudy(orthancStudyId: string): Promise<void>;
+  /**
+   * 検査の画像ごとの、写しの元の画像の ID（Orthanc のメタデータ ModifiedFrom。書き換えの写しにだけある）。
+   * 鍵は UID の組。無ければ null（書き換えの写しでない画像。写しが同じ UID の別の画像に置き換わったときも無くなる）
+   */
+  studyInstanceOrigins(orthancStudyId: string): Promise<Record<string, string | null>>;
   /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
   /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */
@@ -289,6 +309,11 @@ export interface StudyPatient {
 export interface SourceFiles {
   since: number;
   files: Record<string, string>;
+  /**
+   * 画像ごとの Orthanc の画像の ID（鍵は files と同じ）。書き換えの写しの ModifiedFrom と照らす（design.md §15.4）。
+   * この欄の無い前の版の記録では、元を消さない
+   */
+  ids?: Record<string, string>;
 }
 
 export interface PatientInstance extends StudyPatient {

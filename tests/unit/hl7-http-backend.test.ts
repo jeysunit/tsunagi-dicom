@@ -88,12 +88,13 @@ describe("HL7 の Orthanc REST の要求", () => {
     const files = { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2" };
     const changes = (list: { ChangeType: string; ID: string }[], done = true, last = 20) =>
       state.fetch.mockResolvedValueOnce(Response.json({ Changes: list, Done: done, Last: last }));
-    it("変更の記録の位置を先に読み、画像ごとのファイルの印を、UID の組を鍵にして読む", async () => {
+    it("変更の記録の位置を先に読み、画像ごとのファイルの印と画像の ID を、UID の組を鍵にして読む", async () => {
       state.fetch.mockResolvedValueOnce(Response.json({ Changes: [], Done: true, Last: 7 }));
       listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
       expect(await backend().studyInstanceFiles(id)).toEqual({
         since: 7,
-        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" }
+        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" },
+        ids: { "1.2|1.2.3|1.2.3.1": one, "1.2|1.2.3|1.2.3.2": two, "1.2|1.2.3|1.2.3.3": late }
       });
       expect(state.fetch.mock.calls[0]![0]).toBe("http://pacs.example.org/changes?last");
       expect(state.fetch.mock.calls[2]![0]).toBe(`http://pacs.example.org/studies/${id}/instances`);
@@ -142,6 +143,65 @@ describe("HL7 の Orthanc REST の要求", () => {
       changes([]);
       state.fetch.mockResolvedValueOnce(new Response("", { status }));
       await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toBeInstanceOf(error);
+    });
+    it("変更の記録を読んだ後、1 枚を消す直前に beforeEach を呼び、投げれば残りを消さない", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      changes([]);
+      const beforeEach = vi.fn().mockRejectedValue(new Error("synthetic renew failure"));
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files }, beforeEach)).rejects.toThrow("synthetic");
+      expect(beforeEach).toHaveBeenCalledTimes(1);
+      expect(state.fetch.mock.calls.some(c => c[1]?.method === "DELETE")).toBe(false);
+    });
+    it("写しの元（ModifiedFrom）を画像ごとに読み、無い画像は null にする", async () => {
+      state.fetch
+        .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1"), [two]: tag("1.2.3.2") }))
+        .mockResolvedValueOnce(new Response(late, { status: 200 }))
+        .mockResolvedValueOnce(new Response("", { status: 404 }));
+      expect(await backend().studyInstanceOrigins(id)).toEqual({ "1.2|1.2.3|1.2.3.1": late, "1.2|1.2.3|1.2.3.2": null });
+      expect(state.fetch.mock.calls.map(c => c[0]).slice(1)).toEqual([
+        `http://pacs.example.org/instances/${one}/metadata/ModifiedFrom`,
+        `http://pacs.example.org/instances/${two}/metadata/ModifiedFrom`
+      ]);
+    });
+    it("写しの元を読めなければ投げる", async () => {
+      state.fetch
+        .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1") }))
+        .mockResolvedValueOnce(new Response("", { status: 500 }));
+      await expect(backend().studyInstanceOrigins(id)).rejects.toBeInstanceOf(BackendError);
+    });
+  });
+  describe("付け替えの印", () => {
+    it("期限の UNIX 秒を、利用者のメタデータ TsunagiLock に書く資格情報で PUT する", async () => {
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+      await backend().lockStudy(id, 1800000000);
+      const [url, init] = state.fetch.mock.calls[0]!;
+      expect(url).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
+      expect(init.method).toBe("PUT");
+      expect(init.body).toBe("1800000000");
+      expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
+    });
+    it("Orthanc に印の名前（UserMetadata）が無ければ、設定の要ることを知らせて投げる", async () => {
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 404 }));
+      await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("UserMetadata に TsunagiLock が要る");
+    });
+    it.each([0, -1, 1.5, Number.NaN])("期限 %s は送らない", async (until) => {
+      await expect(backend().lockStudy(id, until)).rejects.toBeInstanceOf(BackendError);
+      expect(state.fetch).not.toHaveBeenCalled();
+    });
+    it("通信が切れたら、結果不明ではなく書き換えない誤りにする", async () => {
+      state.fetch.mockRejectedValueOnce(new Error("synthetic transport failure"));
+      const error = await backend().lockStudy(id, 1800000000).catch(e => e);
+      expect(error).toBeInstanceOf(BackendError);
+      expect(error).not.toBeInstanceOf(BackendUnknownError);
+    });
+    it("外すのは DELETE。検査か印がもう無い（404）ときは何もしない", async () => {
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 404 }));
+      await backend().unlockStudy(id);
+      const [url, init] = state.fetch.mock.calls[0]!;
+      expect(url).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
+      expect(init.method).toBe("DELETE");
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 403 }));
+      await expect(backend().unlockStudy(id)).rejects.toBeInstanceOf(BackendError);
     });
   });
   it.each([302, 502, 503, 504])("状態 %i は結果不明", async (status) => {

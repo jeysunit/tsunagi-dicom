@@ -94,6 +94,8 @@ export function restoreMockStudies(): void {
   mockUpdates.clear();
   hl7Jobs.clear();
   hl7Instances.clear();
+  hl7Locks.clear();
+  hl7LockLog.length = 0;
   hl7Simulation = {};
   mockTest.revision = 0;
   mockTest.extraIds.clear();
@@ -188,6 +190,11 @@ const SOP_CLASS: Record<string, string> = {
 /** 写しの無い画像の SOPInstanceUID（Orthanc の ID から決まる、2.25 の形の UID。64 字に収まる） */
 function syntheticUid(orthancId: string): string {
   return `2.25.${BigInt(`0x${createHash("sha256").update(orthancId).digest("hex").slice(0, 30)}`)}`;
+}
+
+/** 書き換えの元の画像の、Orthanc の ID の形の ID（UID の組から決める。写しの ModifiedFrom と照らす） */
+function mockInstanceId(key: string): string {
+  return createHash("sha256").update(`instance:${key}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-");
 }
 
 /** シリーズの MainDicomTags の VR（画像単位の DICOM タグの見本に入れるもの） */
@@ -533,12 +540,30 @@ export function createMockBackend(): Backend {
       return {
         since: 0,
         files: Object.fromEntries(list.map((i) => [key(i), `mock-file-${i.SOPInstanceUID}`])),
+        ids: Object.fromEntries(list.map((i) => [key(i), mockInstanceId(key(i))])),
       };
     },
     async deleteStudyInstances(id: string) {
       if ((await restStudies()).some((s) => s.ID === id)) {
         throw new BackendError("モック：書き換えの元の検査が残っている");
       }
+    },
+    async lockStudy(id: string, untilEpochSeconds: number) {
+      if (hl7Simulation.lockRefused) {
+        throw new BackendError("画像サーバーが付け替えの印を断りました（404）。Orthanc の UserMetadata に TsunagiLock が要る");
+      }
+      hl7Locks.set(id, untilEpochSeconds);
+      hl7LockLog.push(`lock:${id}`);
+    },
+    async unlockStudy(id: string) {
+      hl7Locks.delete(id);
+      hl7LockLog.push(`unlock:${id}`);
+    },
+    // モックの書き換えは検査ごと移すので、どの画像も元の画像の写しとして答える（foreignCopies で、写しでない形にする）
+    async studyInstanceOrigins(id: string) {
+      const key = (i: import("./types").PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
+      return Object.fromEntries((await this.studyInstanceTags(id)).map((i) =>
+        [key(i), hl7Simulation.foreignCopies ? null : mockInstanceId(key(i))]));
     },
 
     async lookupStudyIds(studyInstanceUid: string) {
@@ -621,10 +646,17 @@ export const hl7Jobs = new Map<string, {
 }>();
 
 const hl7Instances = new Map<string, import("./types").PatientInstance[]>();
+/** 付け替えの印（検査の ID → 期限の UNIX 秒）と、付けた・外した順の記録（試験が読む） */
+export const hl7Locks = new Map<string, number>();
+export const hl7LockLog: string[] = [];
 let hl7Simulation: {
   state?: import("./types").JobState;
   changedInstances?: number;
   dispatchTimeout?: boolean;
+  /** 付け替えの印を断る（Orthanc に UserMetadata が無いときの形） */
+  lockRefused?: boolean;
+  /** 写しの ModifiedFrom が元の画像の ID と合わない（写しが別の画像に置き換わった形） */
+  foreignCopies?: boolean;
 } = {};
 /** 次の書き換えを、動き続ける仕事・失敗・一部だけの変更・応答の時間切れにする。 */
 export function simulateMockHl7(options: typeof hl7Simulation): void {
