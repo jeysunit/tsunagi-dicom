@@ -548,7 +548,7 @@ test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像�
   // 送った 3 枚が、画像の番号の順に並ぶ。画面へ返すのは選ぶのに要る値だけ
   expect(instances.map((i) => i.sopInstanceUid)).toEqual(A.sopInstanceUids);
   expect(instances.map((i) => i.instanceNumber)).toEqual(["1", "2", "3"]);
-  expect(Object.keys(instances[0]!).sort()).toEqual(["instanceNumber", "numberOfFrames", "sopClassUid", "sopInstanceUid"]);
+  expect(Object.keys(instances[0]!).sort()).toEqual(["instanceNumber", "numberOfFrames", "sliceLocation", "sopClassUid", "sopInstanceUid"]);
 
   // 1 枚の値の全部。その画像の SOPInstanceUID と画像の番号が入り、ほかの画像のものではない
   const second = A.sopInstanceUids[1]!;
