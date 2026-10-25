@@ -127,7 +127,7 @@ export function ReceivedList({
           <select
             value={source}
             onChange={(e) => setSource(e.target.value)}
-            className="h-7 rounded-md border border-border bg-background px-2 text-sm text-value"
+            className="h-7 rounded-md border border-border-input bg-background px-2 text-sm text-value"
             data-testid="received-source"
           >
             <option value="">すべて</option>

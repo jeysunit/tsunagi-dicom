@@ -1,0 +1,126 @@
+/* ui-kit 1.0.0（3 製品で同じ写し。製品の側で直さない。直すときは元を直して写し直す） */
+/* 明るい地が初期。html[data-theme=dark|light] があればそれに従い、無ければ端末の設定に従う */
+:root {
+  color-scheme: light;
+  --color-background: #FFFFFF;
+  --color-surface: #F6F6F6;
+  --color-muted: #EEEEEE;
+  --color-muted-strong: #E2E2E2;
+  --color-border: #D2D2D2;
+  --color-border-input: #8C8C8C;
+  --color-foreground: #262626;
+  --color-value: #1A1A1A;
+  --color-label: #5F5F5F;
+  --color-primary: #4B4FBF;
+  --color-primary-foreground: #FFFFFF;
+  --color-primary-hover: #3B3EA3;
+  --color-link: #4B4FBF;
+  --color-ring: #4B4FBF;
+  --color-selected: #EDEDF9;
+  --color-selected-strong: #D9DAF3;
+  --color-danger: #D1242F;
+  --color-danger-foreground: #FFFFFF;
+  --color-success: #1A7F37;
+  --color-warning: #9A6700;
+  --color-mod-ct: #0969DA;
+  --color-mod-mr: #9333EA;
+  --color-mod-crdx: #1A7F37;
+  --color-mod-us: #BC4C00;
+  --color-mod-es: #BF3989;
+  --color-mod-mg: #9A6700;
+  --color-mod-doc: #6E7781;
+  --color-mod-sr: #1B7C83;
+  --color-primary-active: #2F3288;
+  --color-hover: #E2E2E2;
+  --color-pressed: #D2D2D2;
+  --color-dev-band: #6B4A00;
+  --color-dev-band-foreground: #FFE8A3;
+  --font-sans: system-ui, "Noto Sans JP", sans-serif;
+  --font-mono: ui-monospace, "Noto Sans Mono", monospace;
+  --text-xs: 12px;   /* 行 18px：補足・項目名・札 */
+  --text-sm: 13px;   /* 行 20px：等幅の値 */
+  --text-base: 14px; /* 行 21px：本文 */
+  --text-lg: 16px;   /* 行 24px：件数・氏名・窓の題 */
+  --text-xl: 20px;   /* 行 28px：見出しの行の h1（3 製品とも） */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
+  --h-topbar: 48px; --w-nav: 208px; --w-nav-closed: 56px; --h-control: 32px; --h-control-sm: 28px; --h-row: 28px;
+  --w-detail: 1200px; --w-form: 900px; --w-settings: 560px; --w-login: 384px; --w-side: 360px;
+  --shadow-lg: 0 4px 16px rgba(0,0,0,.16);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    color-scheme: dark;
+    --color-background: #1B1B1B;
+    --color-surface: #242424;
+    --color-muted: #2D2D2D;
+    --color-muted-strong: #383838;
+    --color-border: #3A3A3A;
+    --color-border-input: #777777;
+    --color-foreground: #E8E8E8;
+    --color-value: #FFFFFF;
+    --color-label: #A3A3A3;
+    --color-primary: #4B4FBF;
+    --color-primary-foreground: #FFFFFF;
+    --color-primary-hover: #3B3EA3;
+    --color-link: #A5A8FF;
+    --color-ring: #A5A8FF;
+    --color-selected: #272844;
+    --color-selected-strong: #383B73;
+    --color-danger: #FF7B72;
+    --color-danger-foreground: #1B1B1B;
+    --color-success: #3FB950;
+    --color-warning: #D29922;
+    --color-mod-ct: #4493F8;
+    --color-mod-mr: #C084FC;
+    --color-mod-crdx: #3FB950;
+    --color-mod-us: #F0883E;
+    --color-mod-es: #F778BA;
+    --color-mod-mg: #D29922;
+    --color-mod-doc: #9198A1;
+    --color-mod-sr: #39C5CF;
+    --color-primary-active: #2F3288;
+    --color-hover: #333333;
+    --color-pressed: #3A3A3A;
+    --color-dev-band: #6B4A00;
+    --color-dev-band-foreground: #FFE8A3;
+    --shadow-lg: 0 4px 16px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --color-background: #1B1B1B;
+  --color-surface: #242424;
+  --color-muted: #2D2D2D;
+  --color-muted-strong: #383838;
+  --color-border: #3A3A3A;
+  --color-border-input: #777777;
+  --color-foreground: #E8E8E8;
+  --color-value: #FFFFFF;
+  --color-label: #A3A3A3;
+  --color-primary: #4B4FBF;
+  --color-primary-foreground: #FFFFFF;
+  --color-primary-hover: #3B3EA3;
+  --color-link: #A5A8FF;
+  --color-ring: #A5A8FF;
+  --color-selected: #272844;
+  --color-selected-strong: #383B73;
+  --color-danger: #FF7B72;
+  --color-danger-foreground: #1B1B1B;
+  --color-success: #3FB950;
+  --color-warning: #D29922;
+  --color-mod-ct: #4493F8;
+  --color-mod-mr: #C084FC;
+  --color-mod-crdx: #3FB950;
+  --color-mod-us: #F0883E;
+  --color-mod-es: #F778BA;
+  --color-mod-mg: #D29922;
+  --color-mod-doc: #9198A1;
+  --color-mod-sr: #39C5CF;
+  --color-primary-active: #2F3288;
+  --color-hover: #333333;
+  --color-pressed: #3A3A3A;
+  --color-dev-band: #6B4A00;
+  --color-dev-band-foreground: #FFE8A3;
+  --shadow-lg: 0 4px 16px rgba(0,0,0,.6);
+}

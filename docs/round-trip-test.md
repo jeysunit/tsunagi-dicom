@@ -73,6 +73,17 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 | 8 | **操作ログが書けないとき**：試しの環境だけで、tsunagi-dicom の `/data` を読み取りだけにしてから、4 を流す（施設の本番の環境では行わない） | 「求めた」を記録できないので、Orthanc を呼ばずにエラーになる（Orthanc の `/jobs` にジョブができない・storescp に届かない） | Orthanc の `/jobs` に新しいジョブが無いこと。`/data` を戻してから、9 で記録のつなぎが壊れていないこと |
 | 9 | 管理者で `/api/audit/verify` を開く | `ok` が `true`。`checked` が 4 の手順の前より増えている | 増えた行の数。送るの記録が、要求の ID で「求めた」「結果」「終わり」の3行（7 の送信は「求めた」「結果（unknown）」「照らした」）につながっていること |
 
+## ビューアで開く
+
+開発用の compose には、Orthanc の OHIF と Stone Web Viewer の plugin（`OHIF_PLUGIN_ENABLED`・`STONE_WEB_VIEWER_PLUGIN_ENABLED`。`docker/dev/viewer.override.yaml`）と、ホストの `127.0.0.1:18042`（`DEV_VIEWER_PORT`）に出す読み取り専用の入口 `viewer-proxy` が入っている。入口は GET と HEAD だけを Orthanc に通し、書き込みの方法は 405 で断る（Orthanc の REST そのものはホストに出さない）。tsunagi-dicom の `VIEWER_OHIF_URL`・`VIEWER_STONE_URL` はこの入口の `/ohif`・`/stone-webviewer` を指すので、検査一覧の「開く」が別のタブで `/ohif/viewer?StudyInstanceUIDs=…` を開く。ビューアは Orthanc の DICOMweb から直に画像を取り、Orthanc の認証（Basic。利用者 `tsunagi`、パスワードは `docker/dev/secrets/backend_password.txt`）をブラウザが聞く。
+
+| # | すること | 期待すること |
+|---|---|---|
+| V1 | 1 で送った検査を「検査一覧」で選び、「開く」を押す | 別のタブで OHIF が開く（Orthanc の認証を聞かれたら 上の利用者で入る）。画像が出る。操作ログに `open_viewer` の行が足される |
+| V2 | 「開く」の ▾ から Stone で開く | 別のタブで Stone が開く。画像が出る |
+
+CI の流れの試験（`tests/flow` の 1b）は、入口が認証なしで 401、認証つきで OHIF・Stone の画面に 200、書き込みの方法に 405 を返すことまでを確かめる。画像が出ることは人が確かめる。
+
 ## HL7 による患者情報の更新（PIR）
 
 ris-emulator が HL7 v2.3.1 で送る患者の統合（A40）・属性の更新（A08）・予約（ORM）を、受け口 `hl7-receiver` が受け、tsunagi-dicom が Orthanc の検査を書き換える（[`spec.md`](spec.md) の 3.5「HL7 による患者情報の更新」）。受け口は ris-emulator だけと共有するネットワークの中で待ち受け、ホストには出していない。
@@ -153,7 +164,7 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 
 ### 値の修正（段 6）で測った結果（2026-10-25）
 
-同じ版の Orthanc（26.9.1。Orthanc 1.13.0）を相手に、結合の試験の 22〜24 と、手元で立てた使い捨ての Orthanc（`OverwriteInstances` の無いもの）で測った。
+同じ版の Orthanc（26.9.1。Orthanc 1.13.0）を相手に、結合の試験の 23〜25 と、手元で立てた使い捨ての Orthanc（`OverwriteInstances` の無いもの）で測った。
 
 | 項目 | 測った結果 | BFF の前提・決めたこと |
 |---|---|---|
@@ -161,6 +172,21 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 | `OverwriteInstances` の無い Orthanc での `Keep` の書き換え | 仕事を作らずに 400。`Details` に `OverwriteInstances` が要ることが書かれる。画像は変わらない | 前もって `/system` で断るので、この答えには行き着かない（行き着いても、書き換えなかった失敗として残る） |
 | 患者 ID を変えない属性の訂正で置き換えた画像のメタデータ | `ReceptionDate` は書き換えの時刻、`RemoteAET` は空、`Origin` は `RestApi` になり、`CalledAET` は無くなる（前は `DicomProtocol` と、送ってきた側の AE タイトル） | 受信一覧では、直した検査が先頭に、送信元 AE 無し・`RestApi` で出る。直し方は段 6 の別の PR で決める（[`spec.md`](spec.md) の 3.5） |
 | `Keep` の無い書き換え（中身の訂正）で `Replace` に StudyInstanceUID を渡したとき | 渡した UID の検査ができ、SeriesInstanceUID と SOPInstanceUID は新しくなる。元の検査は残る。仕事の `Content.ID` は新しい検査の ID | BFF が UID を決め、結果不明のときもその UID で探して照らす |
+
+### 結合の試験で測った、文字の集合の組み合わせ（2026-10-25）
+
+結合の試験の 22 で、同じ版の Orthanc に 6 通りの SpecificCharacterSet の検査を送って測った（理由と対応は `spec.md` の 7）。
+
+| SpecificCharacterSet | Orthanc の REST の氏名 | 正しい氏名での検索 |
+|---|---|---|
+| `\ISO 2022 IR 87` | 崩れない（`試験^花子`） | 見つかる |
+| `ISO 2022 IR 13\ISO 2022 IR 87` | 崩れる（`;n83^2V;R`） | 見つからない |
+| `ISO 2022 IR 6\ISO 2022 IR 87` | 崩れる（`$B;n83(B^$B2V;R(B`） | 見つからない |
+| `ISO_IR 13`（半角カナ） | 崩れない | 見つかる |
+| `\ISO 2022 IR 149` | 崩れない（ハングル） | 見つかる |
+| `ISO 2022 IR 6\ISO 2022 IR 149` | 崩れる（ハングルが消える） | 見つからない |
+
+C-FIND の答えは、6 通りとも `SpecificCharacterSet` が `ISO_IR 100` で、漢字・かな・ハングルが消えた。問い合わせの SpecificCharacterSet を空にしても `ISO_IR 192` にしても同じ。
 
 ### 結合の試験で見つけて直した、BFF の食い違い
 

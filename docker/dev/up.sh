@@ -9,7 +9,7 @@
 #   TSUNAGI_IMAGE=ghcr.io/jeysunit/tsunagi-dicom:sha-xxxxxxx docker/dev/up.sh   # GHCR のイメージを使うとき
 #
 # ポートは環境変数で替えられる：TSUNAGI_HTTP_PORT（既定 3000）・ORTHANC_DICOM_PORT（既定 4242）・DEV_DTG_WEB_PORT（既定 18080）・
-# DEV_RIS_WEB_PORT（既定 18081）
+# DEV_RIS_WEB_PORT（既定 18081）・DEV_VIEWER_PORT（既定 18042。ビューアの入口）
 set -eu
 
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -76,6 +76,9 @@ cat <<EOF
   ris-emulator            http://127.0.0.1:${DEV_RIS_WEB_PORT:-18081}/
                           利用者は ris。パスワードは $secrets/ris_web_password.txt
                           MWL は AE タイトル RIS_EMU（コンテナ ris の 11112。ホストには出していない）
+  ビューア（OHIF・Stone） http://127.0.0.1:${DEV_VIEWER_PORT:-18042}/ohif/viewer
+                          tsunagi-dicom の「開く」が開く。GET と HEAD だけを通す入口で、Orthanc の利用者 tsunagi の
+                          ユーザー名とパスワードをブラウザが聞く（パスワードは $secrets/backend_password.txt）
   Orthanc の DICOM        127.0.0.1:${ORTHANC_DICOM_PORT:-4242}（AE タイトル ORTHANC）。REST はホストに出していない
 
 ris-emulator で今日の CT の予約を 3 件作る（dicom-test-generator のワークリストに出る）：

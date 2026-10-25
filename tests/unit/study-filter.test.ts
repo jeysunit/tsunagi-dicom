@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { StudyView } from "@/lib/fields";
+import { DETAIL_GROUPS, LIST_GROUPS, MODALITY_GROUPS, toggleGroup } from "@/lib/modalities";
 import {
   dateQuery,
   filterToSearchParams,
+  attachSearchNames,
   matchesFilter,
   normalizeForSearch,
   parseFilter,
@@ -77,9 +79,57 @@ const row = (extra: Partial<StudyView> = {}): StudyView => ({
 
 describe("モダリティ・横断の検索", () => {
   it("CR/DX の群は CR と DX の両方に合う", () => {
-    expect(matchesFilter(row(), { date: "all", modality: "CR/DX" })).toBe(true);
-    expect(matchesFilter(row({ modalities: ["CR"] }), { date: "all", modality: "CR/DX" })).toBe(true);
-    expect(matchesFilter(row(), { date: "all", modality: "CT" })).toBe(false);
+    expect(matchesFilter(row(), { date: "all", modalities: ["CR/DX"] })).toBe(true);
+    expect(matchesFilter(row({ modalities: ["CR"] }), { date: "all", modalities: ["CR/DX"] })).toBe(true);
+    expect(matchesFilter(row(), { date: "all", modalities: ["CT"] })).toBe(false);
+  });
+
+  it("モダリティを複数選ぶと、どれかの群に合えば合う（「または」）。選んでいなければ絞らない", () => {
+    const dx = row();
+    const ct = row({ modalities: ["CT"] });
+    const mr = row({ modalities: ["MR"] });
+    const both = row({ modalities: ["CT", "MR"] });
+    const filter = { date: "all" as const, modalities: ["CT" as const, "CR/DX" as const] };
+    expect([dx, ct, mr, both].map((v) => matchesFilter(v, filter))).toEqual([true, true, false, true]);
+    expect(matchesFilter(mr, { date: "all", modalities: [] })).toBe(true);
+    expect(matchesFilter(mr, { date: "all" })).toBe(true);
+    // 許可の一覧にモダリティが無い行（view に無い）は、モダリティで探せない
+    const hidden = row();
+    delete hidden.modalities;
+    expect(matchesFilter(hidden, filter)).toBe(false);
+  });
+
+  it("URL：コンマで区切って複数を持つ。見出しの順にそろえ、重複と知らない名前は捨てる。1 つだけの古い形も読める", () => {
+    expect(parseFilter(new URLSearchParams("modality=MR,CT")).modalities).toEqual(["CT", "MR"]);
+    expect(parseFilter(new URLSearchParams("modality=CT,CT,XX,CR%2FDX")).modalities).toEqual(["CT", "CR/DX"]);
+    expect(parseFilter(new URLSearchParams("modality=CT")).modalities).toEqual(["CT"]);
+    expect(parseFilter(new URLSearchParams("modality=XX")).modalities).toBeUndefined();
+    expect(parseFilter(new URLSearchParams("modality=")).modalities).toBeUndefined();
+    const f = parseFilter(new URLSearchParams("modality=US,CT"));
+    expect(filterToSearchParams(f).get("modality")).toBe("CT,US");
+    expect(parseFilter(filterToSearchParams(f))).toEqual(f);
+    expect(filterToSearchParams({ date: "all", modalities: [] }).toString()).toBe("");
+  });
+
+  it("一覧の上の見出しは DOC・SR を除いた群。DOC・SR は詳細条件の中。合わせて全部の群", () => {
+    expect(LIST_GROUPS).toEqual(["CT", "MR", "CR/DX", "US", "ES", "MG"]);
+    expect(DETAIL_GROUPS).toEqual(["DOC", "SR"]);
+    expect([...LIST_GROUPS, ...DETAIL_GROUPS]).toEqual([...MODALITY_GROUPS]);
+  });
+
+  it("画像の検査に SR が混ざる検査（線量のレポートなど）は、主のモダリティの見出し（CT）で当たる。SR を足しても当たる", () => {
+    const ctWithSr = row({ modalities: ["CT", "SR"] });
+    expect(matchesFilter(ctWithSr, { date: "all", modalities: ["CT"] })).toBe(true);
+    expect(matchesFilter(ctWithSr, { date: "all", modalities: ["MR"] })).toBe(false);
+    expect(matchesFilter(ctWithSr, { date: "all", modalities: ["MR", "SR"] })).toBe(true);
+    expect(matchesFilter(row({ modalities: ["SR"] }), { date: "all", modalities: ["CT"] })).toBe(false);
+  });
+
+  it("群の足し引き：押した群を足し、入っていれば外す。見出しの順に並べ、空になれば絞らない", () => {
+    expect(toggleGroup(undefined, "MR")).toEqual(["MR"]);
+    expect(toggleGroup(["MR"], "CT")).toEqual(["CT", "MR"]);
+    expect(toggleGroup(["CT", "MR"], "CT")).toEqual(["MR"]);
+    expect(toggleGroup(["MR"], "MR")).toBeUndefined();
   });
 
   it("段 3：前の状態の見出しの値（status）は URL から読まない", () => {
@@ -87,7 +137,8 @@ describe("モダリティ・横断の検索", () => {
     expect(filterToSearchParams(parseFilter(new URLSearchParams("status=bookmarked&modality=CT"))).toString()).toBe("modality=CT");
   });
 
-  it.each(["JP-TEST-0001", "jp-test", "山田太郎", "山田 太郎", "やまだ", "ヤマダ", "ﾔﾏﾀﾞ", "yamada taro", "ACC-0001", "胸部"])(
+  // 患者 ID・受付番号は全体の一致（全角半角・大文字小文字はそろえる）。氏名と検査の記述は含む
+  it.each(["JP-TEST-0001", "ｊｐ-test-0001", "山田太郎", "山田 太郎", "やまだ", "ヤマダ", "ﾔﾏﾀﾞ", "yamada taro", "ACC-0001-1", "acc-0001-1", "胸部"])(
     "「%s」で探せる",
     (q) => {
       expect(matchesFilter(row(), { date: "all", q })).toBe(true);
@@ -98,13 +149,72 @@ describe("モダリティ・横断の検索", () => {
     expect(matchesFilter(row(), { date: "all", q: "鈴木" })).toBe(false);
   });
 
+  // 旧：「jp-test」「ACC-0001」で患者 ID・受付番号の一部に合った → 新：全体の一致だけ
+  it.each(["jp-test", "0001", "JP-TEST-000", "ACC-0001", "0001-1"])("患者 ID・受付番号の一部（「%s」）には合わない", (q) => {
+    expect(matchesFilter(row(), { date: "all", q })).toBe(false);
+  });
+
+  it("「025」で「1025」に合わない：患者 ID・受付番号は全体が一致するものだけ", () => {
+    expect(matchesFilter(row({ patientId: "1025", accessionNumber: "A1025" }), { date: "all", q: "025" })).toBe(false);
+    expect(matchesFilter(row({ patientId: "025" }), { date: "all", q: "025" })).toBe(true);
+    expect(matchesFilter(row({ accessionNumber: "025" }), { date: "all", q: "025" })).toBe(true);
+    // 前後・途中の空白はそろえる
+    expect(matchesFilter(row({ patientId: "025" }), { date: "all", q: " 0 25 " })).toBe(true);
+  });
+
+  it("氏名と検査の記述は含むかで探す（患者 ID・受付番号と同じ語でも、氏名・記述の側が含めば合う）", () => {
+    expect(matchesFilter(row({ patientName: "山田 025" }), { date: "all", q: "025" })).toBe(true);
+    expect(matchesFilter(row({ studyDescription: "胸部CT 025" }), { date: "all", q: "025" })).toBe(true);
+  });
+
+  it("氏名の検索は第3〜5成分（ミドル・接頭・接尾）まで含める。画面に出す値は姓と名のまま", () => {
+    const view = row({ patientName: "Doe John", patientKana: "", patientNameAlphabetic: "Doe John" });
+    attachSearchNames(view, "Doe^John^Michael^Dr^Jr.");
+    for (const q of ["Michael", "Dr", "Jr.", "doe john michael", "John Michael Dr Jr."]) {
+      expect(matchesFilter(view, { date: "all", q }), q).toBe(true);
+    }
+    expect(matchesFilter(view, { date: "all", q: "Smith" })).toBe(false);
+    // 表示の値は変わらない
+    expect(view.patientName).toBe("Doe John");
+    expect(view.patientNameAlphabetic).toBe("Doe John");
+    // 結びつけていない行は、画面に出す値で探す
+    expect(matchesFilter(row({ patientName: "Doe John", patientKana: "", patientNameAlphabetic: "Doe John" }), { date: "all", q: "Michael" })).toBe(false);
+  });
+
+  it("氏名の検索は、画面の項目が許可されている氏名の値だけを使う（隠した氏名は、第3〜5成分でも探せない）", () => {
+    const pn = "Yamada^Taro^Michael=山田^太郎^^様=やまだ^たろう^みちる";
+    const all = row();
+    attachSearchNames(all, pn);
+    expect(matchesFilter(all, { date: "all", q: "Michael" })).toBe(true);
+    expect(matchesFilter(all, { date: "all", q: "様" })).toBe(true);
+    expect(matchesFilter(all, { date: "all", q: "みちる" })).toBe(true);
+
+    // 漢字とかなを許可しない役割：英字の第3成分だけ当たる
+    const alphabeticOnly = row();
+    delete alphabeticOnly.patientName;
+    delete alphabeticOnly.patientKana;
+    attachSearchNames(alphabeticOnly, pn);
+    expect(matchesFilter(alphabeticOnly, { date: "all", q: "Michael" })).toBe(true);
+    expect(matchesFilter(alphabeticOnly, { date: "all", q: "様" })).toBe(false);
+    expect(matchesFilter(alphabeticOnly, { date: "all", q: "みちる" })).toBe(false);
+
+    // 氏名を許可しない役割：氏名では探せない
+    const none = row();
+    delete none.patientName;
+    delete none.patientKana;
+    delete none.patientNameAlphabetic;
+    attachSearchNames(none, pn);
+    expect(matchesFilter(none, { date: "all", q: "Michael" })).toBe(false);
+    expect(matchesFilter(none, { date: "all", q: "山田" })).toBe(false);
+  });
+
   it("許可されていない項目（view に無い項目）では探せない", () => {
     const hidden = row();
     delete hidden.patientName;
     delete hidden.patientKana;
     delete hidden.patientNameAlphabetic;
     expect(matchesFilter(hidden, { date: "all", q: "山田" })).toBe(false);
-    expect(matchesFilter(hidden, { date: "all", q: "JP-TEST" })).toBe(true);
+    expect(matchesFilter(hidden, { date: "all", q: "JP-TEST-0001" })).toBe(true);
   });
 
   it("検索の字のそろえ方", () => {
