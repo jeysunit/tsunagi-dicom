@@ -33,32 +33,37 @@ export type ConnectionView = Partial<Omit<ConnectionRecord, "modalities">> & {
   modalities?: (Omit<ConnectionTarget, "aet"> & { aet?: string })[];
 };
 
-/** 直近の接続確認を探す行の数（接続先の数 × 余裕。古い結果は見ない） */
-const ECHO_LOOKBACK_ROWS = 300;
+/** 1 つの接続先を探すとき、新しい順に読む行の数の上限（同じ名前を含む別の行を読み飛ばすため。名前は引用符で閉じて探すので、ふつうは 1 行で見つかる） */
+const ECHO_LOOKBACK_ROWS = 20;
 
-/** 監査の記録から、接続先ごとに直近の接続確認（echo）の結果を読む。断った要求（denied）は確かめていないので数えない */
-export async function lastEchoResults(db: Pick<Db, "auditLog">): Promise<Map<string, { result: ConnectionResult; at: Date }>> {
-  const rows = await db.auditLog.findMany({
-    where: { action: "echo", outcome: { in: ["success", "failed"] } },
-    orderBy: { seq: "desc" },
-    take: ECHO_LOOKBACK_ROWS,
-    select: { occurredAt: true, outcome: true, detail: true },
-  });
+/**
+ * 監査の記録から、登録された接続先ごとに直近の接続確認（echo）の結果を読む。断った要求（denied）は確かめていないので数えない。
+ * 接続先ごとに探すので、ほかの接続先の確認がどれだけ続いても、その接続先の直近の結果は消えない
+ */
+export async function lastEchoResults(db: Pick<Db, "auditLog">, ids: readonly string[]): Promise<Map<string, { result: ConnectionResult; at: Date }>> {
   const latest = new Map<string, { result: ConnectionResult; at: Date }>();
-  for (const row of rows) {
-    let modality: unknown;
-    let connected: unknown;
-    try {
-      const detail = JSON.parse(row.detail ?? "{}") as Record<string, unknown>;
-      modality = detail.modality;
-      connected = detail.connected;
-    } catch {
-      continue;
-    }
-    if (typeof modality !== "string" || latest.has(modality)) continue;
-    // connected が付くのは Orthanc の答えを読めたとき。付かない failed は、確かめそのものが失敗した（失敗として数える）
-    latest.set(modality, { result: row.outcome === "success" && connected === true ? "ok" : "ng", at: row.occurredAt });
-  }
+  await Promise.all(
+    ids.map(async (id) => {
+      const rows = await db.auditLog.findMany({
+        where: { action: "echo", outcome: { in: ["success", "failed"] }, detail: { contains: `"modality":${JSON.stringify(id)}` } },
+        orderBy: { seq: "desc" },
+        take: ECHO_LOOKBACK_ROWS,
+        select: { occurredAt: true, outcome: true, detail: true },
+      });
+      for (const row of rows) {
+        let detail: Record<string, unknown>;
+        try {
+          detail = JSON.parse(row.detail ?? "{}") as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        if (detail.modality !== id) continue;
+        // connected が付くのは Orthanc の答えを読めたとき。付かない failed は、確かめそのものが失敗した（失敗として数える）
+        latest.set(id, { result: row.outcome === "success" && detail.connected === true ? "ok" : "ng", at: row.occurredAt });
+        return;
+      }
+    }),
+  );
   return latest;
 }
 
@@ -74,7 +79,10 @@ export async function connectionRecord(deps: {
   } catch {
     orthanc = "ng";
   }
-  const echoes = await lastEchoResults(deps.db);
+  const echoes = await lastEchoResults(
+    deps.db,
+    entries.map((m) => m.id),
+  );
   const modalities = entries.map((m): ConnectionTarget => {
     const last = echoes.get(m.id);
     return { id: m.id, aet: m.aet, result: last?.result ?? null, at: last ? last.at.toISOString() : null };

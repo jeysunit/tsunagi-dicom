@@ -118,6 +118,27 @@ describe("接続の状態の API", () => {
     expect(body.connection.overall).toBe("ok");
   });
 
+  it("ほかの接続先の確認が何度続いても、失敗した接続先の直近の結果は消えない", async () => {
+    state.role = "general";
+    const { POST } = await import("@/app/api/modalities/[id]/echo/route");
+    expect((await (await POST(post("/api/modalities/offline/echo"), idParams("offline"))).json()).connected).toBe(false);
+    const { appendAudit } = await import("@/lib/audit");
+    for (let i = 0; i < 40; i++) {
+      await appendAudit(await db(), {
+        actorId: "t",
+        actorRole: "general",
+        authMode: "dev",
+        action: "echo",
+        outcome: "success",
+        detail: { modality: "dtg", connected: true },
+      });
+    }
+    const { body } = await connection();
+    expect(body.connection.modalities.find((m: { id: string }) => m.id === "offline")).toMatchObject({ result: "ng" });
+    expect(body.connection.modalities.find((m: { id: string }) => m.id === "dtg")).toMatchObject({ result: "ok" });
+    expect(body.connection.overall).toBe("ng");
+  });
+
   it("権限の無い役割には 403 を返し、断ったことを記録する", async () => {
     const { ROLE_PERMISSIONS } = await import("@/lib/auth/roles");
     const original = ROLE_PERMISSIONS.general;
@@ -149,7 +170,7 @@ describe("接続の状態の組み立て", () => {
   it("許可の一覧に載っていない項目は返らない。一覧に無ければ何も返らない", async () => {
     const { connectionRecord, connectionView } = await import("@/lib/connection-status");
     const record = await connectionRecord({
-      backend: { mock: true, listModalities: async () => [{ id: "dtg", aet: "DTG_SCP", host: "192.0.2.20", port: 104, manufacturer: "", allowEcho: true, allowStore: true }] },
+      backend: { mock: true, listModalities: async () => [{ id: "unchecked", aet: "UNCHECKED_SCP", host: "192.0.2.20", port: 104, manufacturer: "", allowEcho: true, allowStore: true }] },
       db: await db(),
       hl7Configured: false,
     });
@@ -158,7 +179,7 @@ describe("接続の状態の組み立て", () => {
     // 接続先は、名前（id）を見せてよい役割にだけ。AE タイトルはさらに aet が載っているときだけ
     expect(connectionView(record, { study: [], series: [], connection: ["modalities"] })).toEqual({});
     expect(connectionView(record, { study: [], series: [], connection: ["modalities"], modality: ["id"] }).modalities).toEqual([
-      { id: "dtg", result: null, at: null },
+      { id: "unchecked", result: null, at: null },
     ]);
   });
 });

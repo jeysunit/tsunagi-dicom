@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
+import { PageHeader } from "@/components/ui/page-header";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ROLE_LABELS, ROLES, isRole } from "@/lib/auth/roles";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
@@ -133,7 +134,7 @@ export function UserAdmin({
 
   return (
     <section className="space-y-6">
-      <h1 className="text-lg font-bold text-value">ユーザー管理</h1>
+      <PageHeader title="ユーザー管理" />
       {reauth && (
         <form
           onSubmit={(e) => void onReauth(e)}

@@ -50,7 +50,10 @@ export function ConnStatus({ timeZone }: { timeZone: string }) {
     const onBeforeToggle = (event: Event) => {
       if ((event as ToggleEvent).newState !== "open") return;
       const rect = button.getBoundingClientRect();
-      popover.style.top = `${Math.round(rect.bottom + 4)}px`;
+      const top = Math.round(rect.bottom + 4);
+      popover.style.top = `${top}px`;
+      // 接続先が多いときや低い画面でも、末尾の結果と「接続先を開く」まで届くよう、残りの高さを上限にして中でスクロールする
+      popover.style.maxHeight = `${Math.max(120, window.innerHeight - top - 8)}px`;
       popover.style.right = `${Math.max(8, Math.round(window.innerWidth - rect.right))}px`;
       void load();
     };
@@ -85,7 +88,7 @@ export function ConnStatus({ timeZone }: { timeZone: string }) {
         role="group"
         aria-label="接続の状態"
         data-testid="conn-popover"
-        className="fixed inset-auto m-0 w-80 max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background p-3 text-sm text-foreground shadow-md"
+        className="fixed inset-auto m-0 w-80 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-background p-3 text-sm text-foreground shadow-md"
       >
         <h3 className="mb-2 font-bold text-value">接続の状態</h3>
         {state.kind === "error" && <p>接続の状態を読み込めませんでした。時間をおいて、開き直してください。</p>}

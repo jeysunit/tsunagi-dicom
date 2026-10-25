@@ -41,9 +41,9 @@ test("今いる頁：左のナビの項目に aria-current と選んだ行の形
     await expect(page).toHaveURL(new RegExp(`${href}$`));
     await expect(page).toHaveTitle(`${title} - tsunagi-dicom`);
     await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", href);
-    // 頁の見出しの大きさは1つにそろえる（18px・太字）
+    // 頁の見出しの大きさは1つにそろえる（20px・太字）
     const h1 = page.locator("main h1").first();
-    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("18px");
+    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("20px");
   }
 });
 

@@ -84,6 +84,17 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(pop).toBeHidden();
     await expect(button).toBeFocused();
 
+    // 低い画面でも、中でスクロールして末尾の道まで届く（popover の高さは、ボタンの下から画面の下端まで）
+    await page.setViewportSize({ width: 1024, height: 260 });
+    await page.keyboard.press("Enter");
+    await expect(pop).toBeVisible();
+    const link = pop.getByRole("link", { name: "接続先を開く" });
+    await link.scrollIntoViewIfNeeded();
+    await expect(link).toBeInViewport();
+    expect((await pop.boundingBox())!.y + (await pop.boundingBox())!.height).toBeLessThanOrEqual(260);
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1280, height: 720 });
+
     // 外を押しても閉じる。「接続先を開く」を押すと接続先の頁へ移り、popover は閉じる
     await button.click();
     await expect(pop).toBeVisible();
