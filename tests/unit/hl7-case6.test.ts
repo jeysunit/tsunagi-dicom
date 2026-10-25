@@ -9,6 +9,7 @@ import { createFakeOrthanc, type FakeOrthanc } from "./helpers/fake-orthanc";
 // 患者の取り違えが起きない形を、画像ごとの小さな Orthanc で確かめる。
 const A40 = readFileSync("tests/fixtures/hl7/a40.hl7").toString();
 const ORM = readFileSync("tests/fixtures/hl7/orm.hl7").toString();
+const A08 = readFileSync("tests/fixtures/hl7/a08.hl7").toString();
 const TEMP = "ER2026102400";
 const STUDY = "2.25.100";
 let seq = 0;
@@ -394,6 +395,19 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(await sweep()).toEqual({ count: 0, skipped: 1 });
     expect(orthanc.modifyCalls).toHaveLength(calls);
     warn.mockRestore();
+  });
+
+  it.each([
+    ["A40", () => a40(TEMP, "P000001")],
+    ["A08", () => A08.replace("P000001", TEMP).replace("20261024201531A08A", `A08${++seq}`)]
+  ])("%s でも、読んだ画像の患者 ID がメッセージの患者 ID と違えば、書き換えずに AE", async (_name, message) => {
+    temp();
+    // Orthanc の検査の要約は仮の患者 ID だが、画像は全部、別の患者 ID
+    const read = orthanc.backend.studyInstanceTags.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "studyInstanceTags").mockImplementation(async (id) => (await read(id)).map(i => ({ ...i, PatientID: "Q000009" })));
+    expect(await send(message())).toContain("MSA|AE|");
+    expect(orthanc.modifyCalls).toEqual([]);
+    expect(orthanc.deleteCalls).toEqual([]);
   });
 
   it("統合した先の患者の ORM でも、最初の A40 より前に受理したものは使わない", async () => {

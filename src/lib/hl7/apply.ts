@@ -325,6 +325,10 @@ export function planStudy(command: Command, attributes: Record<string, string>, 
   if (before.some(x => values.some(k => x[k] !== p[k]))) {
     throw new BackendError("画像どうしで属性が揃っていない");
   }
+  // 患者 ID での検索は検査の要約で引くので、画像の患者 ID もメッセージの患者 ID と同じかを確かめる（揃いは上で確かめた）
+  if (command.kind !== "ORM" && p.PatientID !== (command.kind === "A40" ? command.priorPatientId : command.patientId)) {
+    throw new BackendError("画像の患者 ID がメッセージの患者 ID と違う");
+  }
   const replace: Record<string, string> = {
     PatientID: p.PatientID,
     PatientName: p.PatientName,
