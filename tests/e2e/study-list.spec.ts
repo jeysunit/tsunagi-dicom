@@ -528,6 +528,19 @@ test("左右に分ける：本文が 736px より狭いとき（左のナビを�
   await expect(row(page)).toBeFocused();
 });
 
+test("左右に分ける：ブラウザの文字を大きくすると（rem が 24px）、本文が 1000px 台でも重ね表示に替わり、背後の一覧は inert になる", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await asRole(page, "一般");
+  // 46rem ＝ 1104px になり、左のナビを開いた本文（1072px ほど）より広い。CSS と JS が同じ幅で切り替わることを確かめる
+  await page.addStyleTag({ content: "html { font-size: 24px; }" });
+  await row(page).click({ position: { x: 100, y: 20 } });
+  const pane = page.getByTestId("detail-pane");
+  await expect(pane).toBeVisible();
+  await expect(page.getByTestId("split-handle")).toBeHidden();
+  await expect(pane).toBeFocused();
+  await expect(page.locator("[data-split-root] [inert]")).toHaveCount(2);
+});
+
 test("詳細を見せるときは必ず記録が残る：A→B→A と戻っても、300ms 止まらない限り中身は出ず、止まれば取り直して記録する", async ({ page }) => {
   // サムネイルの取得（中継）も監査の記録になるので、数に混ざらないよう止める
   await page.route("**/api/dicom-web/**", (r) => r.abort());

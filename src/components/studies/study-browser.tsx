@@ -20,7 +20,7 @@ import {
   splitAfterKey,
   subscribeSplit,
 } from "@/lib/client/split-position";
-import { SPLIT_MIN_BODY_PX, useNarrowerThan } from "@/lib/client/narrow";
+import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
@@ -729,7 +729,7 @@ function Browser({
 
   const box = useRef<HTMLElement>(null);
   // 本文が左右に分けるには狭い（736px 未満）とき、詳細が一覧の上に重なる。開いたら詳細へフォーカスを移し、背後の一覧は操作・読み上げの対象から外し、閉じたら元の行へ戻す
-  const narrow = useNarrowerThan(box, SPLIT_MIN_BODY_PX);
+  const narrow = useNarrowerThan(box, SPLIT_MIN_BODY_REM);
   const paneRef = useRef<HTMLDivElement>(null);
   const restoreUid = useRef<string | null>(null);
 
