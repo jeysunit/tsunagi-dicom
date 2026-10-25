@@ -161,6 +161,22 @@ describe("HL7 の経過の確かめ", () => {
     expect(await send(a40("ER9", "P000009"))).toContain("MSA|AE|");
   });
 
+  it("結果不明の書き換えの行の action を書き換えて HL7 の経過から隠しても、止まったまま", async () => {
+    temp(`${STUDY}.1.1`);
+    orthanc.next.state = "Running";
+    expect(await processMessage(Buffer.from(a40(TEMP, "P000001")), "192.0.2.1", orthanc.backend, undefined, { ...options, jobTimeoutMs: 0 }))
+      .toContain("MSA|AE|");
+    await dropGuards(current.db);
+    const request = (await current.db.auditLog.findMany({ orderBy: { seq: "asc" } })).find(r => r.detail?.includes("\"event\":\"request\""))!;
+    await current.db.auditLog.update({ where: { seq: request.seq }, data: { action: "login" } });
+    await expect(history()).rejects.toBeInstanceOf(HistoryTampered);
+    orthanc.add({ PatientID: "ER9", StudyInstanceUID: "2.25.900" });
+    const calls = orthanc.modifyCalls.length;
+    expect(await send(a40("ER9", "P000009"))).toContain("MSA|AE|");
+    expect(await sweep()).toMatchObject({ count: 0, blocked: expect.stringContaining("鍵つきの値・つなぎと合わない") });
+    expect(orthanc.modifyCalls).toHaveLength(calls);
+  });
+
   it("行の間に差し込んだ行（つなぎの合わない行）は使わない", async () => {
     temp(`${STUDY}.1.1`);
     expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");

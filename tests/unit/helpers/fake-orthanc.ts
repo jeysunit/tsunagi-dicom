@@ -17,7 +17,7 @@ export interface FakeOrthanc {
    * 読んだ後に呼ぶ（最中に届いた画像を作る）。wholeStudyDelete は、次の画像の削除で名指しに関わらず検査ごと消す
    * （画像の削除を誤る Orthanc）
    */
-  next: { state?: JobState; partial?: boolean; beforeModify?: () => void; wholeStudyDelete?: boolean };
+  next: { state?: JobState; partial?: boolean; beforeModify?: () => void; wholeStudyDelete?: boolean; beforeDelete?: () => void };
   add(instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance;
   studyId(patientId: string, uid: string): string;
   modifyCalls: { id: string; replace: Record<string, string> }[];
@@ -32,6 +32,12 @@ export function createFakeOrthanc(): FakeOrthanc {
     createHash("sha256").update(`${patientId}|${uid}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-");
   const idOf = (i: PatientInstance) => studyId(i.PatientID, i.StudyInstanceUID);
   const triple = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
+  // Orthanc のファイルの印（FileUuid）。画像を足す・置き換えるたびに新しい印になる（画像の物ごとに持つ）
+  const files = new WeakMap<PatientInstance, string>();
+  const fileOf = (i: PatientInstance) => {
+    if (!files.has(i)) files.set(i, randomUUID());
+    return files.get(i)!;
+  };
   const fake: FakeOrthanc = {
     instances: [],
     unstable: new Set(),
@@ -89,17 +95,22 @@ export function createFakeOrthanc(): FakeOrthanc {
         fake.instances = fake.instances.filter(i => !(triple(i) === triple(updated) && idOf(i) === idOf(updated)));
         fake.instances.push(updated);
       }
-      fake.next = { wholeStudyDelete: fake.next.wholeStudyDelete };
+      fake.next = { wholeStudyDelete: fake.next.wholeStudyDelete, beforeDelete: fake.next.beforeDelete };
       const jobId = randomUUID();
       jobs.set(jobId, state);
       return { jobId };
     },
-    async deleteStudyInstances(id: string, named: PatientInstance[]) {
+    async studyInstanceFiles(id: string) {
+      return Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), fileOf(i)]));
+    },
+    async deleteStudyInstances(id: string, named: PatientInstance[], files: Record<string, string>) {
+      fake.next.beforeDelete?.();
       fake.deleteCalls.push({ id, sops: named.map(i => i.SOPInstanceUID) });
       const names = new Set(named.map(triple));
       const whole = fake.next.wholeStudyDelete;
       fake.next = {};
-      fake.instances = fake.instances.filter(i => idOf(i) !== id || (!whole && !names.has(triple(i))));
+      fake.instances = fake.instances.filter(i => idOf(i) !== id
+        || (!whole && !(names.has(triple(i)) && files[triple(i)] === fileOf(i))));
     },
     async jobStatus(jobId: string) {
       const state = jobs.get(jobId);

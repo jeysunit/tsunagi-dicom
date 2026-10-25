@@ -1,7 +1,7 @@
 /* eslint-disable no-control-regex -- ASCII と制御文字の検証。 */
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { appendAudit, checkAuditRow, type AuditEntryInput, type AuditOutcome } from "@/lib/audit";
+import { appendAudit, checkAuditRow, verifyAuditChain, type AuditEntryInput, type AuditOutcome } from "@/lib/audit";
 import { auditKeyring } from "@/lib/audit-key";
 import { getDb } from "@/lib/db";
 import { getConfig } from "@/lib/config";
@@ -23,15 +23,20 @@ export const writeAudit: AuditWriter = async (input) => appendAudit(await getDb(
 /** 監査の記録の HL7 の行が、鍵つきの値とつなぎに合わない（書き換えられた・差し込まれた）。人が確かめるまで処理しない */
 export class HistoryTampered extends BackendUnknownError {
   constructor(seq: number, reason: string) {
-    super(`監査の記録の HL7 の行が鍵つきの値・つなぎと合わない（seq ${seq}：${reason}）`);
+    super(`監査の記録が鍵つきの値・つなぎと合わない（seq ${seq}：${reason}）`);
   }
 }
 /**
- * 監査の一本のつなぎから、HL7 の経過を古い順に読む（design.md §13）。使う前に、行ごとに鍵つきの値と前の行との
- * つなぎを確かめる（design.md §15.3）。覚え（remember）を持つ行は鍵つきだけを受ける。合わない行があれば投げる。
+ * 監査の一本のつなぎから、HL7 の経過を古い順に読む（design.md §13）。使う前に、つなぎの全部を確かめ（行の action を
+ * 書き換えて HL7 の行を隠されても見つける）、HL7 の行ごとにも鍵つきの値と前の行とのつなぎを確かめる（design.md §15.1）。
+ * 覚え（remember）を持つ行は鍵つきだけを受ける。合わない行があれば投げる。
  */
 export async function history(): Promise<HistoryRow[]> {
   const db = await getDb();
+  const chain = await verifyAuditChain(db);
+  if (!chain.ok) {
+    throw new HistoryTampered(chain.seq, chain.reason);
+  }
   const rows = await db.auditLog.findMany({ where: { action: "hl7" }, orderBy: { seq: "asc" } });
   const previous = new Map<number, string>();
   // SQLite の変数の数の上限を超えないように分けて読む
@@ -121,6 +126,11 @@ export interface WriteDetail {
    * 書き換えた画像はこの検査にまとまるので、前と後のどちらの確かめにも足す。
    */
   alongside?: PatientInstance[];
+  /**
+   * 患者 ID の変わる書き換えの前に読んだ、元の検査の画像ごとのファイルの印（design.md §15.4）。元の画像は、印が
+   * これと同じものだけを消す（書き換えの後に同じ UID で届き直した画像を消さない）。無ければ元を消さない
+   */
+  sourceFiles?: Record<string, string>;
 }
 /** 人が解くまで、期限を設けず結果不明と部分反映を拾う（design.md §10）。 */
 export function unresolved(rows: HistoryRow[]): WriteDetail[] {
@@ -157,10 +167,10 @@ async function removeSource(backend: Backend, d: WriteDetail): Promise<boolean> 
   const written = new Set(d.before.map(triple));
   const source = await sourceInstances();
   const named = source.filter(i => written.has(triple(i)));
-  if (!named.length) {
+  if (!named.length || !d.sourceFiles) {
     return true;
   }
-  await backend.deleteStudyInstances(d.oldOrthancId, named);
+  await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles);
   const left = new Set((await sourceInstances()).map(triple));
   return source.every(i => written.has(triple(i)) || left.has(triple(i)));
 }
@@ -395,6 +405,8 @@ export async function writeAndVerify(
   if (before.every((p, i) => values.every(k => p[k] === after[i]![k]))) {
     return false;
   }
+  // 患者 ID の変わる書き換えは、後で元の画像を消すので、書き換えの前のファイルの印を残す（design.md §15.4）
+  const sourceFiles = after[0]!.PatientID !== before[0]!.PatientID ? await backend.studyInstanceFiles(id) : undefined;
   const d: WriteDetail = {
     writeId: randomUUID(),
     messageId,
@@ -402,7 +414,8 @@ export async function writeAndVerify(
     StudyInstanceUID: before[0]!.StudyInstanceUID,
     before,
     after,
-    ...(alongside?.length ? { alongside } : {})
+    ...(alongside?.length ? { alongside } : {}),
+    ...(sourceFiles ? { sourceFiles } : {})
   };
   await row("request", "success", { ...d }, after[0]!.PatientID, d.StudyInstanceUID);
   let state: string | undefined;

@@ -522,6 +522,9 @@ export function createMockBackend(): Backend {
       }
       return { jobId };
     },
+    async studyInstanceFiles() {
+      return {};
+    },
     async deleteStudyInstances(id: string) {
       if ((await restStudies()).some((s) => s.ID === id)) {
         throw new BackendError("モック：書き換えの元の検査が残っている");

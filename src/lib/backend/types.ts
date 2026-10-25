@@ -78,10 +78,15 @@ export interface Backend {
    */
   modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
   /**
-   * 検査の画像のうち、UID の組（Study・Series・SOP）が instances のどれかと同じものだけを 1 枚ずつ消す。
-   * ほかの画像（後から届いた画像）は残す。すでに無い画像は飛ばす
+   * 検査の画像ごとの、Orthanc が持つファイルの印（FileUuid）。鍵は UID の組（Study・Series・SOP を `|` でつないだもの）。
+   * 同じ UID の画像が届き直して置き換わると、印が変わる
    */
-  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[]): Promise<void>;
+  studyInstanceFiles(orthancStudyId: string): Promise<Record<string, string>>;
+  /**
+   * 検査の画像のうち、UID の組（Study・Series・SOP）が instances のどれかと同じで、ファイルの印が files と同じものだけを
+   * 1 枚ずつ消す。ほかの画像（後から届いた画像・同じ UID で届き直した画像）は残す。すでに無い画像は飛ばす
+   */
+  deleteStudyInstances(orthancStudyId: string, instances: PatientInstance[], files: Record<string, string>): Promise<void>;
   /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
   /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */

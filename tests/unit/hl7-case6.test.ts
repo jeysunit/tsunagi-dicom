@@ -340,6 +340,21 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "success", detail: { partial: false, matchesAfter: true } });
   });
 
+  it("書き換えの後に同じ UID の画像が元の検査へ届き直して置き換わったら、その画像を消さずに部分反映で止める", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    const late = temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    let resent: typeof late | undefined;
+    // 仕事が写した後、元を消す前に、モダリティが同じ UID の画像を送り直す（OverwriteInstances で置き換わる）
+    orthanc.next.beforeDelete = () => {
+      orthanc.instances = orthanc.instances.filter(i => i !== late);
+      resent = temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });
+    };
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "画像の一部だけが書き換わった" });
+    expect(orthanc.instances.includes(resent!)).toBe(true);
+    expect(rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1)).toMatchObject({ detail: { partial: true } });
+  });
+
   it("書き換えた画像が替え先の検査に揃わなければ、元の画像を消さずに部分反映で止める", async () => {
     temp();
     await send(a40(TEMP, "P000001"));

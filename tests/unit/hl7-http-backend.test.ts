@@ -73,29 +73,44 @@ describe("HL7 の Orthanc REST の要求", () => {
     expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
-  it("元の画像は、UID の組で名指ししたものだけを画像の ID で 1 枚ずつ、書く資格情報で消す", async () => {
+  describe("元の画像の削除", () => {
     const tag = (sop: string) => ({ PatientID: "T1", StudyInstanceUID: "1.2", SeriesInstanceUID: "1.2.3", SOPInstanceUID: sop });
+    const full = (sop: string) => ({ ...tag(sop), PatientName: "", PatientBirthDate: "", PatientSex: "", AccessionNumber: "", SpecificCharacterSet: "" });
     const one = "00000000-00000000-00000000-00000000-0000000a";
-    const late = "00000000-00000000-00000000-00000000-0000000b";
-    state.fetch
-      .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1"), [late]: tag("1.2.3.2") }))
-      .mockResolvedValueOnce(new Response("", { status: 200 }));
-    await backend().deleteStudyInstances(id, [{ ...tag("1.2.3.1"), PatientName: "", PatientBirthDate: "", PatientSex: "", AccessionNumber: "", SpecificCharacterSet: "" }]);
-    expect(state.fetch).toHaveBeenCalledTimes(2);
-    expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}/instances-tags?simplify`);
-    const [url, init] = state.fetch.mock.calls[1]!;
-    expect(url).toBe(`http://pacs.example.org/instances/${one}`);
-    expect(init.method).toBe("DELETE");
-    expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
-  });
-  it.each([[502, BackendUnknownError], [403, BackendError]])("画像の削除の状態 %i を投げる", async (status, error) => {
-    const one = "00000000-00000000-00000000-00000000-0000000a";
-    const tag = { PatientID: "T1", StudyInstanceUID: "1.2", SeriesInstanceUID: "1.2.3", SOPInstanceUID: "1.2.3.1" };
-    state.fetch
-      .mockResolvedValueOnce(Response.json({ [one]: tag }))
-      .mockResolvedValueOnce(new Response("", { status }));
-    const named = { ...tag, PatientName: "", PatientBirthDate: "", PatientSex: "", AccessionNumber: "", SpecificCharacterSet: "" };
-    await expect(backend().deleteStudyInstances(id, [named])).rejects.toBeInstanceOf(error);
+    const two = "00000000-00000000-00000000-00000000-0000000b";
+    const late = "00000000-00000000-00000000-00000000-0000000c";
+    /** 検査の画像のタグと、画像の一覧（FileUuid）の 2 つの答え */
+    const listing = (files: Record<string, string>) => {
+      state.fetch
+        .mockResolvedValueOnce(Response.json({ [one]: tag("1.2.3.1"), [two]: tag("1.2.3.2"), [late]: tag("1.2.3.3") }))
+        .mockResolvedValueOnce(Response.json(Object.entries(files).map(([ID, FileUuid]) => ({ ID, FileUuid }))));
+    };
+    it("画像ごとのファイルの印を、UID の組を鍵にして読む", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      expect(await backend().studyInstanceFiles(id)).toEqual({ "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" });
+      expect(state.fetch.mock.calls[1]![0]).toBe(`http://pacs.example.org/studies/${id}/instances`);
+    });
+    it("ファイルの印が無ければ読めないとする", async () => {
+      listing({ [one]: "f1", [two]: "", [late]: "f3" });
+      await expect(backend().studyInstanceFiles(id)).rejects.toThrow("ファイルの印");
+    });
+    it("名指しで、ファイルの印が書き換えの前と同じ画像だけを、画像の ID で 1 枚ずつ、書く資格情報で消す", async () => {
+      // 2 枚目は同じ UID で届き直して印が変わった
+      listing({ [one]: "f1", [two]: "f2-resent", [late]: "f3" });
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+      await backend().deleteStudyInstances(id, [full("1.2.3.1"), full("1.2.3.2")], { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2" });
+      expect(state.fetch).toHaveBeenCalledTimes(3);
+      expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}/instances-tags?simplify`);
+      const [url, init] = state.fetch.mock.calls[2]!;
+      expect(url).toBe(`http://pacs.example.org/instances/${one}`);
+      expect(init.method).toBe("DELETE");
+      expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
+    });
+    it.each([[502, BackendUnknownError], [403, BackendError]])("画像の削除の状態 %i を投げる", async (status, error) => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      state.fetch.mockResolvedValueOnce(new Response("", { status }));
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { "1.2|1.2.3|1.2.3.1": "f1" })).rejects.toBeInstanceOf(error);
+    });
   });
   it.each([302, 502, 503, 504])("状態 %i は結果不明", async (status) => {
     state.fetch.mockResolvedValue(new Response("", { status }));

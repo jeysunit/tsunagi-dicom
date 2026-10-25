@@ -62,6 +62,8 @@ const EXPORT_TIMEOUT_MS = 10 * 60_000;
 /** 書き出しの本文を流す間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
 const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
+/** 画像の UID の組（studyInstanceFiles の鍵） */
+const instanceKey = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
 /**
  * 書き込みの操作の答えのうち、Orthanc が受けなかったと確かめられないもの（docs/spec.md の 3.5 の結果不明）：
  * 手前の入口の 502・503・504（Orthanc が受けた後に、入口が待ちきれなかったことがある）と、移す答え（3xx）
@@ -183,6 +185,30 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         SOPInstanceUID: get("SOPInstanceUID"),
         SpecificCharacterSet: get("SpecificCharacterSet")
       }];
+    });
+  }
+
+  /** 検査の全画像の、Orthanc の画像の ID・UID の組・ファイルの印（`/studies/{id}/instances` の FileUuid） */
+  async function instanceFiles(id: string): Promise<{ instanceId: string; key: string; file: string }[]> {
+    const tags = await instanceTags(id);
+    const json = await restJsonOrNull(`studies/${id}/instances`);
+    if (!Array.isArray(json)) {
+      throw new BackendError("画像の一覧を読み込めません");
+    }
+    const files = new Map<string, string>();
+    for (const raw of json) {
+      const { ID, FileUuid } = (raw ?? {}) as { ID?: unknown; FileUuid?: unknown };
+      if (typeof ID !== "string" || typeof FileUuid !== "string" || !FileUuid) {
+        throw new BackendError("画像のファイルの印を読み込めません");
+      }
+      files.set(ID, FileUuid);
+    }
+    return tags.map(([instanceId, instance]) => {
+      const file = files.get(instanceId);
+      if (!file || !isOrthancId(instanceId)) {
+        throw new BackendError("画像のファイルの印を読み込めません");
+      }
+      return { instanceId, key: instanceKey(instance), file };
     });
   }
 
@@ -454,16 +480,17 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return (await instanceTags(id)).map(([, instance]) => instance);
     },
 
-    // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す。design.md §15）
-    async deleteStudyInstances(id: string, instances: PatientInstance[]) {
-      const key = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
-      const named = new Set(instances.map(key));
-      for (const [instanceId, instance] of await instanceTags(id)) {
-        if (!named.has(key(instance))) {
+    async studyInstanceFiles(id: string) {
+      return Object.fromEntries((await instanceFiles(id)).map(f => [f.key, f.file]));
+    },
+
+    // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
+    // 書き換えの前とファイルの印が違う画像（同じ UID で届き直して置き換わった画像）も消さない（design.md §15.4）
+    async deleteStudyInstances(id: string, instances: PatientInstance[], files: Record<string, string>) {
+      const named = new Set(instances.map(instanceKey));
+      for (const { instanceId, key, file } of await instanceFiles(id)) {
+        if (!named.has(key) || files[key] !== file) {
           continue;
-        }
-        if (!isOrthancId(instanceId)) {
-          throw new BackendError("画像の ID が正しくありません");
         }
         const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
         await res.body?.cancel();
