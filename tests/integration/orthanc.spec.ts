@@ -1044,18 +1044,24 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
     print(ok and tostring(answer) or 'error')`;
   const found = `function() return '[{"Type":"Study","ID":"${id}"}]' end`;
   const failing = "function() error('synthetic failure') end";
+  const returning = (json: string) => `function() return '${json}' end`;
   const cases: [string, string, string, string][] = [
     ["引き当ての失敗", failing, "realGet", "42752"],
-    ["引き当ての答えが読めない JSON", "function() return 'not json' end", "realGet", "42752"],
+    ["引き当ての答えが読めない JSON", returning("not json"), "realGet", "42752"],
+    ["引き当ての答えが配列でない", returning("{}"), "realGet", "42752"],
+    ["引き当ての答えに検査の ID が無い", returning('[{"Type":"Study"}]'), "realGet", "42752"],
     ["メタデータの読み取りの失敗", found, failing, "42752"],
-    ["メタデータが読めない JSON", found, "function() return 'not json' end", "42752"],
+    ["メタデータが読めない JSON", found, returning("not json"), "42752"],
+    // ?expand の効かない答え（名前の配列）を、印が無いと読まない
+    ["メタデータが名前の配列", found, returning('["TsunagiLock"]'), "42752"],
     // 比べるため：差し替えない引き当てと読み取りで、印が無ければ受ける
     ["印が無い", "realPost", "realGet", "0"]
   ];
   for (const [label, post, get, expected] of cases) {
     const response = await orthanc("tools/execute-script", { method: "POST", body: filter(post, get), contentType: "text/plain" });
     expect(response.status, label).toBe(200);
-    expect((await response.text()).trim(), label).toBe(expected);
+    // 答えは print の全部（filter が断ったときに残す行の後に、試験の print が来る）
+    expect((await response.text()).trim().split("\n").at(-1)?.trim(), label).toBe(expected);
   }
 });
 

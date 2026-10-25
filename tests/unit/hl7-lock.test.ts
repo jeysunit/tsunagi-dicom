@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditEntryInput } from "@/lib/audit";
+import { BackendUnknownError } from "@/lib/backend/types";
 import { processMessage, type ProcessOptions } from "@/lib/hl7/apply";
 import { sweepArrivals } from "@/lib/hl7/sweep";
 import { createFakeOrthanc, type FakeOrthanc } from "./helpers/fake-orthanc";
@@ -212,6 +213,55 @@ describe("付け替えの印", () => {
     await sweep();
     expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "success" });
     expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(0);
+  });
+
+  it("書き換えを求めた答えが来なければ（仕事ができて写しているかもしれない）、印を外さずに結果不明で止める", async () => {
+    temp();
+    orthanc.next.state = "Running";
+    const modify = orthanc.backend.modifyStudyKeepingUids.bind(orthanc.backend);
+    vi.spyOn(orthanc.backend, "modifyStudyKeepingUids").mockImplementation(async (id, replace) => {
+      await modify(id, replace);
+      throw new BackendUnknownError();
+    });
+    expect(await send(a40(TEMP, "P000001"), { lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(orthanc.events.filter(e => e.startsWith("unlock:"))).toEqual([]);
+    expect(orthanc.locks.has(orthanc.studyId(TEMP, STUDY))).toBe(true);
+    expect(results().at(-1)).toMatchObject({ outcome: "unknown", detail: { lockUntil: expect.any(String) } });
+    // 仕事の ID が無いので、照らし合わせは自動で解かない
+    expect(await sweep()).toMatchObject({ blocked: "結果の分からない書き換えがある" });
+    expect(orthanc.deleteCalls).toHaveLength(0);
+  });
+
+  it.each([
+    ["仕事を作った時の印の期限より後に終わっていれば", 60_000, "消さない"],
+    ["仕事を作った時の印の期限を読めなければ", undefined, "消さない"],
+    ["仕事を作った時の印の期限より前に終わっていれば", -60_000, "消す"]
+  ] as const)("BFF が仕事を待つ間に止まり結果を残せなかったとき、%s、照らし合わせで元を%s", async (_label, offset, outcome) => {
+    const kept = outcome === "消さない";
+    temp();
+    orthanc.next.state = "Running";
+    expect(await send(a40(TEMP, "P000001"), { jobTimeoutMs: 5 })).toContain("MSA|AE|");
+    // 結果不明の行を残す前に止まった形にする（dispatch の行の印の期限だけが残る）
+    rows = rows.filter(r => r.detail?.event !== "result");
+    const dispatch = rows.find(r => r.detail?.event === "dispatch")!;
+    const lockUntil = Date.parse(String(dispatch.detail?.lockUntil));
+    expect(lockUntil).toBeGreaterThan(0);
+    if (offset === undefined) {
+      delete dispatch.detail!.lockUntil;
+    }
+    for (const [jobId] of orthanc.jobs) {
+      orthanc.jobs.set(jobId, "Success");
+      orthanc.jobCompletedAt.set(jobId, new Date(lockUntil + (offset ?? 60_000)).toISOString().replace(/\.\d+Z$/, "Z"));
+    }
+    await sweep();
+    const reconciled = rows.filter(r => r.detail?.event === "reconcile").at(-1);
+    if (kept) {
+      expect(reconciled).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+      expect(orthanc.deleteCalls).toHaveLength(0);
+    } else {
+      expect(reconciled).toMatchObject({ outcome: "success" });
+      expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(0);
+    }
   });
 
   it("仕事を待つ間に印を付け直せなければ、元を消さずに部分反映で止め、仕事が写しているかもしれない印は外さない", async () => {

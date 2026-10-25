@@ -15,6 +15,28 @@ local LOCK_NUMBER = '1024'
 -- Refused: Out of Resources（PS3.4 B.2.3。C-STORE の Failure）
 local REFUSED = 0xA700
 
+-- JSON の文字列を読む。最初の字が opening（'[' か '{'）でなければ（配列と物は Lua では同じ table になり、空なら見分けられない）、
+-- 読めなければ nil
+local function parse(raw, opening)
+  if type(raw) ~= 'string' or string.match(raw, '^%s*(.)') ~= opening then
+    return nil
+  end
+  local ok, value = pcall(ParseJson, raw)
+  if not ok or type(value) ~= 'table' then
+    return nil
+  end
+  return value
+end
+
+-- 1 から続く番号だけを鍵に持つ table（JSON の配列）か
+local function isList(t)
+  local n = 0
+  for _ in pairs(t) do
+    n = n + 1
+  end
+  return n == #t
+end
+
 -- 断るなら理由（文字列）を、受けるなら nil を返す
 local function refusal(studyUid)
   if studyUid == nil or studyUid == '' then
@@ -24,20 +46,27 @@ local function refusal(studyUid)
   if not ok or found == nil then
     return 'lookup failed'
   end
-  local okParse, list = pcall(ParseJson, found)
-  if not okParse or type(list) ~= 'table' then
+  -- 引き当ての答えは、{ Type, ID, Path } の配列
+  local list = parse(found, '[')
+  if list == nil or not isList(list) then
     return 'lookup unreadable'
   end
   local now = os.time()
   for _, r in ipairs(list) do
+    if type(r) ~= 'table' or type(r['Type']) ~= 'string' then
+      return 'lookup unreadable'
+    end
     if r['Type'] == 'Study' then
-      -- 検査のメタデータの全部（印が無くても読める。読めなければ確かめられない）
+      if type(r['ID']) ~= 'string' or r['ID'] == '' then
+        return 'lookup unreadable'
+      end
+      -- 検査のメタデータの全部（名前から値への物。印が無くても読める。読めなければ確かめられない）
       local ok2, raw = pcall(RestApiGet, '/studies/' .. r['ID'] .. '/metadata?expand', true)
       if not ok2 or raw == nil then
         return 'metadata unreadable'
       end
-      local ok3, meta = pcall(ParseJson, raw)
-      if not ok3 or type(meta) ~= 'table' then
+      local meta = parse(raw, '{')
+      if meta == nil then
         return 'metadata unreadable'
       end
       local value = meta[LOCK] or meta[LOCK_NUMBER]

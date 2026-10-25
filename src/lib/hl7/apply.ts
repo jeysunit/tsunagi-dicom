@@ -350,12 +350,17 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
       // 名指しで消す（書き換えたときと同じ。消し終えていれば何もしない。design.md §15.4）。元の検査が残っていれば、
       // 消す間は付け替えの印を付ける
       let removed: RemoveOutcome = {};
-      // 仕事の終わりを読めずに止まったとき、印の期限（lockUntil）までに仕事が終わっていなければ、印の切れた後に写した
-      // かもしれない（その間の C-STORE を写しが黙って上書きしうる）。元を消さずに部分反映として人に見せる
-      const lockUntil = rows.filter(r => r.detail?.writeId === d.writeId && typeof r.detail?.lockUntil === "string").at(-1)?.detail?.lockUntil;
+      // 印を付けて書き換えた仕事が、印の期限（dispatch か結果不明の行の lockUntil の最後）までに終わっていなければ、
+      // 印の切れた後に写したかもしれない（その間の C-STORE を写しが黙って上書きしうる。BFF が仕事を待つ間に止まれば
+      // 付け直しも止まる）。期限か仕事の終わりの時刻を読めなければ確かめられないので、同じく元を消さずに部分反映として
+      // 人に見せる。照らし合わせが付け直した印の行（dispatch より後）は、書き換えの印に数えない
+      const history = rows.filter(r => r.detail?.writeId === d.writeId);
+      const lockedWrite = history.slice(0, history.indexOf(dispatch)).some(r => r.detail?.event === "lock");
+      const lockUntil = history.filter(r => typeof r.detail?.lockUntil === "string").at(-1)?.detail?.lockUntil;
+      const until = typeof lockUntil === "string" ? Date.parse(lockUntil) : NaN;
       const completed = job.completionTime ? Date.parse(job.completionTime) : NaN;
-      const copiedAfterLock = typeof lockUntil === "string"
-        && (!Number.isFinite(completed) || completed + 1000 > Date.parse(lockUntil));
+      const copiedAfterLock = lockedWrite
+        && (!Number.isFinite(until) || !Number.isFinite(completed) || completed + 1000 > until);
       if (job.state === "Success" && copiedAfterLock) {
         removed = { lockLost: true };
       } else if (job.state === "Success" && d.after[0]!.PatientID !== d.before[0]!.PatientID) {
@@ -630,7 +635,9 @@ async function writeStudy(
   try {
     const { jobId } = await backend.modifyStudyKeepingUids(id, replace);
     jobCreated = true;
-    await row("dispatch", "success", { writeId: d.writeId, jobId });
+    // 照らし合わせが、仕事がこの期限より後に終わったかを確かめられるよう、印の期限を残す（BFF が仕事を待つ間に止まると、
+    // 付け直しも止まる）
+    await row("dispatch", "success", { writeId: d.writeId, jobId, ...(lock ? { lockUntil: new Date(lock.until()).toISOString() } : {}) });
     const deadline = Date.now() + (options.jobTimeoutMs ?? 120000);
     for (;;) {
       state = (await backend.jobStatus(jobId))?.state;
@@ -644,7 +651,10 @@ async function writeStudy(
       await lock?.renew();
     }
   } catch (e) {
-    if (jobCreated && lock?.lost()) {
+    // 仕事ができて写しているかもしれない（仕事を作った後か、書き換えを求めた答えが来なかった。Orthanc が断ったと分かる
+    // BackendError だけが、仕事の無いことを示す）
+    const mayCopy = jobCreated || !(e instanceof BackendError);
+    if (mayCopy && lock?.lost()) {
       // 仕事の間に印が切れた・付け直せなかった：その間の C-STORE を写しが黙って上書きしえたので、照らし合わせで
       // 自動に解かず、元を消さずに部分反映として人に見せる（design.md §15.4）
       await lock.keep();
@@ -653,15 +663,13 @@ async function writeStudy(
       }, after[0]!.PatientID, d.StudyInstanceUID);
       throw new BackendError("付け替えの印が途中で切れた");
     }
-    if (jobCreated || !(e instanceof BackendError)) {
+    if (mayCopy) {
       // 仕事がまだ写しているかもしれないので、印は外さずに期限で切れるのを待つ。照らし合わせは、仕事がこの期限より
       // 後に終わっていれば元を消さない
-      if (jobCreated && lock) {
-        await lock.keep();
-      }
+      await lock?.keep();
       await row("result", "unknown", {
         ...d,
-        ...(jobCreated && lock ? { lockUntil: new Date(lock.until()).toISOString() } : {}),
+        ...(lock ? { lockUntil: new Date(lock.until()).toISOString() } : {}),
         reason: visible(e instanceof Error ? e.message : "応答不明")
       });
       throw e;
