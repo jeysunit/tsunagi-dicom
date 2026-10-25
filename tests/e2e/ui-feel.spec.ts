@@ -348,7 +348,7 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   await collect("詳細とビューアのメニュー");
   await page.keyboard.press("Escape");
   await page.getByTestId("series-open").first().click();
-  await page.getByTestId("tag-set-study").click();
+  await page.getByTestId("study-tags-open").click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
   await collect("詳細の UID と検査のタグ");
   for (const path of ["/received", "/modalities", "/admin/viewers"]) {
