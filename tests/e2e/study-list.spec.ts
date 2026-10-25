@@ -693,6 +693,22 @@ const headCount = async (page: Page) => Number(await page.getByTestId("study-cou
  * （待ちの印は 0.3 秒たつまで出ないので、件数の表示だけでは新旧を見分けられない）
  */
 const listSettled = (page: Page) => expect(page.getByRole("heading", { level: 1 }).and(page.locator("[data-fetching]"))).toHaveCount(0);
+/**
+ * 見出しや検索を操作したあと、その条件の一覧の応答が来て、画面が取り直しを終えるまで待つ。
+ * listSettled だけだと、取り直しが始まる前の「取り直し中でない」状態でも通り抜ける。そこで、操作の前に
+ * 「この条件の一覧の応答」を待つ約束を作り、応答が来てから listSettled で画面に反映されたことを見る。
+ * 応答は条件（クエリ）で選ぶので、操作より前に出した別の取り直しの応答では通り抜けない
+ * （この条件は、その試験の中で初めて当てるものにする。取り直しが無い操作では応答が来ず、待ちきれずに落ちる）
+ */
+const settledAfter = async (page: Page, params: Record<string, string>, action: () => Promise<unknown>) => {
+  const responded = page.waitForResponse((res) => {
+    const url = new URL(res.url());
+    return url.pathname === "/api/studies" && res.request().method() === "GET" && Object.entries(params).every(([k, v]) => url.searchParams.get(k) === v);
+  });
+  await action();
+  await responded;
+  await listSettled(page);
+};
 
 test("1 行の一覧：行の高さは 28px（14px の文字）、氏名の漢字とかなは別の列（かなは右）", async ({ page }) => {
   await asRole(page, "一般");
@@ -810,20 +826,17 @@ test("件数は、ほかの見出しと検索を当てたあとの数になる�
   await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
   // 検査日を押したあとの件数は、押す前の見出しの件数と同じ
   const n = await count(page.getByTestId("date-week"));
-  await page.getByTestId("date-week").click();
-  await listSettled(page);
+  await settledAfter(page, { modality: "MR", date: "week" }, () => page.getByTestId("date-week").click());
   await expect.poll(() => headCount(page)).toBe(n);
   // モダリティの見出しは、検査日を当てた数
   const ct = await count(page.getByTestId("modality-CT"));
-  await page.getByTestId("modality-CT").click();
-  await listSettled(page);
+  await settledAfter(page, { modality: "CT", date: "week" }, () => page.getByTestId("modality-CT").click());
   await expect.poll(() => headCount(page)).toBe(ct);
   // 横断の検索を当てると、全部の見出しの件数が絞られる
   await page.getByTestId("modality-all").click();
   await page.getByTestId("date-all").click();
-  await page.getByTestId("study-search").fill("JP-TEST-0004");
+  await settledAfter(page, { q: "JP-TEST-0004" }, () => page.getByTestId("study-search").fill("JP-TEST-0004"));
   await expect(page).toHaveURL(/q=JP-TEST-0004/);
-  await listSettled(page);
   await expect(page.getByTestId("study-count")).toHaveText("2");
   await expect.poll(() => count(page.getByTestId("date-all"))).toBe(2);
   await expect.poll(() => count(page.getByTestId("modality-all"))).toBe(2);

@@ -21,6 +21,10 @@ import { expect, test, type Page } from "@playwright/test";
 // 5. 照合（PIR）：DTG で緊急の患者を撮る（MPPS だけが ris-emulator に残る）→ ris-emulator の reconcile list に出る →
 //    reconcile run で正式な患者と予約を結ぶ（A40・ORM を受け口が受ける）→ 同じ StudyInstanceUID の検査が 1 件だけ、
 //    正式な患者 ID・氏名・受付番号で一覧に出て、ris-emulator の予約は同じ StudyInstanceUID の完了になる。
+// 6. 照合の後の追加撮影（IHE PIR の Case 6）：5 と同じ照合の後、DTG で同じ検査に仮の患者情報のまま追加で撮って送る →
+//    受け口の見回し（60 秒ごと）が、追加の画像も正式な患者・受付番号に書き換え、同じ StudyInstanceUID の検査 1 件にまとまる。
+// 7. 取消の ORM（RAD-13 の CA）：5 と同じ照合の後、ris-emulator の pir send --kind orm --order-control CA を受け口が受ける →
+//    検査と画像は残り、受付番号だけが外れる。
 // 前の試験の結果に依らないが、順に流す（管理者のパスワードは 2 で変え、3 はそのパスワードでログインする）。
 
 test.describe.configure({ mode: "serial" });
@@ -466,4 +470,113 @@ test("5 照合：緊急の患者で撮る → ris-emulator の未照合に出る
   expect(rest.some((i) => i.sop_instance_uid === item.sop_instance_uid)).toBe(false);
 
   console.log(`[flow] 照合：A40・ORM を受理 2・照合した検査 1・画像 ${exam.files.length}`);
+});
+
+type FlowStudy = {
+  studyInstanceUid: string;
+  patientId?: string;
+  accessionNumber?: string;
+  instanceCount?: number;
+};
+
+/**
+ * 5 と同じ流れで、緊急の患者（仮の患者 ID）の検査を撮って送り、ris-emulator で正式な患者に照合する（A40・ORM が受理されるまで）。
+ * 6・7 が、この後の動きを確かめる出発点にする。ログインは済ませておく
+ */
+async function emergencyReconciled(page: Page, prefix: string) {
+  const suffix = Date.now().toString().slice(-8);
+  const priorId = `${prefix}${suffix}`;
+  const patientId = `PR${prefix}${suffix}`;
+  const priorName = "FLOW^UNKNOWN";
+  const ris = (...args: string[]) => compose(["exec", "-T", "ris", "python", "-m", "app.cli", ...args], 120_000);
+  const dtg = (...args: string[]) => compose(["exec", "-T", "dtg", "python", "-m", "app.cli", ...args], 300_000);
+
+  const exam = JSON.parse(
+    await dtg("exam", "--emergency", "--patient-id", priorId, "--patient-name", priorName, "-s", "1", "-i", "2", "--send", "--json"),
+  ) as { study_instance_uid: string; files: string[]; send: { status: string } };
+  expect(exam.send).toMatchObject({ status: "sent" });
+
+  const listed = async () => ((await (await page.request.get("/api/studies")).json()) as { studies: FlowStudy[] }).studies;
+  await waitFor("緊急の検査が一覧に出る", listed, (studies) => studies.some((s) => s.studyInstanceUid === exam.study_instance_uid));
+
+  const unreconciled = await waitFor(
+    "未照合に出る",
+    async () => JSON.parse(await ris("reconcile", "list", "--json")) as { sop_instance_uid: string; patient_id: string }[],
+    (items) => items.some((i) => i.patient_id === priorId),
+  );
+  const item = unreconciled.find((i) => i.patient_id === priorId)!;
+  const result = JSON.parse(
+    await ris("reconcile", "run", item.sop_instance_uid, "--patient-id", patientId, "--name", "FLOW^PIR=流れ^照合=ナガレ^ショウゴウ",
+      "--birth-date", "19980312", "--sex", "M", "--json"),
+  ) as { accession_number: string; deliveries: { message_type: string; outcome: string }[] };
+  expect(result.deliveries.map((d) => [d.message_type, d.outcome])).toEqual([
+    ["ADT^A40", "accepted"],
+    ["ORM^O01", "accepted"],
+  ]);
+  const accession = result.accession_number;
+  await waitFor("正式な患者・受付番号で出る", listed, (studies) =>
+    studies.some((s) => s.studyInstanceUid === exam.study_instance_uid && s.patientId === patientId && s.accessionNumber === accession),
+  );
+  return { uid: exam.study_instance_uid, priorId, priorName, patientId, accession, imageCount: exam.files.length, ris, dtg, listed };
+}
+
+test("6 照合の後の追加撮影：仮の患者情報で追加で撮って送る → 見回しが書き換え、同じ UID の検査 1 件に正式な患者・受付番号でまとまる", async ({ page }) => {
+  await loginAsInitialAdmin(page);
+  const flow = await emergencyReconciled(page, "EA");
+
+  // 照合の後に、同じ検査（同じ StudyInstanceUID）へ、仮の患者 ID・氏名のまま追加で撮って Orthanc へ送る（新しいシリーズ）
+  const added = JSON.parse(
+    await flow.dtg("exam", "--emergency", "--append", "--study-uid", flow.uid, "--patient-id", flow.priorId, "--patient-name", flow.priorName,
+      "-s", "1", "-i", "2", "--send", "--json"),
+  ) as { study_instance_uid: string; files: string[]; send: { status: string } };
+  expect(added.study_instance_uid).toBe(flow.uid);
+  expect(added.send).toMatchObject({ status: "sent" });
+  const total = flow.imageCount + added.files.length;
+
+  // 受け口の見回し（60 秒ごと）が、届き終えた（Orthanc の IsStable）追加の画像を、正式な患者・受付番号の検査にまとめる。
+  // 待つのは、見回しの間隔と、画像が安定するまでの時間
+  const after = await waitFor(
+    "追加の画像が正式な患者・受付番号の検査にまとまる",
+    flow.listed,
+    (studies) => {
+      const same = studies.filter((s) => s.studyInstanceUid === flow.uid);
+      return same.length === 1 && same[0]!.patientId === flow.patientId && same[0]!.instanceCount === total;
+    },
+    240_000,
+  );
+  const same = after.filter((s) => s.studyInstanceUid === flow.uid);
+  expect(same).toHaveLength(1);
+  expect(same[0]).toMatchObject({ patientId: flow.patientId, accessionNumber: flow.accession, instanceCount: total });
+  expect(after.some((s) => s.patientId === flow.priorId)).toBe(false);
+
+  console.log(`[flow] 追加撮影：画像 ${flow.imageCount} + ${added.files.length} が正式な患者の検査 1 にまとまった`);
+});
+
+test("7 取消の ORM：照合の後に ORM の CA を送る → 検査と画像は残り、受付番号だけが外れる", async ({ page }) => {
+  await loginAsInitialAdmin(page);
+  const flow = await emergencyReconciled(page, "EC");
+  const before = (await flow.listed()).filter((s) => s.studyInstanceUid === flow.uid);
+  expect(before).toHaveLength(1);
+  expect(before[0]).toMatchObject({ patientId: flow.patientId, accessionNumber: flow.accession, instanceCount: flow.imageCount });
+
+  // ris-emulator から、照合で作った予約の取消（ORC-1 = CA）を受け口へ送る。受理（AA）なら終了コードは 0
+  const cancel = () => flow.ris("pir", "send", "--host", "hl7-receiver", "--kind", "orm", "--accession", flow.accession, "--order-control", "CA");
+  expect(await cancel()).toContain("受理されました");
+
+  // 検査も画像も消さず、受付番号だけが外れる。患者は変わらない
+  const after = await waitFor(
+    "受付番号が外れる",
+    async () => (await flow.listed()).filter((s) => s.studyInstanceUid === flow.uid),
+    (studies) => studies.length === 1 && !studies[0]!.accessionNumber,
+  );
+  expect(after[0]).toMatchObject({ patientId: flow.patientId, instanceCount: flow.imageCount });
+
+  // 受付番号がすでに空の検査への CA は、何も変えずに受理される（同じ取消の送り直し）
+  expect(await cancel()).toContain("受理されました");
+  const again = (await flow.listed()).filter((s) => s.studyInstanceUid === flow.uid);
+  expect(again).toHaveLength(1);
+  expect(again[0]).toMatchObject({ patientId: flow.patientId, instanceCount: flow.imageCount });
+  expect(again[0]!.accessionNumber ?? "").toBe("");
+
+  console.log(`[flow] 取消：ORM の CA を受理 2・検査 1 の受付番号が外れた・画像 ${flow.imageCount}`);
 });
