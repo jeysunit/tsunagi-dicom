@@ -339,7 +339,7 @@ const CELL_PAD = 18;
 /** モダリティ・検査の記述の列の最小の幅。一覧がこれより狭いときは、一覧の中で横にスクロールする */
 const DESC_MIN = 160;
 /** 詰めた形（詳細を開いている間）の、同じ列の最小の幅 */
-const DESC_MIN_COMPACT = 120;
+const DESC_MIN_COMPACT = 80;
 
 /**
  * 一覧の列（px。docs/spec.md の 3.1）。患者 ID・生年月日・年齢・性別は切らない（患者 ID の列は、出している行のいちばん長い値に合わせる）。
@@ -366,15 +366,13 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
     { key: "count", width: 100 },
     { key: "viewer", width: 142 },
   ];
-  // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・年齢・性別・モダリティと検査名。
-  // 省く値（受付番号・カナ・生年月日・Se/Im・開く）は、詳細の見出し・検査の情報・操作の行で見る
-  // 年齢と性別は短い値なので、詰めた形では幅を詰める（一覧が 560px ほどでも、横にスクロールせずに収める）
-  const narrow: Record<string, number> = { age: 56, sex: 56 };
-  return compact ? all.filter((c) => COMPACT_COLUMNS.includes(c.key)).map((c) => ({ ...c, width: narrow[c.key] ?? c.width })) : all;
+  // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・年齢と性別（1 列）・モダリティと検査名。
+  // 省く値（受付番号・カナ・生年月日・Se/Im・開く）は、詳細の見出し・検査の情報・操作の行で見る。
+  // 年齢と性別は短い値なので 1 列にまとめる（一覧が 570px ほどでも、横にスクロールせずに収める）
+  if (!compact) return all;
+  const keep = (key: string) => all.filter((c) => c.key === key);
+  return [...keep("date"), ...keep("id"), ...keep("name"), { key: "agesex", width: 88 }, ...keep("desc")];
 }
-
-/** 詳細を開いている間も残す列 */
-const COMPACT_COLUMNS: readonly string[] = ["date", "id", "name", "age", "sex", "desc"];
 
 /**
  * 一覧を読み直しても、見ていた行の位置を保つ（docs/spec.md の 3.1 の自動更新）。スクロールしているときは、見えている先頭の行を
@@ -481,8 +479,9 @@ function StudyRows({
             <th className={cn("px-2 py-1 font-normal", CUT)}>氏名</th>
             {has("kana") && <th className={cn("px-2 py-1 font-normal", CUT)}>カナ</th>}
             {has("birth") && <th className={cn("px-2 py-1 font-normal", CUT)}>生年月日</th>}
-            <th className={cn("px-2 py-1 font-normal", CUT)}>年齢</th>
-            <th className={cn("px-2 py-1 font-normal", CUT)}>性別</th>
+            {has("age") && <th className={cn("px-2 py-1 font-normal", CUT)}>年齢</th>}
+            {has("sex") && <th className={cn("px-2 py-1 font-normal", CUT)}>性別</th>}
+            {has("agesex") && <th className={cn("px-2 py-1 font-normal", CUT)}>年齢・性別</th>}
             <th className={cn("px-2 py-1 font-normal", CUT)}>モダリティ／検査名</th>
             {has("count") && (
               <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数／画像数">
@@ -584,12 +583,21 @@ function StudyRows({
                       {formatSlashDate(s.patientBirthDate)}
                     </td>
                   )}
-                  <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-age">
-                    {formatAge(s.patientBirthDate, s.studyDate)}
-                  </td>
-                  <td className={cn(CELL, "whitespace-nowrap")} data-testid="patient-sex">
-                    {sexLabel(s.patientSex)}
-                  </td>
+                  {has("age") && (
+                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-age">
+                      {formatAge(s.patientBirthDate, s.studyDate)}
+                    </td>
+                  )}
+                  {has("sex") && (
+                    <td className={cn(CELL, "whitespace-nowrap")} data-testid="patient-sex">
+                      {sexLabel(s.patientSex)}
+                    </td>
+                  )}
+                  {has("agesex") && (
+                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-agesex">
+                      {formatAge(s.patientBirthDate, s.studyDate)} {sexLabel(s.patientSex)}
+                    </td>
+                  )}
                   <td className={cn(CELL, CUT)} title={desc}>
                     <span className="mr-2 inline-flex gap-2 align-middle">
                       {s.modalities?.map((m) => <ModalityTag key={m} modality={m} />)}

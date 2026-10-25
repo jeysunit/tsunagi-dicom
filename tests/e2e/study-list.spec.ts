@@ -282,14 +282,16 @@ test("左右に分ける：何も選ばなければ一覧が全幅。行を選�
   expect(listBox.width).toBeLessThan(fullWidth);
   expect(listBox.width).toBeGreaterThanOrEqual(320);
   expect(paneBox.width).toBeGreaterThanOrEqual(400);
-  expect(await columns()).toEqual(["date", "id", "name", "age", "sex", "desc"]);
+  expect(await columns()).toEqual(["date", "id", "name", "agesex", "desc"]);
+  // 初期設定の位置では、詰めた形の一覧が、1280px の画面で横にスクロールせずに収まる
+  expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const before = await rows(page).nth(1).boundingBox();
   await second.click();
   await expectDetail(page, secondUid);
   // 行の位置は動かない（詳細は行の下に開かない。一覧は選んだだけではスクロールしない。行を替えても列は動かない）
   const after = await rows(page).nth(1).boundingBox();
   expect(after).toEqual(before);
-  expect(await columns()).toEqual(["date", "id", "name", "age", "sex", "desc"]);
+  expect(await columns()).toEqual(["date", "id", "name", "agesex", "desc"]);
   expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollTop)).toBe(0);
   // 閉じる（×）と、一覧は全幅・全部の列に戻る
   await page.getByRole("button", { name: "詳細を閉じる" }).click();
