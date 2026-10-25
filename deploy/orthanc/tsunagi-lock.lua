@@ -72,9 +72,17 @@ local function refusal(studyUid)
       if meta == nil then
         return 'metadata unreadable'
       end
-      local value = meta[LOCK] or meta[LOCK_NUMBER]
+      local value = meta[LOCK]
+      if value == nil then
+        value = meta[LOCK_NUMBER]
+      end
+      -- 名前はあるのに値が読めない（JSON の null は Lua では無いのと同じになる）
+      if value == nil and (string.find(raw, '"' .. LOCK .. '"', 1, true) or string.find(raw, '"' .. LOCK_NUMBER .. '"', 1, true)) then
+        return 'lock value unreadable'
+      end
       if value ~= nil then
-        local untilSeconds = tonumber(value)
+        -- 値は期限の UNIX 秒の文字列（false・物・配列などは読めない値）
+        local untilSeconds = (type(value) == 'string' or type(value) == 'number') and tonumber(value) or nil
         if untilSeconds == nil then
           return 'lock value unreadable'
         end

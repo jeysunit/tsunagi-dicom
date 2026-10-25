@@ -1056,6 +1056,12 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
     ["メタデータが読めない JSON", found, returning("not json"), "42752"],
     // ?expand の効かない答え（名前の配列）を、印が無いと読まない
     ["メタデータが名前の配列", found, returning('["TsunagiLock"]'), "42752"],
+    ["印の値が false", found, returning('{"TsunagiLock":false}'), "42752"],
+    ["印の値が null", found, returning('{"TsunagiLock":null}'), "42752"],
+    ["印の値が配列", found, returning('{"TsunagiLock":[1]}'), "42752"],
+    ["印の番号の値が物", found, returning('{"1024":{}}'), "42752"],
+    // 比べるため：期限の切れた印は受ける
+    ["期限の切れた印", found, returning('{"TsunagiLock":"1"}'), "0"],
     // 比べるため：差し替えない引き当てと読み取りで、印が無ければ受ける
     ["印が無い", "realPost", "realGet", "0"]
   ];
