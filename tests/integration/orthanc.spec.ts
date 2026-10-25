@@ -4,7 +4,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from "@pla
 import { compose, startStorescp, stopStorescp, storescpReceived, storescuToOrthanc } from "./support/docker";
 import { newUid, syntheticStudy, writeDumps, type SyntheticStudy } from "./support/dicom";
 import { adminUser, bffUrl, ITEST, orthancUser } from "./support/env";
-import { readAudit, requestTrails } from "./support/audit-db";
+import { latestCsrfToken, readAudit, requestTrails } from "./support/audit-db";
 import { startGate, type Gate } from "./support/gate";
 import { observe, writeObservations } from "./support/observations";
 import { listJobs, lookupStudy, orthanc, orthancJson, waitFor, type OrthancJob } from "./support/orthanc";
@@ -982,8 +982,48 @@ test("18 HL7 照合の後に仮の患者 ID で届いた画像を、統合した
     expect(t).toMatchObject({ PatientID: finalId, AccessionNumber: "" });
 });
 
-// HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後に置く
-test("19 HL7 見回りの書き換えの最中に届いた画像は、本物の Orthanc で消えずに残り、部分反映で止まる（2026-10-25）", async () => {
+/** Orthanc のログに残った、付け替えの印で C-STORE を断った行の数（deploy/orthanc/tsunagi-lock.lua） */
+const lockRefusals = async () => (await compose(["logs", "--no-color", "orthanc"])).split("\n").filter(l => l.includes("tsunagi-lock: refused")).length;
+/** 試験から Orthanc の REST へ、架空の患者の画像を 1 枚入れる（REST・STOW-RS で届く画像の代わり。付け替えの印では断られない） */
+async function restCreate(tags: Record<string, string>) {
+  return orthancJson<{ ID: string }>("tools/create-dicom", {
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({ Tags: { SOPClassUID: "1.2.840.10008.5.1.4.1.1.7", Modality: "OT", SpecificCharacterSet: "ISO_IR 192", ...tags }, Force: true })
+  });
+}
+
+test("20 付け替えの印：期限の切れていない印のある検査と同じ StudyInstanceUID の C-STORE を、Orthanc の Lua が断る（2026-10-25）", async () => {
+  const study = syntheticStudy("lock-first", 56, 1);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [id] = await waitFor("印の試験の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  const lock = (until: number) => orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "PUT", body: String(until), contentType: "text/plain" });
+  const instances = async () => (await orthancJson<unknown[]>(`studies/${id}/instances`)).length;
+
+  // 印の間：同じ Study の新しいシリーズを送ると、storescu は失敗し、Orthanc には入らない
+  expect((await lock(Math.floor(Date.now() / 1000) + 60)).status).toBe(200);
+  const refusedBefore = await lockRefusals();
+  const more = { ...syntheticStudy("lock-more", 56, 2), studyInstanceUid: study.studyInstanceUid };
+  writeDumps(more);
+  await expect(storescuToOrthanc(more.batch)).rejects.toThrow();
+  expect(await instances()).toBe(1);
+  await waitFor("Orthanc のログに断った行が残る", lockRefusals, n => n > refusedBefore, 10_000);
+
+  // 期限の切れた印では断らない
+  expect((await lock(Math.floor(Date.now() / 1000) - 5)).status).toBe(200);
+  await storescuToOrthanc(more.batch);
+  expect(await instances()).toBe(3);
+
+  // 印を外した後の送り直しも受ける（同じ UID の送り直しは上書き）
+  expect((await lock(Math.floor(Date.now() / 1000) + 60)).status).toBe(200);
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "DELETE" })).status).toBe(200);
+  await storescuToOrthanc(more.batch);
+  expect(await instances()).toBe(3);
+});
+
+// HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後（21 の前。21 は人が解いてから流す）に置く
+test("19 HL7 見回りの書き換えの最中の C-STORE は断られ、REST で届いた画像は消えずに残って部分反映で止まる（2026-10-25）", async () => {
   const token = process.env.ITEST_HL7_TOKEN;
   if (!token) {
     throw Error("試験の HL7 token が無い");
@@ -999,10 +1039,20 @@ test("19 HL7 見回りの書き換えの最中に届いた画像は、本物の 
   writeDumps(late);
   await storescuToOrthanc(late.batch);
   await waitFor("同じ UID の検査が 2 件", () => lookupStudy(first.studyInstanceUid), ids => ids.length === 2);
-  // 見回りが書き換えの仕事を作った直後に、仮の患者 ID の 3 つめのシリーズを届ける
+  // 見回りが書き換えの仕事を作った直後に、仮の患者 ID の 3 つめのシリーズを C-STORE で送り（付け替えの印で断られる）、
+  // 4 つめのシリーズを REST で入れる（印では止まらない）
   const during = { ...syntheticStudy("hl7-race-during", 55, 1, { accessionNumber: "", patientName: "UNKNOWN^MALE" }), studyInstanceUid: first.studyInstanceUid };
   writeDumps(during);
-  gate.onceAfterModify(() => storescuToOrthanc(during.batch));
+  const restSop = newUid();
+  let cstore = "";
+  gate.onceAfterModify(async () => {
+    cstore = await storescuToOrthanc(during.batch).then(() => "stored", () => "failed");
+    await restCreate({
+      PatientID: first.patientId, PatientName: "UNKNOWN^MALE", PatientBirthDate: first.patientBirthDate, PatientSex: first.patientSex,
+      StudyInstanceUID: first.studyInstanceUid, SeriesInstanceUID: newUid(), SOPInstanceUID: restSop
+    });
+  });
+  const refusedBefore = await lockRefusals();
   const sweep = async () => {
     const response = await fetch(`${bffUrl}/api/hl7/sweep`, {
       method: "POST",
@@ -1012,24 +1062,78 @@ test("19 HL7 見回りの書き換えの最中に届いた画像は、本物の 
     expect(response.status).toBe(200);
     return await response.json() as { ok: boolean; count: number; skipped: number; blocked?: string };
   };
-  // 届き終える（StableAge は 2 秒）までは書き換えない。書き換えれば、最中に届いた画像のために部分反映で止まる
+  // 届き終える（StableAge は 2 秒）までは書き換えない。書き換えれば、REST で最中に届いた画像のために部分反映で止まる
   const result = await waitFor("見回りが書き換えを試す", sweep, r => r.count > 0 || r.blocked !== undefined, 60_000);
   expect(result).toMatchObject({ ok: true, count: 0, blocked: "画像の一部だけが書き換わった" });
+  // 最中の C-STORE は、付け替えの印で断られた（送り手には失敗が返り、Orthanc には入っていない）
+  expect(cstore).toBe("failed");
+  expect(await lockRefusals()).toBeGreaterThan(refusedBefore);
 
-  // 最中に届いた画像は、仮の患者 ID のまま Orthanc に残っている（Orthanc に元を消させないため）
   const sops = async () => {
     const tags = (await Promise.all((await lookupStudy(first.studyInstanceUid)).map(id =>
       orthancJson<Record<string, Record<string, string>>>(`studies/${id}/instances-tags?simplify`)))).flatMap(t => Object.values(t));
     return tags.map(t => ({ sop: t.SOPInstanceUID, patientId: t.PatientID }));
   };
   const now = await sops();
-  expect(now.filter(i => i.sop === during.sopInstanceUids[0])).toEqual([{ sop: during.sopInstanceUids[0], patientId: first.patientId }]);
+  expect(now.some(i => i.sop === during.sopInstanceUids[0])).toBe(false);
+  // REST で最中に届いた画像は、仮の患者 ID のまま Orthanc に残っている（Orthanc に元を消させないため）
+  expect(now.filter(i => i.sop === restSop)).toEqual([{ sop: restSop, patientId: first.patientId }]);
   // どの画像も失っていない（書き換えた画像は統合した先にあり、元の画像は名指しで消したか、そのまま残っている）
-  for (const sop of [...first.sopInstanceUids, ...late.sopInstanceUids, ...during.sopInstanceUids])
+  for (const sop of [...first.sopInstanceUids, ...late.sopInstanceUids])
     expect(now.some(i => i.sop === sop)).toBe(true);
   const results = readAudit().filter(r => r.action === "hl7" && r.detail.type === "sweep" && r.detail.event === "result"
     && r.studyInstanceUid === first.studyInstanceUid);
   expect(results.at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, state: "Success" } });
+  expect(results.at(-1)!.detail.foreignCopies).toBeUndefined();
+
+  // 書き換えが終われば印は外れ、断られた C-STORE の送り直しは保存される（仮の患者 ID のまま、後から届いた画像として残る）
+  await storescuToOrthanc(during.batch);
+  expect((await sops()).filter(i => i.sop === during.sopInstanceUids[0])).toEqual([{ sop: during.sopInstanceUids[0], patientId: first.patientId }]);
   // 次の見回りも、人が解くまで書き換えない
   expect(await sweep()).toMatchObject({ count: 0, blocked: "結果の分からない書き換えがある" });
+});
+
+test("21 HL7 A40：書き換えた画像が元を消す前に REST で同じ UID の別の画像に置き換わると、ModifiedFrom が合わず、元を消さずに部分反映で止まる（2026-10-25）", async ({ browser }) => {
+  test.setTimeout(180_000);
+  // 19 の部分反映を、管理者が /api/hl7/resolve で解く（解くまで HL7 の書き換えは止まったまま）
+  const pending = readAudit().filter(r => r.action === "hl7" && r.detail.event === "result" && r.detail.partial === true).at(-1);
+  expect(pending).toBeTruthy();
+  const fresh = await newContext(browser);
+  try {
+    const user = adminUser();
+    await submitLogin(fresh.page, user.username, user.changed);
+    await expect(fresh.page).toHaveURL(`${bffUrl}/`);
+    const resolved = await fresh.page.request.post("/api/hl7/resolve", {
+      headers: { origin: bffUrl, "x-csrf-token": latestCsrfToken() },
+      data: { writeId: pending!.detail.writeId, note: "結合の試験：19 の部分反映を確かめた" }
+    });
+    expect(resolved.status()).toBe(200);
+  } finally {
+    await fresh.context.close();
+  }
+
+  const study = syntheticStudy("hl7-foreign-copy", 57, 2);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [oldId] = await waitFor("仮の患者の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
+  const finalId = "JP-TEST-HL7-FOREIGN";
+  // 仕事が写し終えた後、BFF が元を消す前に、統合した先の患者 ID・同じ値・同じ UID で、中身の違う画像を REST で入れる
+  // （OverwriteInstances で写しが置き換わり、ModifiedFrom が無くなる）
+  const [sop] = study.sopInstanceUids;
+  gate.onceJobSucceeded(async () => {
+    await restCreate({
+      PatientID: finalId, PatientName: "ITEST^FOREIGN", PatientBirthDate: "19700101", PatientSex: study.patientSex,
+      AccessionNumber: study.accessionNumber, StudyInstanceUID: study.studyInstanceUid, SeriesInstanceUID: study.seriesInstanceUid,
+      SOPInstanceUID: sop!, InstitutionName: "ITEST FOREIGN"
+    });
+  });
+  expect(await sendHl7("A40", finalId, { old: study.patientId, name: "ITEST^FOREIGN", birth: "19700101" })).toContain("MSA|AE|");
+  // 元の検査は消さずに残る（どの画像も失っていない）
+  const source = await orthancJson<Record<string, Record<string, string>>>(`studies/${oldId}/instances-tags?simplify`);
+  expect(Object.values(source).map(t => t.SOPInstanceUID).sort()).toEqual([...study.sopInstanceUids].sort());
+  expect(Object.values(source).every(t => t.PatientID === study.patientId)).toBe(true);
+  const result = readAudit().filter(r => r.action === "hl7" && r.detail.event === "result" && r.studyInstanceUid === study.studyInstanceUid).at(-1);
+  expect(result).toMatchObject({ outcome: "failed", detail: { partial: true, foreignCopies: true, state: "Success" } });
+  // 付け替えの印は外れている
+  expect((await orthanc(`studies/${oldId}/metadata/TsunagiLock`)).status).toBe(404);
 });

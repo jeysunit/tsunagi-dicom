@@ -157,7 +157,7 @@ export async function sweepArrivals(
     // 鍵つきの値・つなぎの合わない行（HistoryTampered）を含め、経過を確かめて読めなければ何も書き換えない
     return { count: 0, skipped: 0, blocked: e instanceof Error ? e.message : "監査の記録を読めない" };
   }
-  if (!await reconcile(backend, rows, audit)) {
+  if (!await reconcile(backend, rows, audit, options)) {
     return { count: 0, skipped: 0, blocked: "結果の分からない書き換えがある" };
   }
   const now = (options.now ?? Date.now)();

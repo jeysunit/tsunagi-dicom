@@ -24,6 +24,19 @@ export interface FakeOrthanc {
     beforeDelete?: () => void; duringDelete?: () => void; changesFail?: boolean; deleteFailAfter?: number;
   };
   add(instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance;
+  /**
+   * C-STORE で画像を受ける（deploy/orthanc/tsunagi-lock.lua と同じく、同じ StudyInstanceUID の検査のどれかに期限の
+   * 切れていない付け替えの印があれば断る）。受ければ、同じ検査の同じ SOP の画像を上書きする（OverwriteInstances）
+   */
+  cstore(instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): "stored" | "refused";
+  /** REST・STOW-RS で画像を受ける（印に関わらず受け、同じ検査の同じ SOP の画像を上書きする。上書きした画像に ModifiedFrom は無い） */
+  restStore(instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance;
+  /** 付け替えの印（検査の ID → 期限の UNIX 秒）。画像が 1 枚も無くなった検査の印は、Orthanc と同じく無いものとする */
+  locks: Map<string, number>;
+  /** 印を付けない（Orthanc に UserMetadata が無いときの形） */
+  lockRefused: boolean;
+  /** 印・書き換え・削除の順（"lock:<検査の ID>"・"unlock:…"・"modify:…"・"delete:…"） */
+  events: string[];
   studyId(patientId: string, uid: string): string;
   modifyCalls: { id: string; replace: Record<string, string> }[];
   deleteCalls: { id: string; sops: string[] }[];
@@ -46,6 +59,25 @@ export function createFakeOrthanc(): FakeOrthanc {
   // Orthanc の画像の ID（検査と UID の組で決まる）と、変更の記録（届いた画像の ID の並び。位置は並びの長さ）
   const instanceIdOf = (i: PatientInstance) => `${idOf(i)}|${triple(i)}`;
   const arrivals: string[] = [];
+  // 書き換えの写しの ModifiedFrom（元の画像の ID）。画像の物ごとに持つので、上書きされた画像には無い
+  const modifiedFrom = new WeakMap<PatientInstance, string>();
+  const complete = (instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance => ({
+    PatientName: "",
+    PatientBirthDate: "",
+    PatientSex: "",
+    AccessionNumber: "",
+    SeriesInstanceUID: `${instance.StudyInstanceUID}.1`,
+    SOPInstanceUID: `${instance.StudyInstanceUID}.1.${fake.instances.length + 1}`,
+    SpecificCharacterSet: "ISO_IR 192",
+    ...instance
+  });
+  const store = (full: PatientInstance) => {
+    fake.instances = fake.instances.filter(i => !(triple(i) === triple(full) && idOf(i) === idOf(full)));
+    fake.instances.push(full);
+    arrivals.push(instanceIdOf(full));
+    return full;
+  };
+  const hasStudy = (id: string) => fake.instances.some(i => idOf(i) === id);
   const fake: FakeOrthanc = {
     instances: [],
     unstable: new Set(),
@@ -53,21 +85,28 @@ export function createFakeOrthanc(): FakeOrthanc {
     modifyCalls: [],
     jobs,
     deleteCalls: [],
+    locks: new Map(),
+    lockRefused: false,
+    events: [],
     studyId,
     add(instance) {
-      const full: PatientInstance = {
-        PatientName: "",
-        PatientBirthDate: "",
-        PatientSex: "",
-        AccessionNumber: "",
-        SeriesInstanceUID: `${instance.StudyInstanceUID}.1`,
-        SOPInstanceUID: `${instance.StudyInstanceUID}.1.${fake.instances.length + 1}`,
-        SpecificCharacterSet: "ISO_IR 192",
-        ...instance
-      };
+      const full = complete(instance);
       fake.instances.push(full);
       arrivals.push(instanceIdOf(full));
       return full;
+    },
+    cstore(instance) {
+      const now = Date.now() / 1000;
+      const locked = [...fake.locks].some(([id, until]) => until > now && hasStudy(id)
+        && fake.instances.some(i => idOf(i) === id && i.StudyInstanceUID === instance.StudyInstanceUID));
+      if (locked) {
+        return "refused";
+      }
+      store(complete(instance));
+      return "stored";
+    },
+    restStore(instance) {
+      return store(complete(instance));
     },
     backend: undefined as unknown as Backend
   };
@@ -93,6 +132,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     },
     async modifyStudyKeepingUids(id: string, replace: Record<string, string>) {
       fake.modifyCalls.push({ id, replace: { ...replace } });
+      fake.events.push(`modify:${id}`);
       // 仕事が書き換えるのは、仕事を作った時点の画像だけ（その後に届いた画像は残る）
       const source = fake.instances.filter(i => idOf(i) === id);
       fake.next.beforeModify?.();
@@ -104,6 +144,7 @@ export function createFakeOrthanc(): FakeOrthanc {
         fake.instances = fake.instances.filter(i => !(triple(i) === triple(updated) && idOf(i) === idOf(updated)));
         fake.instances.push(updated);
         arrivals.push(instanceIdOf(updated));
+        modifiedFrom.set(updated, instanceIdOf(instance));
       }
       const { wholeStudyDelete, beforeDelete, duringDelete, changesFail, deleteFailAfter } = fake.next;
       fake.next = { wholeStudyDelete, beforeDelete, duringDelete, changesFail, deleteFailAfter };
@@ -112,7 +153,26 @@ export function createFakeOrthanc(): FakeOrthanc {
       return { jobId };
     },
     async studyInstanceFiles(id: string) {
-      return { since: arrivals.length, files: Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), fileOf(i)])) };
+      const list = fake.instances.filter(i => idOf(i) === id);
+      return {
+        since: arrivals.length,
+        files: Object.fromEntries(list.map(i => [triple(i), fileOf(i)])),
+        ids: Object.fromEntries(list.map(i => [triple(i), instanceIdOf(i)]))
+      };
+    },
+    async lockStudy(id: string, until: number) {
+      if (fake.lockRefused || !hasStudy(id)) {
+        throw new BackendError("画像サーバーが付け替えの印を断りました（404）");
+      }
+      fake.locks.set(id, until);
+      fake.events.push(`lock:${id}`);
+    },
+    async unlockStudy(id: string) {
+      fake.locks.delete(id);
+      fake.events.push(`unlock:${id}`);
+    },
+    async studyInstanceOrigins(id: string) {
+      return Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), modifiedFrom.get(i) ?? null]));
     },
     // http.ts と同じく、印を見て消す画像の ID を決め、1 枚ずつ、消す直前に変更の記録で届き直しを確かめてから ID で消す。
     // Orthanc と同じく、消した画像の変更の記録も消える
@@ -121,6 +181,7 @@ export function createFakeOrthanc(): FakeOrthanc {
       fake.next = {};
       beforeDelete?.();
       fake.deleteCalls.push({ id, sops: named.map(i => i.SOPInstanceUID) });
+      fake.events.push(`delete:${id}`);
       const names = new Set(named.map(triple));
       const candidates = fake.instances
         .filter(i => idOf(i) === id && names.has(triple(i)) && source.files[triple(i)] === fileOf(i))

@@ -1,5 +1,7 @@
-# 開発の一式だけの、tsunagi-dicom への足し分（docker/dev/compose.yaml の include で、配る compose に重ねる）。
+# 開発の一式だけの、tsunagi-dicom と Orthanc への足し分（docker/dev/compose.yaml の include で、配る compose に重ねる）。
 # HL7 の受け口（hl7-receiver）と BFF の間の token と、受ける患者 ID の発番元（ris-emulator の issuer_namespace）を渡す。
+# Orthanc には、HL7 の付け替えの最中の検査への C-STORE を断る Lua と、その印の名前（UserMetadata）を足す
+# （openspec/changes/add-pir-case6-procedure-update/design.md §15.4）。BFF は印を付けられなければ患者 ID を付け替えない。
 # 配る compose（deploy/compose.yaml）には受け口を入れないので、ここにだけ書く。
 services:
   tsunagi:
@@ -8,6 +10,11 @@ services:
       HL7_PATIENT_ID_ISSUER: RIS_EMU
     secrets:
       - hl7_receiver_token
+  orthanc:
+    volumes:
+      # 相対のパスは deploy/ から数える
+      - ../docker/dev/orthanc/lock.json:/etc/orthanc/lock.json:ro
+      - ./orthanc/tsunagi-lock.lua:/lua/tsunagi-lock.lua:ro
 
 secrets:
   hl7_receiver_token:

@@ -63,6 +63,8 @@ const EXPORT_TIMEOUT_MS = 10 * 60_000;
 /** 書き出しの本文を流す間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
 const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
+/** 付け替えの印の、Orthanc の利用者のメタデータの名前（deploy/orthanc/tsunagi-lock.lua と同じ。design.md §15.4） */
+const LOCK_METADATA = "TsunagiLock";
 /** 画像の UID の組（studyInstanceFiles の鍵） */
 const instanceKey = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
 /**
@@ -104,13 +106,13 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     base: string,
     path: string,
     init: {
-      method?: "GET" | "HEAD" | "POST" | "DELETE";
+      method?: "GET" | "HEAD" | "POST" | "PUT" | "DELETE";
       headers?: Record<string, string>;
       body?: string;
       timeoutMs?: number;
       /** 書き込みの操作：送った後に答えが来なければ、届いたかが分からない（結果不明） */
       write?: boolean;
-      /** どの資格情報で求めるか。既定は GET・HEAD が読む資格情報、POST が書く資格情報 */
+      /** どの資格情報で求めるか。既定は GET・HEAD が読む資格情報、POST・PUT・DELETE が書く資格情報 */
       credential?: "read" | "write";
       /** 時間切れを呼ぶ側で決める（本文を流す間は別の時間切れにする書き出しなど）。あれば timeoutMs は使わない */
       signal?: AbortSignal;
@@ -119,7 +121,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     const method = init.method ?? "GET";
     const headers: Record<string, string> = { ...init.headers };
     const auth =
-      (init.credential ?? (method === "POST" || method === "DELETE" ? "write" : "read")) === "write" ? writeAuthorization : authorization;
+      (init.credential ?? (method === "GET" || method === "HEAD" ? "read" : "write")) === "write" ? writeAuthorization : authorization;
     if (auth) headers.authorization = auth;
     try {
       return await fetch(`${base.replace(/\/+$/, "")}/${path}`, {
@@ -516,13 +518,74 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     // 変更の記録の位置を先に読む（印を読んだ後に届いた画像は、位置より後の記録に必ず残る）
     async studyInstanceFiles(id: string) {
       const since = await lastChange();
-      return { since, files: Object.fromEntries((await instanceFiles(id)).map(f => [f.key, f.file])) };
+      const files = await instanceFiles(id);
+      return {
+        since,
+        files: Object.fromEntries(files.map(f => [f.key, f.file])),
+        ids: Object.fromEntries(files.map(f => [f.key, f.instanceId]))
+      };
+    },
+
+    // 印の値は期限の UNIX 秒（Orthanc の Lua が os.time() と比べる）。印の名前は Orthanc の UserMetadata に要る
+    // （無ければ 404。検査が無いときも 404）
+    async lockStudy(id: string, untilEpochSeconds: number) {
+      if (!isOrthancId(id)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      if (!Number.isSafeInteger(untilEpochSeconds) || untilEpochSeconds <= 0) {
+        throw new BackendError("付け替えの印の期限が正しくありません", 400);
+      }
+      const res = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, {
+        method: "PUT",
+        headers: { "content-type": "text/plain" },
+        body: String(untilEpochSeconds),
+        timeoutMs: POST_TIMEOUT_MS
+      });
+      await res.body?.cancel();
+      if (!res.ok) {
+        const hint = res.status === 404 ? `。Orthanc の UserMetadata に ${LOCK_METADATA} が要る` : "";
+        throw new BackendError(`画像サーバーが付け替えの印を断りました（${res.status}）${hint}`);
+      }
+    },
+
+    async unlockStudy(id: string) {
+      if (!isOrthancId(id)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      const res = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, { method: "DELETE", timeoutMs: POST_TIMEOUT_MS });
+      await res.body?.cancel();
+      if (!res.ok && res.status !== 404) {
+        throw new BackendError(`画像サーバーが付け替えの印を外せませんでした（${res.status}）`);
+      }
+    },
+
+    async studyInstanceOrigins(id: string) {
+      const origins: Record<string, string | null> = {};
+      for (const [instanceId, instance] of await instanceTags(id)) {
+        if (!isOrthancId(instanceId)) {
+          throw new BackendError("画像の ID が正しくありません");
+        }
+        const res = await call(orthancUrl, `instances/${instanceId}/metadata/ModifiedFrom`);
+        if (res.status === 404) {
+          await res.body?.cancel();
+          origins[instanceKey(instance)] = null;
+          continue;
+        }
+        if (!res.ok) {
+          await res.body?.cancel();
+          throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+        }
+        const value = (await res.text()).trim();
+        origins[instanceKey(instance)] = isOrthancId(value) ? value : null;
+      }
+      return origins;
     },
 
     // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
     // 書き換えの前とファイルの印が違う画像と、消す直前に変更の記録で届き直しの見える画像（同じ UID で届き直して
     // 置き換わった画像）も消さない。Orthanc は画像を消すとその変更の記録も消すので、届き直しは消す前に確かめる。
-    // 記録を読んでから消すまでの間に届き直した画像は消えうる（Orthanc の削除に条件を付けられない。design.md §15.4）
+    // 記録を読んでから消すまでの間に届き直した画像は消えうる（Orthanc の削除に条件を付けられない）。C-STORE はこの間、
+    // 付け替えの印で Orthanc の Lua が断るので、残るのは REST・STOW-RS で届き直した画像だけ（design.md §15.4）
     async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles) {
       const named = new Set(instances.map(instanceKey));
       for (const { instanceId, key, file } of await instanceFiles(id)) {
