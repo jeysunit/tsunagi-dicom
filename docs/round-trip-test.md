@@ -4,7 +4,7 @@
 クラウドの開発環境はモックだけで試す（`tests/unit/pacs-routes.test.ts`・`tests/e2e/pacs.spec.ts`・`tests/e2e/local-auth.spec.ts`）。CI では、モックの試験に加えて次の2つを流す（`.github/workflows/integration.yml`）。
 
 - **結合の試験**（[`integration-test.md`](integration-test.md)）：この手順の 1〜7・9 を、dicom-test-generator の代わりに DCMTK の storescu で、試験の中で立てた Orthanc のコンテナに対して流す。
-- **開発用の compose の流れ**（`tests/flow`）：この手順の 1・2・4・5 を、開発用の compose をそのまま立てて流す。dicom-test-generator の CLI で架空の患者を Orthanc へ送り、tsunagi-dicom の受信一覧に出ること、tsunagi-dicom から storescp へ送信し、同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届くことを確かめる。予約からの流れ（ris-emulator の CLI で予約を作り、DTG がワークリストを取得してその予約で撮り、Orthanc へ送ると、tsunagi-dicom の検査の一覧に予約の StudyInstanceUID・受付番号・患者 ID で出ること）も確かめる。あわせて、Orthanc の REST（8042）がホストに公開されていないことと、内部ネットワーク（`internal: true`）に tsunagi-dicom と Orthanc だけが入っていることを確かめる。
+- **開発用の compose の流れ**（`tests/flow`）：この手順の 1・2・4・5 を、開発用の compose をそのまま立てて流す。dicom-test-generator の CLI で架空の患者を Orthanc へ送り、tsunagi-dicom の受信一覧に出ること、tsunagi-dicom から storescp へ送信し、同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届くことを確かめる。予約からの流れ（ris-emulator の CLI で予約を作り、DTG がワークリストを取得してその予約で撮り、Orthanc へ送ると、tsunagi-dicom の検査の一覧に予約の StudyInstanceUID・受付番号・患者 ID で出ること）も確かめる。あわせて、Orthanc の REST（8042）がホストに公開されていないことと、内部ネットワーク（`internal: true`）に tsunagi-dicom と Orthanc だけが入っていることを確かめる。HL7 の流れ（A40、照合、照合の後の追加撮影、取消の ORM）は、下の「HL7 による患者情報の更新（PIR）」の H2・H6〜H8 に当たる。
 
 この手順は、人が画面で確かめるときに使い、結果を PR に書く（3・6 は CI でも流すが、8 は CI では流さない）。
 
@@ -85,8 +85,10 @@ ris-emulator が HL7 v2.3.1 で送る患者の統合（A40）・属性の更新�
 | H4 | 予約（ORM の NW）を送る。ZDS に H1 の StudyInstanceUID を入れた ORM を送る（ris-emulator の照合を使わずに、ris-emulator のコンテナの中から手で組んだメッセージを送る。照合を通すときは H6） | AA。全部の画像に受付番号が入る。患者 ID の違う ORM、別の受付番号の ORM は AE で、検査は変わらない |
 | H5 | tsunagi-dicom のコンテナ（`backend` のネットワーク）から受け口の 2575 につなぐ | 何も返さずに閉じる。受け口のログに `refused` が出る |
 | H6 | **照合**（H1 の直後に、H2〜H4 の代わりに流す。H2〜H4 を流した検査には流さない。受付番号が重なり、患者の統合も済んでいるため）。H1 の緊急の患者の MPPS は、DTG が ris-emulator に送っている（`docker/dev/dtg/app_config.yaml` の `use_mpps`）。`dc exec ris python -m app.cli reconcile list` で撮影の SOP Instance UID を見て、`dc exec ris python -m app.cli reconcile run <SOP Instance UID> --patient-id P000001 --name "TANAKA^HIROSHI=田中^博=タナカ^ヒロシ" --birth-date 19980312 --sex M`（ris-emulator の画面の「未照合」からでもよい） | ADT^A40 と ORM^O01 が「送信完了」で、終了コードは 0。検査は H2・H4 の結果と同じになる（正式な患者 ID・氏名・生年月日・性別と、ris-emulator が付けた受付番号。UID は H1 のまま）。ris-emulator に、H1 の StudyInstanceUID の予約が完了で作られ、`reconcile list` から消える |
+| H7 | **照合の後の追加撮影**（H6 の直後。IHE PIR の Case 6）。H1 と同じ仮の患者情報で、同じ検査に追加で撮って送る：`dc exec dtg python -m app.cli exam --emergency --append --study-uid <H1 の StudyInstanceUID> --patient-id DEV0001 --patient-name "DEV^TARO" -s 1 -i 2 --send` | 追加の画像は、いったん仮の患者 ID の検査として Orthanc に入る。受け口の見回し（60 秒ごと）が、届き終えた（Orthanc の `IsStable`）後に、正式な患者 ID・氏名・受付番号の検査にまとめる。一覧には同じ StudyInstanceUID の検査が 1 件だけ出て、画像の数は H1 と追加の合計。仮の患者 ID の検査は残らない |
+| H8 | **取消**（H6 の直後）。照合で作った予約を取り消す：`dc exec ris python -m app.cli pir send --host hl7-receiver --kind orm --accession <H6 の受付番号> --order-control CA` | AA。検査と画像は消えず、受付番号だけが外れる（患者 ID・氏名・画像の数は変わらない）。同じ取消をもう一度送っても AA で、検査は変わらない |
 
-H6 は `tests/flow/flow.spec.ts` の 5 が自動で流す。受け口が拒否したとき（AE・AR）や受け口が止まっているときは、ris-emulator の予約の詳細の「HL7 送信」に「拒否」「送信失敗」と出て、「再送信」で同じ本文を送り直せる。
+H6 は `tests/flow/flow.spec.ts` の 5、H7 は 6、H8 は 7 が自動で流す。受け口が拒否したとき（AE・AR）や受け口が止まっているときは、ris-emulator の予約の詳細の「HL7 送信」に「拒否」「送信失敗」と出て、「再送信」で同じ本文を送り直せる。
 
 ### 開発の一式で測った結果（2026-10-24）
 
@@ -99,6 +101,13 @@ H1〜H5 を、ris-emulator の 3573572、Orthanc 1.13.0（`OverwriteInstances: t
 ### 照合（H6）を開発の一式で測った結果（2026-10-25）
 
 ris-emulator の ae71765（照合のある版。#24 のマージ。測ったのは同じ内容の 5fe0be9）、DTG の 52380eb（`use_mpps: true`）で、`tests/flow/flow.spec.ts` の 5 を流した（compose のプロジェクトは `tsunagi-flow`）。期待どおりだった。緊急の患者（画像 2 枚）の MPPS が `reconcile list` に出て（状態は `COMPLETED`、撮影の StudyInstanceUID）、`reconcile run` の ADT^A40・ORM^O01 がどちらも AA。一覧には同じ StudyInstanceUID の検査が 1 件だけ、正式な患者 ID・生年月日・性別・受付番号・氏名（漢字）で出て、画像の数は同じ、元の患者 ID の検査は残らなかった。ris-emulator の予約は撮影の StudyInstanceUID の完了になり、`reconcile list` から消えた。
+
+### 照合の後の追加撮影（H7）と取消（H8）を開発の一式で測った結果（2026-10-25）
+
+ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DTG の 99eff67（`--emergency --append --study-uid` のある版。#78 のマージ）で、`tests/flow/flow.spec.ts` の 6・7 を流した（compose のプロジェクトは `tsunagi-flow`）。1〜7 の全部が通った。
+
+- H7：照合の後に、同じ StudyInstanceUID へ仮の患者 ID・氏名のまま 2 枚（新しいシリーズ）を追加で送った。受け口の見回し（60 秒ごと）の後、一覧には同じ StudyInstanceUID の検査が 1 件だけ、正式な患者 ID・受付番号で、画像は 4 枚（照合した 2 枚と追加の 2 枚）で出て、仮の患者 ID の検査は残らなかった。追加を送ってから一覧にまとまるまで、試験の 6 全体で 1.6 分かかった（見回しの間隔と、Orthanc が画像を安定と見るまでの時間）。
+- H8：照合で作った予約に CA を送ると AA。検査も画像も（2 枚）残り、受付番号だけが外れた。同じ取消をもう一度送っても AA で、検査は変わらなかった。
 
 ## 実測で決めること（段 4 の残り）
 
