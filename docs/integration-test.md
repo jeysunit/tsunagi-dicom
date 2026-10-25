@@ -54,7 +54,7 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 
 | # | 試験 | 確かめること |
 |---|---|---|
-| 1 | 受信一覧 | storescu（`ITEST_SCU`）から送った検査が、受け取りの記録（`/api/receive-log`）に新しい順に出る。送り元の AE タイトル・`Origin`（`DicomProtocol`）・画像の数が合う。時刻が Orthanc の時計のとおりに出る |
+| 1 | 受信一覧 | storescu（`ITEST_SCU`）から送った検査が、受け取りの記録（`/api/receive-log`）に新しい順に出る。送り元の AE タイトル・`Origin`（`DicomProtocol`）・画像の数が合う。落ち着いた検査の状態は受信完了。時刻が Orthanc の時計のとおりに出る。期間は初期設定の今日で読み、昨日の期間には出ない（変更の記録を新しい側から遡り、期間の始まりで止まる） |
 | 2 | 接続先の一覧と接続確認 | 設定のファイルで登録した `itest-scp` が、名称・AEタイトル・ホスト名・ポート番号とともに出る。C-ECHO で「成功」（時刻つき） |
 | 3 | 検査の一覧・詳細 | QIDO-RS と REST の本物の答えで一覧と詳細が開く。氏名（`ISO_IR 192`。ローマ字・漢字・かな）が崩れない。中継は WADO-RS の metadata を通し、検索は通さない。Orthanc のパスワードが頁と API の答えに出ない |
 | 4 | 送信 | 画面から `itest-scp` へ送ると「送信完了」（送信先・画像の数・時刻つき）になり、storescp に同じ SOPInstanceUID の画像が同じ数だけ届く |

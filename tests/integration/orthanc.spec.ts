@@ -138,21 +138,35 @@ test.afterAll(async () => {
 
 test("1 受信一覧：storescu から Orthanc へ送った検査が、時刻・送り元の AE タイトル・画像の数とともに新しい順に出る", async () => {
   const { page } = admin;
+  // 期間の初期設定は今日（BFF の TZ の日付）。BFF は Orthanc の変更の記録を新しい側から遡って、今日の受信を集める
   const res = await page.request.get("/api/receive-log");
   expect(res.status()).toBe(200);
   const body = (await res.json()) as {
     complete: boolean;
-    items: { receivedAt: string; remoteAet: string | null; origin: string | null; receivedInstances: number; study: { studyInstanceUid: string; patientId: string } }[];
+    overLimit: boolean;
+    period: { kind: string };
+    items: {
+      receivedAt: string;
+      remoteAet: string | null;
+      origin: string | null;
+      receivedInstances: number;
+      receiveState: string | null;
+      study: { studyInstanceUid: string; patientId: string };
+    }[];
   };
-  expect(body.complete).toBe(true);
+  expect({ complete: body.complete, overLimit: body.overLimit, kind: body.period.kind }).toEqual({ complete: true, overLimit: false, kind: "today" });
   const order = body.items.map((i) => i.study.studyInstanceUid).filter((uid) => ALL.some((s) => s.studyInstanceUid === uid));
   // 送った順の逆（新しい順）
   expect(order).toEqual([...ALL].reverse().map((s) => s.studyInstanceUid));
   for (const study of ALL) {
     const item = body.items.find((i) => i.study.studyInstanceUid === study.studyInstanceUid)!;
-    expect(item).toMatchObject({ remoteAet: ITEST.scuAet, origin: "DicomProtocol", receivedInstances: study.sopInstanceUids.length });
+    // 落ち着くまで待った（上の IsStable）ので、状態は受信完了
+    expect(item).toMatchObject({ remoteAet: ITEST.scuAet, origin: "DicomProtocol", receivedInstances: study.sopInstanceUids.length, receiveState: "received" });
     expect(item.study.patientId).toBe(study.patientId);
   }
+  // 昨日の期間には、今日送った検査は入らない（期間の始まりより古い出来事に当たって止まる）
+  const yesterday = (await (await page.request.get("/api/receive-log?period=yesterday")).json()) as typeof body;
+  expect(yesterday.items.filter((i) => ALL.some((s) => s.studyInstanceUid === i.study.studyInstanceUid))).toEqual([]);
 
   // 時刻：Orthanc の変更の記録の Date（時間帯の印なし）は UTC（docs/spec.md の 3.3）。コンテナの時間帯（TZ=Asia/Tokyo）に依らないことを測る。
   // BFF の receivedAt は UTC の時刻（印なしか Z つき）で、いまの時刻から 10 分の内

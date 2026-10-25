@@ -22,6 +22,8 @@ const withNoise = (noise: number) => [
   ...Array.from({ length: noise }, (_, i) => ({ ChangeType: "NewInstance", Date: "20261018T000000", ID: NOISE_ID, Path: `/instances/${NOISE_ID}`, ResourceType: "Instance", Seq: 18 + i })),
 ];
 let allChanges = withNoise(250);
+/** 見本の受信の日（2026-10-17。Asia/Tokyo の 0 時から翌日の 0 時まで） */
+const DAY_1017_JST = { fromMs: Date.parse("2026-10-16T15:00:00Z"), toMs: Date.parse("2026-10-17T15:00:00Z") };
 const lastSeq = () => allChanges.at(-1)!.Seq as number;
 /** Orthanc が 1 回に返す数を切り詰める形（見本のサーバーの上限。BFF が求める 100 より小さい） */
 const SERVER_MAX = 50;
@@ -144,29 +146,40 @@ function backend(write = true) {
 }
 
 describe("実の Orthanc の REST（段 4）", () => {
-  it("受け取りの記録：変更の記録を since・Last・Done で読み切り（上限 50 件で切り詰めるサーバーでも抜けない）、新しい順に組み立てる", async () => {
+  it("受け取りの記録：期間の分を変更の記録の新しい側から遡り（上限 50 件で切り詰めるサーバーでも抜けない）、新しい順に組み立てる", async () => {
     allChanges = withNoise(250);
     seen.length = 0;
-    const { studies: received, complete } = await backend().receivedStudies(3);
-    expect(complete).toBe(true);
+    const { studies: received, overLimit, complete } = await backend().receivedStudies({ ...DAY_1017_JST, limit: 3 });
+    // 期間の中の 8 件が上限の 3 件を超えた：新しい 3 件だけ
+    expect({ overLimit, complete }).toEqual({ overLimit: true, complete: true });
     expect(received.map((r) => r.summary.patientId)).toEqual(["JP-TEST-0004", "JP-TEST-0003", "JP-TEST-0002"]);
     // Orthanc の変更の記録の Date は時間帯の印なしの UTC。BFF は UTC と分かる形（Z つき）で返す（docs/spec.md の 3.3）
     expect(received[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00Z", remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6 });
     expect(received[0]!.summary).toMatchObject({ modalities: ["MR"], seriesCount: 2 });
     expect(seen[0]!.url).toBe("/changes?last");
-    // 答えの Last を次の since にする（50 件ずつ返るので、267 件を 6 回で読み切る）
+    // 区間 (0, 267] を since=0 から読み、答えの Last を次の since にする（50 件ずつ返るので 6 回。求める数は区間の残り）
     expect(seen.filter((s) => s.url.startsWith("/changes?since")).map((s) => s.url)).toEqual(
-      [0, 50, 100, 150, 200, 250].map((since) => `/changes?since=${since}&limit=100`),
+      [0, 50, 100, 150, 200, 250].map((since) => `/changes?since=${since}&limit=${267 - since}`),
     );
     expect(seen.every((s) => s.method === "GET" && s.authorization === basic("reader", "read-secret"))).toBe(true);
-    expect((await backend().receivedStudies(100)).studies).toHaveLength(8);
+    const all = await backend().receivedStudies({ ...DAY_1017_JST, limit: 1000 });
+    expect(all.studies).toHaveLength(8);
+    expect({ overLimit: all.overLimit, complete: all.complete }).toEqual({ overLimit: false, complete: true });
+    // 状態：Orthanc の IsStable（見本の 1 件は、落ち着く前の形）
+    expect(all.studies.filter((r) => r.stable === false)).toHaveLength(1);
+    // 期間の外（翌日）には無い
+    expect((await backend().receivedStudies({ fromMs: DAY_1017_JST.toMs, toMs: DAY_1017_JST.toMs + 86_400_000, limit: 1000 })).studies).toEqual([]);
   });
 
-  it("受け取りの記録：直近の変更の記録の読む範囲（5000 件）が受け取りの検査で埋まらなければ「ここまでしか読めていない」", async () => {
-    // 検査の出来事の後に、ほかの出来事が 6000 件ある：読む範囲（直近 5000 件）に検査が無い
+  it("受け取りの記録：期間の後の出来事が多くても、区切りごとに遡って期間の検査を見つける。読む回数の上限に届いたら「一部を読み込めない」", async () => {
+    // 検査の出来事の後に、ほかの出来事が 6000 件ある：1000 件ずつ 7 つの区切りを遡る（1 区切りは 50 件ずつ 20 回）
     allChanges = withNoise(6000);
-    const r = await backend().receivedStudies(100);
-    expect(r).toEqual({ studies: [], complete: false });
+    const r = await backend().receivedStudies({ ...DAY_1017_JST, limit: 1000 });
+    expect(r.studies).toHaveLength(8);
+    expect(r.complete).toBe(true);
+    // 12000 件：読む回数の上限（200 回）に届き、期間の検査まで遡れない
+    allChanges = withNoise(12000);
+    expect(await backend().receivedStudies({ ...DAY_1017_JST, limit: 1000 })).toEqual({ studies: [], overLimit: false, complete: false });
     allChanges = withNoise(250);
   });
 
@@ -174,7 +187,7 @@ describe("実の Orthanc の REST（段 4）", () => {
     for (const mode of ["empty", "stuck"] as const) {
       changesMode = mode;
       seen.length = 0;
-      const r = await backend().receivedStudies(100);
+      const r = await backend().receivedStudies({ ...DAY_1017_JST, limit: 1000 });
       expect(r.complete, mode).toBe(false);
       // 同じ since を読み続けない（1 頁目と、止まった 2 頁目の 2 回だけ）
       expect(seen.filter((s) => s.url.startsWith("/changes?since")), mode).toHaveLength(2);

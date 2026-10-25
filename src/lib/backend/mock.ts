@@ -10,10 +10,10 @@ import {
   jobFromRest,
   modalitiesFromRest,
   orthancTime,
+  collectReceivedInPeriod,
   parseChanges,
-  readChanges,
-  receivedStudyIds,
   singleStudyId,
+  stableFromRest,
   studyInfoFromRest,
   receptionFromMetadata,
   studyFromRest,
@@ -37,6 +37,7 @@ import {
   type Backend,
   type InstanceSummary,
   type ReceivedStudy,
+  type ReceivedWindow,
   type RelayRequest,
   type SeriesSummary,
   type StudyQuery,
@@ -435,24 +436,26 @@ export function createMockBackend(): Backend {
       return Response.json({ error: "見本に無い" }, { status: 404 });
     },
 
-    async receivedStudies(limit: number) {
-      // 実の Orthanc と同じく、1 回に返す数に上限（MOCK_CHANGES_MAX）のある頁を、since・Last・Done で読み切る
+    async receivedStudies(window: ReceivedWindow) {
+      // 実の Orthanc と同じく、1 回に返す数に上限（MOCK_CHANGES_MAX）のある頁を、since・Last・Done で読む。
+      // 遡り方（区切り・止め方・上限）は実の Orthanc と同じ collectReceivedInPeriod
       const all = parseChanges(await readJson<unknown>("made", "changes.json"));
-      const { changes, complete } = await readChanges(
+      const read = await collectReceivedInPeriod(
         async (since, pageLimit) => {
           const part = all.changes.filter((c) => c.seq > since).slice(0, Math.min(pageLimit, MOCK_CHANGES_MAX));
           const last = part.at(-1)?.seq ?? since;
           return { changes: part, last, done: last >= all.last };
         },
-        0,
-        { limit: 100, maxCalls: 200 },
+        all.last,
+        window,
+        { block: 10, pageLimit: 1000, maxCalls: 200 },
       );
       const [studies, series, metadata] = await Promise.all([
         restStudies<RestStudy & { Series?: string[] }>(),
         readAll<RestSeries>("series"),
         readJson<Record<string, unknown>>("made", "instance-metadata.json"),
       ]);
-      const received = receivedStudyIds(changes, limit).flatMap(({ id, date }): ReceivedStudy[] => {
+      const received = read.ids.flatMap(({ id, date }): ReceivedStudy[] => {
         const study = studies.find((s) => s.ID === id || s.originalId === id);
         if (!study) return [];
         // Orthanc の /studies/{id}/series の形（検査のシリーズの順）
@@ -460,9 +463,9 @@ export function createMockBackend(): Backend {
         const { summary, instanceCount } = studyFromRest(study, rows);
         const first = firstInstanceId(rows);
         const reception = receptionFromMetadata(first ? metadata[first] : undefined);
-        return [{ orthancId: study.ID, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
+        return [{ orthancId: study.ID, receivedAt: orthancTime(date), ...reception, instanceCount, stable: stableFromRest(study), summary }];
       });
-      return { studies: received, complete };
+      return { studies: received, overLimit: read.overLimit, complete: read.complete };
     },
 
     async listModalities() {
