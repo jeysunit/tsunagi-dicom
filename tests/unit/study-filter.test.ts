@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StudyView } from "@/lib/fields";
-import { toggleGroup } from "@/lib/modalities";
+import { DETAIL_GROUPS, LIST_GROUPS, MODALITY_GROUPS, toggleGroup } from "@/lib/modalities";
 import {
   dateQuery,
   filterToSearchParams,
@@ -109,6 +109,20 @@ describe("モダリティ・横断の検索", () => {
     expect(filterToSearchParams(f).get("modality")).toBe("CT,US");
     expect(parseFilter(filterToSearchParams(f))).toEqual(f);
     expect(filterToSearchParams({ date: "all", modalities: [] }).toString()).toBe("");
+  });
+
+  it("一覧の上の見出しは DOC・SR を除いた群。DOC・SR は詳細条件の中。合わせて全部の群", () => {
+    expect(LIST_GROUPS).toEqual(["CT", "MR", "CR/DX", "US", "ES", "MG"]);
+    expect(DETAIL_GROUPS).toEqual(["DOC", "SR"]);
+    expect([...LIST_GROUPS, ...DETAIL_GROUPS]).toEqual([...MODALITY_GROUPS]);
+  });
+
+  it("画像の検査に SR が混ざる検査（線量のレポートなど）は、主のモダリティの見出し（CT）で当たる。SR を足しても当たる", () => {
+    const ctWithSr = row({ modalities: ["CT", "SR"] });
+    expect(matchesFilter(ctWithSr, { date: "all", modalities: ["CT"] })).toBe(true);
+    expect(matchesFilter(ctWithSr, { date: "all", modalities: ["MR"] })).toBe(false);
+    expect(matchesFilter(ctWithSr, { date: "all", modalities: ["MR", "SR"] })).toBe(true);
+    expect(matchesFilter(row({ modalities: ["SR"] }), { date: "all", modalities: ["CT"] })).toBe(false);
   });
 
   it("群の足し引き：押した群を足し、入っていれば外す。見出しの順に並べ、空になれば絞らない", () => {

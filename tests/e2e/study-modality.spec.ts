@@ -69,3 +69,41 @@ test("URL の modality に複数を書いて開ける（コンマ区切り。知
   const us = await headCount(page, "modality-US");
   await expect(page.getByTestId("study-count")).toHaveText(String(mr + us));
 });
+
+test("DOC・SR は一覧の上の見出しに出さず、詳細条件の中で選ぶ。上の見出しと同じ選びに足される", async ({ page }) => {
+  await asGeneral(page);
+  const band = page.getByTestId("study-filters");
+  // 一覧の上：すべて・CT・MR・CR/DX・US・ES・MG
+  for (const id of ["modality-all", "modality-CT", "modality-MR", "modality-CR/DX", "modality-US", "modality-ES", "modality-MG"]) {
+    await expect(band.getByTestId(id)).toBeVisible();
+  }
+  await expect(band.getByTestId("modality-DOC")).toHaveCount(0);
+  await expect(band.getByTestId("modality-SR")).toHaveCount(0);
+
+  // 詳細条件の中：DOC・SR
+  await band.getByTestId("filter-more").click();
+  const panel = page.getByTestId("filter-more-panel");
+  await expect(panel.getByTestId("modality-DOC")).toBeVisible();
+  await expect(panel.getByTestId("modality-SR")).toBeVisible();
+
+  // CT に SR を足すと、CT または SR の検査（上の CT の見出しも押したまま）
+  await page.getByTestId("modality-CT").click();
+  await panel.getByTestId("modality-SR").click();
+  await expect(page.getByTestId("modality-CT")).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByTestId("modality-SR")).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/modality=CT(%2C|,)SR/);
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（1）");
+
+  // 「すべて」で DOC・SR も外れる
+  await page.getByTestId("modality-all").click();
+  await expect(panel.getByTestId("modality-SR")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+});
+
+test("DOC・SR を URL で選んで開くと、詳細条件が開いていて、数に入る", async ({ page }) => {
+  await asGeneral(page);
+  await page.goto("/?modality=SR");
+  await expect(page.getByTestId("filter-more-panel").getByTestId("modality-SR")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("filter-more-count")).toHaveText("（1）");
+  await expect(page.getByTestId("modality-all")).toHaveAttribute("aria-pressed", "false");
+});
