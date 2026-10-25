@@ -431,6 +431,38 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     warn.mockRestore();
   });
 
+  it("部分反映で止まった書き換えの画像を、人が書き戻して解いても、統合し直さない", async () => {
+    const warn = quietly();
+    temp();
+    await send(a40(TEMP, "P000001"));
+    const late = temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    orthanc.next.beforeModify = () => void temp(STUDY, { SOPInstanceUID: `${STUDY}.3.1` });
+    expect(await sweep()).toMatchObject({ blocked: "画像の一部だけが書き換わった" });
+    // 人が、移った 2.1 を仮の患者 ID へ書き戻し、/api/hl7/resolve で解く
+    orthanc.instances = orthanc.instances.map(i => i.SOPInstanceUID === late.SOPInstanceUID
+      ? { ...i, PatientID: TEMP, PatientName: "UNKNOWN^MALE", PatientBirthDate: "", PatientSex: "M" } : i);
+    // /api/hl7/resolve と同じ形の行（before・after を持たない。書き戻した後なので後の値とは合わない）
+    const request = rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "request").at(-1)!;
+    rows.push({ actorId: "admin", actorRole: "admin", authMode: "local", action: "hl7", outcome: "failed",
+      detail: { event: "reconcile", writeId: request.detail?.writeId, manual: true, matchesAfter: false, matchesBefore: false, newOrthancId: null, note: "書き戻した" } });
+    const calls = orthanc.modifyCalls.length;
+    warn.mockClear();
+    expect(await sweep()).toEqual({ count: 0, skipped: 1 });
+    expect(warn.mock.calls.at(-1)?.[0]).toContain("前に統合した画像が仮の患者 ID に戻っている");
+    expect(orthanc.modifyCalls).toHaveLength(calls);
+    warn.mockRestore();
+  });
+
+  it("何も変わらずに失敗した書き換えは、次の見回りでもう一度書き換える", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    orthanc.next.state = "Failure";
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "書き換わらなかった" });
+    expect(await sweep()).toMatchObject({ count: 1 });
+    expect(patientsOf(STUDY)).toEqual(["P000001"]);
+  });
+
   it("ORM の検査として見回りが移した画像を、人が書き戻しても、統合し直さない", async () => {
     const warn = quietly();
     expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");

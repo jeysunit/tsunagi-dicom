@@ -183,12 +183,16 @@ export async function sweepArrivals(
     result.skipped++;
     console.warn(`HL7 の照合の後の画像を書き換えなかった：${visible(reason)}（${visible(patientId)}・${visible(uid)}）`);
   };
-  // 前に患者 ID を書き換えて移した画像（A40・見回りの成功した書き換え）の、元の患者 ID ごとの UID の組。
-  // 移した画像が元の患者 ID に戻っていれば、人が誤った統合を書き戻したものでありうるので、統合し直さない
+  // 前に患者 ID を書き換えようとした画像（A40・見回りの書き換えの request）の、元の患者 ID ごとの UID の組。
+  // 移した（かもしれない）画像が元の患者 ID に戻っていれば、人が誤った統合を書き戻したものでありうるので、統合し直さない。
+  // 成功だけでなく、結果不明・部分反映・人が解いた書き換えも含める。何も変わらなかった（失敗で、部分反映でない）
+  // 書き換えだけは除く（画像は元のままなので、次の見回りでもう一度書き換えてよい）
+  const unchanged = new Set(rows.filter(r => r.detail?.event === "result" && r.outcome === "failed" && r.detail?.partial === false
+    && !rows.some(o => o.detail?.writeId === r.detail?.writeId && o.detail?.event === "reconcile"))
+    .map(r => r.detail?.writeId));
   const moved = new Map<string, Set<string>>();
   for (const r of rows) {
-    const done = (r.detail?.event === "result" || r.detail?.event === "reconcile") && r.outcome === "success";
-    const before = done ? r.detail?.before : undefined;
+    const before = r.detail?.event === "request" && !unchanged.has(r.detail?.writeId) ? r.detail?.before : undefined;
     for (const i of Array.isArray(before) ? before as PatientInstance[] : []) {
       const set = moved.get(i.PatientID) ?? new Set<string>();
       set.add(instanceKey(i));
