@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StudyView } from "@/lib/fields";
+import { toggleGroup } from "@/lib/modalities";
 import {
   dateQuery,
   filterToSearchParams,
@@ -77,9 +78,43 @@ const row = (extra: Partial<StudyView> = {}): StudyView => ({
 
 describe("モダリティ・横断の検索", () => {
   it("CR/DX の群は CR と DX の両方に合う", () => {
-    expect(matchesFilter(row(), { date: "all", modality: "CR/DX" })).toBe(true);
-    expect(matchesFilter(row({ modalities: ["CR"] }), { date: "all", modality: "CR/DX" })).toBe(true);
-    expect(matchesFilter(row(), { date: "all", modality: "CT" })).toBe(false);
+    expect(matchesFilter(row(), { date: "all", modalities: ["CR/DX"] })).toBe(true);
+    expect(matchesFilter(row({ modalities: ["CR"] }), { date: "all", modalities: ["CR/DX"] })).toBe(true);
+    expect(matchesFilter(row(), { date: "all", modalities: ["CT"] })).toBe(false);
+  });
+
+  it("モダリティを複数選ぶと、どれかの群に合えば合う（「または」）。選んでいなければ絞らない", () => {
+    const dx = row();
+    const ct = row({ modalities: ["CT"] });
+    const mr = row({ modalities: ["MR"] });
+    const both = row({ modalities: ["CT", "MR"] });
+    const filter = { date: "all" as const, modalities: ["CT" as const, "CR/DX" as const] };
+    expect([dx, ct, mr, both].map((v) => matchesFilter(v, filter))).toEqual([true, true, false, true]);
+    expect(matchesFilter(mr, { date: "all", modalities: [] })).toBe(true);
+    expect(matchesFilter(mr, { date: "all" })).toBe(true);
+    // 許可の一覧にモダリティが無い行（view に無い）は、モダリティで探せない
+    const hidden = row();
+    delete hidden.modalities;
+    expect(matchesFilter(hidden, filter)).toBe(false);
+  });
+
+  it("URL：コンマで区切って複数を持つ。見出しの順にそろえ、重複と知らない名前は捨てる。1 つだけの古い形も読める", () => {
+    expect(parseFilter(new URLSearchParams("modality=MR,CT")).modalities).toEqual(["CT", "MR"]);
+    expect(parseFilter(new URLSearchParams("modality=CT,CT,XX,CR%2FDX")).modalities).toEqual(["CT", "CR/DX"]);
+    expect(parseFilter(new URLSearchParams("modality=CT")).modalities).toEqual(["CT"]);
+    expect(parseFilter(new URLSearchParams("modality=XX")).modalities).toBeUndefined();
+    expect(parseFilter(new URLSearchParams("modality=")).modalities).toBeUndefined();
+    const f = parseFilter(new URLSearchParams("modality=US,CT"));
+    expect(filterToSearchParams(f).get("modality")).toBe("CT,US");
+    expect(parseFilter(filterToSearchParams(f))).toEqual(f);
+    expect(filterToSearchParams({ date: "all", modalities: [] }).toString()).toBe("");
+  });
+
+  it("群の足し引き：押した群を足し、入っていれば外す。見出しの順に並べ、空になれば絞らない", () => {
+    expect(toggleGroup(undefined, "MR")).toEqual(["MR"]);
+    expect(toggleGroup(["MR"], "CT")).toEqual(["CT", "MR"]);
+    expect(toggleGroup(["CT", "MR"], "CT")).toEqual(["MR"]);
+    expect(toggleGroup(["MR"], "MR")).toBeUndefined();
   });
 
   it("段 3：前の状態の見出しの値（status）は URL から読まない", () => {

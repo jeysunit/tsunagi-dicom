@@ -159,7 +159,7 @@ describe("件数を数えたことの監査の記録", () => {
   it("数えた条件・範囲・返した件数・上限に届いたかを残す。患者の値は入れない（検索の語は有無だけ）", async () => {
     const all = [summary(1, "20261019", { patientId: "SECRET-ID-9", patientName: "秘密 花子" }), summary(2, "20260101")];
     const { backend } = fakeBackend(all);
-    const r = await listStudies(deps(backend), { date: "today", modality: "CT", q: "SECRET-ID-9" });
+    const r = await listStudies(deps(backend), { date: "today", modalities: ["CT"], q: "SECRET-ID-9" });
     const fields = searchAuditFields("api", r.returned, r.facetAudit);
     const detail = fields.detail as { facets: Record<string, unknown>; returned: unknown[] };
     expect(detail.facets).toMatchObject({
