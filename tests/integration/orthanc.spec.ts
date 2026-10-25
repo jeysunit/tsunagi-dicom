@@ -1062,6 +1062,12 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
     ["印の値が null", found, returning('{"TsunagiLock":null}'), "42752"],
     ["印の値が配列", found, returning('{"TsunagiLock":[1]}'), "42752"],
     ["印の番号の値が物", found, returning('{"1024":{}}'), "42752"],
+    // 名前を \u で書いた null（Lua の文字列では \\ が 1 つの \ になる）
+    ["印の名前を \\u で書いた値が null", found, returning('{"\\\\u0054sunagiLock":null}'), "42752"],
+    ["印の値が負の無限大", found, returning('{"TsunagiLock":"-1e999"}'), "42752"],
+    ["印の値が小数", found, returning('{"TsunagiLock":"1.5"}'), "42752"],
+    // 比べるため：\u で書いた名前の、期限の切れていない印は断る
+    ["印の名前を \\u で書いた、期限の切れていない印", found, returning('{"\\\\u0054sunagiLock":"99999999999"}'), "42752"],
     // 比べるため：期限の切れた印は受ける
     ["期限の切れた印", found, returning('{"TsunagiLock":"1"}'), "0"],
     // 比べるため：差し替えない引き当てと読み取りで、印が無ければ受ける

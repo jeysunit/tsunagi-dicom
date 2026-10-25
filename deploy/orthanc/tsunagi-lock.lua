@@ -77,13 +77,14 @@ local function refusal(studyUid)
       if value == nil then
         value = meta[LOCK_NUMBER]
       end
-      -- 名前はあるのに値が読めない（JSON の null は Lua では無いのと同じになる）
-      if value == nil and (string.find(raw, '"' .. LOCK .. '"', 1, true) or string.find(raw, '"' .. LOCK_NUMBER .. '"', 1, true)) then
-        return 'lock value unreadable'
+      -- JSON の null は Lua では無いのと同じになり、印の名前の値が null でも見分けられない（名前は \u で書かれうる）。
+      -- Orthanc のメタデータの値はどれも文字列で null は無いので、null の値が 1 つでもあれば読めない答えとする
+      if string.find(raw, ':%s*null') then
+        return 'metadata unreadable'
       end
       if value ~= nil then
-        -- 値は期限の UNIX 秒の文字列（false・物・配列などは読めない値）
-        local untilSeconds = (type(value) == 'string' or type(value) == 'number') and tonumber(value) or nil
+        -- 値は期限の UNIX 秒（BFF は正の整数の文字列を書く）。符号・小数・指数・無限大・false・物・配列などは読めない値
+        local untilSeconds = type(value) == 'string' and string.match(value, '^%d+$') and tonumber(value) or nil
         if untilSeconds == nil then
           return 'lock value unreadable'
         end
