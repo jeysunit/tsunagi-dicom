@@ -30,24 +30,50 @@ function tidySpaces(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-/** 1つの組（`姓^名^…`）を、姓と名だけの1つの文字列にする */
-function group(value: string | undefined): string {
+/** 氏名の成分の数（PS3.5 6.2：姓・名・ミドル・接頭・接尾） */
+const COMPONENTS = 5;
+
+/**
+ * 1つの組（`姓^名^…`）を、1つの文字列にする。表示は姓と名だけ（`components` が 2）。
+ * 検索は第3〜5成分（ミドル・接頭・接尾）まで含める（`components` が 5）
+ */
+function group(value: string | undefined, components = 2): string {
   if (!value) return "";
-  const [family = "", given = ""] = value.split("^");
-  return [family, given]
+  return value
+    .split("^")
+    .slice(0, components)
     .map((part) => tidySpaces(toFullWidthKana(part)))
     .filter((part) => part !== "")
     .join(" ");
 }
 
-export function parsePatientName(input: unknown): ParsedPatientName {
+function parse(input: unknown, components: number): ParsedPatientName {
   const text = typeof input === "string" ? input : "";
   const [alphabeticRaw, ideographicRaw, phoneticRaw] = text.split("=");
-  const alphabetic = group(alphabeticRaw);
-  const ideographic = group(ideographicRaw);
+  const alphabetic = group(alphabeticRaw, components);
+  const ideographic = group(ideographicRaw, components);
   return {
     name: ideographic || alphabetic,
-    kana: group(phoneticRaw),
+    kana: group(phoneticRaw, components),
     alphabetic,
   };
+}
+
+/** 画面に出す2つの値（姓と名だけ）と、ローマ字の組 */
+export function parsePatientName(input: unknown): ParsedPatientName {
+  return parse(input, 2);
+}
+
+/**
+ * 検索にだけ使う値：parsePatientName と同じ組の選び方で、第3〜5成分（ミドル・接頭・接尾）まで含める。
+ * 画面には出さない（表示は parsePatientName のまま。docs/patient-name-test-cases.md の規則 8）。
+ * 組の選び方（漢字が空ならローマ字）は表示に合わせる。表示が空になる組は、検索でも使わない
+ */
+export function parsePatientNameForSearch(input: unknown): ParsedPatientName {
+  const text = typeof input === "string" ? input : "";
+  const [alphabeticRaw, ideographicRaw, phoneticRaw] = text.split("=");
+  // 表示が空の組（第3成分以降だけの組を含む）は、検索でも空にする
+  const searchable = (raw: string | undefined) => (group(raw, 2) ? group(raw, COMPONENTS) : "");
+  const alphabetic = searchable(alphabeticRaw);
+  return { name: searchable(ideographicRaw) || alphabetic, kana: searchable(phoneticRaw), alphabetic };
 }
