@@ -11,6 +11,7 @@ const GENERAL: Permission[] = [
   "dicom.all_values",
   "viewer.remember",
   "receive.view",
+  "send.view",
   "modality.check",
   "study.send",
   "study.export",

@@ -50,6 +50,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           canEditViewerDefaults: can(state.session.role, "viewer.defaults"),
           account: !!local,
           canViewReceived: can(state.session.role, "receive.view"),
+          canViewSent: can(state.session.role, "send.view"),
           canCheckModalities: can(state.session.role, "modality.check"),
         })
       : undefined;
