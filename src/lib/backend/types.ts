@@ -80,6 +80,18 @@ export interface Backend {
    */
   modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
   /**
+   * UID を保つ書き換えに要る Orthanc の設定が入っているか（Orthanc の /system の OverwriteInstances と UserMetadata）。
+   * overwriteInstances が無ければ、UID を保つ書き換えを Orthanc が断る（400）。lockMetadata（UserMetadata の TsunagiLock）が
+   * 無ければ付け替えの印を付けられない。付け替えの印の Lua が読み込まれているかは、REST からは分からない
+   */
+  keepUidSettings(): Promise<{ overwriteInstances: boolean; lockMetadata: boolean }>;
+  /**
+   * 新しい UID の検査を作る書き換えの仕事を作る（中身の訂正。docs/spec.md の 3.5）。replace の StudyInstanceUID を
+   * 新しい検査の UID にし、SeriesInstanceUID と SOPInstanceUID は Orthanc が新しく作る（Keep を渡さない）。
+   * 元の検査は残す（KeepSource は既定の true）
+   */
+  modifyStudyNewUid(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
+  /**
    * 検査の画像ごとの、Orthanc が持つファイルの印（FileUuid）と、読む前の Orthanc の変更の記録（/changes）の位置。
    * 鍵は UID の組（Study・Series・SOP を `|` でつないだもの）。同じ UID の画像が届き直して置き換わると、印が変わる
    */
@@ -182,6 +194,11 @@ export interface Backend {
   sendStudy(modalityId: string, orthancStudyId: string): Promise<{ jobId: string }>;
   /** Orthanc の仕事の状態（/jobs/{id}）。無ければ null */
   jobStatus(jobId: string): Promise<JobStatus | null>;
+  /**
+   * 終わっていない書き換えの仕事（/jobs?expand の Type が ResourceModification で、State が Success・Failure でないもの）の数。
+   * 仕事の ID が分からない書き換えを、管理者が解く前に確かめる（その仕事がまだ動いているかもしれない）
+   */
+  unfinishedModifyJobs(): Promise<number>;
 
   // ── 段 5：書き出し・削除（docs/spec.md の 3.5） ──
 
@@ -198,6 +215,9 @@ export interface OrthancStudyInfo {
   patientId: string;
   patientName: string;
   studyDate: string;
+  /** 検査名と受付番号（値の修正の確かめの画面と、中身の訂正の確かめに使う） */
+  studyDescription: string;
+  accessionNumber: string;
   seriesCount: number;
   /** 版（Orthanc の LastUpdate）。確かめの画面を出した後に検査が変われば、この値が変わる */
   version: string;

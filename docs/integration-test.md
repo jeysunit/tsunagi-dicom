@@ -69,6 +69,9 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 | 13 | 上限を超えたとき（2026-10-21） | 古い検査 1001 件のあとに、いちばん新しい検査を入れる（Orthanc の REST の `tools/create-dicom`。架空の患者）。画面の API（`/api/studies`）の一覧の先頭に、いちばん新しい検査が出る。件数は「以上」（`exact: false`）で、外れるのは古い側の検査だけ。範囲（2020 年 1 月）の中は確定の 31 件。Orthanc の QIDO-RS が `limit` で切ったときに返す順と、`Warning` の有無を記録する（[`spec.md`](spec.md) の 3.1「上限に届いたとき」） |
 | 14 | 画像ごとの主なタグと日本語の値（2026-10-23） | SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の検査を送り、主なタグ（`…/instances/{sop}/tags`）が `INSTANCE_TAGS` の順に、設定のタグだけを返す。氏名（漢字・かな）と検査名が崩れない。画像に無いタグは null。画面でサムネイルから開いた表にも日本語の氏名が出る。転送構文（(0002,0010)）が metadata に入るかと、metadata の文字の集合の値を記録する。流すのは 13 より前（13 が検査を 1001 件足すと、一覧の上限を超えて画面で開けなくなることがあるため） |
 | 15 | HL7 の A40 | 仮の患者 ID の検査を BFF の `/api/hl7/messages` から更新する。AA が返り、Study・Series・SOP の UID は同じで、患者 ID が替わり、元の患者の検査が残らず、監査の received・request・dispatch・result・ack が残る。token は試験のたびに乱数で作る |
+| 22 | 患者情報修正（氏名。2026-10-25） | 管理者が再認証の後に、確かめの画面（`/api/studies/{uid}/modify/preview`）と実行（`/api/studies/{uid}/modify`）で氏名を直す。全画像の氏名が直り、Study・Series・SOP の UID と Orthanc の中の検査の ID は変わらない。監査の求めた・書き換えの request・dispatch・result・結果が要求の ID で結ばれる。Orthanc の `/system` の設定の値と、置き換えた画像の受信の記録のメタデータ・受信一覧での出方を記録する。前の試験（19・21）が残した部分反映を、先に `/api/hl7/resolve` で解く |
+| 23 | 患者情報修正（患者IDの付け替え。2026-10-25） | 選んだ検査が新しい患者ID へ移り、UID は変わらず、元の患者の検査が残らず、付け替えの印が外れている。結果の行に、HL7 の見回りの覚え（`origin: screen`）が残る |
+| 24 | 検査情報修正（検査日・検査名。2026-10-25） | BFF が決めた新しい StudyInstanceUID の検査ができ、全画像の検査日・検査名が直り、SeriesInstanceUID と SOPInstanceUID も新しい。元の検査は残る。監査の request・dispatch・result が残る |
 
 試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報とホスト名は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」に写す。
 

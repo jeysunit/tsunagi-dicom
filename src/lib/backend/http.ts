@@ -679,6 +679,49 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return { jobId: id };
     },
 
+    // Orthanc 26.9.1（Orthanc 1.13.0）の /system は OverwriteInstances（真偽）と UserMetadata（名前と番号）を返す
+    // （2026-10-25 に実測。docs/round-trip-test.md の「実測で決めること」）。形が違えば、入っていないとみなす
+    async keepUidSettings() {
+      const system = await restJsonOrNull("system");
+      const s = system && typeof system === "object" ? (system as Record<string, unknown>) : {};
+      const metadata = s.UserMetadata && typeof s.UserMetadata === "object" ? (s.UserMetadata as Record<string, unknown>) : {};
+      return { overwriteInstances: s.OverwriteInstances === true, lockMetadata: typeof metadata[LOCK_METADATA] === "number" };
+    },
+
+    // 中身の訂正：新しい UID の検査を作る。StudyInstanceUID は BFF が決めて渡す（結果不明のときに、その UID で探して照らす）。
+    // Orthanc は Keep の無い書き換えで SeriesInstanceUID・SOPInstanceUID を新しく作り、元の検査を残す（2026-10-25 に実測）
+    async modifyStudyNewUid(orthancStudyId: string, replace: Record<string, string>) {
+      if (!isOrthancId(orthancStudyId)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      if (!isDicomUid(replace.StudyInstanceUID)) {
+        throw new BackendError("新しい StudyInstanceUID が正しくありません", 400);
+      }
+      const res = await restPost(`studies/${orthancStudyId}/modify`, JSON.stringify({
+        Replace: replace,
+        Force: true,
+        Asynchronous: true
+      }), { write: true });
+      if (!res.ok) {
+        await res.body?.cancel();
+        if (isUncertainStatus(res.status)) {
+          throw new BackendUnknownError();
+        }
+        throw new BackendError(`画像サーバーが書き換えを断りました（${res.status}）`, res.status === 400 ? 400 : 502);
+      }
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        throw new BackendUnknownError();
+      }
+      const id = body && typeof body === "object" ? (body as { ID?: unknown }).ID : undefined;
+      if (!isJobId(id)) {
+        throw new BackendUnknownError();
+      }
+      return { jobId: id };
+    },
+
     async lookupStudyIds(studyInstanceUid: string) {
       const res = await restPost("tools/lookup", checkedUid(studyInstanceUid), { contentType: "text/plain", credential: "read" });
       if (!res.ok) {
@@ -731,6 +774,18 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!isJobId(jobId)) return null;
       const json = await restJsonOrNull(`jobs/${jobId}`);
       return json ? jobFromRest(json) : null;
+    },
+
+    // 読めない・形が違えば投げる（数えられないまま、終わっていないとも終わったとも言わない）
+    async unfinishedModifyJobs() {
+      const json = await restJsonOrNull("jobs?expand");
+      if (!Array.isArray(json)) {
+        throw new BackendError("画像サーバーのジョブの一覧を読み込めません");
+      }
+      return json.filter((j) => {
+        const job = j && typeof j === "object" ? (j as { Type?: unknown; State?: unknown }) : {};
+        return job.Type === "ResourceModification" && job.State !== "Success" && job.State !== "Failure";
+      }).length;
     },
 
     async exportStudy(orthancStudyId: string) {
