@@ -264,7 +264,7 @@ test("1b ビューア：入口は読み取り専用で、Orthanc の OHIF と St
   }
 });
 
-test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の送信 → storescp", async ({ page }) => {
+test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の送信 → storescp", async ({ page, browser }) => {
   // 架空の患者（患者 ID は試験ごとに変える）
   const patientId = `DEVFLOW${randomBytes(4).toString("hex").toUpperCase()}`;
   const out = await compose(
@@ -308,6 +308,26 @@ test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一
   await panel.getByTestId("send-submit").click();
   await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 120_000 });
   await expect(panel.getByTestId("send-status")).toContainText(`${SCP.id}（${SCP.aet}） へ ${sent.length} 画像`);
+
+  // 「開く」：BFF が OHIF の URL（入口の /ohif/viewer?StudyInstanceUIDs=）へ移す。その URL を OHIF で開くと、
+  // OHIF が DICOMweb（入口の /dicom-web）からこの検査を取って、画像を描く
+  const opened = await page.request.get(`/api/viewers/open?${new URLSearchParams({ study: uid, viewer: "ohif" })}`, {
+    maxRedirects: 0,
+    headers: { "sec-fetch-site": "same-origin" },
+  });
+  expect(opened.status()).toBe(302);
+  const viewerUrl = opened.headers()["location"]!;
+  expect(viewerUrl).toBe(`http://127.0.0.1:${viewerPort}/ohif/viewer?StudyInstanceUIDs=${uid}`);
+  const viewerContext = await browser.newContext({ httpCredentials: { username: "tsunagi", password: readFileSync(path.join(secretsDir, "backend_password.txt"), "utf8").replace(/\r?\n$/, "") } });
+  try {
+    const viewerPage = await viewerContext.newPage();
+    const studyLoaded = viewerPage.waitForResponse((r) => r.url().includes(`/dicom-web/studies`) && r.url().includes(uid) && r.status() === 200, { timeout: 90_000 });
+    await viewerPage.goto(viewerUrl);
+    await studyLoaded;
+    await expect(viewerPage.locator("canvas").first()).toBeVisible({ timeout: 90_000 });
+  } finally {
+    await viewerContext.close();
+  }
 
   // storescp に、同じ StudyInstanceUID の画像が同じ数だけ、同じ SOPInstanceUID で届く
   const received = await waitFor(

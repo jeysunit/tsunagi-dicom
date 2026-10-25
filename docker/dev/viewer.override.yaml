@@ -12,3 +12,7 @@ services:
     environment:
       OHIF_PLUGIN_ENABLED: "true"
       STONE_WEB_VIEWER_PLUGIN_ENABLED: "true"
+    volumes:
+      # OHIF のデータソースを DICOMweb にする（plugin の既定は dicom-json で、「開く」が渡す StudyInstanceUIDs では読めない）。
+      # 相対のパスは deploy/ から数える。ほかの設定ファイルと同じ項目を持たない
+      - ../docker/dev/orthanc/ohif.json:/etc/orthanc/ohif.json:ro
