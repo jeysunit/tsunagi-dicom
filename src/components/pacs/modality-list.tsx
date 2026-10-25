@@ -35,8 +35,8 @@ interface Notice {
  */
 function unreachableReason(canSeeAddress: boolean): string {
   return canSeeAddress
-    ? "原因は分かりません。ホスト名・ポート番号・AEタイトルを確かめて、もう一度接続確認してください。"
-    : "原因は分かりません。管理者に、登録の確かめを頼んでください。";
+    ? "原因は分かりません。ホスト名・ポート番号・AEタイトルを確認して、もう一度接続確認してください。"
+    : "原因は分かりません。管理者に、登録の確認を頼んでください。";
 }
 
 export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: ModalityView[]; csrfToken?: string; timeZone: string }) {
