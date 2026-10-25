@@ -1069,9 +1069,9 @@ test("詳細：受付番号はバナーに常に出し、英字氏名・和暦�
   await expect(info.getByTestId("detail-alphabetic")).toContainText("Shiken Takako");
   await expect(info).toContainText("1960/07/15（昭和35年）");
   await expect(info.getByTestId("detail-counts")).toHaveText(/シリーズ \/ 画像\s*1 \/ 4/);
-  // 「検査の情報」は、右の残りの幅で折り返しても 3 段（80px）以内。見出し全体は、バナー（110px）・UID（60px）・検査の情報（80px）の合計に収まる
+  // 「検査の情報」は、右の残りの幅で折り返しても 3 段（80px）以内。見出し全体は、バナー（3 段で 150px）・UID（60px）・検査の情報（80px）の合計に収まる
   expect((await info.boundingBox())!.height).toBeLessThanOrEqual(80);
-  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(110 + 60 + 80 + 12);
+  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(150 + 60 + 80 + 12);
 });
 
 test("詳細の見出し：受付番号が無いときも「受付番号 —」を出す（無いこと自体が照合の手がかり）", async ({ page }) => {
@@ -1111,8 +1111,8 @@ test("詳細の見出しは患者バナー：氏名・かな・患者 ID・生�
   await expect(head).toContainText("JP-TEST-0004");
   const banner = head.getByRole("region", { name: "患者" });
   // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は氏名の右と下の 2 段に
-  // 折り返す。前は 1280px の幅で氏名と同じ段に並び 64px 以内だった。いまは 2 段（110px 以内）まで
-  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(110);
+  // 折り返す。前は 1280px の幅で氏名と同じ段に並び 64px 以内だった。いまは 3 段（150px 以内）まで（字体で段の数が変わる）
+  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(150);
   // 下のシリーズのサムネイルが、同じ画面に見えている（詳細の場所の中。スクロールしなくても）
   const pane = (await page.getByTestId("detail-pane").boundingBox())!;
   const strip = (await page.getByTestId("series-strip").boundingBox())!;
