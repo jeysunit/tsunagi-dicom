@@ -202,6 +202,42 @@ test("タグの表：キーボードの Ctrl+C と、メニューのキーでも
   await expect(selectedTags(table)).toHaveCount(2);
 });
 
+test("タグの表：Shift でクリックした行にフォーカスが移り、続く矢印のキーはその行から動く", async ({ page }) => {
+  const table = await openTagTable(page);
+  const tr = (i: number) => table.locator("tbody tr").nth(i);
+  await tr(1).click();
+  await tr(5).click({ modifiers: ["Shift"] });
+  await expect(tr(5)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(tr(6)).toBeFocused();
+  await expect(tr(6)).toHaveAttribute("aria-selected", "true");
+  await expect(selectedTags(table)).toHaveCount(1);
+});
+
+test("タグの表：メニューを開いたまま外の欄を押したときは、フォーカスを表へ奪い返さない", async ({ page }) => {
+  const table = await openTagTable(page);
+  await table.locator("tbody tr").nth(1).click({ button: "right" });
+  await expect(page.getByTestId("tag-menu")).toBeVisible();
+  const search = page.getByRole("searchbox").first();
+  await search.click();
+  await expect(page.getByTestId("tag-menu")).toHaveCount(0);
+  await expect(search).toBeFocused();
+});
+
+test("受信一覧：選んだ行は、絞り込みで並びが変わっても同じ行のまま", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.goto("/received");
+  const rows = page.getByTestId("received-row");
+  const target = rows.nth(3);
+  const patientId = (await target.locator("td").nth(3).textContent())!.trim();
+  await target.getByTestId("received-at").click();
+  const at = (await target.getByTestId("received-at").textContent())!;
+  await page.getByTestId("received-search").fill(patientId);
+  const picked = page.locator('[data-testid=received-row][aria-selected="true"]');
+  await expect(picked).toHaveCount(1);
+  await expect(picked.getByTestId("received-at")).toHaveText(at);
+});
+
 test("UID の写すボタンは、UID のすぐ右にある（行の右端に離れない）", async ({ page }) => {
   await asRole(page, "一般");
   await page.locator(`tr[data-study-uid="${STUDY}"]`).click();

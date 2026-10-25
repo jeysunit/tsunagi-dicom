@@ -89,9 +89,21 @@ export function ReceivedList({
     );
   });
   const filtered = !!source || !!needle || onlyNew;
-  const keyOf = (r: ReceivedView, i: number) => `${r.study.studyInstanceUid ?? "row"}-${r.receivedAt ?? i}`;
+  // 行の鍵：検査と受信日時。同じ組が重なる行（受信日時が無い行など）は、読んだ並びの何番目かを添える。絞り込みで並びが変わっても、鍵は変わらない
+  const keys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return new Map(
+      items.map((r) => {
+        const base = `${r.study.studyInstanceUid ?? "row"}-${r.receivedAt ?? ""}`;
+        const n = seen.get(base) ?? 0;
+        seen.set(base, n + 1);
+        return [r, n === 0 ? base : `${base}#${n}`] as const;
+      }),
+    );
+  }, [items]);
+  const keyOf = (r: ReceivedView) => keys.get(r) ?? "";
   // 矢印のキーの止まり先（フォーカスを受ける行は 1 つ）。選んだ行が表に無いときは先頭
-  const tabStopKey = shown.some((r, i) => keyOf(r, i) === pickedKey) ? pickedKey : shown[0] ? keyOf(shown[0], 0) : null;
+  const tabStopKey = shown.some((r) => keyOf(r) === pickedKey) ? pickedKey : shown[0] ? keyOf(shown[0]) : null;
 
   async function reload() {
     setReloading(true);
@@ -213,12 +225,12 @@ export function ReceivedList({
                   </td>
                 </tr>
               )}
-              {shown.map((r, i) => {
+              {shown.map((r) => {
                 const desc = [r.study.modalities?.join("・"), r.study.studyDescription].filter(Boolean).join(" ");
                 const origin = originText(r.origin);
                 const fresh = isNewArrival(r.receivedAt, previous);
                 const href = studyListHref(r);
-                const rowKey = keyOf(r, i);
+                const rowKey = keyOf(r);
                 const isPicked = rowKey === pickedKey;
                 return (
                   <tr

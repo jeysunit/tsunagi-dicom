@@ -175,6 +175,8 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
                 }}
                 onClick={(e) => {
                   choose(i, { range: e.shiftKey, toggle: e.ctrlKey || e.metaKey });
+                  // Shift を押したクリックは mousedown を止めているので、フォーカスを自分で移す（続く矢印のキーが、押した行から動くように）
+                  e.currentTarget.focus({ preventScroll: true });
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -218,8 +220,10 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
           data-testid="tag-menu"
           onToggle={(e) => {
             if (e.newState === "closed") {
+              // フォーカスが行き場を失った（Esc・項目を押した）ときだけ、動いている行へ戻す。外の欄を押した・Tab で出たときは、その移り先を保つ
+              const focused = document.activeElement;
+              if (!focused || focused === document.body || e.currentTarget.contains(focused)) focusRow(active);
               setMenu(null);
-              focusRow(active);
             }
           }}
         >
