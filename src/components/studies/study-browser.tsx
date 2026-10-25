@@ -20,7 +20,7 @@ import {
   splitAfterKey,
   subscribeSplit,
 } from "@/lib/client/split-position";
-import { getNarrow, getServerNarrow, subscribeNarrow } from "@/lib/client/narrow";
+import { SPLIT_MIN_BODY_PX, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, modalityGroupOf, type ModalityGroup } from "@/lib/modalities";
@@ -56,7 +56,6 @@ export interface StudyListData {
 const DETAIL_DELAY_MS = 300;
 /** 削除が終わったことの知らせを出しておく時間（ミリ秒。docs/spec.md の 3.5） */
 const NOTICE_MS = 10_000;
-/** 一覧の最小の高さ（見出しと 7 行ほど。study-list-scroll の md:min-h-56 と同じ）と、絞り込みと一覧の間（gap-2） */
 
 const listKey =(filter: StudyFilter) => ["studies", filterToSearchParams(filter).toString()] as const;
 
@@ -720,13 +719,13 @@ function Browser({
     }
   }, []);
 
-  // 狭い画面では、詳細が一覧の上に重なる。開いたら詳細へフォーカスを移し、背後の一覧は操作・読み上げの対象から外し、閉じたら元の行へ戻す
-  const narrow = useSyncExternalStore(subscribeNarrow, getNarrow, getServerNarrow);
+  const box = useRef<HTMLElement>(null);
+  // 本文が左右に分けるには狭い（736px 未満）とき、詳細が一覧の上に重なる。開いたら詳細へフォーカスを移し、背後の一覧は操作・読み上げの対象から外し、閉じたら元の行へ戻す
+  const narrow = useNarrowerThan(box, SPLIT_MIN_BODY_PX);
   const paneRef = useRef<HTMLDivElement>(null);
   const restoreUid = useRef<string | null>(null);
 
   const split = useSyncExternalStore(subscribeSplit, getSplit, getServerSplit);
-  const box = useRef<HTMLElement>(null);
   /** 一覧と詳細を左右に分ける場所（境目の位置はこの幅に対する百分率） */
   const body = useRef<HTMLDivElement>(null);
   const listId = useId();
@@ -822,7 +821,8 @@ function Browser({
   };
 
   return (
-    <section ref={box} data-split-root className="relative flex min-h-0 flex-1 flex-col gap-2">
+    // @container：左右に分けるかを、画面の幅ではなく本文の幅（46rem ＝ 736px）で決める（@[46rem]:）。JS 側の narrow（useNarrowerThan）と同じ値
+    <section ref={box} data-split-root className="@container relative flex min-h-0 flex-1 flex-col gap-2">
       {/* 絞り込みの帯と件数の行は、左右をまたいで上に置く（docs/design-system/screen-types.md の「型 B の変種」） */}
       <div inert={overlayOpen || undefined} className="shrink-0 space-y-3">
         <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} />
@@ -870,8 +870,10 @@ function Browser({
         inert={overlayOpen || undefined}
         className={cn(
           "flex min-h-0 min-w-0 flex-col",
-          // 一覧は詰めた形の列が読める幅（20rem）より、詳細は 25rem より縮まない
-          detailOpen ? "max-md:flex-1 md:max-w-[calc(100%-25rem)] md:min-w-80 md:flex-none md:basis-(--split)" : "flex-1",
+          // 一覧は詰めた形の列が読める幅（20rem）より、詳細は 25rem（と境目の 0.75rem）より縮まない
+          detailOpen
+            ? "@max-[46rem]:flex-1 @[46rem]:max-w-[calc(100%-25rem-0.75rem)] @[46rem]:min-w-80 @[46rem]:flex-none @[46rem]:basis-(--split)"
+            : "flex-1",
         )}
         style={{ "--split": `${split}%` } as React.CSSProperties}
       >
@@ -921,7 +923,7 @@ function Browser({
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         data-testid="split-handle"
-        className="group hidden w-3 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-none md:flex"
+        className="group hidden w-3 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-none @[46rem]:flex"
         onKeyDown={(e) => {
           const next = splitAfterKey(split, e.key);
           if (next === null) return;
@@ -952,7 +954,7 @@ function Browser({
           if (e.currentTarget.querySelector("[role=menu]")) return;
           closeDetail();
         }}
-        className="bg-surface focus-visible:outline-none max-md:absolute max-md:inset-0 max-md:z-30 max-md:overflow-auto md:min-h-0 md:min-w-100 md:flex-1 md:overflow-auto md:rounded-md md:border md:border-border"
+        className="bg-surface focus-visible:outline-none @max-[46rem]:absolute @max-[46rem]:inset-0 @max-[46rem]:z-30 @max-[46rem]:overflow-auto @[46rem]:min-h-0 @[46rem]:min-w-100 @[46rem]:flex-1 @[46rem]:overflow-auto @[46rem]:rounded-md @[46rem]:border @[46rem]:border-border"
       >
         <button
           type="button"

@@ -481,7 +481,9 @@ test("左右に分ける：境目をどちらへ寄せても、一覧は 320px�
         handleLeft: handleRect.left,
         handleRight: handleRect.right,
         detailLeft: detail.left,
+        detailRight: detail.right,
         detailWidth: detail.width,
+        bodyRight: r("[data-split-root]").right,
       };
     });
   // いちばん左へ：一覧は詰めた形の列が読める幅（320px）を保つ
@@ -498,8 +500,30 @@ test("左右に分ける：境目をどちらへ寄せても、一覧は 320px�
   expect(g.filtersBottom).toBeLessThanOrEqual(g.listTop + 1);
   expect(g.listRight).toBeLessThanOrEqual(g.handleLeft + 1);
   expect(g.handleRight).toBeLessThanOrEqual(g.detailLeft + 1);
+  // 詳細は本文の中に収まる（境目の幅も引いて、右へはみ出さない）
+  expect(g.detailRight).toBeLessThanOrEqual(g.bodyRight + 1);
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("左右に分ける：本文が 736px より狭いとき（左のナビを開いた 900px の画面）は、左右に分けず、詳細を一覧の上に重ねる", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 800 });
+  await asRole(page, "一般");
+  await row(page).click({ position: { x: 100, y: 20 } });
+  const pane = page.getByTestId("detail-pane");
+  await expect(pane).toBeVisible();
+  // 重ね表示：境目は無く、詳細は一覧を覆い、背後の一覧は inert。フォーカスは詳細へ
+  await expect(page.getByTestId("split-handle")).toBeHidden();
+  await expect(pane).toBeFocused();
+  await expect(page.locator("[data-split-root] [inert]")).toHaveCount(2);
+  const list = (await page.getByTestId("study-list-scroll").boundingBox())!;
+  const box = (await pane.boundingBox())!;
+  expect(box.x).toBeLessThanOrEqual(list.x + 1);
+  expect(box.x + box.width).toBeGreaterThanOrEqual(list.x + list.width - 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(pane).toHaveCount(0);
+  await expect(row(page)).toBeFocused();
 });
 
 test("詳細を見せるときは必ず記録が残る：A→B→A と戻っても、300ms 止まらない限り中身は出ず、止まれば取り直して記録する", async ({ page }) => {
