@@ -33,6 +33,8 @@ const MENU_ITEMS: readonly { format: CopyFormat; label: string }[] = [
   { format: "tag-value", label: "タグと値" },
   { format: "value", label: "値だけ" },
 ];
+/** メニューの高さ：項目 28px × 数 + 内側の余白 8px + 枠 2px（下の端で切れないよう、出す位置を直すのに使う） */
+const MENU_HEIGHT = MENU_ITEMS.length * 28 + 10;
 const NOTICE_MS = 2500;
 
 export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
@@ -74,7 +76,7 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
   function openMenu(position: MenuPosition) {
     setMenu({
       x: Math.max(0, Math.min(position.x, window.innerWidth - MENU_WIDTH)),
-      y: Math.max(0, Math.min(position.y, window.innerHeight - 56)),
+      y: Math.max(0, Math.min(position.y, window.innerHeight - MENU_HEIGHT)),
     });
   }
 
@@ -242,9 +244,21 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
           popover="auto"
           role="menu"
           aria-label="タグの操作"
+          tabIndex={-1}
           style={{ position: "fixed", inset: "auto", margin: 0, left: menu.x, top: menu.y, width: MENU_WIDTH }}
           className="rounded-md border border-border bg-background py-1 text-left text-sm text-foreground shadow-lg"
           data-testid="tag-menu"
+          // メニューのキー：上下の矢印・Home・End で項目を移る（先頭・末尾は回り込む）
+          onKeyDown={(e) => {
+            const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+            if (!keys.includes(e.key)) return;
+            e.preventDefault();
+            const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
+            const at = items.indexOf(document.activeElement as HTMLElement);
+            const next =
+              e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+            items[next]?.focus();
+          }}
           onToggle={(e) => {
             if (e.newState === "closed") {
               // フォーカスが行き場を失った（Esc・項目を押した）ときだけ、動いている行へ戻す。外の欄を押した・Tab で出たときは、その移り先を保つ

@@ -217,6 +217,31 @@ test("タグの表：メニューの「タグと値」「値だけ」と、表�
   expect((await clipboard(page)).split("\n").every((l) => /^\d+$/.test(l))).toBe(true);
 });
 
+test("タグの表：メニューは上下の矢印・Home・End で項目を移り、画面の下の端でも切れない", async ({ page }) => {
+  const table = await openTagTable(page);
+  const row = table.locator("tbody tr").nth(3);
+  await row.click({ button: "right" });
+  const items = page.getByTestId("tag-menu").getByRole("menuitem");
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(items.nth(2)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(items.nth(2)).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  // 画面の下の端に近い行で開いても、最後の項目まで画面に収まる
+  const viewport = page.viewportSize()!;
+  await row.dispatchEvent("contextmenu", { clientX: 100, clientY: viewport.height - 4, bubbles: true, cancelable: true });
+  const box = (await items.nth(2).boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+});
+
 test("タグの表：キーボードの Ctrl+C と、メニューのキーでも写せる。Esc でメニューを閉じるとフォーカスが行に戻る", async ({ page }) => {
   const table = await openTagTable(page);
   const tr = (i: number) => table.locator("tbody tr").nth(i);
