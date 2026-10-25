@@ -398,10 +398,15 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
           await lock?.release();
         }
       }
-      const checked = await verify(backend, d);
-      const success = job.state === "Success" && checked.matchesAfter && !removed.arrivalsLost && !removed.foreignCopies && !removed.lockLost;
+      // 元を消す間の異常を見つけた後は、確かめに失敗しても解かずに残さず、部分反映として人に見せる
+      const anomaly = Boolean(removed.arrivalsLost || removed.foreignCopies || removed.lockLost);
+      const checked = await verify(backend, d).catch((e: unknown) => {
+        if (!anomaly) throw e;
+        return undefined;
+      });
+      const success = checked !== undefined && job.state === "Success" && checked.matchesAfter && !anomaly;
       // Success の不一致は、前の値と同じでも自動で解かない（design.md §4）。
-      const partial = !success && (job.state === "Success" || !checked.matchesBefore);
+      const partial = !success && (job.state === "Success" || !checked?.matchesBefore);
       const row: HistoryRow = {
         actorId: "hl7-receiver",
         actorRole: "system",
@@ -696,7 +701,7 @@ async function writeStudy(
     state = "Failure";
     refusal = e.message;
   }
-  let checked;
+  let checked: Awaited<ReturnType<typeof verify>> | undefined;
   // 患者 ID の変わる書き換え（A40）だけ、元の検査が残る。書き換えた画像を確かめてから元の画像を名指しで消す（design.md §15）
   let removed: RemoveOutcome = {};
   try {
@@ -717,22 +722,27 @@ async function writeStudy(
       throw e;
     }
   }
+  // 元を消す間の異常（印の切れ・写しの置き換わり・最中に届いた画像の消失）を見つけた後は、確かめに失敗しても結果不明に
+  // 戻さず（照らし合わせが自動で解きうる）、部分反映として人に見せる
+  const anomaly = Boolean(removed.arrivalsLost || removed.foreignCopies || removed.lockLost);
   try {
     checked = await verify(backend, d);
   } catch (e) {
-    await row("result", "unknown", { ...d, reason: "画像ごとの確かめに失敗した" });
-    throw e;
+    if (!anomaly) {
+      await row("result", "unknown", { ...d, reason: "画像ごとの確かめに失敗した" });
+      throw e;
+    }
   }
-  const success = state === "Success" && checked.matchesAfter && !removed.arrivalsLost && !removed.foreignCopies && !removed.lockLost;
+  const success = checked !== undefined && state === "Success" && checked.matchesAfter && !anomaly;
   // 成功した仕事の不一致は部分反映として止め、人の確認を待つ（design.md §4）。
-  const partial = !success && (state === "Success" || !checked.matchesBefore);
+  const partial = !success && (state === "Success" || !checked?.matchesBefore);
   await row("result", success ? "success" : "failed", {
     ...d,
     ...checked,
     ...removed,
     partial,
     state,
-    reason: refusal ? visible(refusal) : undefined
+    reason: refusal ? visible(refusal) : checked ? undefined : "画像ごとの確かめに失敗した"
   }, after[0]!.PatientID, d.StudyInstanceUID);
   if (!success) {
     throw new BackendError(partial ? "画像の一部だけが書き換わった" : refusal ?? "書き換わらなかった");

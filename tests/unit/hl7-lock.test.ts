@@ -178,6 +178,28 @@ describe("付け替えの印", () => {
     expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
   });
 
+  it("印の切れを見つけた後に確かめが失敗しても、結果不明に戻さず部分反映で止める（自動で解かせない）", async () => {
+    temp();
+    const lookup = orthanc.backend.lookupStudyIds.bind(orthanc.backend);
+    let broken = false;
+    vi.spyOn(orthanc.backend, "lookupStudyIds").mockImplementation(async (uid) => {
+      if (broken) throw new Error("synthetic lookup failure");
+      return lookup(uid);
+    });
+    orthanc.next.duringDelete = () => {
+      const stalled = Date.now() + 300;
+      while (Date.now() < stalled) {
+        // 止まった BFF の代わり
+      }
+      // 消した後の引き当て（消し残りと写しの確かめ・画像ごとの確かめ）が、どれも失敗する
+      broken = true;
+    };
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(results().at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true, lockLost: true } });
+    broken = false;
+    expect(await sweep()).toMatchObject({ blocked: "結果の分からない書き換えがある" });
+  });
+
   it("BFF が期限より長く止まった後は、付け直しで隠さず、元を消さずに部分反映で止める", async () => {
     temp();
     orthanc.next.state = "Running";
@@ -263,25 +285,35 @@ describe("付け替えの印", () => {
     expect(orthanc.modifyCalls).toHaveLength(0);
   });
 
-  it("照らし合わせが印を付ける前の引き当てで元を見つけられなくても、印の無いまま元を消さない", async () => {
+  it.each([
+    ["", false],
+    ["（続く画像ごとの確かめが失敗しても、部分反映で残す）", true]
+  ])("照らし合わせが印を付ける前の引き当てで元を見つけられなくても、印の無いまま元を消さない%s", async (_label, verifyFails) => {
     temp();
     orthanc.next.state = "Running";
     expect(await send(a40(TEMP, "P000001"), { jobTimeoutMs: 5 })).toContain("MSA|AE|");
     for (const [jobId] of orthanc.jobs) {
       orthanc.jobs.set(jobId, "Success");
     }
-    // 照らし合わせが仕事の終わりを読んだ直後の引き当て（印を付けるかを決める）だけ、空を返す
+    // 照らし合わせが仕事の終わりを読んだ直後の引き当て（印を付けるかを決める）だけ、空を返す。verifyFails なら、その後の
+    // 3 回目（消すかの確かめの 2 回の後の、画像ごとの確かめ）が失敗する
     const status = orthanc.backend.jobStatus.bind(orthanc.backend);
     const lookup = orthanc.backend.lookupStudyIds.bind(orthanc.backend);
-    let empty = false;
+    let after: number | undefined;
     vi.spyOn(orthanc.backend, "jobStatus").mockImplementation(async (jobId) => {
-      empty = true;
+      after = 0;
       return status(jobId);
     });
     vi.spyOn(orthanc.backend, "lookupStudyIds").mockImplementation(async (uid) => {
-      if (empty) {
-        empty = false;
+      if (after === undefined) {
+        return lookup(uid);
+      }
+      const n = after++;
+      if (n === 0) {
         return [];
+      }
+      if (n === 3 && verifyFails) {
+        throw new Error("synthetic lookup failure");
       }
       return lookup(uid);
     });
