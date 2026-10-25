@@ -43,6 +43,8 @@ describe("サムネイルを押せるか（権限）", () => {
     expect(html).not.toContain('data-testid="detail-tags-toggle"');
     expect(html).not.toContain('data-testid="detail-uid-toggle"');
     expect(html).toContain('data-testid="study-uid"');
+    // 検査のタグは、Study UID の横のボタン（開け閉め）から見る
+    expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*data-testid="study-tags-open"/);
   });
 
   it("dicom.all_values の無い役割：サムネイルはボタンにせず、絵と文字だけ。「DICOM タグ」も無い", () => {
@@ -51,6 +53,7 @@ describe("サムネイルを押せるか（権限）", () => {
     expect(html).toContain("Chest Axial 5mm");
     expect(html).not.toContain('data-testid="series-open"');
     expect(html).not.toContain('data-testid="detail-tags-toggle"');
+    expect(html).not.toContain('data-testid="study-tags-open"');
     // シリーズの並びの中に、押せる物が無い
     const strip = html.slice(html.indexOf('data-testid="series-row"'));
     expect(strip.slice(0, strip.indexOf("</ul>"))).not.toContain("<button");
@@ -83,14 +86,14 @@ describe("見出し（患者バナー）と「検査の情報」", () => {
     expect(banner).not.toContain("昭和");
   });
 
-  it("バナーに足さない値は「検査の情報」のタブに置く。出す値が無いときは、タブを出さずシリーズだけにする", () => {
+  it("バナーに足さない値は、タブに隠さず、見出しの下の「検査の情報」に並べる。出す値が無いときは、区画ごと出さない", () => {
     const withInfo = render(true, full);
-    expect(withInfo).toContain('role="tablist"');
+    expect(withInfo).not.toContain('role="tablist"');
     const info = withInfo.slice(withInfo.indexOf('data-testid="detail-info"'));
     expect(info).toContain("試験 医師");
     expect(info).toContain("1960/07/15（昭和35年）");
     expect(info).toContain("1 / 4");
-    expect(render(true)).not.toContain('role="tablist"');
+    expect(render(true)).not.toContain('data-testid="detail-info"');
   });
 
   it("受付番号が空でも、項目ごと返らない（許可の一覧に無い）ときを除き、「受付番号 —」を出す", () => {
