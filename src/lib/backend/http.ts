@@ -548,6 +548,16 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         const hint = res.status === 404 ? `。Orthanc の UserMetadata に ${LOCK_METADATA} が要る` : "";
         throw new BackendError(`画像サーバーが付け替えの印を断りました（${res.status}）${hint}`);
       }
+      // 印が確かに立ったことを読み直して確かめる（PUT の答えだけで信じない）。入口で道を絞るときに印の道を 1 つの
+      // 資格情報にまとめられるよう、書いたのと同じ資格情報で読む
+      const check = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, { credential: "write" });
+      const value = check.ok ? (await check.text()).trim() : "";
+      if (!check.ok) {
+        await check.body?.cancel();
+      }
+      if (value !== String(untilEpochSeconds)) {
+        throw new BackendError("付け替えの印を付けたのに、読み直すと値が違います");
+      }
     },
 
     async unlockStudy(id: string) {

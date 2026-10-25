@@ -163,6 +163,15 @@ interface SourceLock {
   renew(): Promise<void>;
   /** 印が切れずに続いていることを確かめ、要れば延ばす。切れたかもしれない・延ばせないときは投げる（元を消す直前に呼ぶ） */
   ensure(): Promise<void>;
+  /** 付け直しに失敗した・期限を過ぎたことがある（その間に C-STORE が入りえた） */
+  lost(): boolean;
+  /** いまの期限（ミリ秒の時刻） */
+  until(): number;
+  /**
+   * 付け直しを止め、印は外さずに期限で切れるのを待つ（仕事の終わりを読めないとき。仕事が写している間に外さない）。
+   * この後の release は印を外さない
+   */
+  keep(): Promise<void>;
   release(): Promise<void>;
 }
 /**
@@ -220,14 +229,27 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   // 仕事を待つ間・元の検査を読む間・写しを確かめる間も切らさないように、期限の 4 分の 1 ごとに付け直す
   const timer = setInterval(() => void renew().catch(() => undefined), Math.max(ttl / 4, 10));
   timer.unref?.();
+  let kept = false;
+  const stop = async () => {
+    released = true;
+    clearInterval(timer);
+    await pending?.catch(() => undefined);
+  };
   return {
     renew,
     // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる（renew が確かめる）
     ensure: renew,
+    lost: () => failure !== undefined || (!released && Date.now() >= until),
+    until: () => until,
+    keep: async () => {
+      kept = true;
+      await stop();
+    },
     release: async () => {
-      released = true;
-      clearInterval(timer);
-      await pending?.catch(() => undefined);
+      await stop();
+      if (kept) {
+        return;
+      }
       try {
         await backend.unlockStudy(id);
       } catch {
@@ -244,6 +266,8 @@ type RemoveOutcome = {
    * 消す前に見つければ元は消さない。消した後に見つけたとき（確かめから消すまでの間に置き換わった）も、成功にしない
    */
   foreignCopies?: true;
+  /** 付け替えの印が途中で切れた・付け直せなかった（その間の C-STORE を写しが黙って上書きしえた）。元は消さない */
+  lockLost?: true;
 };
 /**
  * 患者 ID の変わる書き換えの後に、元の検査から書き換えた画像だけを名指しで消す（design.md §15）。書き換えは元を残すので、
@@ -326,7 +350,15 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
       // 名指しで消す（書き換えたときと同じ。消し終えていれば何もしない。design.md §15.4）。元の検査が残っていれば、
       // 消す間は付け替えの印を付ける
       let removed: RemoveOutcome = {};
-      if (job.state === "Success" && d.after[0]!.PatientID !== d.before[0]!.PatientID) {
+      // 仕事の終わりを読めずに止まったとき、印の期限（lockUntil）までに仕事が終わっていなければ、印の切れた後に写した
+      // かもしれない（その間の C-STORE を写しが黙って上書きしうる）。元を消さずに部分反映として人に見せる
+      const lockUntil = rows.filter(r => r.detail?.writeId === d.writeId && typeof r.detail?.lockUntil === "string").at(-1)?.detail?.lockUntil;
+      const completed = job.completionTime ? Date.parse(job.completionTime) : NaN;
+      const copiedAfterLock = typeof lockUntil === "string"
+        && (!Number.isFinite(completed) || completed + 1000 > Date.parse(lockUntil));
+      if (job.state === "Success" && copiedAfterLock) {
+        removed = { lockLost: true };
+      } else if (job.state === "Success" && d.after[0]!.PatientID !== d.before[0]!.PatientID) {
         const lock = (await backend.lookupStudyIds(d.StudyInstanceUID)).includes(d.oldOrthancId)
           ? await lockSource(backend, d.oldOrthancId, options, ttlSeconds => audit({
             actorId: "hl7-receiver",
@@ -340,12 +372,18 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
           })) : undefined;
         try {
           removed = await removeSource(backend, d, lock);
+        } catch (e) {
+          // 消す途中で印が切れた・付け直せなかったら、残りを消さずに部分反映として人に見せる
+          if (!lock?.lost()) {
+            throw e;
+          }
+          removed = { lockLost: true };
         } finally {
           await lock?.release();
         }
       }
       const checked = await verify(backend, d);
-      const success = job.state === "Success" && checked.matchesAfter && !removed.arrivalsLost && !removed.foreignCopies;
+      const success = job.state === "Success" && checked.matchesAfter && !removed.arrivalsLost && !removed.foreignCopies && !removed.lockLost;
       // Success の不一致は、前の値と同じでも自動で解かない（design.md §4）。
       const partial = !success && (job.state === "Success" || !checked.matchesBefore);
       const row: HistoryRow = {
@@ -606,9 +644,24 @@ async function writeStudy(
       await lock?.renew();
     }
   } catch (e) {
+    if (jobCreated && lock?.lost()) {
+      // 仕事の間に印が切れた・付け直せなかった：その間の C-STORE を写しが黙って上書きしえたので、照らし合わせで
+      // 自動に解かず、元を消さずに部分反映として人に見せる（design.md §15.4）
+      await lock.keep();
+      await row("result", "failed", {
+        ...d, partial: true, lockLost: true, reason: visible(e instanceof Error ? e.message : "付け替えの印が切れた")
+      }, after[0]!.PatientID, d.StudyInstanceUID);
+      throw new BackendError("付け替えの印が途中で切れた");
+    }
     if (jobCreated || !(e instanceof BackendError)) {
+      // 仕事がまだ写しているかもしれないので、印は外さずに期限で切れるのを待つ。照らし合わせは、仕事がこの期限より
+      // 後に終わっていれば元を消さない
+      if (jobCreated && lock) {
+        await lock.keep();
+      }
       await row("result", "unknown", {
         ...d,
+        ...(jobCreated && lock ? { lockUntil: new Date(lock.until()).toISOString() } : {}),
         reason: visible(e instanceof Error ? e.message : "応答不明")
       });
       throw e;
@@ -621,11 +674,17 @@ async function writeStudy(
   let removed: RemoveOutcome = {};
   try {
     if (state === "Success" && lock) {
-      removed = await removeSource(backend, d, lock);
+      // 仕事を待つ間に印が切れていれば、元を消さない
+      removed = lock.lost() ? { lockLost: true } : await removeSource(backend, d, lock);
     }
   } catch (e) {
-    await row("result", "unknown", { ...d, reason: visible(e instanceof Error ? e.message : "元の画像を消せなかった") });
-    throw e;
+    if (lock?.lost()) {
+      // 消す途中で印が切れた・付け直せなかった：残りは消さず、部分反映として人に見せる
+      removed = { lockLost: true };
+    } else {
+      await row("result", "unknown", { ...d, reason: visible(e instanceof Error ? e.message : "元の画像を消せなかった") });
+      throw e;
+    }
   }
   try {
     checked = await verify(backend, d);
@@ -633,7 +692,7 @@ async function writeStudy(
     await row("result", "unknown", { ...d, reason: "画像ごとの確かめに失敗した" });
     throw e;
   }
-  const success = state === "Success" && checked.matchesAfter && !removed.arrivalsLost && !removed.foreignCopies;
+  const success = state === "Success" && checked.matchesAfter && !removed.arrivalsLost && !removed.foreignCopies && !removed.lockLost;
   // 成功した仕事の不一致は部分反映として止め、人の確認を待つ（design.md §4）。
   const partial = !success && (state === "Success" || !checked.matchesBefore);
   await row("result", success ? "success" : "failed", {

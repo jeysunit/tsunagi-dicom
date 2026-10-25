@@ -1023,6 +1023,40 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
   expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "DELETE" })).status).toBe(200);
   await storescuToOrthanc(more.batch);
   expect(await instances()).toBe(3);
+
+  // 読めない印の値は、確かめられないので断る（受ける側に倒さない）
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "PUT", body: "not-a-time", contentType: "text/plain" })).status).toBe(200);
+  const unreadable = { ...syntheticStudy("lock-unreadable", 56, 3), studyInstanceUid: study.studyInstanceUid };
+  writeDumps(unreadable);
+  await expect(storescuToOrthanc(unreadable.batch)).rejects.toThrow();
+  expect(await instances()).toBe(3);
+  expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "DELETE" })).status).toBe(200);
+
+  // 引き当て・メタデータの読み取りに失敗したとき、読めない JSON が返ったときも断る。Orthanc の REST を壊せないので、
+  // 試験の Orthanc だけ /tools/execute-script を開け、同じ Lua の中で RestApiPost・RestApiGet を差し替えて filter を呼ぶ
+  // （差し替えは 1 回の実行の中で戻す。Orthanc は Lua を 1 つずつ動かすので、その間の C-STORE には効かない）
+  const filter = (post: string, get: string) => `
+    local realPost, realGet = RestApiPost, RestApiGet
+    RestApiPost = ${post}
+    RestApiGet = ${get}
+    local ok, answer = pcall(ReceivedCStoreInstanceFilter, { StudyInstanceUID = '${study.studyInstanceUid}' }, { RemoteAet = 'ITEST_LUA' }, {})
+    RestApiPost, RestApiGet = realPost, realGet
+    print(ok and tostring(answer) or 'error')`;
+  const found = `function() return '[{"Type":"Study","ID":"${id}"}]' end`;
+  const failing = "function() error('synthetic failure') end";
+  const cases: [string, string, string, string][] = [
+    ["引き当ての失敗", failing, "realGet", "42752"],
+    ["引き当ての答えが読めない JSON", "function() return 'not json' end", "realGet", "42752"],
+    ["メタデータの読み取りの失敗", found, failing, "42752"],
+    ["メタデータが読めない JSON", found, "function() return 'not json' end", "42752"],
+    // 比べるため：差し替えない引き当てと読み取りで、印が無ければ受ける
+    ["印が無い", "realPost", "realGet", "0"]
+  ];
+  for (const [label, post, get, expected] of cases) {
+    const response = await orthanc("tools/execute-script", { method: "POST", body: filter(post, get), contentType: "text/plain" });
+    expect(response.status, label).toBe(200);
+    expect((await response.text()).trim(), label).toBe(expected);
+  }
 });
 
 // HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後（21 の前。21 は人が解いてから流す）に置く

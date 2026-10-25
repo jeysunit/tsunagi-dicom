@@ -171,14 +171,27 @@ describe("HL7 の Orthanc REST の要求", () => {
     });
   });
   describe("付け替えの印", () => {
-    it("期限の UNIX 秒を、利用者のメタデータ TsunagiLock に書く資格情報で PUT する", async () => {
-      state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+    it("期限の UNIX 秒を、利用者のメタデータ TsunagiLock に書く資格情報で PUT し、読み直して確かめる", async () => {
+      state.fetch
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(new Response("1800000000", { status: 200 }));
       await backend().lockStudy(id, 1800000000);
       const [url, init] = state.fetch.mock.calls[0]!;
       expect(url).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
       expect(init.method).toBe("PUT");
       expect(init.body).toBe("1800000000");
       expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
+      const [checkUrl, checkInit] = state.fetch.mock.calls[1]!;
+      expect(checkUrl).toBe(`http://pacs.example.org/studies/${id}/metadata/TsunagiLock`);
+      expect(checkInit.method).toBe("GET");
+      expect(checkInit.headers.authorization).toBe(init.headers.authorization);
+    });
+    it.each([
+      ["別の値", () => new Response("1700000000", { status: 200 })],
+      ["読めない", () => new Response("", { status: 404 })]
+    ])("PUT が成功しても、読み直した印が%sなら投げる", async (_label, readBack) => {
+      state.fetch.mockResolvedValueOnce(new Response("", { status: 200 })).mockResolvedValueOnce(readBack());
+      await expect(backend().lockStudy(id, 1800000000)).rejects.toThrow("読み直すと値が違います");
     });
     it("Orthanc に印の名前（UserMetadata）が無ければ、設定の要ることを知らせて投げる", async () => {
       state.fetch.mockResolvedValueOnce(new Response("", { status: 404 }));
