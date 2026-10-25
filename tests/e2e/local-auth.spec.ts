@@ -686,6 +686,15 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await fresh.context.close();
 });
 
+// 共有の管理者のセッションは、操作の無い時間が SCREEN_LOCK_MINUTES を越えるとロックされる。段 6 のように長い試験を挟む前に使い終える
+test("ログアウトすると、セッションは使えない", async () => {
+  const { page } = admin;
+  await page.goto("/");
+  await page.getByRole("button", { name: "ログアウト" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  expect((await page.request.get("/api/studies")).status()).toBe(401);
+});
+
 // 段 6（段 5 の後に置く。モックの Orthanc の中で氏名を直し、検査を1件足すため）
 test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を保って直し、検査情報修正は直した検査を新しく作る（理由と再認証つき）", async ({ browser }) => {
   test.setTimeout(120_000);
@@ -848,12 +857,4 @@ test("画面のロック：ロックの画面からログアウトでき、確�
   // ロック・ロックの画面からのログアウト・ログインの 3 行以上が増える
   expect(after.checked).toBeGreaterThanOrEqual(before.checked + 3);
   await fresh.context.close();
-});
-
-test("ログアウトすると、セッションは使えない", async () => {
-  const { page } = admin;
-  await page.goto("/");
-  await page.getByRole("button", { name: "ログアウト" }).click();
-  await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get("/api/studies")).status()).toBe(401);
 });

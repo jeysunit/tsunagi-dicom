@@ -40,7 +40,16 @@ interface Preview {
   scope: "patient" | "reassign" | "accession" | "content";
   orthancId: string;
   fields: Record<string, { before: string; after: string }>;
-  studies: { studyInstanceUid: string; studyDate: string; studyDescription: string; accessionNumber: string; instanceCount: number; mixed: string[] }[];
+  studies: {
+    studyInstanceUid: string;
+    studyDate: string;
+    studyDescription: string;
+    accessionNumber: string;
+    instanceCount: number;
+    mixed: string[];
+    /** 患者情報修正：この検査の、直す項目の修正前の値 */
+    before?: Record<string, string>;
+  }[];
   target?: { exists: boolean; PatientName?: string; PatientBirthDate?: string; PatientSex?: string };
 }
 
@@ -140,7 +149,7 @@ export function ModifyPanel({
   }
 
   return (
-    <div id={panelId} role="group" aria-label="値の修正" className="mt-2 space-y-2 rounded-md border border-border bg-surface p-3" data-testid="modify-panel">
+    <div id={panelId} role="group" aria-label="修正" className="mt-2 space-y-2 rounded-md border border-border bg-surface p-3" data-testid="modify-panel">
       {!current && !loadError && (
         <p className="min-h-5">
           <PendingText pending>いまの値を読み込んでいます…</PendingText>
@@ -461,6 +470,34 @@ function CorrectionForm({
               ))}
             </tbody>
           </table>
+          {preview.studies.some((s) => Object.entries(s.before ?? {}).some(([f, v]) => v !== preview.fields[f]?.before)) && (
+            // 同じ患者IDの検査どうしで修正前の値が違う（取り違え・前の修正の途中で止まったなど）。検査ごとの値を並べる
+            <div className="space-y-1" data-testid="modify-studies">
+              <p className="text-sm text-danger">検査ごとに修正前の値が違います。全部の検査が修正後の値になります。</p>
+              <table className="text-sm">
+                <thead>
+                  <tr className="text-xs text-label">
+                    <th className="pr-4 text-left font-normal">検査日</th>
+                    <th className="pr-4 text-left font-normal">検査名</th>
+                    {Object.keys(preview.fields).map((f) => (
+                      <th key={f} className="pr-4 text-left font-normal">{FIELD_LABELS[f as CorrectionField] ?? f}（修正前）</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.studies.map((s) => (
+                    <tr key={s.studyInstanceUid}>
+                      <td className="pr-4 text-value">{formatSlashDate(s.studyDate)}</td>
+                      <td className="pr-4 text-value">{s.studyDescription}</td>
+                      {Object.keys(preview.fields).map((f) => (
+                        <td key={f} className="pr-4 text-value">{shown(f, s.before?.[f] ?? "")}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <p className="text-sm text-value" data-testid="modify-scope">
             {preview.scope === "patient" && `同じ患者IDの検査 ${preview.studies.length} 件の、全部の画像に当てます。`}
             {preview.scope === "reassign" && (preview.target?.exists
@@ -533,9 +570,9 @@ function CorrectionForm({
         <div role="alert" className="space-y-1" data-testid="modify-status">
           <p className="text-danger">
             {phase.hl7
-              ? "この検査に、結果不明のHL7の更新があります。管理者が確認するまで、値の修正はできません"
+              ? "この検査に、結果不明のHL7の更新があります。管理者が確認するまで、修正はできません"
               : phase.partial
-                ? "一部だけが修正されました。管理者が確認するまで、値の修正はできません"
+                ? "一部だけが修正されました。管理者が確認するまで、修正はできません"
                 : "修正の結果を確認できません。再実行せずに状態を確認してください"}
           </p>
           {phase.note && <p className="text-sm text-label">{phase.note}</p>}

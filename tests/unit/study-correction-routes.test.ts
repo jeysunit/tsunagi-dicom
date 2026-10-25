@@ -670,6 +670,28 @@ describe("属性の訂正（患者情報修正）", () => {
   });
 });
 
+describe("修正の窓に最初に入れる、いまの値（GET …/modify/preview）", () => {
+  it("Orthanc から読んだいまの値を返し、患者の値を見せたことを記録する。役割の無い・形の違う検査の ID は断る", async () => {
+    const { GET } = await import("@/app/api/studies/[uid]/modify/preview/route");
+    const res = await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/modify/preview`), uidParams(STUDY));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.values).toEqual({
+      PatientID: "JP-TEST-0001",
+      PatientName: "Yamada^Taro=山田^太郎=やまだ^たろう",
+      PatientBirthDate: expect.any(String),
+      PatientSex: expect.any(String),
+      AccessionNumber: "ACC-0001-1",
+      StudyDate: "20260410",
+      StudyDescription: "胸部CT 単純（試験）",
+    });
+    expect(body.mixed).toEqual([]);
+    const viewed = (await (await db()).auditLog.findMany({ where: { action: "view_study" }, orderBy: { seq: "desc" }, take: 1 }))[0];
+    expect(detailOf(viewed)).toMatchObject({ via: "modify_current" });
+    expect((await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/modify/preview?orthancId=x`), uidParams(STUDY))).status).toBe(400);
+  });
+});
+
 describe("中身の訂正（検査情報修正）", () => {
   it("検査日の訂正は、新しい StudyInstanceUID の検査を作り、元の検査を残す", async () => {
     const source = await instancesOf(STUDY);
