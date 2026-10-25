@@ -1326,7 +1326,7 @@ test("23 患者情報修正（氏名）：全画像の氏名が直り、Study・
     OverwriteInstancesMode: system.OverwriteInstancesMode,
     TsunagiLock: system.UserMetadata?.TsunagiLock ?? null,
   });
-  const study = syntheticStudy("attr-name", 61, 3);
+  const study = syntheticStudy("attr-name", 70, 3);
   writeDumps(study);
   await storescuToOrthanc(study.batch);
   const [id] = await waitFor("患者情報修正の検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
@@ -1368,14 +1368,14 @@ test("23 患者情報修正（氏名）：全画像の氏名が直り、Study・
 
 test("24 患者情報修正（患者IDの付け替え）：選んだ検査だけが新しい患者IDへ移り、UID は変わらず、元の画像は残らない（2026-10-25）", async ({ browser }) => {
   test.setTimeout(180_000);
-  const study = syntheticStudy("attr-reassign", 62, 2);
+  const study = syntheticStudy("attr-reassign", 71, 2);
   writeDumps(study);
   await storescuToOrthanc(study.batch);
   const [oldId] = await waitFor("付け替えの検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
   const s = await correctionSession(browser);
   try {
     await resolveLeftovers(s.post);
-    const to = "JP-TEST-IT62-NEW";
+    const to = "JP-TEST-IT71-NEW";
     const { status, body, shown } = await s.correct(study.studyInstanceUid, "attribute", { PatientID: to });
     expect(shown).toMatchObject({ scope: "reassign", target: { exists: false } });
     expect(status, JSON.stringify(body)).toBe(200);
@@ -1394,7 +1394,7 @@ test("24 患者情報修正（患者IDの付け替え）：選んだ検査だけ
 
 test("25 検査情報修正（検査日・検査名）：新しい StudyInstanceUID の検査ができ、Series・SOP の UID も新しく、元の検査は残る（2026-10-25）", async ({ browser }) => {
   test.setTimeout(180_000);
-  const study = syntheticStudy("content-date", 63, 2);
+  const study = syntheticStudy("content-date", 72, 2);
   writeDumps(study);
   await storescuToOrthanc(study.batch);
   const [sourceId] = await waitFor("検査情報修正の検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
