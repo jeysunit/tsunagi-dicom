@@ -15,16 +15,13 @@ export interface FakeOrthanc {
   /**
    * 次の書き換えの仕事の結果（既定は Success。partial は 1 枚だけ書き換えて Success）。beforeModify は仕事が画像を
    * 読んだ後に呼ぶ（最中に届いた画像を作る）。wholeStudyDelete は、次の画像の削除で名指しに関わらず検査ごと消す
-   * （画像の削除を誤る Orthanc）
-   */
-  /**
-   * beforeDelete は削除の前（ファイルの印を見る前）、duringDelete は印を見た後で消す前に呼ぶ（届き直しを作る）
+   * （画像の削除を誤る Orthanc）。beforeDelete は削除の前（ファイルの印を見る前）、duringDelete は印を見た後で消す前に
+   * 呼ぶ（届き直しを作る）。changesFail は次の変更の記録の読み取りを結果不明で失敗させ、deleteFailAfter は次の削除を
+   * その枚数だけ消した後に結果不明で止める（時間切れ・一部だけの削除）
    */
   next: {
     state?: JobState; partial?: boolean; beforeModify?: () => void; wholeStudyDelete?: boolean;
-    beforeDelete?: () => void; duringDelete?: () => void;
-    /** 次の変更の記録の読み取りを、結果不明で失敗させる */
-    changesFail?: boolean;
+    beforeDelete?: () => void; duringDelete?: () => void; changesFail?: boolean; deleteFailAfter?: number;
   };
   add(instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance;
   studyId(patientId: string, uid: string): string;
@@ -108,8 +105,8 @@ export function createFakeOrthanc(): FakeOrthanc {
         fake.instances.push(updated);
         arrivals.push(instanceIdOf(updated));
       }
-      const { wholeStudyDelete, beforeDelete, duringDelete, changesFail } = fake.next;
-      fake.next = { wholeStudyDelete, beforeDelete, duringDelete, changesFail };
+      const { wholeStudyDelete, beforeDelete, duringDelete, changesFail, deleteFailAfter } = fake.next;
+      fake.next = { wholeStudyDelete, beforeDelete, duringDelete, changesFail, deleteFailAfter };
       const jobId = randomUUID();
       jobs.set(jobId, state);
       return { jobId };
@@ -120,7 +117,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     // http.ts と同じく、印を見て消す画像の ID を決め、1 枚ずつ、消す直前に変更の記録で届き直しを確かめてから ID で消す。
     // Orthanc と同じく、消した画像の変更の記録も消える
     async deleteStudyInstances(id: string, named: PatientInstance[], source: { since: number; files: Record<string, string> }) {
-      const { beforeDelete, duringDelete, wholeStudyDelete, changesFail } = fake.next;
+      const { beforeDelete, duringDelete, wholeStudyDelete, changesFail, deleteFailAfter } = fake.next;
       fake.next = {};
       beforeDelete?.();
       fake.deleteCalls.push({ id, sops: named.map(i => i.SOPInstanceUID) });
@@ -132,10 +129,13 @@ export function createFakeOrthanc(): FakeOrthanc {
       if (changesFail) {
         throw new BackendUnknownError();
       }
-      const doomed = new Set(candidates.filter(c => !arrivals.slice(source.since).includes(c)));
+      const doomed = new Set(candidates.filter(c => !arrivals.slice(source.since).includes(c)).slice(0, deleteFailAfter));
       fake.instances = fake.instances.filter(i => idOf(i) !== id || (!wholeStudyDelete && !doomed.has(instanceIdOf(i))));
       for (let k = arrivals.length - 1; k >= 0; k--) {
         if (doomed.has(arrivals[k]!)) arrivals[k] = "（消した画像の記録）";
+      }
+      if (deleteFailAfter !== undefined) {
+        throw new BackendUnknownError();
       }
     },
     async jobStatus(jobId: string) {

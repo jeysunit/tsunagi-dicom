@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -161,6 +162,36 @@ describe("HL7 の経過の確かめ", () => {
     await expect(history()).rejects.toThrow("鍵の無い行");
     orthanc.add({ PatientID: "ER9", StudyInstanceUID: "2.25.900" });
     expect(await send(a40("ER9", "P000009"))).toContain("MSA|AE|");
+  });
+
+  it("鍵の無い偽の result（manual）で、部分反映を解いたことにできない", async () => {
+    temp(`${STUDY}.1.1`);
+    temp(`${STUDY}.1.2`);
+    orthanc.next.partial = true;
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AE|");
+    const request = (await history()).find(r => r.detail?.event === "request")!;
+    await forgeRow(current.db, { event: "result", writeId: request.detail?.writeId, manual: true, partial: false }, true);
+    await expect(history()).rejects.toThrow("鍵の無い行");
+    orthanc.add({ PatientID: "ER9", StudyInstanceUID: "2.25.900" });
+    const calls = orthanc.modifyCalls.length;
+    expect(await send(a40("ER9", "P000009"))).toContain("MSA|AE|");
+    expect(orthanc.modifyCalls).toHaveLength(calls);
+  });
+
+  it("予測した MSH-10 の鍵の無い偽の ack（AA）で、まだ受けていないメッセージに AA を返させない", async () => {
+    orthanc.add({ PatientID: "ER9", StudyInstanceUID: "2.25.900" });
+    temp(`${STUDY}.1.1`);
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+    // 次に送られる A40（MSH-10 を予測）を受けたことにする received と ack を、鍵の無い形で書き足す
+    const next = a40("ER9", "P000009");
+    const controlId = next.split("\r")[0]!.split("|")[9];
+    const bodyHash = createHash("sha256").update(Buffer.from(next)).digest("hex");
+    await forgeRow(current.db, { event: "received", messageId: "forged", controlId, sendingApplication: "RIS_EMU", sendingFacility: "TEST_HOSPITAL", bodyHash }, true);
+    await forgeRow(current.db, { event: "ack", messageId: "forged", code: "AA", reason: "受理した" }, true);
+    const ack = await send(next);
+    expect(ack).toContain("MSA|AE|");
+    expect(ack).toContain("鍵の無い行");
+    expect(orthanc.instances.find(i => i.StudyInstanceUID === "2.25.900")?.PatientID).toBe("ER9");
   });
 
   it("結果不明の書き換えの行の action を書き換えて HL7 の経過から隠しても、止まったまま", async () => {

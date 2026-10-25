@@ -431,6 +431,35 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     warn.mockRestore();
   });
 
+  it("ORM の検査として見回りが移した画像を、人が書き戻しても、統合し直さない", async () => {
+    const warn = quietly();
+    expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
+    expect(await send(orm("P000001", STUDY, "RE1"))).toContain("MSA|AA|");
+    temp();
+    expect(await sweep()).toMatchObject({ count: 1 });
+    orthanc.instances = orthanc.instances.map(i => ({ ...i, PatientID: TEMP, PatientName: "UNKNOWN^MALE", PatientBirthDate: "", PatientSex: "M", AccessionNumber: "" }));
+    const calls = orthanc.modifyCalls.length;
+    expect(await sweep()).toEqual({ count: 0, skipped: 1 });
+    expect(orthanc.modifyCalls).toHaveLength(calls);
+    expect(patientsOf(STUDY)).toEqual([TEMP]);
+    warn.mockRestore();
+  });
+
+  it("元の画像を一部だけ消したところで答えが来なくなっても、次の照らし合わせが残りを消して解く", async () => {
+    temp();
+    await send(a40(TEMP, "P000001"));
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    temp(STUDY, { SOPInstanceUID: `${STUDY}.2.2` });
+    orthanc.next.deleteFailAfter = 1;
+    expect(await sweep()).toMatchObject({ count: 0, blocked: "書き換えに失敗した" });
+    expect(rows.filter(r => r.detail?.event === "result").at(-1)).toMatchObject({ outcome: "unknown" });
+    expect(orthanc.instances.filter(i => i.PatientID === TEMP)).toHaveLength(1);
+    expect(await sweep()).toEqual({ count: 0, skipped: 0 });
+    expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "success", detail: { partial: false } });
+    expect(patientsOf(STUDY)).toEqual(["P000001"]);
+    expect(orthanc.instances).toHaveLength(3);
+  });
+
   it("同じ UID の検査が仮の患者 2 人と統合した先の患者の 3 件にあれば、どれも書き換えない", async () => {
     const warn = quietly();
     temp();
