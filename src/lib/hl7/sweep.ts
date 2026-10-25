@@ -6,7 +6,6 @@ import { BackendError, type Backend, type PatientInstance } from "@/lib/backend/
 import { visible } from "../../../hl7-receiver/visible";
 import {
   history,
-  planStudy,
   reconcile,
   writeAndVerify,
   writeAudit,
@@ -14,8 +13,8 @@ import {
   type AuditWriter,
   type HistoryRow,
   type ProcessOptions,
-  type Remembered,
-} from "./apply";
+} from "@/lib/keep-uid-write";
+import { planStudy, type Remembered } from "./apply";
 
 /** A40・ORM の覚えを使う期間。受理から 24 時間（design.md §15） */
 export const REMEMBER_TTL_MS = 24 * 60 * 60 * 1000;
