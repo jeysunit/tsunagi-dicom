@@ -516,25 +516,17 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     // 変更の記録の位置を先に読む（印を読んだ後に届いた画像は、位置より後の記録に必ず残る）
     async studyInstanceFiles(id: string) {
       const since = await lastChange();
-      const list = await instanceFiles(id);
-      return {
-        since,
-        files: Object.fromEntries(list.map(f => [f.key, f.file])),
-        ids: Object.fromEntries(list.map(f => [f.key, f.instanceId]))
-      };
-    },
-
-    async arrivedSince(since: number, instanceIds: string[]) {
-      return instanceIds.length > 0 && arrivedSince(since, new Set(instanceIds));
+      return { since, files: Object.fromEntries((await instanceFiles(id)).map(f => [f.key, f.file])) };
     },
 
     // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
-    // 書き換えの前とファイルの印が違う画像（同じ UID で届き直して置き換わった画像）も消さない。Orthanc の削除には
-    // 印の条件を付けられないので、呼び手が後で arrivedSince で届き直しを確かめる（design.md §15.4）
+    // 書き換えの前とファイルの印が違う画像と、消す直前に変更の記録で届き直しの見える画像（同じ UID で届き直して
+    // 置き換わった画像）も消さない。Orthanc は画像を消すとその変更の記録も消すので、届き直しは消す前に確かめる。
+    // 記録を読んでから消すまでの間に届き直した画像は消えうる（Orthanc の削除に条件を付けられない。design.md §15.4）
     async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles) {
       const named = new Set(instances.map(instanceKey));
       for (const { instanceId, key, file } of await instanceFiles(id)) {
-        if (!named.has(key) || source.files[key] !== file) {
+        if (!named.has(key) || source.files[key] !== file || await arrivedSince(source.since, new Set([instanceId]))) {
           continue;
         }
         const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });

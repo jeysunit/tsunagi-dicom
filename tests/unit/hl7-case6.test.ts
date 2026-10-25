@@ -355,36 +355,36 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1)).toMatchObject({ detail: { partial: true } });
   });
 
-  it("印を見てから消すまでの間に同じ UID の画像が届き直して消えたら、見つけて部分反映で止める", async () => {
+  it("印を見た後、消す直前の確かめの前に同じ UID の画像が届き直したら、変更の記録で見つけて消さずに部分反映で止める", async () => {
     temp();
     await send(a40(TEMP, "P000001"));
     const late = temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    let resent: typeof late | undefined;
     orthanc.next.duringDelete = () => {
       orthanc.instances = orthanc.instances.filter(i => i !== late);
-      temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });
+      resent = temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });
     };
     expect(await sweep()).toMatchObject({ count: 0, blocked: "画像の一部だけが書き換わった" });
-    // 届き直した画像は（Orthanc に条件つきの削除が無いので）消えたが、成功にはしない
-    expect(orthanc.instances.some(i => i.PatientID === TEMP)).toBe(false);
+    expect(orthanc.instances.includes(resent!)).toBe(true);
     expect(rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1))
-      .toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true } });
+      .toMatchObject({ outcome: "failed", detail: { partial: true } });
   });
 
-  it("届き直した画像を消した後に変更の記録を読めずに止まっても、次の照らし合わせは成功にしない", async () => {
+  it("消す直前の確かめで変更の記録を読めずに止まっても、次の照らし合わせは届き直した画像を消さず、成功にしない", async () => {
     temp();
     await send(a40(TEMP, "P000001"));
     const late = temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
+    let resent: typeof late | undefined;
     orthanc.next.duringDelete = () => {
       orthanc.instances = orthanc.instances.filter(i => i !== late);
-      temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });
+      resent = temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });
     };
     orthanc.next.changesFail = true;
     expect(await sweep()).toMatchObject({ count: 0, blocked: "書き換えに失敗した" });
     expect(rows.filter(r => r.detail?.event === "result").at(-1)).toMatchObject({ outcome: "unknown" });
-    // 元の画像はもう無いが、照らし合わせも消した画像の ID の届き直しを変更の記録で見つける
     expect(await sweep()).toMatchObject({ count: 0, blocked: "結果の分からない書き換えがある" });
-    expect(rows.filter(r => r.detail?.event === "reconcile").at(-1))
-      .toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true, matchesAfter: true } });
+    expect(orthanc.instances.includes(resent!)).toBe(true);
+    expect(rows.filter(r => r.detail?.event === "reconcile").at(-1)).toMatchObject({ outcome: "failed", detail: { partial: true } });
   });
 
   it("書き換えた画像が替え先の検査に揃わなければ、元の画像を消さずに部分反映で止める", async () => {

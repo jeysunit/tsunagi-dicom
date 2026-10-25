@@ -86,7 +86,6 @@ describe("HL7 の Orthanc REST の要求", () => {
         .mockResolvedValueOnce(Response.json(Object.entries(files).map(([ID, FileUuid]) => ({ ID, FileUuid }))));
     };
     const files = { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2" };
-    const ids = { "1.2|1.2.3|1.2.3.1": one, "1.2|1.2.3|1.2.3.2": two };
     const changes = (list: { ChangeType: string; ID: string }[], done = true, last = 20) =>
       state.fetch.mockResolvedValueOnce(Response.json({ Changes: list, Done: done, Last: last }));
     it("変更の記録の位置を先に読み、画像ごとのファイルの印を、UID の組を鍵にして読む", async () => {
@@ -94,8 +93,7 @@ describe("HL7 の Orthanc REST の要求", () => {
       listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
       expect(await backend().studyInstanceFiles(id)).toEqual({
         since: 7,
-        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" },
-        ids: { ...ids, "1.2|1.2.3|1.2.3.3": late }
+        files: { "1.2|1.2.3|1.2.3.1": "f1", "1.2|1.2.3|1.2.3.2": "f2", "1.2|1.2.3|1.2.3.3": "f3" }
       });
       expect(state.fetch.mock.calls[0]![0]).toBe("http://pacs.example.org/changes?last");
       expect(state.fetch.mock.calls[2]![0]).toBe(`http://pacs.example.org/studies/${id}/instances`);
@@ -108,35 +106,42 @@ describe("HL7 の Orthanc REST の要求", () => {
     it("名指しで、ファイルの印が書き換えの前と同じ画像だけを、画像の ID で 1 枚ずつ、書く資格情報で消す", async () => {
       // 2 枚目は同じ UID で届き直して印が変わった
       listing({ [one]: "f1", [two]: "f2-resent", [late]: "f3" });
+      // 消す直前に、変更の記録でその画像の届き直しが無いかを読む（ほかの画像の記録は関係ない）
+      changes([{ ChangeType: "NewInstance", ID: late }]);
       state.fetch.mockResolvedValueOnce(new Response("", { status: 200 }));
-      await backend().deleteStudyInstances(id, [full("1.2.3.1"), full("1.2.3.2")], { since: 7, files, ids });
-      expect(state.fetch).toHaveBeenCalledTimes(3);
-      expect(state.fetch.mock.calls[0]![0]).toBe(`http://pacs.example.org/studies/${id}/instances-tags?simplify`);
-      const [url, init] = state.fetch.mock.calls[2]!;
-      expect(url).toBe(`http://pacs.example.org/instances/${one}`);
+      await backend().deleteStudyInstances(id, [full("1.2.3.1"), full("1.2.3.2")], { since: 7, files });
+      expect(state.fetch.mock.calls.map(c => c[0])).toEqual([
+        `http://pacs.example.org/studies/${id}/instances-tags?simplify`,
+        `http://pacs.example.org/studies/${id}/instances`,
+        "http://pacs.example.org/changes?since=7&limit=1000",
+        `http://pacs.example.org/instances/${one}`
+      ]);
+      const init = state.fetch.mock.calls[3]![1];
       expect(init.method).toBe("DELETE");
       expect(init.headers.authorization).toBe(`Basic ${Buffer.from("writer:synthetic-write").toString("base64")}`);
     });
-    it("名指しの画像の ID に、位置より後の届いた記録があるかを、続きの頁まで読んで答える", async () => {
-      changes([{ ChangeType: "NewInstance", ID: late }, { ChangeType: "StableStudy", ID: id }], false, 15);
+    it("消す直前に、変更の記録の続きの頁まで読み、位置より後に届き直した画像は消さない", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      changes([{ ChangeType: "StableStudy", ID: id }], false, 15);
       changes([{ ChangeType: "NewInstance", ID: one }], true, 16);
-      expect(await backend().arrivedSince(7, [one, two])).toBe(true);
-      expect(state.fetch.mock.calls.map(c => c[0])).toEqual([
+      await backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files });
+      expect(state.fetch.mock.calls.map(c => c[0]).slice(2)).toEqual([
         "http://pacs.example.org/changes?since=7&limit=1000",
         "http://pacs.example.org/changes?since=15&limit=1000"
       ]);
-      state.fetch.mockReset();
-      changes([{ ChangeType: "NewInstance", ID: late }]);
-      expect(await backend().arrivedSince(7, [one, two])).toBe(false);
+      expect(state.fetch.mock.calls.some(c => c[1]?.method === "DELETE")).toBe(false);
     });
-    it("変更の記録の形が違えば読めないとする", async () => {
+    it("変更の記録の形が違えば、消さずに読めないとする", async () => {
+      listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
       state.fetch.mockResolvedValueOnce(Response.json({ Changes: "x" }));
-      await expect(backend().arrivedSince(7, [one])).rejects.toThrow("変更の記録");
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toThrow("変更の記録");
+      expect(state.fetch.mock.calls.some(c => c[1]?.method === "DELETE")).toBe(false);
     });
     it.each([[502, BackendUnknownError], [403, BackendError]])("画像の削除の状態 %i を投げる", async (status, error) => {
       listing({ [one]: "f1", [two]: "f2", [late]: "f3" });
+      changes([]);
       state.fetch.mockResolvedValueOnce(new Response("", { status }));
-      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files, ids })).rejects.toBeInstanceOf(error);
+      await expect(backend().deleteStudyInstances(id, [full("1.2.3.1")], { since: 7, files })).rejects.toBeInstanceOf(error);
     });
   });
   it.each([302, 502, 503, 504])("状態 %i は結果不明", async (status) => {

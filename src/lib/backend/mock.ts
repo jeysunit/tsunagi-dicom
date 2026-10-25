@@ -529,16 +529,12 @@ export function createMockBackend(): Backend {
       return {
         since: 0,
         files: Object.fromEntries(list.map((i) => [key(i), `mock-file-${i.SOPInstanceUID}`])),
-        ids: Object.fromEntries(list.map((i) => [key(i), `mock-instance-${i.SOPInstanceUID}`])),
       };
     },
     async deleteStudyInstances(id: string) {
       if ((await restStudies()).some((s) => s.ID === id)) {
         throw new BackendError("モック：書き換えの元の検査が残っている");
       }
-    },
-    async arrivedSince() {
-      return false;
     },
 
     async lookupStudyIds(studyInstanceUid: string) {

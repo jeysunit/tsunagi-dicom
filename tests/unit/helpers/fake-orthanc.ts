@@ -115,32 +115,28 @@ export function createFakeOrthanc(): FakeOrthanc {
       return { jobId };
     },
     async studyInstanceFiles(id: string) {
-      const list = fake.instances.filter(i => idOf(i) === id);
-      return {
-        since: arrivals.length,
-        files: Object.fromEntries(list.map(i => [triple(i), fileOf(i)])),
-        ids: Object.fromEntries(list.map(i => [triple(i), instanceIdOf(i)]))
-      };
+      return { since: arrivals.length, files: Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), fileOf(i)])) };
     },
-    async arrivedSince(since: number, instanceIds: string[]) {
-      if (fake.next.changesFail) {
-        fake.next.changesFail = false;
-        throw new BackendUnknownError();
-      }
-      return arrivals.slice(since).some(a => instanceIds.includes(a));
-    },
-    // http.ts と同じく、印を見て消す画像の ID を決めてから、ID で消す（印を見た後に置き換わった画像も消える）
+    // http.ts と同じく、印を見て消す画像の ID を決め、1 枚ずつ、消す直前に変更の記録で届き直しを確かめてから ID で消す。
+    // Orthanc と同じく、消した画像の変更の記録も消える
     async deleteStudyInstances(id: string, named: PatientInstance[], source: { since: number; files: Record<string, string> }) {
       const { beforeDelete, duringDelete, wholeStudyDelete, changesFail } = fake.next;
-      fake.next = { changesFail };
+      fake.next = {};
       beforeDelete?.();
       fake.deleteCalls.push({ id, sops: named.map(i => i.SOPInstanceUID) });
       const names = new Set(named.map(triple));
-      const doomed = new Set(fake.instances
+      const candidates = fake.instances
         .filter(i => idOf(i) === id && names.has(triple(i)) && source.files[triple(i)] === fileOf(i))
-        .map(instanceIdOf));
+        .map(instanceIdOf);
       duringDelete?.();
+      if (changesFail) {
+        throw new BackendUnknownError();
+      }
+      const doomed = new Set(candidates.filter(c => !arrivals.slice(source.since).includes(c)));
       fake.instances = fake.instances.filter(i => idOf(i) !== id || (!wholeStudyDelete && !doomed.has(instanceIdOf(i))));
+      for (let k = arrivals.length - 1; k >= 0; k--) {
+        if (doomed.has(arrivals[k]!)) arrivals[k] = "（消した画像の記録）";
+      }
     },
     async jobStatus(jobId: string) {
       const state = jobs.get(jobId);

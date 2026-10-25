@@ -183,12 +183,6 @@ async function removeSource(backend: Backend, d: WriteDetail): Promise<boolean> 
   if (named.length) {
     await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles);
   }
-  // 書き換えた画像のどれかが、印を読んだ後に届き直していれば、届き直した中身を消したかもしれない。前の回で消し終えて
-  // 止まった後の照らし合わせでも、消した画像の ID と変更の記録で確かめる（画像の ID が分からなければ確かめられない）
-  const instanceIds = d.before.map(i => d.sourceFiles!.ids[triple(i)]);
-  if (instanceIds.some(id => !id) || await backend.arrivedSince(d.sourceFiles.since, instanceIds as string[])) {
-    return false;
-  }
   const left = new Set((await sourceInstances()).map(triple));
   return source.every(i => written.has(triple(i)) || left.has(triple(i)));
 }
