@@ -9,6 +9,7 @@ import { PendingText, useDelayedPending } from "@/components/ui/pending";
 import { Tabs } from "@/components/ui/tabs";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { PacsActions } from "@/components/studies/pacs-actions";
+import { TagGrid } from "@/components/studies/tag-grid";
 import { Thumbnail } from "@/components/studies/thumbnail";
 import { ViewerMenu } from "@/components/studies/viewer-menu";
 import type { DicomValueRow } from "@/lib/all-values";
@@ -69,7 +70,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       size="sm"
       variant="ghost"
       // 読み上げ用の文字（sr-only は絶対位置）の基準をボタンにする。基準が無いと、詳細の場所の中で切れずに、頁の高さを押し広げる
-      className="relative h-6"
+      className="relative ml-1 h-6 align-middle"
       aria-label={`${label}をコピー`}
       onClick={() => {
         void navigator.clipboard.writeText(text).then(
@@ -93,10 +94,13 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 /** StudyInstanceUID・SeriesInstanceUID：行の幅いっぱいに 0.75rem・等幅・控えめの色、コピーのボタン付き */
 function UidLine({ label, uid, testId = "uid-line" }: { label: string; uid: string; testId?: string }) {
   return (
-    <div className="flex items-center gap-2" data-testid={testId}>
+    <div className="flex items-baseline gap-2" data-testid={testId}>
       <span className="shrink-0 text-xs text-label">{label}</span>
-      <code className="min-w-0 flex-1 font-mono text-[0.75rem] break-all text-label">{uid}</code>
-      <CopyButton text={uid} label={label} />
+      {/* 写すボタンは値のすぐ右（行の右端に離さない）。長い UID が折り返すときは、最後の行の末尾に付く */}
+      <span className="min-w-0">
+        <code className="font-mono text-[0.75rem] break-all text-label">{uid}</code>
+        <CopyButton text={uid} label={label} />
+      </span>
     </div>
   );
 }
@@ -147,51 +151,7 @@ function TagTable<T>({
           {query.error.message}
         </p>
       )}
-      {rows && (
-        <table className="w-full table-fixed text-xs">
-          <colgroup>
-            <col className="w-[5.5rem]" />
-            <col className="w-[7.5rem]" />
-            <col className="w-[2.5rem]" />
-            <col />
-          </colgroup>
-          <thead className="sticky top-0 bg-surface text-left text-label">
-            <tr>
-              <th scope="col" className="px-2 py-1 font-normal">
-                タグ
-              </th>
-              <th scope="col" className="px-2 py-1 font-normal">
-                タグ名
-              </th>
-              <th scope="col" className="px-2 py-1 font-normal">
-                VR
-              </th>
-              <th scope="col" className="px-2 py-1 font-normal">
-                値
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.tag} className="border-b border-border align-top last:border-0" data-tag={row.tag}>
-                <td className="px-2 py-1 font-mono whitespace-nowrap text-label">{row.tag}</td>
-                <td className="px-2 py-1 break-words text-label">{row.name}</td>
-                <td className="px-2 py-1 font-mono text-label">{row.vr}</td>
-                <td className="px-2 py-1 break-all" data-testid="tag-value">
-                  {row.value === null ? (
-                    <span className="text-label">—</span>
-                  ) : (
-                    <>
-                      {row.value}
-                      {row.length != null && <span className="text-label">…（全 {row.length.toLocaleString("ja-JP")} 文字）</span>}
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {rows && <TagGrid rows={rows} />}
     </div>
   );
 }
