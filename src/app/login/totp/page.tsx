@@ -11,7 +11,7 @@ export default async function TotpPage() {
   if (state.kind !== "pending") redirect(state.kind === "anonymous" ? "/login" : "/");
   if (state.stage !== "totp") redirect(STAGE_PATHS[state.stage]);
   return (
-    <section className="mx-auto max-w-sm space-y-4 pt-8">
+    <section className="mx-auto w-full max-w-[var(--w-login)] space-y-4 pt-8">
       <h1 className="text-lg font-bold text-value">認証コードの入力</h1>
       <p className="text-label">認証アプリに表示された 6 桁のコードを入力してください</p>
       <CodeForm endpoint="/api/auth/totp" csrfToken={state.row.csrfToken} label="認証" />

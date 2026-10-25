@@ -32,7 +32,7 @@ export function ViewerDefaults({
   }
 
   return (
-    <section className="max-w-xl space-y-4">
+    <section className="max-w-[var(--w-settings)] space-y-4">
       <h1 className="text-lg font-bold text-value">ビューア設定（モダリティ別）</h1>
       <p className="text-label">検査ごとの指定がない場合に使うビューアです</p>
       {openers.length === 0 && <p className="text-label">ビューアが設定されていません（VIEWER_OHIF_URL などを設定します）</p>}

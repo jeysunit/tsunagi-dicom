@@ -161,6 +161,46 @@ describe("docs/design-system/tokens.md と globals.css の色", () => {
   });
 });
 
+/** CSS の `selector {` から最初の `}` までの塊から、`--<prefix>…` の宣言を名前と値（小文字）の対で返す */
+function declarations(text: string, selector: string, prefix: RegExp): Record<string, string> {
+  const start = text.indexOf(`${selector} {`);
+  expect(start, selector).toBeGreaterThanOrEqual(0);
+  const body = stripComments(text.slice(start, text.indexOf("}", start)));
+  return Object.fromEntries(
+    [...body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)]
+      .filter((d) => prefix.test(d[1]!))
+      .map((d) => [d[1]!, d[2]!.trim().toLowerCase()]),
+  );
+}
+
+// ui-kit の写し（3 製品で同じ値）。写しは直さず、globals.css をこれに合わせる。
+// 文字の大きさ・余白・角は Tailwind の段（text-xs・p-3・rounded-md など）で書くので、ここでは比べない（docs/design-system/tokens.md の 2〜4）
+describe("ui-kit の tokens.css と globals.css", () => {
+  const kit = readFileSync("docs/design-system/ui-kit/tokens.css", "utf8");
+  const COLOR = /^--color-/;
+  const LAYOUT = /^--(?:w|h)-/;
+
+  it("明るい地の色は、名前も値も同じ（足りない色も余分な色も無い）", () => {
+    expect(declarations(css, "@theme", COLOR)).toEqual(declarations(kit, ":root", COLOR));
+  });
+
+  it("暗い地の色は、名前も値も同じ（globals.css の暗い地に無い色は明るい地の値を引き継ぐ）", () => {
+    const dark = { ...declarations(css, "@theme", COLOR), ...declarations(css, '[data-theme="dark"]', COLOR) };
+    expect(dark).toEqual(declarations(kit, ":root[data-theme=dark]", COLOR));
+  });
+
+  it("字体・外枠の高さ・本文の幅は同じ", () => {
+    expect(declarations(css, "@theme", /^--font-/)).toEqual(declarations(kit, ":root", /^--font-/));
+    const layout = declarations(css, ":root", LAYOUT);
+    expect(Object.keys(layout).length).toBeGreaterThan(5);
+    expect(layout).toEqual(declarations(kit, ":root", LAYOUT));
+  });
+
+  it("写しの版は 1.0.0", () => {
+    expect(readFileSync("docs/design-system/ui-kit/VERSION", "utf8").trim()).toBe("1.0.0");
+  });
+});
+
 const badge = (kind: StatusKind, text: string) => createElement(StatusBadge, { kind, children: text });
 
 describe("部品", () => {
