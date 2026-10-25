@@ -17,7 +17,8 @@ RUN apt-get update \
   && chown itest /received
 
 COPY send-dumps.sh /usr/local/bin/send-dumps
-RUN chmod 0755 /usr/local/bin/send-dumps
+COPY find-study.sh /usr/local/bin/find-study
+RUN chmod 0755 /usr/local/bin/send-dumps /usr/local/bin/find-study
 
 USER 10001
 WORKDIR /tmp
