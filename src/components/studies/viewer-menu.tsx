@@ -103,7 +103,7 @@ export function ViewerMenu({
   return (
     <div
       ref={root}
-      className={cn("relative inline-flex items-end gap-1", compact ? "max-w-full flex-row-reverse items-center gap-1.5" : "flex-col")}
+      className={cn("relative inline-flex gap-1", compact ? "max-w-full flex-row-reverse items-center gap-1.5" : "flex-col items-start")}
       data-row-control
     >
       <div className="inline-flex shrink-0">
@@ -145,8 +145,9 @@ export function ViewerMenu({
           id={menuId}
           role="menu"
           className={cn(
-            "absolute right-0 z-30 min-w-56 rounded-md border border-border bg-background py-1 text-left shadow-md",
-            compact ? "top-7" : "top-8",
+            "absolute z-30 min-w-56 rounded-md border border-border bg-background py-1 text-left shadow-md",
+            // 一覧の行の中は、右端のボタンの下に右そろえで開く。詳細は、ボタンの下に左そろえで開く（右の区画の外へ、一覧の上にはみ出さない）
+            compact ? "top-7 right-0" : "top-8 left-0",
           )}
         >
           {openers.map((v) => (

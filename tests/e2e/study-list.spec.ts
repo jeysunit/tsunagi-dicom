@@ -20,9 +20,6 @@ async function asRole(page: Page, label: "管理者" | "一般") {
   }
 }
 
-/** 詳細の見出し（患者バナーと UID の 1 行）の高さの上限（px）。バナーは氏名とかなの 2 行（約 58px）、UID の行は 24px のボタンを含む */
-const BANNER_HEAD_MAX = 96;
-
 const rows = (page: Page) => page.getByTestId("study-table").locator("tbody > tr[data-study-uid]");
 const row = (page: Page, uid = STUDY) => page.locator(`tr[data-study-uid="${uid}"]`);
 
@@ -267,13 +264,11 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   // バナーの項目は、見出しの並び（氏名・患者ID・生年月日・受付番号・検査日時・モダリティ）のとおり
   const labels = await banner.locator("dt").allTextContents();
   expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
-  // UID は、バナーの下の 1 行。高さは、バナー（氏名とかなの 2 行）と UID の 1 行ぶん。その下の「検査の情報」（項目名と値の対）は含めない
-  expect(
-    await head.evaluate((el) => {
-      const info = el.querySelector("[data-testid=detail-info]");
-      return el.getBoundingClientRect().height - (info ? info.getBoundingClientRect().height + 2 : 0);
-    }),
-  ).toBeLessThanOrEqual(BANNER_HEAD_MAX);
+  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は 2〜3 段に折り返す（字体で折り返しの数が変わる。CI の機では 3 段で 144px だった）。
+  // 前は「バナー（氏名とかなの 2 行）と UID の 1 行で 96px 以内」だった。いまは、バナーは 3 段まで（150px 以内）、UID の行は
+  // 折り返しても 4 行まで（80px 以内）を確かめる（「検査の情報」は含めない）
+  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(150);
+  expect((await detail.getByTestId("study-uid").boundingBox())!.height).toBeLessThanOrEqual(80);
   // StudyInstanceUID は見出しに常に出る（開け閉めしない）。下の「UID」「DICOM タグ」のボタンは無い
   await expect(detail.getByTestId("detail-uid-toggle")).toHaveCount(0);
   await expect(detail.getByTestId("detail-tags-toggle")).toHaveCount(0);
@@ -290,26 +285,31 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   await expect(detail.getByTestId("tag-set-all")).toHaveCount(1);
   await expect(detail.getByTestId("study-tags-open")).toHaveCount(1);
 
-  // もう一度押しても閉じない（下の詳細は選んだ行のものを出し続ける）。Escape で選びを外すと案内に戻る
-  // （期待の変更：行の下に開く形をやめ、もう一度押して閉じる動きを、Escape に替えた。docs/spec.md の 3.1）
+  // もう一度押しても閉じない（右の詳細は選んだ行のものを出し続ける）。Escape で選びを外すと、詳細の場所ごと閉じる
+  // （期待の変更：行の下に開く形をやめ、もう一度押して閉じる動きを、Escape に替えた。docs/spec.md の 3.1。
+  //   2026-10-25 に、案内の文「検査を選択してください」をやめ、何も選んでいないときは詳細の場所を出さない形にした）
   await row(page).click();
   await expect(detail).toBeVisible();
   await row(page).focus();
   await page.keyboard.press("Escape");
   await expect(detail).toHaveCount(0);
-  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+  await expect(page.getByTestId("detail-pane")).toHaveCount(0);
 });
 
 // 詳細がどの検査のものか。UID の行は「UID」の中（閉じている）なので、詳細の枠に付けた data-study-uid で確かめる
 const expectDetail = (page: Page, uid: string) => expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
 
-test("上下に分ける：行を選ぶと下の詳細が替わり、一覧の行は動かない。頁全体はスクロールしない", async ({ page }) => {
+test("左右に分ける：何も選ばなければ一覧が全幅。行を選ぶと右に詳細が開き、一覧は列を詰めた形になる。行を替えても一覧の行は動かない。頁全体はスクロールしない", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await asRole(page, "一般");
   await expect(rows(page)).toHaveCount(8);
-  // 何も選んでいないときは、下に短い案内だけ
-  await expect(page.getByTestId("study-detail-empty")).toBeVisible();
+  // 何も選んでいないときは、詳細の場所を出さず、一覧が全幅（案内の文は出さない）
+  await expect(page.getByTestId("detail-pane")).toHaveCount(0);
   await expect(page.getByTestId("study-detail")).toHaveCount(0);
+  await expect(page.getByTestId("split-handle")).toHaveCount(0);
+  const fullWidth = (await page.getByTestId("study-list-scroll").boundingBox())!.width;
+  const columns = () => page.getByTestId("study-table").locator("colgroup col").evaluateAll((els) => els.map((el) => el.getAttribute("data-col")));
+  expect(await columns()).toEqual(["date", "id", "accession", "name", "kana", "birth", "age", "sex", "desc", "count", "viewer"]);
 
   const noPageScroll = () =>
     page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight);
@@ -317,20 +317,41 @@ test("上下に分ける：行を選ぶと下の詳細が替わり、一覧の�
 
   const second = rows(page).nth(1);
   const secondUid = (await second.getAttribute("data-study-uid"))!;
-  const before = await rows(page).nth(1).boundingBox();
   await rows(page).first().click();
   await expectDetail(page, (await rows(page).first().getAttribute("data-study-uid"))!);
+  // 詳細は一覧の右に開く（同じ高さの帯）。一覧は幅が縮み、列は詰めた形（検査日時・患者ID・氏名・年齢・性別・モダリティ／検査名）に替わる
+  const listBox = (await page.getByTestId("study-list-scroll").boundingBox())!;
+  const paneBox = (await page.getByTestId("detail-pane").boundingBox())!;
+  expect(paneBox.x).toBeGreaterThanOrEqual(listBox.x + listBox.width);
+  expect(Math.abs(paneBox.y - listBox.y)).toBeLessThanOrEqual(1);
+  expect(listBox.width).toBeLessThan(fullWidth);
+  expect(listBox.width).toBeGreaterThanOrEqual(320);
+  expect(paneBox.width).toBeGreaterThanOrEqual(400);
+  expect(await columns()).toEqual(["date", "id", "name", "agesex", "desc"]);
+  // 初期設定の位置では、詰めた形の一覧が、1280px の画面で横にスクロールせずに収まる
+  expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const before = await rows(page).nth(1).boundingBox();
   await second.click();
   await expectDetail(page, secondUid);
-  // 行の位置は動かない（詳細は行の下に開かない。一覧は選んだだけではスクロールしない）
+  // 行の位置は動かない（詳細は行の下に開かない。一覧は選んだだけではスクロールしない。行を替えても列は動かない）
   const after = await rows(page).nth(1).boundingBox();
   expect(after).toEqual(before);
+  expect(await columns()).toEqual(["date", "id", "name", "agesex", "desc"]);
   expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollTop)).toBe(0);
+  // 閉じる（×）と、一覧は全幅・全部の列に戻る
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
+  await expect(page.getByTestId("detail-pane")).toHaveCount(0);
+  expect(await columns()).toHaveLength(11);
+  expect((await page.getByTestId("study-list-scroll").boundingBox())!.width).toBeGreaterThanOrEqual(fullWidth - 1);
+  await rows(page).nth(1).click();
+  await expectDetail(page, secondUid);
   // 詳細が長くても頁は伸びない。一覧の中だけがスクロールする
   expect(await noPageScroll()).toBe(true);
   // 期待の変更（1 件）：一覧の中だけがスクロールすることの確かめを、高さ 900px から 600px の画面に替えた。
-  // 1 行が 28px になり、見本の 8 件は 900px の高さの一覧に全部収まる（前は 65px で収まらなかった）ため。確かめる内容は同じ
-  await page.setViewportSize({ width: 1280, height: 600 });
+  // 1 行が 28px になり、見本の 8 件は 900px の高さの一覧に全部収まる（前は 65px で収まらなかった）ため。確かめる内容は同じ。
+  // 左右に分けて（2026-10-25）、一覧が画面の下まで使えるようになったので、600px から 500px に替えた（8 件は 600px の高さの一覧にも収まる。
+  // 一覧の高さは 224px を下回らないので、これより低いと頁がスクロールする）
+  await page.setViewportSize({ width: 1280, height: 500 });
   expect(await noPageScroll()).toBe(true);
   const list = page.getByTestId("study-list-scroll");
   expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
@@ -338,7 +359,7 @@ test("上下に分ける：行を選ぶと下の詳細が替わり、一覧の�
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollbarGutter)).toContain("stable");
 });
 
-test("上下に分ける：矢印の上下で行を移すと詳細が付いて替わり、Enter でビューアを開く。通り過ぎた行の詳細は読まない", async ({ page }) => {
+test("左右に分ける：矢印の上下で行を移すと詳細が付いて替わり、Enter でビューアを開く。通り過ぎた行の詳細は読まない", async ({ page }) => {
   await asRole(page, "一般");
   const detailRequests: string[] = [];
   page.on("request", (req) => {
@@ -375,7 +396,7 @@ test("上下に分ける：矢印の上下で行を移すと詳細が付いて�
   await expectOpened(page, () => page.keyboard.press("Enter"), /viewer\.example\.org\/(ohif|stone)\//);
 });
 
-test("上下に分ける：矢印で移した行は、一覧の見える所にスクロールする", async ({ page }) => {
+test("左右に分ける：矢印で移した行は、一覧の見える所にスクロールする", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 560 });
   await asRole(page, "一般");
   await rows(page).first().click();
@@ -390,49 +411,54 @@ test("上下に分ける：矢印で移した行は、一覧の見える所に�
   expect(inView).toBe(true);
 });
 
-test("上下に分ける：境目をキーボードで動かせ、位置を覚える", async ({ page }) => {
-  // 低い画面では、一覧の最小の高さのために境目の動く範囲が狭まる（別の試験で見る）。ここは高い画面で動きを見る
-  await page.setViewportSize({ width: 1280, height: 1000 });
+test("左右に分ける：境目をキーボードで動かせ、位置を覚える", async ({ page }) => {
   await asRole(page, "一般");
+  // 行を選ぶまでは、境目は無い（一覧が全幅）
+  await expect(page.getByTestId("split-handle")).toHaveCount(0);
+  await row(page).click();
   const handle = page.getByTestId("split-handle");
   await expect(handle).toHaveAttribute("role", "separator");
-  await expect(handle).toHaveAttribute("aria-orientation", "horizontal");
-  await expect(handle).toHaveAttribute("aria-valuenow", "60");
-  const topHeight = () => page.locator("[data-split-root] > div").first().evaluate((el) => el.getBoundingClientRect().height);
-  const h0 = await topHeight();
+  await expect(handle).toHaveAttribute("aria-orientation", "vertical");
+  await expect(handle).toHaveAttribute("aria-valuenow", "55");
+  const listWidth = () => page.getByTestId("study-list-scroll").evaluate((el) => el.getBoundingClientRect().width);
+  const w0 = await listWidth();
 
   await handle.focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(handle).toHaveAttribute("aria-valuenow", "65");
-  expect(await topHeight()).toBeGreaterThan(h0);
+  await page.keyboard.press("ArrowRight");
+  await expect(handle).toHaveAttribute("aria-valuenow", "60");
+  expect(await listWidth()).toBeGreaterThan(w0);
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await expect(handle).toHaveAttribute("aria-valuenow", "50");
+  expect(await listWidth()).toBeLessThan(w0);
+  // 上下の矢印は扱わない
   await page.keyboard.press("ArrowUp");
-  await page.keyboard.press("ArrowUp");
-  await expect(handle).toHaveAttribute("aria-valuenow", "55");
-  expect(await topHeight()).toBeLessThan(h0);
+  await expect(handle).toHaveAttribute("aria-valuenow", "50");
   await page.keyboard.press("Home");
-  await expect(handle).toHaveAttribute("aria-valuenow", "20");
-  await page.keyboard.press("ArrowUp");
-  await expect(handle).toHaveAttribute("aria-valuenow", "20");
+  await expect(handle).toHaveAttribute("aria-valuenow", "30");
+  await page.keyboard.press("ArrowLeft");
+  await expect(handle).toHaveAttribute("aria-valuenow", "30");
   await page.keyboard.press("End");
-  await expect(handle).toHaveAttribute("aria-valuenow", "80");
+  await expect(handle).toHaveAttribute("aria-valuenow", "75");
   await page.keyboard.press("Home");
-  await page.keyboard.press("ArrowDown");
-  await expect(handle).toHaveAttribute("aria-valuenow", "25");
+  await page.keyboard.press("ArrowRight");
+  await expect(handle).toHaveAttribute("aria-valuenow", "35");
 
   // 開き直しても同じ位置
   await page.reload();
-  await expect(page.getByTestId("split-handle")).toHaveAttribute("aria-valuenow", "25");
+  await row(page).click();
+  await expect(page.getByTestId("split-handle")).toHaveAttribute("aria-valuenow", "35");
 
   // ドラッグでも動く
   const box = (await page.getByTestId("split-handle").boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 120, { steps: 5 });
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2, { steps: 5 });
   await page.mouse.up();
-  expect(Number(await page.getByTestId("split-handle").getAttribute("aria-valuenow"))).toBeGreaterThan(25);
+  expect(Number(await page.getByTestId("split-handle").getAttribute("aria-valuenow"))).toBeGreaterThan(35);
 });
 
-test("上下に分ける：狭い画面では一覧だけを出し、行を選ぶと詳細を一覧の上に重ねる", async ({ page }) => {
+test("左右に分ける：狭い画面では一覧だけを出し、行を選ぶと詳細を一覧の上に重ねる", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await asRole(page, "一般");
   await expect(page.getByTestId("split-handle")).toBeHidden();
@@ -448,7 +474,8 @@ test("上下に分ける：狭い画面では一覧だけを出し、行を選�
   // 開いたら詳細へフォーカスが移り、背後の一覧は操作の対象から外れる（inert）。Tab を送っても一覧の行には出ない
   const pane = page.getByTestId("detail-pane");
   await expect(pane).toBeFocused();
-  await expect(page.locator("[data-split-root] > div[inert]")).toHaveCount(1);
+  // 背後の絞り込みの帯と一覧（左右に分けた場所の左）が inert
+  await expect(page.locator("[data-split-root] [inert]")).toHaveCount(2);
   // 段 3 で詳細の状態のボタンを外し、詳細の中の止まり先が減った。前の「Tab を 6 回」は、詳細の中の止まり先の数に
   // 頼っていたので、詳細の中の止まり先の数だけ Tab を送って詳細の中に留まること、さらに送っても一覧の行に出ないことに分けた
   const stops = await pane.evaluate(
@@ -470,7 +497,7 @@ test("上下に分ける：狭い画面では一覧だけを出し、行を選�
   await page.keyboard.press("Escape");
   await expect(pane).toBeHidden();
   await expect(row(page)).toBeFocused();
-  await expect(page.locator("[data-split-root] > div[inert]")).toHaveCount(0);
+  await expect(page.locator("[data-split-root] [inert]")).toHaveCount(0);
 
   // 閉じるボタンでも同じ
   await row(page).click({ position: { x: 100, y: 20 } });
@@ -480,31 +507,83 @@ test("上下に分ける：狭い画面では一覧だけを出し、行を選�
   await expect(row(page)).toBeFocused();
 });
 
-test("上下に分ける：境目を上へ寄せても、一覧が最小の高さを保ち、絞り込みがはみ出さない", async ({ page }) => {
-  // 期待の変更（左のナビ）：左のナビ（208px）を開くと、本文が狭くなって絞り込みが 1 段多く折り返す（日本語の字体で 3 段）。
-  // その 1 段（約 32px）ぶん、画面の高さを 560px から 640px に上げた。ナビを閉じれば、これまでの高さでも収まる
+test("左右に分ける：境目をどちらへ寄せても、一覧は 320px・詳細は 400px を保ち、絞り込みがはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 640 });
   await asRole(page, "一般");
   await row(page).click();
   const handle = page.getByTestId("split-handle");
   await handle.focus();
+  const geometry = () =>
+    page.evaluate(() => {
+      const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      const filters = r("[data-testid=study-filters]");
+      const list = r("[data-testid=study-list-scroll]");
+      const handleRect = r("[data-testid=split-handle]");
+      const detail = r("[data-testid=detail-pane]");
+      return {
+        filtersBottom: filters.bottom,
+        listTop: list.top,
+        listWidth: list.width,
+        listRight: list.right,
+        handleLeft: handleRect.left,
+        handleRight: handleRect.right,
+        detailLeft: detail.left,
+        detailRight: detail.right,
+        detailWidth: detail.width,
+        bodyRight: r("[data-split-root]").right,
+      };
+    });
+  // いちばん左へ：一覧は詰めた形の列が読める幅（320px）を保つ
   await page.keyboard.press("Home");
-  await expect(handle).toHaveAttribute("aria-valuenow", "20");
-  const g = await page.evaluate(() => {
-    const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-    const filters = r("[data-testid=study-filters]");
-    const list = r("[data-testid=study-list-scroll]");
-    const handleRect = r("[data-testid=split-handle]");
-    const detail = r("[data-testid=detail-pane]");
-    return { filtersBottom: filters.bottom, listTop: list.top, listHeight: list.height, listBottom: list.bottom, handleTop: handleRect.top, handleBottom: handleRect.bottom, detailTop: detail.top };
-  });
-  // 一覧は 3 行ほどの高さ（14rem＝224px）を保つ
-  expect(g.listHeight).toBeGreaterThanOrEqual(220);
-  // 絞り込みは一覧の上、一覧は境目の上、境目は詳細の上（重ならない）
+  await expect(handle).toHaveAttribute("aria-valuenow", "30");
+  let g = await geometry();
+  expect(g.listWidth).toBeGreaterThanOrEqual(319);
+  // いちばん右へ：詳細は 400px を保つ
+  await page.keyboard.press("End");
+  await expect(handle).toHaveAttribute("aria-valuenow", "75");
+  g = await geometry();
+  expect(g.detailWidth).toBeGreaterThanOrEqual(399);
+  // 絞り込みは一覧の上、一覧は境目の左、境目は詳細の左（重ならない）
   expect(g.filtersBottom).toBeLessThanOrEqual(g.listTop + 1);
-  expect(g.listBottom).toBeLessThanOrEqual(g.handleTop + 1);
-  expect(g.handleBottom).toBeLessThanOrEqual(g.detailTop + 1);
+  expect(g.listRight).toBeLessThanOrEqual(g.handleLeft + 1);
+  expect(g.handleRight).toBeLessThanOrEqual(g.detailLeft + 1);
+  // 詳細は本文の中に収まる（境目の幅も引いて、右へはみ出さない）
+  expect(g.detailRight).toBeLessThanOrEqual(g.bodyRight + 1);
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("左右に分ける：本文が 736px より狭いとき（左のナビを開いた 900px の画面）は、左右に分けず、詳細を一覧の上に重ねる", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 800 });
+  await asRole(page, "一般");
+  await row(page).click({ position: { x: 100, y: 20 } });
+  const pane = page.getByTestId("detail-pane");
+  await expect(pane).toBeVisible();
+  // 重ね表示：境目は無く、詳細は一覧を覆い、背後の一覧は inert。フォーカスは詳細へ
+  await expect(page.getByTestId("split-handle")).toBeHidden();
+  await expect(pane).toBeFocused();
+  await expect(page.locator("[data-split-root] [inert]")).toHaveCount(2);
+  const list = (await page.getByTestId("study-list-scroll").boundingBox())!;
+  const box = (await pane.boundingBox())!;
+  expect(box.x).toBeLessThanOrEqual(list.x + 1);
+  expect(box.x + box.width).toBeGreaterThanOrEqual(list.x + list.width - 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(pane).toHaveCount(0);
+  await expect(row(page)).toBeFocused();
+});
+
+test("左右に分ける：ブラウザの文字を大きくすると（rem が 24px）、本文が 1000px 台でも重ね表示に替わり、背後の一覧は inert になる", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await asRole(page, "一般");
+  // 46rem ＝ 1104px になり、左のナビを開いた本文（1072px ほど）より広い。CSS と JS が同じ幅で切り替わることを確かめる
+  await page.addStyleTag({ content: "html { font-size: 24px; }" });
+  await row(page).click({ position: { x: 100, y: 20 } });
+  const pane = page.getByTestId("detail-pane");
+  await expect(pane).toBeVisible();
+  await expect(page.getByTestId("split-handle")).toBeHidden();
+  await expect(pane).toBeFocused();
+  await expect(page.locator("[data-split-root] [inert]")).toHaveCount(2);
 });
 
 test("詳細を見せるときは必ず記録が残る：A→B→A と戻っても、300ms 止まらない限り中身は出ず、止まれば取り直して記録する", async ({ page }) => {
@@ -571,13 +650,16 @@ test("ビューアの覚えを変えても、詳細は取り直さず、「詳�
   const menu = page.getByTestId("study-detail").getByTestId("open-menu");
   await menu.click();
   await page.getByRole("menuitem", { name: "この検査は Stone で開く" }).click();
-  await expect(row(page).getByTestId("remembered-viewer")).toHaveText("この検査: Stone");
+  // 覚えは、詳細のビューアの部品に出る（期待の変更：詳細を開いている間、一覧の列は詰めた形で、行にビューアの部品は無い。2026-10-25）。
+  // 一覧の行の値を読み直した結果が詳細に届いていること（覚えが替わった）を、ここで確かめる
+  const remembered = page.getByTestId("study-detail").getByTestId("remembered-viewer");
+  await expect(remembered).toHaveText("この検査: Stone");
   await page.waitForTimeout(500);
   expect(gets).toHaveLength(1);
   // 戻す
   await menu.click();
   await page.getByRole("menuitem", { name: /記憶を解除/ }).click();
-  await expect(row(page).getByTestId("remembered-viewer")).toHaveCount(0);
+  await expect(remembered).toHaveCount(0);
   expect(gets).toHaveLength(1);
 });
 
@@ -1059,8 +1141,9 @@ test("詳細：受付番号はバナーに常に出し、英字氏名・和暦�
   await expect(info.getByTestId("detail-alphabetic")).toContainText("Shiken Takako");
   await expect(info).toContainText("1960/07/15（昭和35年）");
   await expect(info.getByTestId("detail-counts")).toHaveText(/シリーズ \/ 画像\s*1 \/ 4/);
-  // 見出し（バナー・UID・検査の情報）は、情報の行の分だけ高くなるが、バナー（2 行）と UID の 1 行と、情報の 1〜2 行に収まる
-  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(BANNER_HEAD_MAX + 48);
+  // 「検査の情報」は、右の残りの幅で折り返しても 3 段（80px）以内。見出し全体は、バナー（3 段で 150px）・UID（60px）・検査の情報（80px）の合計に収まる
+  expect((await info.boundingBox())!.height).toBeLessThanOrEqual(80);
+  expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(150 + 60 + 80 + 12);
 });
 
 test("詳細の見出し：受付番号が無いときも「受付番号 —」を出す（無いこと自体が照合の手がかり）", async ({ page }) => {
@@ -1099,8 +1182,9 @@ test("詳細の見出しは患者バナー：氏名・かな・患者 ID・生�
   const head = page.getByTestId("detail-head");
   await expect(head).toContainText("JP-TEST-0004");
   const banner = head.getByRole("region", { name: "患者" });
-  // 1280px の幅では、バナーの項目は氏名と同じ段に並ぶ（氏名 24px＋かな 18px＋内側の余白 16px 程度）
-  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(64);
+  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は氏名の右と下の 2 段に
+  // 折り返す。前は 1280px の幅で氏名と同じ段に並び 64px 以内だった。いまは 3 段（150px 以内）まで（字体で段の数が変わる）
+  expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(150);
   // 下のシリーズのサムネイルが、同じ画面に見えている（詳細の場所の中。スクロールしなくても）
   const pane = (await page.getByTestId("detail-pane").boundingBox())!;
   const strip = (await page.getByTestId("series-strip").boundingBox())!;
@@ -1402,8 +1486,9 @@ test("画像の場所：狭い幅（600px）では、画像の一覧を上、タ
 });
 
 test("自動更新：30 秒ごとに一覧の版を読み、変わったときだけ一覧を読み直す。選んだ行・スクロール・開いている詳細は残る", async ({ page }) => {
-  // 一覧がスクロールする高さにする
-  await page.setViewportSize({ width: 1280, height: 520 });
+  // 一覧がスクロールする高さにする（期待の変更：左右に分けて（2026-10-25）一覧が画面の下まで使えるようになったので、520px から 500px に替えた。
+  // 一覧の高さは 224px を下回らないので、これより低いと頁がスクロールする）
+  await page.setViewportSize({ width: 1280, height: 500 });
   await asRole(page, "一般");
   // 役割を選ぶために開いた頁の版の要求が、この下で足す route に入って数えられないよう、その頁を閉じてから始める
   // （混んだ CI では、その頁の最初の要求が遅れて出る）
