@@ -501,12 +501,14 @@ describe("付け替えの印", () => {
     const status = orthanc.backend.jobStatus.bind(orthanc.backend);
     let polls = 0;
     vi.spyOn(orthanc.backend, "jobStatus").mockImplementation(async (jobId) => {
-      // 付け直しの時計が回るまで仕事を終わらせない
-      if (++polls === 1) await new Promise(r => setTimeout(r, 60));
+      // 時計の付け直しが始まる（失敗する）まで仕事を終わらせない（期限 400 ミリ秒の内で待つ）
+      if (++polls === 1) {
+        for (let waited = 0; calls < 2 && waited < 350; waited += 5) await new Promise(r => setTimeout(r, 5));
+      }
       if (polls === 3) orthanc.jobs.set(jobId, "Success");
       return status(jobId);
     });
-    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 80, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
+    expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 400, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
     expect(calls).toBeGreaterThan(1);
     expect(orthanc.deleteCalls).toHaveLength(0);
     expect(orthanc.events.filter(e => e.startsWith("unlock:"))).toEqual([]);
