@@ -226,14 +226,58 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
   await expect(rows).toHaveCount(3);
   await expect(page.getByTestId("modality-table")).not.toContainText("192.0.2.");
   await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
-  // 結果は印と時刻つき（「成功 10:32:05」「失敗 10:32:11（応答なし）」。docs/spec.md の 3.3）
-  await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText(/^成功 \d{2}:\d{2}:\d{2}$/);
+  // 結果は札と時刻つき（「成功 10:32:05」。失敗は札・時刻・理由の 1 句。docs/spec.md の 3.3）
+  await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText(/成功\s*\d{2}:\d{2}:\d{2}$/);
+  await expect(page.getByTestId("echo-notice")).toContainText("dtg に接続できました");
   await page.locator('[data-modality="offline"]').getByTestId("echo").click();
-  await expect(page.locator('[data-modality="offline"]').getByTestId("echo-result")).toHaveText(/^失敗 \d{2}:\d{2}:\d{2}（応答なし）$/);
+  const offline = page.locator('[data-modality="offline"]').getByTestId("echo-result");
+  await expect(offline).toHaveText(/失敗\s*\d{2}:\d{2}:\d{2}原因は分かりません。管理者に、登録の確認を頼んでください。$/);
+  // 相手が答えなかったのか断られたのかは応答から分からないので、「応答がありません」などとは書かない
+  await expect(offline).not.toContainText("応答がありません");
+
+  // すべて接続確認：失敗があっても全部の行に結果が出て、件数を知らせる
+  await page.getByTestId("echo-all").click();
+  await expect(page.getByTestId("echo-notice")).toContainText("3 件のうち、1 件に接続できませんでした");
+  await expect(page.getByTestId("echo-result")).toHaveCount(3);
+  await expect(page.getByTestId("echo-all")).toBeEnabled();
 
   await asRole(page, "管理者");
   await page.goto("/modalities");
   await expect(page.locator('[data-modality="dtg"]')).toContainText("192.0.2.20:11112");
+  await expect(page.getByRole("columnheader", { name: "ホスト名:ポート番号" })).toBeVisible();
+  await page.locator('[data-modality="offline"]').getByTestId("echo").click();
+  await expect(page.locator('[data-modality="offline"]').getByTestId("echo-why")).toContainText("ホスト名・ポート番号・AEタイトルを確認して");
+});
+
+test("接続先：確認そのものを終えられなかったときは、接続できなかったと書かない", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.route("**/api/modalities/dtg/echo", (route) => route.abort());
+  await page.goto("/modalities");
+  const row = page.locator('[data-modality="dtg"]');
+  await row.getByTestId("echo").click();
+  await expect(row.getByTestId("echo-why")).toContainText("サーバーに接続できませんでした");
+  await expect(page.getByTestId("echo-notice")).toContainText("dtg の接続確認を終えられませんでした");
+  await expect(page.getByTestId("echo-notice")).not.toContainText("dtg に接続できませんでした");
+});
+
+test("接続先：確認中は札を出し、その行のボタンを押せなくする。二度押しても要求は 1 回", async ({ page }) => {
+  await asRole(page, "一般");
+  let calls = 0;
+  await page.route("**/api/modalities/dtg/echo", async (route) => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue();
+  });
+  await page.goto("/modalities");
+  const row = page.locator('[data-modality="dtg"]');
+  await expect(row.getByTestId("echo-cell")).toHaveText("—");
+  await row.getByTestId("echo").dblclick();
+  await expect(row.getByTestId("echo-result")).toContainText("確認中");
+  await expect(row.getByTestId("echo")).toBeDisabled();
+  await expect(page.getByTestId("echo-all")).toBeDisabled();
+  await expect(row.getByTestId("echo-result")).toContainText("成功");
+  await expect(row.getByTestId("echo")).toBeEnabled();
+  expect(calls).toBe(1);
 });
 
 // 期待の変更：前は「医師・閲覧には受け取り・機器の頁の道が無い」。役割を管理者と一般の2つにした（2026-10-20）ので、
