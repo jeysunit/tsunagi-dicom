@@ -77,7 +77,7 @@ export function ConnStatus({ timeZone }: { timeZone: string }) {
         data-testid="conn-button"
         data-overall={overall ?? "loading"}
       >
-        <span className="text-label">接続の状態</span>
+        <span className="text-label max-sm:hidden">接続の状態</span>
         {overall === "ok" && <StatusBadge kind="confirmed">接続中</StatusBadge>}
         {overall === "ng" && <StatusBadge kind="failed">一部が接続不可</StatusBadge>}
         {overall === "unknown" && <StatusBadge kind="unknown">確認できません</StatusBadge>}
