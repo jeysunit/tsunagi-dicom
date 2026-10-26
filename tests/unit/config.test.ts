@@ -59,6 +59,22 @@ describe("設定の読み込み", () => {
     expect(config.viewers.ohifUrl).toBeUndefined();
   });
 
+  it("ビューアの URL は根を書く。開く道（OHIF の /viewer・Stone の /index.html）まで書いた値は断る", () => {
+    // 末尾に /viewer を書くと、開く URL が /ohif/viewer/viewer になって 404 になる（2026-10-27 に見つけた設定の誤り）
+    expect(variablesOf({ ...base, VIEWER_OHIF_URL: "https://pacs.example.org/ohif/viewer" })).toEqual(["VIEWER_OHIF_URL"]);
+    expect(variablesOf({ ...base, VIEWER_OHIF_URL: "https://pacs.example.org/ohif/viewer/" })).toEqual(["VIEWER_OHIF_URL"]);
+    expect(variablesOf({ ...base, VIEWER_STONE_URL: "https://pacs.example.org/stone-webviewer/index.html" })).toEqual([
+      "VIEWER_STONE_URL",
+    ]);
+    const config = loadConfig({
+      ...base,
+      VIEWER_OHIF_URL: "https://pacs.example.org/ohif/",
+      VIEWER_STONE_URL: "https://pacs.example.org/stone-webviewer",
+    });
+    expect(config.viewers.ohifUrl).toBe("https://pacs.example.org/ohif/");
+    expect(config.viewers.stoneUrl).toBe("https://pacs.example.org/stone-webviewer");
+  });
+
   it("SESSION_SECRET が空なら起動しない", () => {
     expect(variablesOf({ ...base, SESSION_SECRET: "" })).toEqual(["SESSION_SECRET"]);
     expect(variablesOf({ ...base, SESSION_SECRET: undefined })).toEqual(["SESSION_SECRET"]);

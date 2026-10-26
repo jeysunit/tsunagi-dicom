@@ -81,7 +81,7 @@ Orthanc を**改造せずにそのまま使い**、日本の医療機関の画�
 | | `BACKEND_WRITE_USERNAME`・`BACKEND_WRITE_PASSWORD`・`BACKEND_WRITE_PASSWORD_FILE` | 書く資格情報（段 4）。Orthanc への書き込みの POST（C-ECHO・送る）に使う（引き当ての `/tools/lookup` は読む資格情報）。名前とパスワードは組で渡す。無ければ読む資格情報で書く。患者の情報を置く環境では、読む資格情報と分けることが施設の必須（`security-and-maintenance.md` の 4.1） |
 | | `BACKEND_CA_FILE` | 自前の CA（例：施設の CA）。証明書の確かめを切る設定は持たない |
 | | `BACKEND_MOCK` | `true` でモックのバックエンド（`tests/fixtures` の合成のデータ）。開発・CI 用 |
-| ビューア | `VIEWER_OHIF_URL`・`VIEWER_STONE_URL`・`VIEWER_VOLVIEW_URL` | ビューアの根の URL（ブラウザから開く。別のサーバーでもよい）。空ならそのビューアを出さない。検査を開く URL は、OHIF は `<根>/viewer?StudyInstanceUIDs=…`、Stone は `<根>/index.html?study=…`、VolView は `<根>/?urls=[…]` に組むので、`/viewer` や `/index.html` は根に書かない（Orthanc の OHIF・Stone の plugin の根は `/ohif`・`/stone-webviewer`） |
+| ビューア | `VIEWER_OHIF_URL`・`VIEWER_STONE_URL`・`VIEWER_VOLVIEW_URL` | ビューアの根の URL（ブラウザから開く。別のサーバーでもよい）。空ならそのビューアを出さない。検査を開く URL は、OHIF は `<根>/viewer?StudyInstanceUIDs=…`、Stone は `<根>/index.html?study=…`、VolView は `<根>/?urls=[…]` に組むので、`/viewer` や `/index.html` は根に書かない（Orthanc の OHIF・Stone の plugin の根は `/ohif`・`/stone-webviewer`）。OHIF の根の末尾が `/viewer`、Stone の根の末尾が `/index.html` の値は、開く URL が二重になって 404 になるので、起動の時に断る |
 | | `VIEWER_WEASIS_ENABLED` | `true` で Weasis（`weasis://`）を出す。`false` なら出さない。Weasis は後ろ |
 | | `PUBLIC_DICOMWEB_URL` | 研究の道具へ渡す URL（コピー用） |
 | 認証 | `AUTH_MODE` | `local`（アプリの利用者）・`oidc`（外部の認証。後ろ）・`dev`（開発用。下の 4）。**既定は `local`**（設定しなければ認証が有効。原則 4）。`dev` は `BACKEND_MOCK=true` のときだけ起動する（どの段でも。4） |
