@@ -290,7 +290,7 @@ describe("削除", () => {
     // 消えた検査は、受け取りの記録・引き当てにも出ない
     const { getBackend } = await import("@/lib/backend");
     expect(await getBackend().lookupStudy(STUDY)).toBeNull();
-    expect((await getBackend().receivedStudies(100)).studies.some((r) => r.summary.studyInstanceUid === STUDY)).toBe(false);
+    expect((await getBackend().receivedStudies({ fromMs: 0, toMs: Number.MAX_SAFE_INTEGER, limit: 1000 })).studies.some((r) => r.summary.studyInstanceUid === STUDY)).toBe(false);
   });
 
   it("管理者のほかの役割には断り、Orthanc を呼ばずに、断ったことを記録する", async () => {

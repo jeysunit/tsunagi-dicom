@@ -326,8 +326,8 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   const { page } = admin;
   const before = await (await page.request.get("/api/audit/verify")).json();
 
-  // 届いた：受け取りの記録に、検査装置の試験用のソフト（DTG_SCU）から受けた検査が出る
-  await page.goto("/received");
+  // 届いた：受け取りの記録に、検査装置の試験用のソフト（DTG_SCU）から受けた検査が出る（見本の受信の日 2026-10-17 の期間で開く）
+  await page.goto("/received?period=range&from=2026-10-17&to=2026-10-17");
   await expect(page.getByTestId("received-row").first()).toContainText("DTG_SCU");
 
   // 送り先を確かめる（C-ECHO）

@@ -173,10 +173,10 @@ export interface Backend {
   // ── 段 4：受け取ったものを見る・機器・送る（docs/spec.md の 3.3・3.4）。Orthanc の REST を使う ──
 
   /**
-   * 受け取った検査（Orthanc の変更の記録 /changes から、新しい順に limit 件まで）。
-   * complete=false は、読む範囲（直近の変更の数・読む回数）の上限で止まり、もっと古い受け取りを読めていないこと
+   * 期間の中で受け取った検査（Orthanc の変更の記録 /changes を新しい側から遡り、新しい順に limit 件まで）。
+   * overLimit は期間の中に limit 件より多くあったこと。complete=false は、読む回数の上限などで期間の始まりまで遡れなかったこと
    */
-  receivedStudies(limit: number): Promise<ReceivedStudies>;
+  receivedStudies(window: ReceivedWindow): Promise<ReceivedStudies>;
   /** Orthanc に登録された機器（/modalities?expand） */
   listModalities(): Promise<ModalityEntry[]>;
   /** Orthanc から機器へ C-ECHO（/modalities/{id}/echo）。つながったら true。機器が無ければ BackendError(404) */
@@ -225,9 +225,18 @@ export interface OrthancStudyInfo {
   version: string;
 }
 
+/** 受信一覧の期間（[fromMs, toMs) の UTC のミリ秒）と、返す数の上限 */
+export interface ReceivedWindow {
+  fromMs: number;
+  toMs: number;
+  limit: number;
+}
+
 export interface ReceivedStudies {
   studies: ReceivedStudy[];
-  /** 読むと決めた範囲を読み切ったうえで、それより古い変更の記録が無い（false なら「ここまでしか読めていない」） */
+  /** 期間の中に上限の数より多くあり、新しい上限の数だけを返した */
+  overLimit: boolean;
+  /** 期間の始まりまで遡れた（false なら、期間の古い側を読めていない） */
   complete: boolean;
 }
 
@@ -243,6 +252,8 @@ export interface ReceivedStudy {
   origin: string | null;
   /** 検査の画像の数 */
   instanceCount: number;
+  /** 検査が落ち着いた（Orthanc の `/studies/{id}` の IsStable。StableStudy の後）。分からなければ null */
+  stable: boolean | null;
   summary: StudySummary;
 }
 
