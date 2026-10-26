@@ -84,31 +84,94 @@ export interface StudyRecord {
 export type StudyView = Partial<StudyRecord>;
 
 /** 受け取りの記録の1行の、検査のほかの項目（段 4。docs/spec.md の 3.3） */
-export const RECEIVE_FIELDS = ["receivedAt", "remoteAet", "origin", "receivedInstances"] as const;
+export const RECEIVE_FIELDS = ["receivedAt", "remoteAet", "origin", "receivedInstances", "receiveState"] as const;
 export type ReceiveField = (typeof RECEIVE_FIELDS)[number];
+
+/**
+ * 送った記録の1行の、検査のほかの項目（送信一覧。docs/spec.md の 3.4）。監査の記録の送信の行と Orthanc の仕事から組み立てる。
+ * 仕事の ID・送った利用者・誤りの番号と原文・照らし合わせの書き込みは返さない（仕事の ID は token の外に出さない。3.4）
+ */
+export const SENT_FIELDS = ["requestId", "requestedAt", "finishedAt", "destination", "destinationAet", "status"] as const;
+export type SentField = (typeof SENT_FIELDS)[number];
+
+/** 送信の状態（画面の語は docs/spec.md の 2.2：送信待ち・送信中・送信完了・送信失敗・結果不明） */
+export const SENT_STATUSES = ["pending", "running", "sent", "failed", "unknown"] as const;
+export type SentStatus = (typeof SENT_STATUSES)[number];
 
 /** 機器の一覧の項目（段 4）。住所（host・port）と機器ごとの許可は、機器の管理の役割にだけ返す */
 export const MODALITY_FIELDS = ["id", "aet", "host", "port", "manufacturer", "allowEcho", "allowStore"] as const;
 export type ModalityField = (typeof MODALITY_FIELDS)[number];
 const MODALITY_NAME_FIELDS = ["id", "aet"] as const satisfies readonly ModalityField[];
 
+/** 上の帯の接続の状態の項目（docs/spec.md の 3.3）。接続先の名前と AE タイトルは、さらに modality の項目（id・aet）で絞る */
+export const CONNECTION_FIELDS = ["overall", "orthanc", "hl7", "modalities", "mock"] as const;
+export type ConnectionField = (typeof CONNECTION_FIELDS)[number];
+
 export interface FieldAllowlist {
   study: readonly StudyField[];
   series: readonly SeriesField[];
   /** 無ければ受け取りの記録の項目を返さない（足し忘れは出ない側に倒れる） */
   receive?: readonly ReceiveField[];
+  /** 無ければ送った記録の項目を返さない */
+  sent?: readonly SentField[];
   /** 無ければ機器の項目を返さない */
   modality?: readonly ModalityField[];
+  /** 無ければ接続の状態の項目を返さない */
+  connection?: readonly ConnectionField[];
 }
 
 export type FieldAllowlistMap = Record<Role, FieldAllowlist>;
 
 /** 既定の役割の許可の一覧。どの既定の役割も、使える画面に要る項目をすべて見る（原則 8） */
 export const ROLE_FIELD_ALLOWLIST: FieldAllowlistMap = {
-  admin: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_FIELDS },
+  admin: {
+    study: STUDY_FIELDS,
+    series: SERIES_FIELDS,
+    receive: RECEIVE_FIELDS,
+    sent: SENT_FIELDS,
+    modality: MODALITY_FIELDS,
+    connection: CONNECTION_FIELDS,
+  },
   // 接続先の住所（host・port）と許可は、システムの設定にあたるので管理者だけ（docs/spec.md の 3.6）
-  general: { study: STUDY_FIELDS, series: SERIES_FIELDS, receive: RECEIVE_FIELDS, modality: MODALITY_NAME_FIELDS },
+  general: {
+    study: STUDY_FIELDS,
+    series: SERIES_FIELDS,
+    receive: RECEIVE_FIELDS,
+    sent: SENT_FIELDS,
+    modality: MODALITY_NAME_FIELDS,
+    connection: CONNECTION_FIELDS,
+  },
 };
+
+/** 送った記録の1行（画面の API が返す形）。時刻は UTC と分かる ISO 8601（`Z` つき） */
+export interface SentRecord {
+  requestId: string;
+  /** 受付日時：BFF が送信を求めた時刻（監査の記録の「求めた」の行） */
+  requestedAt: string;
+  /** 終わりを記録した時刻（送信完了・送信失敗。照らし合わせの時刻を含む）。終わっていなければ null */
+  finishedAt: string | null;
+  /** 送信先の名称（Orthanc の機器の名前） */
+  destination: string;
+  destinationAet: string | null;
+  status: SentStatus;
+}
+/**
+ * 送った記録の1行。検査の項目は、Orthanc から読めた検査なら全部の項目から、もう無い検査なら監査の記録にある
+ * 患者 ID と StudyInstanceUID だけから、どちらも study の許可の一覧で絞る
+ */
+export type SentView = Partial<SentRecord> & { study: StudyView };
+
+/** 送った記録の1行を、役割の許可の一覧で絞る。study は全部の項目（StudyRecord）か、監査の記録の2つの項目だけ */
+export function sentView(
+  record: SentRecord,
+  study: StudyRecord | Pick<StudyRecord, "patientId" | "studyInstanceUid">,
+  allowlist: FieldAllowlist,
+): SentView {
+  return {
+    ...(pickFields(record, SENT_FIELDS, allowlist.sent ?? []) as Partial<SentRecord>),
+    study: pickFields(study, STUDY_FIELDS, allowlist.study) as StudyView,
+  };
+}
 
 /** 受け取りの記録の1行（画面の API が返す形） */
 export interface ReceivedRecord {
@@ -116,6 +179,8 @@ export interface ReceivedRecord {
   remoteAet: string | null;
   origin: string | null;
   receivedInstances: number;
+  /** 受信の状態：receiving は受信中（Orthanc で検査が落ち着く前）、received は受信完了（落ち着いた後）。分からなければ null */
+  receiveState: "receiving" | "received" | null;
 }
 export type ReceivedView = Partial<ReceivedRecord> & { study: StudyView };
 

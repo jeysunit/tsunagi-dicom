@@ -38,9 +38,10 @@ export function RoleSwitcher({ current }: { current: Role }) {
           aria-pressed={role === current}
           disabled={pending}
           onClick={() => void switchTo(role)}
-          // 帯の地の上なので、地は帯の色のまま、hover・押している間も帯の色で変える（共通の白い地・hover の地では字が読めない）
+          // 帯の地の上なので、地は帯の色のまま、hover・押している間も帯の色で変える（共通の白い地・hover の地では字が読めない）。
+          // 枠は帯の地との対比を 3:1 以上にする（70% で約 4.1:1。40% では 2.4:1 だった。WCAG 2.2 の 1.4.11）
           className={cn(
-            "border-dev-band-foreground/40 bg-transparent text-dev-band-foreground shadow-none not-disabled:hover:border-dev-band-foreground not-disabled:hover:bg-dev-band-foreground/20 not-disabled:active:bg-dev-band-foreground/30",
+            "border-dev-band-foreground/70 bg-transparent text-dev-band-foreground shadow-none not-disabled:hover:border-dev-band-foreground not-disabled:hover:bg-dev-band-foreground/20 not-disabled:active:bg-dev-band-foreground/30",
             role === current &&
               "bg-dev-band-foreground font-bold text-dev-band not-disabled:hover:bg-dev-band-foreground not-disabled:active:bg-dev-band-foreground",
           )}

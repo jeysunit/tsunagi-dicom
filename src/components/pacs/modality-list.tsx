@@ -2,6 +2,7 @@
 
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { ActionButton } from "@/components/ui/pending";
 import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityView } from "@/lib/fields";
@@ -33,10 +34,8 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
 
   return (
     <section className="space-y-2" data-testid="modalities-page">
-      <div className="flex flex-wrap items-baseline gap-x-4">
-        <h1 className="text-lg font-bold text-value">接続先</h1>
-        <p className="text-xs text-label">Orthanc に登録された DICOM 接続先（登録・変更は Orthanc の設定で行います）</p>
-      </div>
+      <PageHeader title="接続先" />
+      <p className="text-xs text-label">Orthanc に登録された DICOM 接続先（登録・変更は Orthanc の設定で行います）</p>
       {modalities.length === 0 ? (
         <p className="text-label">接続先が登録されていません</p>
       ) : (

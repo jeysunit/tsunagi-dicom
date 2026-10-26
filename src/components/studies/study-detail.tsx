@@ -288,7 +288,7 @@ function SeriesImages({
         <PendingText pending={instances.isFetching} />
         {/* 切り替えは、画像の一覧の読み込みが終わってから。画像に関するタグだけ（検査のタグは、Study UID の横のボタンから） */}
         {items.length > 0 && (
-          <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="タグの表示">
+          <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border-input" role="group" aria-label="タグの表示">
             <SegmentButton pressed={tagSet === "configured"} onClick={() => onTagSet("configured")} testId="tag-set-configured">
               主なタグ
             </SegmentButton>

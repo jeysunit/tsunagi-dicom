@@ -54,6 +54,8 @@ export const AUDIT_ACTIONS = [
   "receive_log",
   "echo",
   "send",
+  // 送信一覧を開いた（送った記録を読んだ。detail の returned に、返した患者 ID と StudyInstanceUID の組）
+  "send_log",
   // 段 5：書き出し（ZIP）。削除は上の delete（detail の phase は send と同じ）
   "export",
   // つなぎの鍵が替わった（鍵つきにした・SESSION_SECRET を替えた）。detail の from（前の行の keyId。鍵の無い行なら sha256）と to

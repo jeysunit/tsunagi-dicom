@@ -285,6 +285,8 @@ async function preview(session: Session, uid: string): Promise<Response> {
     patientId: info.patientId,
     patientName: name.name,
     patientKana: name.kana,
+    patientBirthDate: info.patientBirthDate,
+    patientSex: info.patientSex,
     studyDate: info.studyDate,
     seriesCount: series.length,
     instanceCount: series.reduce((n, s) => n + (s.instanceCount ?? 0), 0),
