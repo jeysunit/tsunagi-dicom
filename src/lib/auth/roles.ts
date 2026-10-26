@@ -44,6 +44,8 @@ export const PERMISSIONS = [
   "connection.view",
   // ほかの機器へ送る（書き込みの操作。docs/spec.md の 3.5 の共通の決まりを通す）
   "study.send",
+  // 送った記録を見る（送信一覧。監査の記録の送信の行と Orthanc の仕事から読む。読むだけ。docs/spec.md の 3.4）
+  "send.view",
   // 結果の分からない書き込みの操作を、管理者が確かめて記録に足す（照らし合わせ。docs/spec.md の 3.5）
   "pacs.reconcile",
   // 段 5：書き出し（ZIP。患者の情報を含んだまま持ち出せる形になる）
@@ -64,6 +66,9 @@ const GENERAL: readonly Permission[] = [
   "dicom.all_values",
   "viewer.remember",
   "receive.view",
+  // 送信一覧は受信一覧と表裏の画面なので、受信一覧と同じく一般にも許す（送信は一般の操作。ほかの利用者の送信も、
+  // 同じ検査を重ねて送らないために見えるほうがよい。返す項目は許可の一覧の sent・study で絞り、開いたことを記録する）
+  "send.view",
   "modality.check",
   "connection.view",
   "study.send",
