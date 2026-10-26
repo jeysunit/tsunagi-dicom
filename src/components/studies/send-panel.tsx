@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmActions, ConfirmPanel } from "@/components/ui/confirm-panel";
 import { ProgressBar, Spinner } from "@/components/ui/pending";
+import { Select } from "@/components/ui/select";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { getJson } from "@/lib/client/api";
 import { errorText, postJson } from "@/lib/client/post-json";
@@ -221,8 +222,8 @@ export function SendPanel({
               <>
                 <label className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-label">送信先</span>
-                  <select
-                    className="h-7 rounded-md border border-border-input bg-background px-2 text-value"
+                  <Select
+                    size="sm"
                     value={target}
                     disabled={inFlight}
                     onChange={(e) => {
@@ -237,7 +238,7 @@ export function SendPanel({
                         {m.id}（AE: {m.aet}）
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 {/* 確かめの画面：送る検査と送り先を2行の表に並べる */}
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">

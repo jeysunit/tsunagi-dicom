@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getJson } from "@/lib/client/api";
 import { errorText, postJson } from "@/lib/client/post-json";
@@ -59,7 +61,7 @@ export function ViewerDefaults({
       setError(errorText(result));
     } else {
       // 書けたか確かめられない：元の値へ戻したと断定しない（画面と保存済みの値がずれていないか、読み直して確かめてもらう）
-      setError("保存できたか確認できませんでした。ページを読み直して、設定を確かめてください");
+      setError("保存できたか確認できませんでした。ページを読み直して、設定を確認してください");
     }
   }
 
@@ -75,7 +77,7 @@ export function ViewerDefaults({
 
   return (
     <section className="max-w-[var(--w-settings)] space-y-4">
-      <h1 className="text-lg font-bold text-value">ビューア設定（モダリティ別）</h1>
+      <PageHeader title="ビューア設定" note="モダリティ別" />
       <p className="text-label">検査ごとの指定がない場合に使うビューアです</p>
       {openers.length === 0 && <p className="text-label">ビューアが設定されていません（VIEWER_OHIF_URL などを設定します）</p>}
       <dl className="divide-y divide-border rounded-md border border-border">
@@ -87,9 +89,8 @@ export function ViewerDefaults({
               <span className="inline-flex min-w-[6.5rem] justify-end" aria-live="polite">
                 {saved === m && <StatusBadge kind="confirmed">保存しました</StatusBadge>}
               </span>
-              <select
+              <Select
                 aria-label={`${m} の標準のビューア`}
-                className="h-8 rounded-md border border-border-input bg-background px-2 text-value"
                 value={values[m] ?? ""}
                 disabled={openers.length === 0}
                 aria-busy={saving === m || undefined}
@@ -104,7 +105,7 @@ export function ViewerDefaults({
                     {v.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </dd>
           </div>
         ))}

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PasswordForm } from "@/components/auth/auth-forms";
+import { PageHeader } from "@/components/ui/page-header";
 import { minPasswordLength } from "@/lib/auth/password-policy";
 import { getAuthState } from "@/lib/auth/session";
 import { STAGE_PATHS } from "@/lib/auth/stage-path";
@@ -14,7 +15,7 @@ export default async function ChangePasswordStagePage() {
   if (state.stage !== "change_password") redirect(STAGE_PATHS[state.stage]);
   return (
     <section className="mx-auto w-full max-w-[var(--w-login)] space-y-4 pt-8">
-      <h1 className="text-lg font-bold text-value">パスワードの変更</h1>
+      <PageHeader title="パスワードの変更" />
       <p className="text-label">ログインを続けるには、パスワードを変更してください</p>
       <PasswordForm
         csrfToken={state.row.csrfToken}

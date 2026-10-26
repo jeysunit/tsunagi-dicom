@@ -50,6 +50,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           canEditViewerDefaults: can(state.session.role, "viewer.defaults"),
           account: !!local,
           canViewReceived: can(state.session.role, "receive.view"),
+          canViewSent: can(state.session.role, "send.view"),
           canCheckModalities: can(state.session.role, "modality.check"),
         })
       : undefined;
@@ -72,6 +73,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           pendingCsrfToken={pendingCsrfToken}
           theme={state.kind === "active" ? { current: theme, csrfToken: local?.row.csrfToken } : undefined}
           navToggle={!!navGroups}
+          connection={state.kind === "active" && can(state.session.role, "connection.view") ? { timeZone: config.timeZone } : undefined}
         />
         {local ? (
           <LockGuard

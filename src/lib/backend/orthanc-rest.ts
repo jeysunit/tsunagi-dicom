@@ -1,5 +1,13 @@
 /* eslint-disable no-control-regex -- 制御文字そのものを見つけるための式。 */
-import { BackendError, type JobState, type JobStatus, type ModalityEntry, type OrthancStudyInfo, type StudySummary } from "@/lib/backend/types";
+import {
+  BackendError,
+  type JobState,
+  type JobStatus,
+  type ModalityEntry,
+  type OrthancStudyInfo,
+  type ReceivedWindow,
+  type StudySummary,
+} from "@/lib/backend/types";
 
 // Orthanc の REST の応答の読み取り（docs/spec.md の 3.3・3.4）。実の Orthanc（http.ts）とモック（mock.ts）で同じものを使う。
 // 形は Orthanc Book（REST API の「Tracking changes」「Sending resources to remote modalities」「Performing C-Echo」、
@@ -73,18 +81,76 @@ export async function readChanges(
   return { changes, complete: false };
 }
 
-/** 受け取った検査（新しい順）。検査の新しい・落ち着いたの出来事のうち、いちばん新しい時刻を受け取った時刻にする */
-export function receivedStudyIds(changes: readonly OrthancChange[], limit: number): { id: string; date: string }[] {
-  const latest = new Map<string, { date: string; seq: number }>();
-  for (const c of changes) {
-    if (c.resourceType !== "Study" || (c.changeType !== "NewStudy" && c.changeType !== "StableStudy")) continue;
-    const prev = latest.get(c.id);
-    if (!prev || prev.seq < c.seq) latest.set(c.id, { date: c.date, seq: c.seq });
+/** 期間の中で受け取った検査（新しい順） */
+export interface ReceivedInPeriod {
+  ids: { id: string; date: string }[];
+  /** 期間の中に limit 件より多くあった（新しい limit 件だけを返した） */
+  overLimit: boolean;
+  /** 期間の始まりまで遡れた（false なら、期間の古い側を読めていない） */
+  complete: boolean;
+}
+
+const RECEIVED_EVENTS = new Set(["NewStudy", "StableStudy"]);
+
+/** 変更の記録の時刻を、UTC のミリ秒にする。読めなければ null */
+function changeMs(date: string): number | null {
+  const iso = orthancTime(date);
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * 期間の中で受け取った検査を、変更の記録（`/changes`）を新しい側から遡って集める（docs/spec.md の 3.3）。
+ * Orthanc の `/changes` は古い側から読む形（since・limit・Last・Done）なので、最後の番号 head から block 件ずつ区切り、
+ * 区間 (lower, upper] を since=lower から読み、区間の中を新しい順に見る。
+ * - 受け取った時刻は、その検査の NewStudy・StableStudy のうち、いちばん新しい出来事の時刻（新しい側から最初に見たもの）。
+ *   それが期間の後なら、期間の中に古い出来事があっても入れない（受信日時が期間の外の検査）。
+ * - 期間の始まりより古い時刻の出来事（種類を問わない）に当たったら、そこで止める（続き番号の順に時刻が進むことを前提にする）。
+ * - 期間の中の検査が limit 件を超えたら、新しい limit 件で止めて overLimit。
+ * - 読む回数が maxCalls に届いた・Done でないのに空の頁か Last が進まない頁が来た・記録の初めまで遡ったのに
+ *   最初の続き番号が 1 でない（古い記録が Orthanc に残っていない）ときは complete=false
+ */
+export async function collectReceivedInPeriod(
+  fetchPage: (since: number, limit: number) => Promise<OrthancChanges>,
+  head: number,
+  window: ReceivedWindow,
+  options: { block: number; pageLimit: number; maxCalls: number },
+): Promise<ReceivedInPeriod> {
+  const ids: { id: string; date: string }[] = [];
+  const seen = new Set<string>();
+  let calls = 0;
+  let upper = head;
+  let oldestSeq = Infinity;
+  while (upper > 0) {
+    const lower = Math.max(0, upper - options.block);
+    const block: OrthancChange[] = [];
+    let since = lower;
+    while (since < upper) {
+      if (calls >= options.maxCalls) return { ids, overLimit: false, complete: false };
+      calls += 1;
+      const page = await fetchPage(since, Math.min(options.pageLimit, upper - since));
+      block.push(...page.changes.filter((c) => c.seq > since && c.seq <= upper));
+      if (page.done || page.last >= upper) break;
+      // Done でないのに、空の頁か Last が進まない答え：続きを読めないので止める（同じ所を読み続けない）
+      if (page.changes.length === 0 || page.last <= since) return { ids, overLimit: false, complete: false };
+      since = page.last;
+    }
+    block.sort((a, b) => b.seq - a.seq);
+    for (const c of block) {
+      oldestSeq = Math.min(oldestSeq, c.seq);
+      const t = changeMs(c.date);
+      if (t !== null && t < window.fromMs) return { ids, overLimit: false, complete: true };
+      if (c.resourceType !== "Study" || !RECEIVED_EVENTS.has(c.changeType) || seen.has(c.id)) continue;
+      seen.add(c.id);
+      if (t === null || t >= window.toMs) continue;
+      if (ids.length >= window.limit) return { ids, overLimit: true, complete: true };
+      ids.push({ id: c.id, date: c.date });
+    }
+    upper = lower;
   }
-  return [...latest.entries()]
-    .sort((a, b) => b[1].seq - a[1].seq)
-    .slice(0, Math.max(0, limit))
-    .map(([id, v]) => ({ id, date: v.date }));
+  // 記録の初めまで遡った。最初の続き番号が 1 でなければ、古い記録は Orthanc に残っていない
+  return { ids, overLimit: false, complete: oldestSeq === Infinity || oldestSeq <= 1 };
 }
 
 /**
@@ -124,6 +190,12 @@ export function studyFromRest(study: unknown, series: readonly unknown[]): { sum
     },
     instanceCount,
   };
+}
+
+/** 検査が落ち着いたか（`/studies/{id}` の IsStable）。真偽値でなければ null（分からない） */
+export function stableFromRest(study: unknown): boolean | null {
+  const v = obj(study).IsStable;
+  return typeof v === "boolean" ? v : null;
 }
 
 /** シリーズの並びから、最初の画像の ID（受け取りのメタデータを読む先） */

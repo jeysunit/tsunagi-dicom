@@ -111,11 +111,14 @@ describe("受け取りの記録", () => {
   it("一般には、受け取った検査を新しい順に、時刻・送ってきた機器・画像の数とともに返し、返した検査を記録する", async () => {
     state.role = "general";
     const { GET } = await import("@/app/api/receive-log/route");
-    const res = await GET();
+    // 見本の受信の日（2026-10-17）を期間に指定する
+    const res = await GET(new Request("http://localhost/api/receive-log?period=range&from=2026-10-17&to=2026-10-17"));
     expect(res.status).toBe(200);
-    const { items } = await res.json();
+    const { items, period, overLimit, complete } = await res.json();
+    expect({ period, overLimit, complete }).toEqual({ period: { kind: "range", from: "2026-10-17", to: "2026-10-17" }, overLimit: false, complete: true });
     expect(items).toHaveLength(8);
-    expect(items[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00Z", remoteAet: "DTG_SCU", receivedInstances: 6 });
+    expect(items[0]).toMatchObject({ receivedAt: "2026-10-17T13:32:00Z", remoteAet: "DTG_SCU", receivedInstances: 6, receiveState: "receiving" });
+    expect(items[1]).toMatchObject({ receiveState: "received" });
     expect(items[0].study).toMatchObject({ patientId: "JP-TEST-0004", modalities: ["MR"] });
     // REST で入った検査は、送ってきた機器が無く、入った道が分かる
     expect(items.find((i: { study: { patientId: string }; origin: string }) => i.origin === "RestApi")).toMatchObject({ remoteAet: null });
@@ -124,6 +127,20 @@ describe("受け取りの記録", () => {
     const row = await lastAudit("receive_log");
     expect(row).toMatchObject({ outcome: "success", actorRole: "general" });
     expect((detailOf(row).returned as unknown[]).length).toBe(8);
+    expect(detailOf(row)).toMatchObject({ period: { kind: "range", from: "2026-10-17", to: "2026-10-17" }, overLimit: false, complete: true });
+  });
+
+  it("期間を読めない問い合わせは 400 で断る。期間の外の受信は返さない", async () => {
+    state.role = "general";
+    const { GET } = await import("@/app/api/receive-log/route");
+    for (const q of ["period=week", "period=range", "period=range&from=2026-10-17", "period=range&from=2026-02-30&to=2026-03-01", "period=range&from=2026-10-18&to=2026-10-17"]) {
+      const res = await GET(new Request(`http://localhost/api/receive-log?${q}`));
+      expect(res.status, q).toBe(400);
+      expect((await res.json()).error, q).toMatch(/^受信一覧の期間を読み込めません。/);
+    }
+    // 見本の受信の翌日：期間の外なので 0 件
+    const res = await GET(new Request("http://localhost/api/receive-log?period=range&from=2026-10-18&to=2026-10-18"));
+    expect((await res.json()).items).toEqual([]);
   });
 
   // 外した試験：「医師・閲覧には断る」。役割を管理者と一般の2つにし（2026-10-20）、受信一覧は両方が使うので、断る役割が無い

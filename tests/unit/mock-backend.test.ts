@@ -243,17 +243,27 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
 });
 
 describe("モックのバックエンド（段 4：受け取りの記録・機器・C-ECHO・送る）", () => {
-  it("受け取った検査を、新しい順に上限まで返す（見本の 8 件。REST で入った1件は送ってきた機器が無い）", async () => {
+  it("期間の中で受け取った検査を、新しい順に上限まで返す（見本の 8 件。REST で入った1件は送ってきた機器が無い）", async () => {
     const backend = createMockBackend();
-    // モックの /changes は 1 回に 5 件までしか返さない（実の Orthanc の切り詰めの形）。Last から続けて読み切る
-    const { studies: all, complete } = await backend.receivedStudies(100);
-    expect(complete).toBe(true);
+    // 見本の受信の日（2026-10-17。Asia/Tokyo の 0 時から翌日の 0 時まで）
+    const day = { fromMs: Date.parse("2026-10-16T15:00:00Z"), toMs: Date.parse("2026-10-17T15:00:00Z") };
+    // モックの /changes は 1 回に 5 件までしか返さない（実の Orthanc の切り詰めの形）。区切りごとに Last から続けて読む
+    const { studies: all, overLimit, complete } = await backend.receivedStudies({ ...day, limit: 1000 });
+    expect({ overLimit, complete }).toEqual({ overLimit: false, complete: true });
     expect(all).toHaveLength(8);
     expect(all.map((r) => r.receivedAt)).toEqual([...all.map((r) => r.receivedAt)].sort().reverse());
-    expect(all[0]).toMatchObject({ remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6 });
+    expect(all[0]).toMatchObject({ remoteAet: "DTG_SCU", origin: "DicomProtocol", instanceCount: 6, stable: false });
+    expect(all.slice(1).every((r) => r.stable === true)).toBe(true);
     expect(all.filter((r) => r.origin === "RestApi").map((r) => r.remoteAet)).toEqual([null]);
     expect(all.find((r) => r.summary.studyInstanceUid === STUDY)).toMatchObject({ remoteAet: "CT_EXAMPLE", instanceCount: 4 });
-    expect((await backend.receivedStudies(2)).studies).toHaveLength(2);
+    // 上限を超えたら、新しい上限の数だけと overLimit
+    const two = await backend.receivedStudies({ ...day, limit: 2 });
+    expect(two.studies).toHaveLength(2);
+    expect(two.overLimit).toBe(true);
+    // 上限ちょうどは、超えていない
+    expect((await backend.receivedStudies({ ...day, limit: 8 })).overLimit).toBe(false);
+    // 期間の外（翌日）には無い
+    expect((await backend.receivedStudies({ fromMs: day.toMs, toMs: day.toMs + 86_400_000, limit: 1000 })).studies).toEqual([]);
   });
 
   it("機器の一覧・C-ECHO（offline だけ答えない）・登録の無い機器は 404", async () => {

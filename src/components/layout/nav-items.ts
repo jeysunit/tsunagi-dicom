@@ -1,7 +1,7 @@
 // 左のナビの項目（docs/design-system/menu.md）。群は「業務」「接続」「管理」。項目の名前は docs/spec.md の 2.2 の用語集（頁の題と同じ語）。
 // 出す項目は、役割に許された頁だけ。1 つも出せない群は出さない。
 
-export type NavIcon = "studies" | "received" | "modalities" | "viewers" | "users" | "account";
+export type NavIcon = "studies" | "received" | "sent" | "modalities" | "viewers" | "users" | "account";
 
 export interface NavItem {
   href: string;
@@ -20,6 +20,8 @@ export interface NavAccess {
   account: boolean;
   /** 受け取りの記録（段 4） */
   canViewReceived?: boolean;
+  /** 送った記録（送信一覧） */
+  canViewSent?: boolean;
   /** 機器の一覧と確かめ（段 4） */
   canCheckModalities?: boolean;
 }
@@ -31,6 +33,7 @@ export function buildNavGroups(nav: NavAccess): NavGroup[] {
       items: [
         { href: "/", label: "検査一覧", icon: "studies" },
         ...(nav.canViewReceived ? [{ href: "/received", label: "受信一覧", icon: "received" as const }] : []),
+        ...(nav.canViewSent ? [{ href: "/sent", label: "送信一覧", icon: "sent" as const }] : []),
       ],
     },
     {

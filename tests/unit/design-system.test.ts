@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
 import { PatientBanner } from "@/components/ui/patient-banner";
+import { Select } from "@/components/ui/select";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 
 // 画面のデザインシステム（docs/design-system）を機械で守る検査。
@@ -258,15 +259,27 @@ describe("部品", () => {
     let count = 0;
     for (const file of sourceFiles("src").filter((f) => f.endsWith(".tsx"))) {
       const text = readFileSync(file, "utf8");
-      // 開きの札の中（次の `>` まで。属性の中の矢印の関数 `=>` は飛ばす）の className
-      for (const m of text.matchAll(/<(select|textarea)\b((?:=>|[^>])*)>/g)) {
+      // 開きの札の中（次の `>` まで。属性の中の矢印の関数 `=>` は飛ばす）の className。
+      // 選択欄は部品 <Select>（枠は部品の中で持つ。下の検査）を使い、素の <select> は部品の定義の中にだけ置く
+      for (const m of text.matchAll(/<(select|textarea|Select)\b((?:=>|[^>])*)>/g)) {
         count += 1;
+        if (m[1] === "Select") continue;
+        if (m[1] === "select") {
+          if (!file.endsWith("components/ui/select.tsx")) found.push(`${file}: 素の <select>（部品 <Select> を使う）`);
+          continue;
+        }
         const cls = m[2]!.match(/className="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
         if (!cls.includes("border-border-input") || cls.includes("border-border")) found.push(`${file}: <${m[1]}> ${cls.join(" ")}`);
       }
     }
-    expect(count, "検査の目はある：select・textarea を見つけた").toBeGreaterThanOrEqual(7);
+    expect(count, "検査の目はある：select・textarea・Select を見つけた").toBeGreaterThanOrEqual(7);
     expect(found).toEqual([]);
+  });
+
+  it("部品 Select の枠は border-input（区切りの線の border ではない）", () => {
+    const classes = renderToStaticMarkup(createElement(Select, { name: "a" })).match(/class="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
+    expect(classes).toContain("border-border-input");
+    expect(classes).not.toContain("border-border");
   });
 
   it("件数の行：補足が無くても、高さ（min-h-7）を持つ。補足は件数と別の区画に出す", () => {

@@ -34,6 +34,7 @@ test("今いる頁：左のナビの項目に aria-current と選んだ行の形
 
   for (const [href, title] of [
     ["/received", "受信一覧"],
+    ["/sent", "送信一覧"],
     ["/modalities", "接続先"],
     ["/admin/viewers", "ビューア設定"],
   ] as const) {
@@ -41,9 +42,9 @@ test("今いる頁：左のナビの項目に aria-current と選んだ行の形
     await expect(page).toHaveURL(new RegExp(`${href}$`));
     await expect(page).toHaveTitle(`${title} - tsunagi-dicom`);
     await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", href);
-    // 頁の見出しの大きさは1つにそろえる（18px・太字）
+    // 頁の見出しの大きさは1つにそろえる（20px・太字）
     const h1 = page.locator("main h1").first();
-    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("18px");
+    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("20px");
   }
 });
 
@@ -356,7 +357,7 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   await page.getByTestId("study-tags-open").click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
   await collect("詳細の UID と検査のタグ");
-  for (const path of ["/received", "/modalities", "/admin/viewers"]) {
+  for (const path of ["/received", "/sent", "/modalities", "/admin/viewers"]) {
     await page.goto(path);
     if (path === "/modalities") {
       await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
