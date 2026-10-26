@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { TotpEnrollment } from "@/components/auth/totp-enrollment";
+import { PageHeader } from "@/components/ui/page-header";
 import { startEnrollment } from "@/lib/auth/local-auth";
 import { authContext, getAuthState } from "@/lib/auth/session";
 import { STAGE_PATHS } from "@/lib/auth/stage-path";
@@ -15,7 +16,7 @@ export default async function EnrollPage() {
   const enrollment = await startEnrollment(await authContext(), state.row, state.user);
   return (
     <section className="mx-auto w-full max-w-[var(--w-login)] space-y-4 pt-8">
-      <h1 className="text-lg font-bold text-value">二要素認証の設定</h1>
+      <PageHeader title="二要素認証の設定" />
       <p className="text-label">二要素認証の設定が必要です。認証アプリを登録してください</p>
       <TotpEnrollment secret={enrollment.secret} uri={enrollment.uri} csrfToken={state.row.csrfToken} />
     </section>

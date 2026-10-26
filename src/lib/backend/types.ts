@@ -80,6 +80,18 @@ export interface Backend {
    */
   modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
   /**
+   * UID を保つ書き換えに要る Orthanc の設定が入っているか（Orthanc の /system の OverwriteInstances と UserMetadata）。
+   * overwriteInstances が無ければ、UID を保つ書き換えを Orthanc が断る（400）。lockMetadata（UserMetadata の TsunagiLock）が
+   * 無ければ付け替えの印を付けられない。付け替えの印の Lua が読み込まれているかは、REST からは分からない
+   */
+  keepUidSettings(): Promise<{ overwriteInstances: boolean; lockMetadata: boolean }>;
+  /**
+   * 新しい UID の検査を作る書き換えの仕事を作る（中身の訂正。docs/spec.md の 3.5）。replace の StudyInstanceUID を
+   * 新しい検査の UID にし、SeriesInstanceUID と SOPInstanceUID は Orthanc が新しく作る（Keep を渡さない）。
+   * 元の検査は残す（KeepSource は既定の true）
+   */
+  modifyStudyNewUid(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
+  /**
    * 検査の画像ごとの、Orthanc が持つファイルの印（FileUuid）と、読む前の Orthanc の変更の記録（/changes）の位置。
    * 鍵は UID の組（Study・Series・SOP を `|` でつないだもの）。同じ UID の画像が届き直して置き換わると、印が変わる
    */
@@ -161,10 +173,10 @@ export interface Backend {
   // ── 段 4：受け取ったものを見る・機器・送る（docs/spec.md の 3.3・3.4）。Orthanc の REST を使う ──
 
   /**
-   * 受け取った検査（Orthanc の変更の記録 /changes から、新しい順に limit 件まで）。
-   * complete=false は、読む範囲（直近の変更の数・読む回数）の上限で止まり、もっと古い受け取りを読めていないこと
+   * 期間の中で受け取った検査（Orthanc の変更の記録 /changes を新しい側から遡り、新しい順に limit 件まで）。
+   * overLimit は期間の中に limit 件より多くあったこと。complete=false は、読む回数の上限などで期間の始まりまで遡れなかったこと
    */
-  receivedStudies(limit: number): Promise<ReceivedStudies>;
+  receivedStudies(window: ReceivedWindow): Promise<ReceivedStudies>;
   /** Orthanc に登録された機器（/modalities?expand） */
   listModalities(): Promise<ModalityEntry[]>;
   /** Orthanc から機器へ C-ECHO（/modalities/{id}/echo）。つながったら true。機器が無ければ BackendError(404) */
@@ -182,6 +194,11 @@ export interface Backend {
   sendStudy(modalityId: string, orthancStudyId: string): Promise<{ jobId: string }>;
   /** Orthanc の仕事の状態（/jobs/{id}）。無ければ null */
   jobStatus(jobId: string): Promise<JobStatus | null>;
+  /**
+   * 終わっていない書き換えの仕事（/jobs?expand の Type が ResourceModification で、State が Success・Failure でないもの）の数。
+   * 仕事の ID が分からない書き換えを、管理者が解く前に確かめる（その仕事がまだ動いているかもしれない）
+   */
+  unfinishedModifyJobs(): Promise<number>;
 
   // ── 段 5：書き出し・削除（docs/spec.md の 3.5） ──
 
@@ -197,15 +214,29 @@ export interface OrthancStudyInfo {
   studyInstanceUid: string;
   patientId: string;
   patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
   studyDate: string;
+  /** 検査名と受付番号（値の修正の確かめの画面と、中身の訂正の確かめに使う） */
+  studyDescription: string;
+  accessionNumber: string;
   seriesCount: number;
   /** 版（Orthanc の LastUpdate）。確かめの画面を出した後に検査が変われば、この値が変わる */
   version: string;
 }
 
+/** 受信一覧の期間（[fromMs, toMs) の UTC のミリ秒）と、返す数の上限 */
+export interface ReceivedWindow {
+  fromMs: number;
+  toMs: number;
+  limit: number;
+}
+
 export interface ReceivedStudies {
   studies: ReceivedStudy[];
-  /** 読むと決めた範囲を読み切ったうえで、それより古い変更の記録が無い（false なら「ここまでしか読めていない」） */
+  /** 期間の中に上限の数より多くあり、新しい上限の数だけを返した */
+  overLimit: boolean;
+  /** 期間の始まりまで遡れた（false なら、期間の古い側を読めていない） */
   complete: boolean;
 }
 
@@ -221,6 +252,8 @@ export interface ReceivedStudy {
   origin: string | null;
   /** 検査の画像の数 */
   instanceCount: number;
+  /** 検査が落ち着いた（Orthanc の `/studies/{id}` の IsStable。StableStudy の後）。分からなければ null */
+  stable: boolean | null;
   summary: StudySummary;
 }
 

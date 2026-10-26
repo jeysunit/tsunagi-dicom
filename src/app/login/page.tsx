@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/auth/auth-forms";
+import { PageHeader } from "@/components/ui/page-header";
 import { getAuthState } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
 
@@ -12,7 +13,7 @@ export default async function LoginPage() {
   if (state.kind === "active" || state.kind === "locked") redirect("/");
   return (
     <section className="mx-auto w-full max-w-[var(--w-login)] space-y-4 pt-8">
-      <h1 className="text-lg font-bold text-value">ログイン</h1>
+      <PageHeader title="ログイン" />
       <LoginForm />
     </section>
   );

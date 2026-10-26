@@ -26,35 +26,40 @@ const hasMarkLine = (row: Locator) =>
     const style = getComputedStyle(el);
     return style.boxShadow !== "none" && /\b3px\b/.test(style.boxShadow);
   });
-/** 先頭のセルが太字か。一覧の表（ui/table）の選んだ行は太字にしない（幅が変わるため。docs/design-system/parts.md） */
-const isBold = (row: Locator) => row.locator("td").first().evaluate((el) => Number(getComputedStyle(el).fontWeight) >= 700);
+/** 受信一覧の選んだ行：左の 3px の線で示し、太字にしない（幅が変わるため。docs/design-system/components.md の「一覧の表」） */
+const hasLineNotBold = (row: Locator) =>
+  row.locator("td").first().evaluate((el) => {
+    const style = getComputedStyle(el);
+    return style.boxShadow !== "none" && /\b3px\b/.test(style.boxShadow) && Number(style.fontWeight) < 700;
+  });
+/** 受信一覧を、見本の受信の日（2026-10-17）の期間で開く（期間の初期設定は今日で、見本の受信は入らない） */
+const RECEIVED_SAMPLE_DAY = "/received?period=range&from=2026-10-17&to=2026-10-17";
 
-test("受信一覧：クリックした行は地と左の線が替わり、aria-selected になる。別の行を押すと移る", async ({ page }) => {
+// 期待の変更：選んだ行の印を「左の線と太字」から「左の線（太字にしない）」にした（幅が変わるため。docs/design-system/components.md）
+test("受信一覧：クリックした行は地と左の線が替わり（太字にしない）、aria-selected になる。別の行を押すと移る", async ({ page }) => {
   await asRole(page, "一般");
-  await page.goto("/received");
+  await page.goto(RECEIVED_SAMPLE_DAY);
   const rows = page.getByTestId("received-row");
   const [a, b] = [rows.nth(2), rows.nth(4)];
   const before = await background(a);
   await expect(a).toHaveAttribute("aria-selected", "false");
-  expect(await hasMarkLine(a)).toBe(false);
+  expect(await hasLineNotBold(a)).toBe(false);
 
   await a.getByTestId("received-at").click();
   await expect(a).toHaveAttribute("aria-selected", "true");
   expect(await background(a)).not.toBe(before);
-  expect(await hasMarkLine(a)).toBe(true);
-  // 受信一覧はまだ ui/table に載せ替えていない（選んだ行を太字で示す今の形のまま）
-  expect(await isBold(a)).toBe(true);
+  expect(await hasLineNotBold(a)).toBe(true);
 
   await b.getByTestId("received-at").click();
   await expect(b).toHaveAttribute("aria-selected", "true");
   await expect(a).toHaveAttribute("aria-selected", "false");
-  expect(await hasMarkLine(a)).toBe(false);
+  expect(await hasLineNotBold(a)).toBe(false);
   await expect(page.locator('[data-testid=received-row][aria-selected="true"]')).toHaveCount(1);
 });
 
 test("受信一覧：矢印のキーで動かした行が選ばれ、止まり先の行は 1 つだけ。Esc で外れる", async ({ page }) => {
   await asRole(page, "一般");
-  await page.goto("/received");
+  await page.goto(RECEIVED_SAMPLE_DAY);
   const rows = page.getByTestId("received-row");
   await rows.first().focus();
   await page.keyboard.press("ArrowDown");
@@ -72,7 +77,7 @@ test("受信一覧：矢印のキーで動かした行が選ばれ、止まり�
 
 test("受信一覧：行の中の「検査一覧で表示」は、行を選ぶ操作にしない", async ({ page }) => {
   await asRole(page, "一般");
-  await page.goto("/received");
+  await page.goto(RECEIVED_SAMPLE_DAY);
   const target = page.getByTestId("received-row").nth(1);
   await target.getByRole("link", { name: "検査一覧で表示" }).click();
   await expect(page).toHaveURL(/q=/);
@@ -304,10 +309,11 @@ test("タグの表：メニューを開いたまま外の欄を押したとき�
 
 test("受信一覧：選んだ行は、絞り込みで並びが変わっても同じ行のまま", async ({ page }) => {
   await asRole(page, "一般");
-  await page.goto("/received");
+  await page.goto(RECEIVED_SAMPLE_DAY);
   const rows = page.getByTestId("received-row");
   const target = rows.nth(3);
-  const patientId = (await target.locator("td").nth(3).textContent())!.trim();
+  // 列の順を送受信の一覧にそろえた（受信日時・送信元 AE・患者ID の順）ので、患者ID は 3 列目
+  const patientId = (await target.locator("td").nth(2).textContent())!.trim();
   await target.getByTestId("received-at").click();
   const at = (await target.getByTestId("received-at").textContent())!;
   await page.getByTestId("received-search").fill(patientId);

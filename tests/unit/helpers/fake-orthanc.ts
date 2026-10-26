@@ -130,6 +130,25 @@ export function createFakeOrthanc(): FakeOrthanc {
     async studyIsStable(id: string) {
       return !fake.unstable.has(id);
     },
+    // 値の修正（段 6）の試験のため：検査の要点（画像の値から作る。検査日・検査名・版は持たない）
+    async studyInfo(id: string) {
+      const found = fake.instances.filter(i => idOf(i) === id);
+      if (!found.length) {
+        return null;
+      }
+      const p = found[0]!;
+      return {
+        orthancId: id,
+        studyInstanceUid: p.StudyInstanceUID,
+        patientId: p.PatientID,
+        patientName: p.PatientName,
+        studyDate: "",
+        studyDescription: "",
+        accessionNumber: p.AccessionNumber,
+        seriesCount: new Set(found.map(i => i.SeriesInstanceUID)).size,
+        version: ""
+      };
+    },
     async lookupStudyIds(uid: string) {
       return [...new Set(fake.instances.filter(i => i.StudyInstanceUID === uid).map(idOf))];
     },

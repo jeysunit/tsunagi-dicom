@@ -12,10 +12,11 @@ describe("左のナビの項目", () => {
       canEditViewerDefaults: true,
       account: true,
       canViewReceived: true,
+      canViewSent: true,
       canCheckModalities: true,
     });
     expect(labels(groups)).toEqual([
-      ["業務", ["検査一覧", "受信一覧"]],
+      ["業務", ["検査一覧", "受信一覧", "送信一覧"]],
       ["接続", ["接続先"]],
       ["管理", ["ビューア設定", "ユーザー管理", "個人設定"]],
     ]);
@@ -29,6 +30,10 @@ describe("左のナビの項目", () => {
       ["業務", ["検査一覧", "受信一覧"]],
       ["管理", ["個人設定"]],
     ]);
+    // 送信一覧は、send.view の役割にだけ出す（受信一覧の下）
+    const withSent = buildNavGroups({ canManageUsers: false, canEditViewerDefaults: false, account: false, canViewReceived: true, canViewSent: true });
+    expect(labels(withSent)).toEqual([["業務", ["検査一覧", "受信一覧", "送信一覧"]]]);
+    expect(withSent[0]!.items.at(-1)).toMatchObject({ href: "/sent", icon: "sent" });
   });
 
   it("今いる頁：検査一覧（/）は完全に一致したときだけ、ほかは下の道も含める", () => {
