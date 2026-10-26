@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Field, Input } from "@/components/ui/input";
-import { ActionButton } from "@/components/ui/pending";
+import { ReauthForm } from "@/components/ui/reauth-form";
 import { LOCK_COOKIE, type LockCookieReason } from "@/lib/auth/lock-cookie";
 import { errorText, postJson } from "@/lib/client/post-json";
 import { cn } from "@/lib/utils";
@@ -396,39 +395,30 @@ export function LockGuard({
           data-testid="screen-lock"
           className="fixed inset-0 z-40 flex items-center justify-center bg-background/60"
         >
-          <form
+          <ReauthForm
             onSubmit={(e) => void onUnlock(e)}
             className="w-full max-w-sm space-y-3 rounded-md border border-border bg-surface p-4"
-          >
-            <h2 id="screen-lock-title" className="flex items-center gap-1.5 font-bold text-value">
-              <Lock aria-hidden className="size-4" />
-              画面ロック中
-            </h2>
-            <p className="text-label">{needsTotp ? "パスワードと認証コードを入力してロックを解除してください" : "パスワードを入力してロックを解除してください"}</p>
-            <Field label="パスワード">
-              <Input name="password" type="password" autoComplete="current-password" required />
-            </Field>
-            {needsTotp && (
-              <Field label="認証コード（6 桁）">
-                <Input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} required />
-              </Field>
-            )}
-            {error && (
-              <p role="alert" className="text-sm text-danger">
-                {error}
-              </p>
-            )}
-            {/* 主な操作（ロック解除）を右端に置く */}
-            <div className="flex justify-end gap-2">
+            heading={
+              <h2 id="screen-lock-title" className="flex items-center gap-1.5 font-bold text-value">
+                <Lock aria-hidden className="size-4" />
+                画面ロック中
+              </h2>
+            }
+            message={needsTotp ? "パスワードと認証コードを入力してロックを解除してください" : "パスワードを入力してロックを解除してください"}
+            visibleLabels
+            needsCode={needsTotp}
+            error={error}
+            pending={busy}
+            submitLabel="ロック解除"
+            // 主な操作（ロック解除）を右端に置く
+            alignEnd
+            secondary={
               <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmLogout(true)}>
                 <LogOut aria-hidden />
                 ログアウト
               </Button>
-              <ActionButton type="submit" pending={busy}>
-                ロック解除
-              </ActionButton>
-            </div>
-          </form>
+            }
+          />
         </div>
       )}
       <ConfirmDialog
