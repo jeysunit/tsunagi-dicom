@@ -614,6 +614,7 @@ export function StudyDetailPanel({
         study={study}
         screen={screen}
         onDeleted={(s) => (onDeleted ? onDeleted(s) : changed())}
+        onModified={changed}
         leading={
           <ViewerMenu
             studyUid={uid}

@@ -2,14 +2,14 @@ import { z } from "zod";
 import { checkedScreenWrite, readJson } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { studyUidParam } from "@/lib/api/study-param";
-import { audit, requirePermission } from "@/lib/auth/session";
+import { audit, requirePermission, requireSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { getConfig } from "@/lib/config";
 import { checkCorrectionValues, correctionScope, type CorrectionValues } from "@/lib/correction-fields";
 import { getDb } from "@/lib/db";
 import { history, unresolved } from "@/lib/keep-uid-write";
 import { signModifyConfirm } from "@/lib/pacs-ops";
-import { CorrectionRefused, readSnapshot } from "@/lib/study-correction";
+import { CorrectionRefused, readCurrent, readSnapshot } from "@/lib/study-correction";
 import { Kind, OrthancId, pendingContent, UNRESOLVED, Values } from "../shared";
 
 // 値の修正の確かめの画面（docs/spec.md の 3.5。段 6）。直す検査（患者の属性の訂正では同じ患者 ID の全部の検査）・直す項目の
@@ -20,6 +20,36 @@ import { Kind, OrthancId, pendingContent, UNRESOLVED, Values } from "../shared";
 type Context = { params: Promise<{ uid: string }> };
 
 const Body = z.object({ kind: Kind, values: Values, orthancId: OrthancId.optional() });
+
+/**
+ * GET ?orthancId=… ：値の修正の窓に最初に入れる、いまの値（Orthanc から読む。一覧の行の値ではない）。患者の値を見せるので、
+ * 詳細を開いたのと同じく記録する。同じ UID の検査が複数あれば、選ぶための要点を添えて 409
+ */
+export async function GET(request: Request, { params }: Context) {
+  try {
+    const session = await requireSession();
+    const uid = studyUidParam((await params).uid);
+    const raw = new URL(request.url).searchParams.get("orthancId");
+    const orthancId = raw === null ? undefined : OrthancId.safeParse(raw).success ? raw : null;
+    if (orthancId === null) return Response.json({ error: "検査の ID が正しくありません" }, { status: 400 });
+    await requirePermission(session, "study.modify", { action: "modify", studyInstanceUid: uid, detail: { via: "current" } });
+    try {
+      const current = await readCurrent(getBackend(), uid, orthancId);
+      await audit(session, { action: "view_study", patientId: current.values.PatientID, studyInstanceUid: uid, detail: { via: "modify_current" } });
+      return Response.json(current);
+    } catch (e) {
+      if (e instanceof CorrectionRefused) {
+        if (e.reason === "ambiguous") {
+          await audit(session, { action: "view_study", studyInstanceUid: uid, detail: { via: "modify_preview_candidates" } });
+        }
+        return Response.json({ error: e.message, ...e.extra }, { status: e.status });
+      }
+      throw e;
+    }
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
 
 export async function POST(request: Request, { params }: Context) {
   try {
