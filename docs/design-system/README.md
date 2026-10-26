@@ -68,6 +68,6 @@ ui-kit の写しは製品の側で直さない。`globals.css` の値はこの�
 | 見出しの行 | `src/components/ui/page-header.tsx` | あり。h1（20px・行 28px・太字）に頁の名前だけ。補足は `note`（small）、右に `actions` |
 | 空の状態 | `src/components/ui/empty-state.tsx` | あり。事実・次の手・操作 1 つ。`kind="denied"` は権限の無い頁の型（黙って別の頁へ移さない） |
 | ボタン | `src/components/ui/button.tsx` | あり |
-| 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトが使う |
+| 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトと、ユーザー管理（役割の変更・無効にする・二要素認証のリセット）が使う |
 | 入力欄 | `src/components/ui/input.tsx` | あり |
 | 待ちの印 | `src/components/ui/pending.tsx` | あり |

@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Download, Send, Trash2, XCircle } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/pending";
 import { DeletePanel } from "@/components/studies/delete-panel";
@@ -31,9 +31,16 @@ export function PacsActions({
   const [activity, setActivity] = useState<SendActivity | null>(null);
   const sendId = useId();
   const deleteId = useId();
+  const sendOpenRef = useRef<HTMLButtonElement>(null);
+  const deleteOpenRef = useRef<HTMLButtonElement>(null);
   const uid = study.studyInstanceUid ?? "";
   if (!uid || !(leading || screen.can.send || screen.can.export || screen.can.delete)) return null;
   const toggle = (which: "send" | "delete") => setOpen((v) => (v === which ? null : which));
+  // 欄を閉じたら、開いたボタンへフォーカスを戻す（戻さないと body に落ちる）
+  const close = (which: "send" | "delete") => {
+    setOpen(null);
+    (which === "send" ? sendOpenRef : deleteOpenRef).current?.focus();
+  };
 
   return (
     <div className="w-full" data-testid="pacs-actions">
@@ -41,7 +48,7 @@ export function PacsActions({
       <div className="flex flex-wrap items-start gap-2" role="group" aria-label="検査の操作">
         {leading}
         {screen.can.send && (
-          <Button type="button" size="sm" variant="outline" aria-expanded={open === "send"} aria-controls={sendId} data-testid="send-open" onClick={() => toggle("send")}>
+          <Button ref={sendOpenRef} type="button" size="sm" variant="outline" aria-expanded={open === "send"} aria-controls={sendId} data-testid="send-open" onClick={() => toggle("send")}>
             <Send aria-hidden />
             送信
           </Button>
@@ -63,7 +70,7 @@ export function PacsActions({
           <>
             {/* 削除の左に、いつも 1rem 以上の間をあける（余りがあれば、間が広がって削除が右端に寄る）。入りきらなければ、削除は次の行の右端へ折り返す */}
             <span aria-hidden className="grow basis-4" />
-            <Button type="button" size="sm" variant="outline" aria-expanded={open === "delete"} aria-controls={deleteId} className="ml-auto text-danger" data-testid="delete-open" onClick={() => toggle("delete")}>
+            <Button ref={deleteOpenRef} type="button" size="sm" variant="outline" aria-expanded={open === "delete"} aria-controls={deleteId} className="ml-auto text-danger" data-testid="delete-open" onClick={() => toggle("delete")}>
               <Trash2 aria-hidden />
               削除…
             </Button>
@@ -71,10 +78,10 @@ export function PacsActions({
         )}
       </div>
       {screen.can.send && (
-        <SendPanel study={study} screen={screen} open={open === "send"} panelId={sendId} onClose={() => setOpen(null)} onStatus={setActivity} />
+        <SendPanel study={study} screen={screen} open={open === "send"} panelId={sendId} onClose={() => close("send")} onStatus={setActivity} />
       )}
       {screen.can.delete && open === "delete" && (
-        <DeletePanel study={study} screen={screen} panelId={deleteId} onClose={() => setOpen(null)} onDeleted={() => onDeleted(study)} />
+        <DeletePanel study={study} screen={screen} panelId={deleteId} onClose={() => close("delete")} onDeleted={() => onDeleted(study)} />
       )}
     </div>
   );

@@ -26,8 +26,8 @@ export function EmptyState(props: EmptyStateProps | DeniedStateProps) {
   if (props.kind === "denied") {
     const { kind: _kind, adminOnly = true, className, ...rest } = props;
     return (
-      <Box className={className} data-kind="denied" {...rest}>
-        <b className="text-value">{adminOnly ? "この画面は管理者だけが開けます。" : "この画面を開く権限がありません。"}</b>
+      <Box className={className} data-kind="denied" role="status" {...rest}>
+        <b className="text-value">{adminOnly ? "この画面は管理者のみ利用できます。" : "この画面を開く権限がありません。"}</b>
         <span className="text-label">管理者に役割の変更を頼んでください。</span>
         <Button asChild variant="outline">
           <Link href="/">検査一覧へ</Link>

@@ -50,12 +50,13 @@ describe("空の状態（EmptyState）", () => {
 
   it("denied は、事実・次の手・検査一覧への道の 3 つ。黙って移さない", () => {
     const admin = renderToStaticMarkup(createElement(EmptyState, { kind: "denied" }));
-    expect(admin).toContain("この画面は管理者だけが開けます。");
+    expect(admin).toContain("この画面は管理者のみ利用できます。");
+    expect(admin).toContain('role="status"');
     expect(admin).toContain("管理者に役割の変更を頼んでください。");
     expect(admin).toMatch(/<a[^>]*href="\/"[^>]*>検査一覧へ<\/a>/);
     const other = renderToStaticMarkup(createElement(EmptyState, { kind: "denied", adminOnly: false }));
     expect(other).toContain("この画面を開く権限がありません。");
-    expect(other).not.toContain("管理者だけが開けます");
+    expect(other).not.toContain("管理者のみ利用できます");
   });
 });
 

@@ -106,6 +106,19 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(pop).toBeHidden();
   });
 
+  test("上の帯：接続の状態を読めないとき（401・通信の失敗）は、「一部が接続不可」と言わず「確認できません」", async ({ page }) => {
+    // 期待の追加：状態の API が答えないだけでは、接続先が落ちているとは言えない
+    await page.route("**/api/connection-status", (route) => route.fulfill({ status: 401, json: { error: "unauthorized" } }));
+    await page.goto("/");
+    const button = page.getByTestId("site-header").getByRole("button", { name: "接続の状態を開く" });
+    await expect(button).toContainText("確認できません");
+    await expect(button).not.toContainText("一部が接続不可");
+    await page.unroute("**/api/connection-status");
+    await page.route("**/api/connection-status", (route) => route.abort());
+    await page.reload();
+    await expect(button).toContainText("確認できません");
+  });
+
   test("地の色の保存は、別の場所からの要求と、決めた値の外を断る", async ({ request }) => {
     const foreign = await request.post("/api/preferences/theme", {
       data: { theme: "dark" },

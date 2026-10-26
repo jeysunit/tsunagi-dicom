@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import type { ConnectionView } from "@/lib/connection-status";
 import { formatDateTimeIn } from "@/lib/format/japanese-date";
 
-// 上の帯の接続の状態（docs/design-system/parts.md の「上の帯」）。閉じているときは全体の状態の札を 1 つ（接続中・一部が接続不可）。
+// 上の帯の接続の状態（docs/design-system/parts.md の「上の帯」）。閉じているときは全体の状態の札を 1 つ（接続中・一部が接続不可。状態を読めなかったときは確認できません）。
 // 押すと標準の popover 属性で中身が開く（外を押す・Esc で閉じる。開け閉めは書かない）。
 // 中身は画像サーバー・HL7 の受け口・接続先の直近の接続確認と、接続先の頁への道。状態は画面の API（/api/connection-status）から読む。
 // 読むのは頁を開いたとき・1 分ごと（頁が見えている間）・開いたとき。相手に何も送らない。
@@ -62,7 +62,8 @@ export function ConnStatus({ timeZone }: { timeZone: string }) {
   }, [load]);
 
   const view = state.kind === "ready" ? state.view : undefined;
-  const overall = state.kind === "error" ? "ng" : view?.overall;
+  // 読めなかった（401・423・通信の失敗）ときは、接続先が落ちているとは言えないので、「一部が接続不可」にせず別の札にする
+  const overall = state.kind === "error" ? "unknown" : view?.overall;
 
   return (
     <span className="relative inline-flex" data-testid="conn-status">
@@ -79,6 +80,7 @@ export function ConnStatus({ timeZone }: { timeZone: string }) {
         <span className="text-label">接続の状態</span>
         {overall === "ok" && <StatusBadge kind="confirmed">接続中</StatusBadge>}
         {overall === "ng" && <StatusBadge kind="failed">一部が接続不可</StatusBadge>}
+        {overall === "unknown" && <StatusBadge kind="unknown">確認できません</StatusBadge>}
         {overall === undefined && <StatusBadge kind="sending">確認中</StatusBadge>}
       </Button>
       <div

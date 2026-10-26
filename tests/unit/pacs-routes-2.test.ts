@@ -574,6 +574,8 @@ describe("削除：違う検査を消さない", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ patientId: "JP-TEST-0004", patientName: "試験 髙子", studyDate: "20260410", seriesCount: 1, instanceCount: 4 });
+    // 要約の生年月日・性別は、一覧の行の値でなく Orthanc から読み直した値
+    expect(body).toMatchObject({ patientBirthDate: "19600715", patientSex: "F" });
     const { openDeleteConfirm } = await import("@/lib/pacs-ops");
     const { getBackend } = await import("@/lib/backend");
     const id = (await getBackend().lookupStudy(STUDY))!;

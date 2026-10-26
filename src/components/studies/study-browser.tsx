@@ -60,6 +60,8 @@ export interface StudyListData {
 const DETAIL_DELAY_MS = 300;
 /** 削除が終わったことの知らせを出しておく時間（ミリ秒。docs/spec.md の 3.5） */
 const NOTICE_MS = 10_000;
+/** 一覧の中でキーを押した後、自動更新の行の差し込みを待つ時間（ミリ秒。docs/spec.md の 3.1） */
+const KEY_HOLD_MS = 3_000;
 
 const listKey =(filter: StudyFilter) => ["studies", filterToSearchParams(filter).toString()] as const;
 
@@ -92,7 +94,7 @@ const withCount = (label: string, n: number | undefined, atLeast = false) =>
 function Segmented({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     // 見える名前は付けない（幅のため）。読み上げにはグループの名前、マウスには title で知らせる
-    <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label={label} title={label}>
+    <div className="inline-flex overflow-hidden rounded-md border border-border-input" role="group" aria-label={label} title={label}>
       {children}
     </div>
   );
@@ -261,7 +263,7 @@ function FilterBar({
           data-testid="filter-more"
           onClick={() => setMore((v) => !v)}
           className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-sm text-foreground shadow-xs hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "inline-flex h-7 items-center gap-1 rounded-md border border-border-input bg-background px-2 text-sm text-foreground shadow-xs hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             pressFeedback,
           )}
         >
@@ -300,7 +302,7 @@ function FilterBar({
         >
           <span className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-label">検査日</span>
-          <div className="inline-flex overflow-hidden rounded-md border border-border">
+          <div className="inline-flex overflow-hidden rounded-md border border-border-input">
             <Chip pressed={filter.date === "range"} onClick={() => onChange({ ...filter, date: "range" })} testId="date-range">
               {DATE_LABELS.range}
             </Chip>
@@ -770,9 +772,16 @@ function StudyRows({
  * 版が変わったときだけ一覧を読み直す（変わらなければ検査の検索をしない）。選んだ行・スクロール・開いている詳細はそのまま
  * （詳細は読み直さない。「詳細を開いた」の記録を増やさない）。この読み直しの間は待ちの印を出さない（quiet）。
  * タブを隠している間は読まず、戻ったらすぐ読む。seconds が 0 なら何もしない。
- * 読み直しの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）
+ * 読み直しの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）。
+ * hooks.tick は版を読むたび（読み直しの前）に、hooks.beforeAuto は一覧を読み直す直前に、hooks.afterAuto は答えが届いた後
+ * （読めなかったときも）に呼ぶ（行の差し込みを待つかを決める。Browser）
  */
-function useListRefresh(seconds: number, initialVersion: string | undefined, autoRef: React.RefObject<boolean>) {
+function useListRefresh(
+  seconds: number,
+  initialVersion: string | undefined,
+  autoRef: React.RefObject<boolean>,
+  hooks: React.RefObject<{ tick: () => void; beforeAuto: () => void; afterAuto: () => void }>,
+) {
   const queryClient = useQueryClient();
   const [quiet, setQuiet] = useState(false);
   // 基準の版。サーバーが一覧を取る前に読んだ版。無ければ、最初に読んだ版を基準にする
@@ -781,11 +790,13 @@ function useListRefresh(seconds: number, initialVersion: string | undefined, aut
     queryKey: ["studies-version"],
     queryFn: async ({ signal }) => {
       const { version: next } = await getJson<{ version: string }>("/api/studies/version", signal);
+      hooks.current.tick();
       if (base.current === undefined || base.current === next) {
         base.current = next;
         return next;
       }
       setQuiet(true);
+      hooks.current.beforeAuto();
       autoRef.current = true;
       try {
         // 開いていない絞り込みの一覧は古い印だけを付け、いま出している一覧を読み直す
@@ -800,6 +811,7 @@ function useListRefresh(seconds: number, initialVersion: string | undefined, aut
       } finally {
         autoRef.current = false;
         setQuiet(false);
+        hooks.current.afterAuto();
       }
       return next;
     },
@@ -892,14 +904,75 @@ function Browser({
     if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState(null, "", url);
   }, [params]);
 
-  const changed = () => void queryClient.invalidateQueries({ queryKey: ["studies"] });
-  const data = list.data;
+  // 自動更新の行の差し込みを待つ（docs/spec.md の 3.1）：ポインタが一覧の上にある間と、一覧の中でキーを押してから 3 秒の間は、
+  // 読み直した一覧を出さず、読み直す前の一覧（held）を出したままにする。押す直前に行がずれて、隣の検査を選ばないように。
+  // 新しい行は件数の行の「新着 n 件」で知らせ、押すか、待つ理由が無くなった後の次の版の読み取りで出す。
+  // 選んだ行は StudyInstanceUID で持つので、差し込んだ後も同じ検査を選んだまま
+  const hold = useRef({ pointer: false, keyAt: Number.NEGATIVE_INFINITY });
+  const [held, setHeld] = useState<{ key: string; data: StudyListData } | null>(null);
+  /** 出していない新しい行（新着）と、出したままの消えた行の数。行の出入りが無い読み直し（画像の枚数が増えただけなど）は、
+   * 行がずれないので、待たずに出す（null） */
+  const waiting = useMemo(() => {
+    if (!held || held.key !== params || !list.data || list.data === held.data) return null;
+    const shown = new Set(held.data.studies.map((s) => s.studyInstanceUid));
+    const next = new Set(list.data.studies.map((s) => s.studyInstanceUid));
+    const added = list.data.studies.filter((s) => !shown.has(s.studyInstanceUid)).length;
+    const removed = held.data.studies.filter((s) => !next.has(s.studyInstanceUid)).length;
+    return added > 0 || removed > 0 ? { added, removed } : null;
+  }, [held, params, list.data]);
+  const data = waiting && held ? held.data : list.data;
+  // fetching：読み直しを始める前から一覧を取っている（利用者の絞り込み・最初の読み込み。前の絞り込みの行を仮に出している間や、
+  // 覚えている一覧を出しながら取り直している間）
+  const latest = useRef({ params, shown: data, fetching: list.isFetching });
+  useEffect(() => {
+    latest.current = { params, shown: data, fetching: list.isFetching };
+  });
+  const refreshHooks = useRef({ tick: () => {}, beforeAuto: () => {}, afterAuto: () => {} });
+  useEffect(() => {
+    const holding = () => hold.current.pointer || Date.now() - hold.current.keyAt < KEY_HOLD_MS;
+    const release = () => {
+      if (!holding()) setHeld(null);
+    };
+    refreshHooks.current = {
+      tick: release,
+      // 読み直す前に、いま出している一覧を控える（待つかどうかは、答えが届いた時に決める。読み直しの間にポインタを
+      // 一覧へ移しても差し込まない）。利用者の検索の答えを待っている間は控えない（求めた結果を、古い一覧の裏に隠さない）
+      beforeAuto: () => {
+        const { params: key, shown, fetching } = latest.current;
+        if (fetching || !shown) setHeld(null);
+        else setHeld({ key, data: shown });
+      },
+      // 答えが届いた時：待つ理由が無ければ、そのまま出す
+      afterAuto: release,
+    };
+  }, []);
+  // ポインタと、一覧の中で押したキーを数える（一覧の外の要素の操作は数えない）
+  const listBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = listBox.current;
+    if (!el) return;
+    const enter = () => (hold.current.pointer = true);
+    const leave = () => (hold.current.pointer = false);
+    const key = () => (hold.current.keyAt = Date.now());
+    el.addEventListener("pointerenter", enter);
+    el.addEventListener("pointerleave", leave);
+    el.addEventListener("keydown", key);
+    return () => {
+      el.removeEventListener("pointerenter", enter);
+      el.removeEventListener("pointerleave", leave);
+      el.removeEventListener("keydown", key);
+    };
+  }, []);
+  const changed = () => {
+    setHeld(null);
+    void queryClient.invalidateQueries({ queryKey: ["studies"] });
+  };
   // 列見出しでの並べ替え。読み込んだ検査（上限 1000 件）の中だけを、この画面で並べる。絞り込みを替えても並びは保つ
   const [sort, setSort] = useState<StudySort>(DEFAULT_SORT);
   const rows = useMemo(() => (data ? (isDefaultSort(sort) ? data.studies : sortStudies(data.studies, sort)) : []), [data, sort]);
   const onSort = useCallback((key: SortKey) => setSort((current) => nextSort(current, key)), []);
   const refreshSeconds = screen.refreshSeconds ?? 0;
-  const refresh = useListRefresh(refreshSeconds, initialVersion, autoRefreshRef);
+  const refresh = useListRefresh(refreshSeconds, initialVersion, autoRefreshRef, refreshHooks);
   // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」。
   // 自動更新の読み直しには出さない（30 秒ごとに一覧がちらつかないように）
   const fetching = list.isFetching && !refresh.quiet;
@@ -915,6 +988,7 @@ function Browser({
   }, [notice]);
   const changeFilter = (f: StudyFilter) => {
     setNotice(null);
+    setHeld(null);
     setFilter(f);
   };
   /** 条件をクリア：絞り込みを既定に戻す。検索の欄の打ちかけの字も消すため、絞り込みの部品を作り直す */
@@ -972,14 +1046,24 @@ function Browser({
         <CountRow
           aside={
             refreshSeconds > 0 && (
-              <span
-                className={cn("inline-flex items-center gap-1", refresh.failed && "text-danger")}
-                data-testid="list-refresh"
-                data-failed={refresh.failed || undefined}
-              >
-                <RefreshCw aria-hidden className="size-3.5" />
-                {refresh.failed ? "自動更新：接続できません" : `自動更新（${refreshSeconds}秒）`}
-              </span>
+              <>
+                {/* 差し込みを待っている新しい行（上の held）。押すと一覧に出す。読み上げの場所は常に置き、中身だけを替える */}
+                <span aria-live="polite">
+                  {waiting && (
+                    <Button type="button" size="xs" variant="outline" data-testid="list-new" onClick={() => setHeld(null)}>
+                      {waiting.added > 0 ? `新着 ${waiting.added} 件` : "一覧を更新"}
+                    </Button>
+                  )}
+                </span>
+                <span
+                  className={cn("inline-flex items-center gap-1", refresh.failed && "text-danger")}
+                  data-testid="list-refresh"
+                  data-failed={refresh.failed || undefined}
+                >
+                  <RefreshCw aria-hidden className="size-3.5" />
+                  {refresh.failed ? "自動更新：接続できません" : `自動更新（${refreshSeconds}秒）`}
+                </span>
+              </>
             )
           }
         >
@@ -1023,6 +1107,8 @@ function Browser({
             : "flex-1",
         )}
         style={{ "--split": `${split}%` } as React.CSSProperties}
+        // 自動更新の行の差し込みを待つ間を数える場所（上の hold）
+        ref={listBox}
       >
       {/* 0 件でも表の枠と見出しの行を出し、一覧の場所が分かるようにする（2026-10-21。空の場所が真っ白だった） */}
       <StudyRows
