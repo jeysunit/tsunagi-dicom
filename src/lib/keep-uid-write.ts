@@ -27,8 +27,11 @@ export class HistoryTampered extends BackendUnknownError {
     super(`監査の記録が鍵つきの値・つなぎと合わない（seq ${seq}：${reason}）`);
   }
 }
-/** 書き換えの経過を残す監査の記録の操作 */
-const WRITE_ACTIONS: readonly AuditAction[] = ["hl7"];
+/**
+ * 書き換えの経過を残す監査の記録の操作。HL7 による更新（hl7）と、画面の値の修正（modify）の両方を読み、どちらかの
+ * 結果不明・部分反映が残るあいだは、両方の書き換えを止める（openspec/changes/add-study-value-correction/design.md の 2）
+ */
+const WRITE_ACTIONS: readonly AuditAction[] = ["hl7", "modify"];
 /**
  * 監査の一本のつなぎから、書き換えの経過を古い順に読む（design.md §13）。つなぎの全部を確かめ（行の action を書き換えて
  * 書き換えの行を隠されても見つける）、確かめた行のうち書き換えの操作の行だけを返す（確かめた後に読み直さない。design.md §15.1）。
@@ -122,10 +125,17 @@ export interface WriteDetail {
    * これと同じものだけを消す（書き換えの後に同じ UID で届き直した画像を消さない）。無ければ元を消さない
    */
   sourceFiles?: SourceFiles;
+  /**
+   * 複数の検査をまとめた書き換えの組（画面の、同じ患者の全部の検査への属性の訂正）の、組の全部の StudyInstanceUID。
+   * 組は event が group の行で始め、全部の検査を書き換え終えたら result の行で閉じる。閉じていない（途中で止まった）・
+   * 部分反映・結果不明の組は、管理者が解くまで残る（照らし合わせは、組を自動では解かない。仕事の行が無いため）。
+   * 組の before と after は空
+   */
+  group?: string[];
 }
-/** 人が解くまで、期限を設けず結果不明と部分反映を拾う（design.md §10）。 */
+/** 人が解くまで、期限を設けず結果不明と部分反映を拾う（design.md §10）。書き換えの組（group）も同じく拾う */
 export function unresolved(rows: HistoryRow[]): WriteDetail[] {
-  return rows.filter(r => r.detail?.event === "request").map(r => r.detail as unknown as WriteDetail).filter(d => {
+  return rows.filter(r => r.detail?.event === "request" || r.detail?.event === "group").map(r => r.detail as unknown as WriteDetail).filter(d => {
     const last = rows.filter(r => r.detail?.writeId === d.writeId && ["result", "reconcile"].includes(String(r.detail?.event))).at(-1);
     return !last || (last.detail?.manual !== true && (last.outcome === "unknown" || last.detail?.partial === true));
   });
@@ -142,9 +152,10 @@ export function sameInstances(actual: PatientInstance[], expected: PatientInstan
 }
 /**
  * 書き換える検査の画像を確かめる。画像が無い・UID の組が欠ける・重なる・StudyInstanceUID が揃わない・
- * 患者の値と受付番号が画像どうしで揃わないときは投げる
+ * 患者の値と受付番号が画像どうしで揃わないときは投げる。uniform が false なら、患者 ID のほかの値の揃いは見ない
+ * （画面の属性の訂正は、部分反映で値の揃わなくなった検査を、人が確かめて揃え直すのにも使うため）
  */
-export function checkStudyInstances(before: PatientInstance[]): PatientInstance {
+export function checkStudyInstances(before: PatientInstance[], uniform = true): PatientInstance {
   if (!before.length) {
     throw new BackendError("検査の画像が見つからない");
   }
@@ -155,7 +166,7 @@ export function checkStudyInstances(before: PatientInstance[]): PatientInstance 
   if (new Set(before.map(triple)).size !== before.length || invalidUid) {
     throw new BackendError("画像の UID の組が正しくない");
   }
-  if (before.some(x => values.some(k => x[k] !== p[k]))) {
+  if (before.some(x => (uniform ? values : ["PatientID"] as const).some(k => x[k] !== p[k]))) {
     throw new BackendError("画像どうしで属性が揃っていない");
   }
   return p;
@@ -392,7 +403,7 @@ export async function verify(backend: Backend, d: WriteDetail) {
 const SYSTEM_ACTOR = { actorId: "hl7-receiver", actorRole: "system", authMode: "hl7" } as const;
 /** 書き換えの「求めた」の行の操作（照らし合わせの行は、同じ操作の行として書く） */
 function writeAction(rows: HistoryRow[], writeId: string): AuditAction {
-  return rows.find(r => r.detail?.event === "request" && r.detail?.writeId === writeId)?.action ?? "hl7";
+  return rows.find(r => (r.detail?.event === "request" || r.detail?.event === "group") && r.detail?.writeId === writeId)?.action ?? "hl7";
 }
 /** 終わった仕事だけを照らし、部分反映と仕事の ID 不明は残す（design.md §10）。 */
 export async function reconcile(backend: Backend, rows: HistoryRow[], audit: AuditWriter, options: ProcessOptions = {}): Promise<boolean> {
