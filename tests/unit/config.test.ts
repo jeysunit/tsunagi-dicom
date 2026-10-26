@@ -66,6 +66,9 @@ describe("設定の読み込み", () => {
     expect(variablesOf({ ...base, VIEWER_STONE_URL: "https://pacs.example.org/stone-webviewer/index.html" })).toEqual([
       "VIEWER_STONE_URL",
     ]);
+    // URL でない値も、例外で落ちずに、設定の誤りとして変数の名前を返す
+    expect(variablesOf({ ...base, VIEWER_OHIF_URL: "not-a-url" })).toEqual(["VIEWER_OHIF_URL"]);
+    expect(variablesOf({ ...base, VIEWER_STONE_URL: "not-a-url" })).toEqual(["VIEWER_STONE_URL"]);
     const config = loadConfig({
       ...base,
       VIEWER_OHIF_URL: "https://pacs.example.org/ohif/",

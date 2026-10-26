@@ -125,9 +125,14 @@ const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で�
  * （書くと `/ohif/viewer/viewer` を開いて 404 になる。docs/spec.md の 2.1 の表）
  */
 const viewerRoot = (route: string) =>
-  httpUrl.refine((url) => !new URL(url).pathname.replace(/\/+$/, "").endsWith(route), {
-    error: `ビューアの根の URL にする（末尾の ${route} は付けない。開く時に足す）`,
-  });
+  httpUrl.refine(
+    (url) => {
+      // URL でない値は httpUrl が誤りにする。zod はその後もここを呼ぶので、読めない値はここでは通す
+      if (!URL.canParse(url)) return true;
+      return !new URL(url).pathname.replace(/\/+$/, "").endsWith(route);
+    },
+    { error: `ビューアの根の URL にする（末尾の ${route} は付けない。開く時に足す）` },
+  );
 
 const envSchema = z.object({
   // 省ける（orthanc だけ）。前の設定の dicomweb は、黙って Orthanc として動かさずに断る
