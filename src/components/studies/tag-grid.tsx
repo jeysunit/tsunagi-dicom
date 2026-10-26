@@ -1,5 +1,6 @@
 "use client";
 
+import { Copy } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   EMPTY_SELECTION,
@@ -37,7 +38,11 @@ const MENU_ITEMS: readonly { format: CopyFormat; label: string }[] = [
 const MENU_HEIGHT = MENU_ITEMS.length * 28 + 10;
 const NOTICE_MS = 2500;
 
-export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
+/**
+ * copyTag：その行の値の右に、値を写すボタンを置く（画像の場所の表の (0008,0018) SOPInstanceUID。1 行目に固定した行）。
+ * 写したら、表の上の行に知らせを出す（読み上げにも知らせる）
+ */
+export function TagGrid({ rows, copyTag }: { rows: readonly CopyableTagRow[]; copyTag?: string }) {
   const [selection, setSelection] = useState<RowSelection>(EMPTY_SELECTION);
   const [active, setActive] = useState(0);
   const [menu, setMenu] = useState<MenuPosition | null>(null);
@@ -82,6 +87,17 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
 
   function announce(count: number, ok: boolean) {
     setNotice(ok ? `${count} 行をコピーしました` : "コピーできませんでした");
+  }
+
+  /** 固定した行の値だけを写す（行の選びは変えない） */
+  async function copyValue(row: CopyableTagRow) {
+    const label = row.tag === "0008,0018" ? "SOPInstanceUID" : (row.name ?? row.tag);
+    try {
+      await navigator.clipboard.writeText(row.value ?? "");
+      setNotice(`${label}をコピーしました`);
+    } catch {
+      setNotice("コピーできませんでした");
+    }
   }
 
   /** 選んだ行を、形式を指して写す（選びが空なら動いている行） */
@@ -196,7 +212,8 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
                 }}
                 className={cn(
                   "border-b border-border align-top last:border-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-                  isPicked ? "bg-selected font-bold [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-ring)]" : "hover:bg-muted",
+                  // 選んだ行の見た目は一覧の表（ui/table）と同じ：地 selected-strong と左 3px の線。太字にしない（幅が変わるため）
+                  isPicked ? "bg-selected-strong [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-ring)]" : "hover:bg-muted",
                 )}
                 data-tag={row.tag}
                 data-selected={isPicked || undefined}
@@ -231,6 +248,24 @@ export function TagGrid({ rows }: { rows: readonly CopyableTagRow[] }) {
                       {row.value}
                       {row.length != null && <span className="text-label">…（全 {row.length.toLocaleString("ja-JP")} 文字）</span>}
                     </>
+                  )}
+                  {row.tag === copyTag && row.value !== null && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      className="ml-1 h-6 align-middle"
+                      aria-label={`${row.tag === "0008,0018" ? "SOPInstanceUID" : (row.name ?? row.tag)}をコピー`}
+                      data-testid="tag-value-copy"
+                      // 写すボタンは行を選ぶ操作にしない
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void copyValue(row);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Copy aria-hidden />
+                    </Button>
                   )}
                 </td>
               </tr>

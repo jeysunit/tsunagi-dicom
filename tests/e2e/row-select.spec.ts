@@ -134,8 +134,8 @@ test("タグの表：クリックで行を選び、Shift で範囲、Ctrl で足
   await expect(selectedTags(table)).toHaveCount(1);
   expect(await background(tr(2))).not.toBe(before);
   expect(await hasMarkLine(tr(2))).toBe(true);
-  // タグの表はまだ選んだ行を太字で示す（検査の詳細の見出しの PR で一覧の表にそろえる）
-  expect(await isBold(tr(2))).toBe(true);
+  // 期待の変更：選んだ行は、一覧の表と同じく太字にしない（地と左の線だけで示す。幅が変わらない）
+  expect(await isBold(tr(2))).toBe(false);
   await expect(table.getByRole("grid")).toHaveAttribute("aria-multiselectable", "true");
 
   await tr(5).click({ modifiers: ["Shift"] });

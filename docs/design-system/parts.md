@@ -196,7 +196,7 @@
 
 ## 検査の情報（`.finfo`）と UID の行（`.uidrow`）
 
-- `.finfo`：3 列×2 行（行 40px）に 英字氏名・生年月日（和暦）・紹介医・Study ID・シリーズ数と画像数。無い値は「—」。並びは 患者バナー → `.finfo` → Study UID の `.uidrow` → 操作の行（`.ops`）。
+- `.finfo`：3 列×2 行（行 40px）に 英字氏名・生年月日（和暦）・紹介医・Study ID・シリーズ数と画像数。2 列目（和暦つきの生年月日）は中身の幅、残りを 1 列目と 3 列目で分ける（折り返して行が 40px を超えない）。無い値は「—」。並びは 患者バナー → `.finfo` → Study UID の `.uidrow` → 操作の行（`.ops`）。
 - `.uidrow`：`<div class="uidrow"><span class="l">Study UID</span><span class="uid">…</span><button class="btn btn-ghost btn-sm">コピー</button></div>`。SOP Instance UID は表の上に置かず、タグの表の 1 行目に (0008,0018) を固定し、その行にコピーを置く。dicom-test-generator の送信ジョブの詳細にも Study UID の行を足す（受け手で探す鍵）。
 
 ## 一覧＋右に区画・一覧＋右に詳細の幅

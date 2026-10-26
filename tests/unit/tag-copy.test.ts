@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tagRowsText, tagRowText } from "@/lib/client/tag-copy";
+import { pinTagRow, tagRowsText, tagRowText } from "@/lib/client/tag-copy";
 
 // DICOM タグの表で選んだ行を写す文字（1 行 1 タグ。タグ・タグ名・VR・値をタブで区切る）
 
@@ -62,5 +62,24 @@ describe("tagRowsText", () => {
 
   it("行が無ければ空の文字", () => {
     expect(tagRowsText([])).toBe("");
+  });
+});
+
+describe("pinTagRow", () => {
+  const a = { tag: "0008,0020", vr: "DA", value: "1" };
+  const b = { tag: "0008,0018", vr: "UI", value: "2" };
+  const c = { tag: "0010,0020", vr: "LO", value: "3" };
+  const fallback = { tag: "0008,0018", vr: "UI", value: "x" };
+
+  it("表にある行を 1 行目に移し、ほかの行の順は変えない", () => {
+    expect(pinTagRow([a, b, c], "0008,0018", fallback)).toEqual([b, a, c]);
+  });
+
+  it("すでに 1 行目なら、そのまま", () => {
+    expect(pinTagRow([b, a, c], "0008,0018", fallback)).toEqual([b, a, c]);
+  });
+
+  it("表に無いときは、代わりの行を 1 行目に足す", () => {
+    expect(pinTagRow([a, c], "0008,0018", fallback)).toEqual([fallback, a, c]);
   });
 });

@@ -1187,7 +1187,7 @@ function Browser({
           aria-label="詳細を閉じる"
           onClick={closeDetail}
           className={cn(
-            "sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "sticky top-0 float-right z-20 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             pressFeedback,
           )}
         >
