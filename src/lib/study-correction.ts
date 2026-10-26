@@ -116,6 +116,28 @@ async function readStudy(backend: Backend, uid: string, orthancId: string): Prom
   return { orthancId, info, instances, alongside, mixed };
 }
 
+/**
+ * 値の修正の窓に最初に入れる、いまの値（選んだ検査の先頭の画像の患者の値と受付番号、検査の要約の検査日・検査名）と、
+ * 画像どうしで値の揃っていない項目。同じ UID の検査が複数あって選んでいなければ、選ぶための要点を添えて断る
+ */
+export async function readCurrent(backend: Backend, uid: string, orthancId?: string) {
+  const study = await readStudy(backend, uid, await selectStudy(backend, uid, orthancId));
+  const p = study.instances[0]!;
+  return {
+    orthancId: study.orthancId,
+    values: {
+      PatientID: p.PatientID,
+      PatientName: p.PatientName,
+      PatientBirthDate: p.PatientBirthDate,
+      PatientSex: p.PatientSex,
+      AccessionNumber: p.AccessionNumber,
+      StudyDate: study.info.studyDate,
+      StudyDescription: study.info.studyDescription,
+    },
+    mixed: study.mixed,
+  };
+}
+
 /** 状態の印に入れる、画像の UID の組と値（並びを決めて） */
 const instanceState = (list: PatientInstance[]) =>
   list.map((i) => [triple(i), ...KEEP_UID_VALUES.map((k) => i[k]), i.SpecificCharacterSet]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
@@ -185,7 +207,8 @@ export async function readSnapshot(
       ? Object.fromEntries(PATIENT_ATTRS.map((k) => [k, basis[0]![k]]))
       : Object.fromEntries(PATIENT_ATTRS.filter((k) => values[k] !== undefined).map((k) => [k, values[k]!]));
     if (basis.length && PATIENT_ATTRS.some((k) => values[k] !== undefined && values[k] !== attributes[k])) {
-      throw new CorrectionRefused(409, "target_mismatch", "付け替え先の患者の氏名・生年月日・性別と、入力した値が違います", { target: attributes });
+      // 付け替え先の患者の値は、断る応答にも監査の記録にも入れない（見せるのは、記録を残す確かめの画面の成功の応答だけ）
+      throw new CorrectionRefused(409, "target_mismatch", "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います");
     }
     // 付け替え先の患者に同じ UID の検査があり、同じ画像（UID の組）を持っていれば、書き換えた画像が上書きになるので断る
     const sent = new Set(selected.alongside.filter((i) => i.PatientID === to).map(triple));

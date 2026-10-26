@@ -306,11 +306,16 @@ describe("属性の訂正（患者情報修正）", () => {
     // JP-TEST-0002 の氏名は Shiken^Hanako=試験^花子=しけん^はなこ
     const mismatch = await preview("attribute", { PatientID: "JP-TEST-0002", PatientName: "Yamada^Taro" });
     expect(mismatch.status).toBe(409);
-    expect((await mismatch.json()).target).toMatchObject({ PatientName: "Shiken^Hanako=試験^花子=しけん^はなこ" });
+    // 期待の変更：前は断る応答に付け替え先の患者の値（target）を返していた。患者の値は記録を残す確かめの成功の応答だけで見せるので、
+    // 断る応答には「違う」ことだけを返し、付け替え先の氏名・生年月日・性別を含めない
+    const mismatchBody = await mismatch.json();
+    expect(mismatchBody).toEqual({ error: "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います" });
+    expect(JSON.stringify(mismatchBody)).not.toMatch(/Shiken|試験|しけん|1995/);
     const spy = vi.spyOn(await backend(), "modifyStudyKeepingUids");
     const requestId = crypto.randomUUID();
     const res = await modify({ requestId, kind: "attribute", values: { PatientID: "JP-TEST-0002", PatientName: "Yamada^Taro" }, confirmToken: "m1.x.x.x" });
     expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).not.toMatch(/Shiken|試験|しけん|1995/);
     expect(spy).not.toHaveBeenCalled();
     const p = await (await preview("attribute", { PatientID: "JP-TEST-0002" })).json();
     expect(p.target).toMatchObject({ exists: true, PatientName: "Shiken^Hanako=試験^花子=しけん^はなこ" });
@@ -667,6 +672,28 @@ describe("属性の訂正（患者情報修正）", () => {
     const p = await preview("attribute", { PatientID: "JP-TEST-0098" }, STUDY, { orthancId: real });
     expect(p.status).toBe(200);
     expect((await p.json()).orthancId).toBe(real);
+  });
+});
+
+describe("修正の窓に最初に入れる、いまの値（GET …/modify/preview）", () => {
+  it("Orthanc から読んだいまの値を返し、患者の値を見せたことを記録する。役割の無い・形の違う検査の ID は断る", async () => {
+    const { GET } = await import("@/app/api/studies/[uid]/modify/preview/route");
+    const res = await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/modify/preview`), uidParams(STUDY));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.values).toEqual({
+      PatientID: "JP-TEST-0001",
+      PatientName: "Yamada^Taro=山田^太郎=やまだ^たろう",
+      PatientBirthDate: expect.any(String),
+      PatientSex: expect.any(String),
+      AccessionNumber: "ACC-0001-1",
+      StudyDate: "20260410",
+      StudyDescription: "胸部CT 単純（試験）",
+    });
+    expect(body.mixed).toEqual([]);
+    const viewed = (await (await db()).auditLog.findMany({ where: { action: "view_study" }, orderBy: { seq: "desc" }, take: 1 }))[0];
+    expect(detailOf(viewed)).toMatchObject({ via: "modify_current" });
+    expect((await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/modify/preview?orthancId=x`), uidParams(STUDY))).status).toBe(400);
   });
 });
 

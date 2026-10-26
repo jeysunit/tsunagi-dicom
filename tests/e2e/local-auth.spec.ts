@@ -727,6 +727,80 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await fresh.context.close();
 });
 
+// 共有の管理者のセッションは、操作の無い時間が SCREEN_LOCK_MINUTES を越えるとロックされる。段 6 のように長い試験を挟む前に使い終える
+test("ログアウトすると、セッションは使えない", async () => {
+  const { page } = admin;
+  await page.goto("/");
+  await page.getByRole("button", { name: "ログアウト" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  expect((await page.request.get("/api/studies")).status()).toBe(401);
+});
+
+// 段 6（段 5 の後に置く。モックの Orthanc の中で氏名を直し、検査を1件足すため）
+test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を保って直し、検査情報修正は直した検査を新しく作る（理由と再認証つき）", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const fresh = await newPage(browser);
+  const { page } = fresh;
+  await submitLogin(page, E2E_ADMIN.username, ADMIN_PASSWORD);
+  await expect(page).toHaveURL(/\/login\/totp$/);
+  const totp = page.getByRole("form", { name: "認証" });
+  await totp.getByLabel(/認証コード/).fill(await nextCode(adminSecret));
+  await totp.getByRole("button", { name: "認証" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/");
+  const rows = page.locator("tbody > tr[data-study-uid]");
+  const before = Number(await page.getByTestId("study-count").textContent());
+  const uid = (await rows.last().getAttribute("data-study-uid"))!;
+  await page.locator(`tr[data-study-uid="${uid}"]`).click();
+
+  // 患者情報修正：氏名（漢字）を直す → 確認（前と後の値・当てる範囲）→ 理由 → 再認証 → 修正しました
+  await page.getByTestId("modify-open").click();
+  const panel = page.getByTestId("modify-panel");
+  await expect(panel.getByRole("tab", { name: "患者情報修正" })).toHaveAttribute("aria-selected", "true");
+  // 確かめの欄の決まり（docs/design-system/parts.md）：開いたら最初の入力へフォーカス、キャンセルは左・実行は右、閉じたら開いたボタンへフォーカスを戻す
+  await expect(panel.getByTestId("modify-PatientID")).toBeFocused();
+  const cancelBox = (await panel.getByRole("button", { name: "キャンセル" }).first().boundingBox())!;
+  const checkBox = (await panel.getByTestId("modify-attribute-check").boundingBox())!;
+  expect(cancelBox.x).toBeLessThan(checkBox.x);
+  await panel.getByRole("button", { name: "キャンセル" }).first().click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId("modify-open")).toBeFocused();
+  await page.getByTestId("modify-open").click();
+  await panel.getByTestId("modify-PatientName-1").fill("試験^三郎");
+  await panel.getByTestId("modify-attribute-check").click();
+  const confirm = panel.getByTestId("modify-confirm");
+  await expect(confirm.getByTestId("modify-row-PatientName")).toContainText("試験^三郎");
+  await expect(confirm.getByTestId("modify-scope")).toContainText(/同じ患者IDの検査 \d+ 件/);
+  await expect(confirm.getByTestId("modify-submit")).toBeDisabled();
+  await confirm.getByTestId("modify-reason").fill("氏名の誤入力の修正（試験）");
+  await confirm.getByTestId("modify-submit").click();
+  const reauth = panel.getByTestId("modify-reauth");
+  await expect(reauth).toBeVisible();
+  await reauth.getByLabel("パスワード").fill(ADMIN_PASSWORD);
+  await reauth.getByRole("button", { name: "認証して続行" }).click();
+  await expect(panel.getByTestId("modify-attribute").getByTestId("modify-status")).toContainText("修正しました");
+  // UID は変わらないので、同じ行に直した氏名が出る
+  await expect(page.locator(`tr[data-study-uid="${uid}"]`)).toContainText("試験 三郎");
+  await expect(page.getByTestId("study-count")).toHaveText(String(before));
+
+  // 検査情報修正：検査日を直す → 確認 → 理由 → 修正する（再認証は REAUTH_MINUTES の間は聞き直さない）→ 検査が1件増える。
+  // 修正の窓は開いたまま（UID が変わらないので、同じ検査の詳細のまま）
+  const panel2 = page.getByTestId("modify-panel");
+  await panel2.getByRole("tab", { name: "検査情報修正" }).click();
+  await panel2.getByTestId("modify-StudyDate").fill("20250101");
+  await panel2.getByTestId("modify-content-check").click();
+  const confirm2 = panel2.getByTestId("modify-confirm");
+  await expect(confirm2.getByTestId("modify-row-StudyDate")).toContainText("2025/01/01");
+  await expect(confirm2.getByTestId("modify-scope")).toContainText("元の検査は残ります");
+  await confirm2.getByTestId("modify-reason").fill("検査日の誤り（試験）");
+  await confirm2.getByTestId("modify-submit").click();
+  await expect(panel2.getByTestId("modify-content").getByTestId("modify-status")).toContainText("新しく作りました");
+  await expect(page.getByTestId("study-count")).toHaveText(String(before + 1));
+  await expect(page.locator(`tr[data-study-uid="${uid}"]`)).toHaveCount(1);
+  expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
+  await fresh.context.close();
+});
+
 test("画面のロック：ロックの画面からログアウトでき、確認の窓を挟む。前の利用者の情報は画面に残らず、監査の記録の鎖は保たれる", async ({ browser }) => {
   test.setTimeout(120_000);
   const fresh = await newPage(browser);
@@ -833,12 +907,4 @@ test("画面のロック：ロックの画面からログアウトでき、確�
   // ロック・ロックの画面からのログアウト・ログインの 3 行以上が増える
   expect(after.checked).toBeGreaterThanOrEqual(before.checked + 3);
   await fresh.context.close();
-});
-
-test("ログアウトすると、セッションは使えない", async () => {
-  const { page } = admin;
-  await page.goto("/");
-  await page.getByRole("button", { name: "ログアウト" }).click();
-  await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get("/api/studies")).status()).toBe(401);
 });

@@ -78,6 +78,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       reconcile: can(role, "pacs.reconcile"),
       export: can(role, "study.export") && writes,
       delete: can(role, "study.delete") && writes,
+      modify: can(role, "study.modify") && writes,
     },
     ...(session.local ? { reauth: true } : {}),
   };
