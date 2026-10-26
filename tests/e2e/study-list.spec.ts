@@ -1105,14 +1105,20 @@ test("狭い画面では絞り込みが折り返し、横にはみ出さない",
   await expect(page.getByTestId("study-count")).toHaveText("8");
   const g = await page.evaluate(() => {
     const f = document.querySelector("[data-testid=study-filters]")!;
-    const over = [...document.querySelectorAll("body *")]
-      .filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1)
-      .slice(0, 12)
-      .map((e) => `${e.tagName}[${e.getAttribute("data-testid") ?? e.getAttribute("data-slot") ?? ""}]${Math.round(e.getBoundingClientRect().right)}`);
-    return { scroll: f.scrollWidth, client: f.clientWidth, page: document.documentElement.scrollWidth <= window.innerWidth, doc: document.documentElement.scrollWidth, win: window.innerWidth, over };
+    return { scroll: f.scrollWidth, client: f.clientWidth, page: document.documentElement.scrollWidth <= window.innerWidth };
   });
   expect(g.scroll).toBeLessThanOrEqual(g.client + 1);
-  expect(g.page, JSON.stringify(g)).toBe(true);
+  // 上の帯の接続の状態の札が一番長い「一部が接続不可」でも、頁は横にはみ出さない
+  await page.route("**/api/connection-status", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { connection?: Record<string, unknown> };
+    await route.fulfill({ response: res, json: { ...body, connection: { ...body.connection, overall: "ng" } } });
+  });
+  await page.reload();
+  await expect(page.getByTestId("conn-button")).toHaveAttribute("data-overall", "ng");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(g.page).toBe(true);
 });
 
 // 期待の変更（#57）：下の「UID」のボタン（開け閉め）をやめ、StudyInstanceUID は見出しの 3 行目、SeriesInstanceUID は画像の場所の見出しに、
