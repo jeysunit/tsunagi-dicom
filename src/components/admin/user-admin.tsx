@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
+import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ROLE_LABELS, ROLES, isRole, type Role } from "@/lib/auth/roles";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
@@ -150,7 +152,7 @@ export function UserAdmin({
 
   return (
     <section className="space-y-6">
-      <h1 className="text-lg font-bold text-value">ユーザー管理</h1>
+      <PageHeader title="ユーザー管理" />
       {/* 確認の窓（docs/design-system/components.md）。押したら窓を閉じてから送る（再認証を求められたら、画面の再認証の欄に移る） */}
       <ConfirmDialog
         open={confirm !== null}
@@ -221,7 +223,8 @@ export function UserAdmin({
               <TableCell className="font-mono">{u.username}</TableCell>
               <TableCell className="font-bold text-value">{u.displayName}</TableCell>
               <TableCell>
-                <select
+                <Select
+                  size="sm"
                   aria-label={`${u.username} の役割`}
                   value={u.role}
                   disabled={pending}
@@ -229,14 +232,13 @@ export function UserAdmin({
                     const role = e.target.value;
                     if (isRole(role)) askRole(u, role);
                   }}
-                  className="h-7 rounded-md border border-border-input bg-background px-1"
                 >
                   {ROLES.map((r) => (
                     <option key={r} value={r}>
                       {ROLE_LABELS[r]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </TableCell>
               <TableCell>
                 {u.status === "active" ? "有効" : "無効"}
@@ -315,13 +317,13 @@ export function UserAdmin({
           <Input name="displayName" required autoComplete="off" />
         </Field>
         <Field label="役割">
-          <select name="role" defaultValue="general" className="h-8 w-full rounded-md border border-border-input bg-background px-2">
+          <Select name="role" defaultValue="general" className="w-full">
             {ROLES.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABELS[r]}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field
           label="初期パスワード"

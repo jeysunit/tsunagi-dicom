@@ -35,11 +35,10 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
   });
 
   test("暗い地に切り替えると、利用者ごとに覚えて、開き直しても暗い地のまま", async ({ page }) => {
-    // 期待の変更：切り替えは「表示」のライト・ダークの2つのボタンの並びにした（1つのボタンでは今の状態か切り替え先かが分からないため。
-    // docs/spec.md の 2）。押している側が今の地であることを確かめる
+    // 期待の変更：切り替えは、絵の押しボタン 1 つ（aria-label「表示をライトとダークで切り替える」）にした。押している状態（aria-pressed）が暗い地。
+    // 前は「表示」のライト・ダークの 2 つのボタンだった。押すたびに替える
     await page.goto("/");
-    await expect(page.getByTestId("theme-light")).toHaveAttribute("aria-pressed", "true");
-    const toggle = page.getByTestId("theme-dark");
+    const toggle = page.getByRole("button", { name: "表示をライトとダークで切り替える" });
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const saved = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
@@ -51,14 +50,73 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
 
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expect(page.getByTestId("theme-dark")).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
     // 次の試験のために明るい地へ戻す
     const back = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
-    await page.getByTestId("theme-light").click();
+    await toggle.click();
     await back;
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+
+  test("上の帯：製品名の横に版、接続の状態の札と標準の popover、見出しの h1", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("検査一覧");
+    const header = page.getByTestId("site-header");
+    await expect(header.getByTestId("app-version")).toHaveText(/^\d+\.\d+\.\d+/);
+    const button = header.getByRole("button", { name: "接続の状態を開く" });
+    // 札は全体の状態 1 つ（接続中・一部が接続不可）。ほかの試験で接続確認が失敗していれば後者になる
+    await expect(button).toContainText(/接続中|一部が接続不可/);
+    const pop = page.getByTestId("conn-popover");
+    await expect(pop).toBeHidden();
+
+    // キーボードだけで開き、中の道へ進み、Esc で閉じて元のボタンへ戻る
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await expect(pop).toBeVisible();
+    await expect(pop).toContainText("画像サーバー（Orthanc）");
+    await expect(pop).toContainText("HL7 の受け口");
+    await expect(pop.getByTestId("backend-mock")).toHaveText("バックエンド：モック");
+    await page.keyboard.press("Tab");
+    await expect(pop.getByRole("link", { name: "接続先を開く" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(pop).toBeHidden();
+    await expect(button).toBeFocused();
+
+    // 低い画面でも、中でスクロールして末尾の道まで届く（popover の高さは、ボタンの下から画面の下端まで）
+    await page.setViewportSize({ width: 1024, height: 260 });
+    await page.keyboard.press("Enter");
+    await expect(pop).toBeVisible();
+    const link = pop.getByRole("link", { name: "接続先を開く" });
+    await link.scrollIntoViewIfNeeded();
+    await expect(link).toBeInViewport();
+    expect((await pop.boundingBox())!.y + (await pop.boundingBox())!.height).toBeLessThanOrEqual(260);
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1280, height: 720 });
+
+    // 外を押しても閉じる。「接続先を開く」を押すと接続先の頁へ移り、popover は閉じる
+    await button.click();
+    await expect(pop).toBeVisible();
+    await page.getByRole("heading", { level: 1 }).click();
+    await expect(pop).toBeHidden();
+    await button.click();
+    await pop.getByRole("link", { name: "接続先を開く" }).click();
+    await expect(page).toHaveURL(/\/modalities$/);
+    await expect(pop).toBeHidden();
+  });
+
+  test("上の帯：接続の状態を読めないとき（401・通信の失敗）は、「一部が接続不可」と言わず「確認できません」", async ({ page }) => {
+    // 期待の追加：状態の API が答えないだけでは、接続先が落ちているとは言えない
+    await page.route("**/api/connection-status", (route) => route.fulfill({ status: 401, json: { error: "unauthorized" } }));
+    await page.goto("/");
+    const button = page.getByTestId("site-header").getByRole("button", { name: "接続の状態を開く" });
+    await expect(button).toContainText("確認できません");
+    await expect(button).not.toContainText("一部が接続不可");
+    await page.unroute("**/api/connection-status");
+    await page.route("**/api/connection-status", (route) => route.abort());
+    await page.reload();
+    await expect(button).toContainText("確認できません");
   });
 
   test("地の色の保存は、別の場所からの要求と、決めた値の外を断る", async ({ request }) => {

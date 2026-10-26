@@ -72,6 +72,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           pendingCsrfToken={pendingCsrfToken}
           theme={state.kind === "active" ? { current: theme, csrfToken: local?.row.csrfToken } : undefined}
           navToggle={!!navGroups}
+          connection={state.kind === "active" && can(state.session.role, "connection.view") ? { timeZone: config.timeZone } : undefined}
         />
         {local ? (
           <LockGuard
