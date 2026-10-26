@@ -55,8 +55,9 @@ interface InfoRow {
  * 値の無い項目も詰めずに「—」（検査を替えても、同じ項目が同じ位置にある）
  */
 function StudyInfo({ rows }: { rows: readonly InfoRow[] }) {
+  // 2 列目（和暦つきの生年月日）は中身の幅、残りを 1 列目と 3 列目で分ける（日本語の字体が広い環境でも、生年月日が折り返して行が 40px を超えない）
   return (
-    <dl className="finfo grid grid-cols-3 gap-x-4" data-testid="detail-info">
+    <dl className="finfo grid grid-cols-[1fr_auto_1fr] gap-x-4" data-testid="detail-info">
       {rows.map((r) => (
         <div key={r.label} className="flex min-h-10 min-w-0 flex-col justify-center" data-testid={r.testId}>
           <dt className="text-xs text-label">{r.label}</dt>
