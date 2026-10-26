@@ -20,12 +20,14 @@ async function asRole(page: Page, label: "管理者" | "一般") {
 }
 
 const background = (row: Locator) => row.evaluate((el) => getComputedStyle(el).backgroundColor);
-/** 色のほかに示すもの：左の 3px の線（先頭のセルの内側の影）と、太字 */
+/** 色のほかに示すもの：左の 3px の線（先頭のセルの内側の影） */
 const hasMarkLine = (row: Locator) =>
   row.locator("td").first().evaluate((el) => {
     const style = getComputedStyle(el);
-    return style.boxShadow !== "none" && /\b3px\b/.test(style.boxShadow) && Number(style.fontWeight) >= 700;
+    return style.boxShadow !== "none" && /\b3px\b/.test(style.boxShadow);
   });
+/** 先頭のセルが太字か。一覧の表（ui/table）の選んだ行は太字にしない（幅が変わるため。docs/design-system/parts.md） */
+const isBold = (row: Locator) => row.locator("td").first().evaluate((el) => Number(getComputedStyle(el).fontWeight) >= 700);
 /** 受信一覧の選んだ行：左の 3px の線で示し、太字にしない（幅が変わるため。docs/design-system/components.md の「一覧の表」） */
 const hasLineNotBold = (row: Locator) =>
   row.locator("td").first().evaluate((el) => {
@@ -92,10 +94,21 @@ test("検査一覧：クリックした行は地と左の線が替わる。矢�
   await expect(first).toHaveAttribute("aria-selected", "true");
   expect(await background(first)).not.toBe(before);
   expect(await hasMarkLine(first)).toBe(true);
+  // 選んだ行は太字にしない（幅が変わり、日時の列からはみ出すため）
+  expect(await isBold(first)).toBe(false);
   await page.keyboard.press("ArrowDown");
   await expect(rows.nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(first).toHaveAttribute("aria-selected", "false");
   expect(await hasMarkLine(rows.nth(1))).toBe(true);
+  expect(await isBold(rows.nth(1))).toBe(false);
+  // Esc で選びを外し、行にフォーカスがあるときの Space で選ぶ
+  await page.keyboard.press("ArrowUp");
+  await expect(first).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-testid=study-table] tbody tr[aria-selected="true"]')).toHaveCount(0);
+  await first.focus();
+  await page.keyboard.press("Space");
+  await expect(first).toHaveAttribute("aria-selected", "true");
 });
 
 /** 検査の詳細を開き、サムネイルから画像の場所を開いて、主なタグの表を返す */
@@ -121,6 +134,8 @@ test("タグの表：クリックで行を選び、Shift で範囲、Ctrl で足
   await expect(selectedTags(table)).toHaveCount(1);
   expect(await background(tr(2))).not.toBe(before);
   expect(await hasMarkLine(tr(2))).toBe(true);
+  // タグの表はまだ選んだ行を太字で示す（検査の詳細の見出しの PR で一覧の表にそろえる）
+  expect(await isBold(tr(2))).toBe(true);
   await expect(table.getByRole("grid")).toHaveAttribute("aria-multiselectable", "true");
 
   await tr(5).click({ modifiers: ["Shift"] });

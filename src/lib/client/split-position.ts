@@ -6,7 +6,8 @@
 export const SPLIT_KEY = "tsunagi-dicom.listWidth";
 export const SPLIT_MIN = 30;
 export const SPLIT_MAX = 75;
-export const SPLIT_DEFAULT = 55;
+/** 既定は 一覧 45：詳細 55（docs/design-system/parts.md の「一覧＋右に詳細の幅」） */
+export const SPLIT_DEFAULT = 45;
 export const SPLIT_STEP = 5;
 
 export function clampSplit(value: number): number {

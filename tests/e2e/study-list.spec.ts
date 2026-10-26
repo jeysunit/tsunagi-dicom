@@ -325,7 +325,7 @@ test("左右に分ける：何も選ばなければ一覧が全幅。行を選�
   expect(paneBox.x).toBeGreaterThanOrEqual(listBox.x + listBox.width);
   expect(Math.abs(paneBox.y - listBox.y)).toBeLessThanOrEqual(1);
   expect(listBox.width).toBeLessThan(fullWidth);
-  expect(listBox.width).toBeGreaterThanOrEqual(320);
+  expect(listBox.width).toBeGreaterThanOrEqual(440);
   expect(paneBox.width).toBeGreaterThanOrEqual(400);
   expect(await columns()).toEqual(["date", "id", "name", "agesex", "desc"]);
   // 初期設定の位置では、詰めた形の一覧が、1280px の画面で横にスクロールせずに収まる
@@ -419,21 +419,24 @@ test("左右に分ける：境目をキーボードで動かせ、位置を覚�
   const handle = page.getByTestId("split-handle");
   await expect(handle).toHaveAttribute("role", "separator");
   await expect(handle).toHaveAttribute("aria-orientation", "vertical");
-  await expect(handle).toHaveAttribute("aria-valuenow", "55");
+  // 既定は 一覧 45：詳細 55
+  await expect(handle).toHaveAttribute("aria-valuenow", "45");
   const listWidth = () => page.getByTestId("study-list-scroll").evaluate((el) => el.getBoundingClientRect().width);
   const w0 = await listWidth();
 
   await handle.focus();
   await page.keyboard.press("ArrowRight");
-  await expect(handle).toHaveAttribute("aria-valuenow", "60");
+  await expect(handle).toHaveAttribute("aria-valuenow", "50");
   expect(await listWidth()).toBeGreaterThan(w0);
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowLeft");
-  await expect(handle).toHaveAttribute("aria-valuenow", "50");
+  await expect(handle).toHaveAttribute("aria-valuenow", "40");
+  // 1280px の画面（本文 1024px ほど）の 40% は 440px を割るので、一覧は 440px で止まり、既定の位置より狭い
   expect(await listWidth()).toBeLessThan(w0);
+  expect(await listWidth()).toBeGreaterThanOrEqual(439);
   // 上下の矢印は扱わない
   await page.keyboard.press("ArrowUp");
-  await expect(handle).toHaveAttribute("aria-valuenow", "50");
+  await expect(handle).toHaveAttribute("aria-valuenow", "40");
   await page.keyboard.press("Home");
   await expect(handle).toHaveAttribute("aria-valuenow", "30");
   await page.keyboard.press("ArrowLeft");
@@ -507,7 +510,7 @@ test("左右に分ける：狭い画面では一覧だけを出し、行を選�
   await expect(row(page)).toBeFocused();
 });
 
-test("左右に分ける：境目をどちらへ寄せても、一覧は 320px・詳細は 400px を保ち、絞り込みがはみ出さない", async ({ page }) => {
+test("左右に分ける：境目をどちらへ寄せても、一覧は 440px・詳細は 400px を保ち、絞り込みがはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 640 });
   await asRole(page, "一般");
   await row(page).click();
@@ -533,11 +536,11 @@ test("左右に分ける：境目をどちらへ寄せても、一覧は 320px�
         bodyRight: r("[data-split-root]").right,
       };
     });
-  // いちばん左へ：一覧は詰めた形の列が読める幅（320px）を保つ
+  // いちばん左へ：一覧は 440px を保つ
   await page.keyboard.press("Home");
   await expect(handle).toHaveAttribute("aria-valuenow", "30");
   let g = await geometry();
-  expect(g.listWidth).toBeGreaterThanOrEqual(319);
+  expect(g.listWidth).toBeGreaterThanOrEqual(439);
   // いちばん右へ：詳細は 400px を保つ
   await page.keyboard.press("End");
   await expect(handle).toHaveAttribute("aria-valuenow", "75");
@@ -553,7 +556,7 @@ test("左右に分ける：境目をどちらへ寄せても、一覧は 320px�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("左右に分ける：本文が 736px より狭いとき（左のナビを開いた 900px の画面）は、左右に分けず、詳細を一覧の上に重ねる", async ({ page }) => {
+test("左右に分ける：本文が 852px より狭いとき（左のナビを開いた 900px の画面）は、左右に分けず、詳細を一覧の上に重ねる", async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 800 });
   await asRole(page, "一般");
   await row(page).click({ position: { x: 100, y: 20 } });
@@ -576,7 +579,7 @@ test("左右に分ける：本文が 736px より狭いとき（左のナビを�
 test("左右に分ける：ブラウザの文字を大きくすると（rem が 24px）、本文が 1000px 台でも重ね表示に替わり、背後の一覧は inert になる", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await asRole(page, "一般");
-  // 46rem ＝ 1104px になり、左のナビを開いた本文（1072px ほど）より広い。CSS と JS が同じ幅で切り替わることを確かめる
+  // 53.25rem ＝ 1278px になり、左のナビを開いた本文（1072px ほど）より広い。CSS と JS が同じ幅で切り替わることを確かめる
   await page.addStyleTag({ content: "html { font-size: 24px; }" });
   await row(page).click({ position: { x: 100, y: 20 } });
   const pane = page.getByTestId("detail-pane");
@@ -1101,11 +1104,23 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
 test("狭い画面では絞り込みが折り返し、横にはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await asRole(page, "一般");
+  // 一覧が出てから測る（asRole は頁を開いた直後に返るので、描き終わる前の幅を測ることがある）
+  await expect(page.getByTestId("study-count")).toHaveText("8");
   const g = await page.evaluate(() => {
     const f = document.querySelector("[data-testid=study-filters]")!;
     return { scroll: f.scrollWidth, client: f.clientWidth, page: document.documentElement.scrollWidth <= window.innerWidth };
   });
   expect(g.scroll).toBeLessThanOrEqual(g.client + 1);
+  // 上の帯の接続の状態の札が一番長い「一部が接続不可」でも、頁は横にはみ出さない
+  await page.route("**/api/connection-status", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { connection?: Record<string, unknown> };
+    await route.fulfill({ response: res, json: { ...body, connection: { ...body.connection, overall: "ng" } } });
+  });
+  await page.reload();
+  await expect(page.getByTestId("conn-button")).toHaveAttribute("data-overall", "ng");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(g.page).toBe(true);
 });
 
