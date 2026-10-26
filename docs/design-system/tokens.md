@@ -21,10 +21,12 @@
 | `--color-primary-active` | 主ボタンを押している間 | #2F3288 | #2F3288 |
 | `--color-link` | リンクの文字 | #4B4FBF | #A5A8FF |
 | `--color-ring` | フォーカスの輪 | #4B4FBF | #A5A8FF |
-| `--color-selected` | 選択行・選択中のナビの地 | #EDEDF9 | #272844 |
+| `--color-selected` | 選択中のナビの地・選択の薄い地 | #EDEDF9 | #272844 |
+| `--color-selected-strong` | 一覧の選んだ行の地 | #D9DAF3 | #383B73 |
 | `--color-hover` | 押せる物の hover の地 | #E2E2E2 | #333333 |
 | `--color-pressed` | 押している間の地 | #D2D2D2 | #3A3A3A |
 | `--color-danger` | 失敗・中止・誤り・危険な操作 | #D1242F | #FF7B72 |
+| `--color-danger-foreground` | 危険の色を地にしたボタンの文字 | #FFFFFF | #1B1B1B |
 | `--color-success` | 完了・成功・確認済み | #1A7F37 | #3FB950 |
 | `--color-warning` | 実施中・送信中・注意 | #9A6700 | #D29922 |
 | `--color-dev-band` | 検証モードの帯の地 | #6B4A00 | #6B4A00 |

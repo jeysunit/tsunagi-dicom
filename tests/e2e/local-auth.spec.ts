@@ -338,6 +338,8 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
   await page.getByTestId("send-open").click();
   const panel = page.getByTestId("send-panel");
+  // 開いたら、最初の入力（送信先の選択欄）へフォーカスが移る
+  await expect(panel.getByTestId("send-modality")).toBeFocused();
   await panel.getByTestId("send-modality").selectOption("dtg");
   await expect(panel.getByTestId("send-confirm")).toContainText("JP-TEST-0004");
   await expect(panel.getByTestId("send-confirm")).toContainText("dtg（DTG_SCP）");
@@ -351,6 +353,8 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   await expect(panel.getByTestId("send-submit")).toHaveCount(0);
   // 閉じて開き直すと、新しい送信の確かめの画面になる
   await panel.getByTestId("send-close").click();
+  // 閉じたら、開いたボタンへフォーカスが戻る（body に落ちない）
+  await expect(page.getByTestId("send-open")).toBeFocused();
   await page.getByTestId("send-open").click();
   await expect(page.getByTestId("send-panel").getByTestId("send-submit")).toBeVisible();
   await expect(page.getByTestId("send-panel").getByTestId("send-status")).toHaveCount(0);
@@ -690,6 +694,8 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await expect(panel.getByTestId("delete-confirm")).toContainText("JP-TEST-0003");
   await expect(panel.getByTestId("delete-confirm")).toContainText("この操作は取り消せません");
   await expect(panel.getByTestId("delete-submit")).toBeDisabled();
+  // 開いたら、最初の入力（削除の理由）へフォーカスが移る
+  await expect(panel.getByTestId("delete-reason")).toBeFocused();
   await panel.getByTestId("delete-reason").fill("取り違えた検査（試験）");
   await panel.getByTestId("delete-submit").click();
   // 再認証の前は消さない（パスワードだけを求め、検査はまだ一覧にある）。
@@ -749,6 +755,15 @@ test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を�
   await page.getByTestId("modify-open").click();
   const panel = page.getByTestId("modify-panel");
   await expect(panel.getByRole("tab", { name: "患者情報修正" })).toHaveAttribute("aria-selected", "true");
+  // 確かめの欄の決まり（docs/design-system/parts.md）：開いたら最初の入力へフォーカス、キャンセルは左・実行は右、閉じたら開いたボタンへフォーカスを戻す
+  await expect(panel.getByTestId("modify-PatientID")).toBeFocused();
+  const cancelBox = (await panel.getByRole("button", { name: "キャンセル" }).first().boundingBox())!;
+  const checkBox = (await panel.getByTestId("modify-attribute-check").boundingBox())!;
+  expect(cancelBox.x).toBeLessThan(checkBox.x);
+  await panel.getByRole("button", { name: "キャンセル" }).first().click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId("modify-open")).toBeFocused();
+  await page.getByTestId("modify-open").click();
   await panel.getByTestId("modify-PatientName-1").fill("試験^三郎");
   await panel.getByTestId("modify-attribute-check").click();
   const confirm = panel.getByTestId("modify-confirm");

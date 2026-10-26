@@ -11,7 +11,7 @@ export default async function LoginPage() {
   const state = await getAuthState();
   if (state.kind === "active" || state.kind === "locked") redirect("/");
   return (
-    <section className="mx-auto max-w-sm space-y-4 pt-8">
+    <section className="mx-auto w-full max-w-[var(--w-login)] space-y-4 pt-8">
       <h1 className="text-lg font-bold text-value">ログイン</h1>
       <LoginForm />
     </section>

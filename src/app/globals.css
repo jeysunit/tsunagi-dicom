@@ -31,6 +31,8 @@
   --color-pressed: #d2d2d2;
   /* 選んだ行の地（主の色の薄い地。左の縦線は主の色） */
   --color-selected: #ededf9;
+  /* 一覧の選んだ行の地（selected より濃く、白い地と見分けられる差にする。左の縦線は主の色） */
+  --color-selected-strong: #d9daf3;
   /* 主の色（ボタンの地。白い字）。選択・主のボタン・リンクにだけ使い、状態の意味（正常・注意・異常）には使わない */
   --color-primary: #4b4fbf;
   --color-primary-foreground: #ffffff;
@@ -42,6 +44,8 @@
   --color-link: #4b4fbf;
   --color-ring: #4b4fbf;
   --color-danger: #d1242f;
+  /* 危険の色を地にしたときの文字（確認の窓の実行のボタン） */
+  --color-danger-foreground: #ffffff;
   /* 終わったことの印（送信完了・接続確認の成功）。文字と印を必ず添える */
   --color-success: #1a7f37;
   /* 途中のことの印（実施中・送信中）。赤でも緑でもない状態に使い、文字と印を必ず添える */
@@ -65,6 +69,18 @@
 
 :root {
   color-scheme: light;
+  /* 外枠と本文の幅（docs/design-system/parts.md の「外枠」。値は ui-kit の tokens.css と同じ） */
+  --h-topbar: 48px;
+  --w-nav: 208px;
+  --w-nav-closed: 56px;
+  --h-control: 32px;
+  --h-control-sm: 28px;
+  --h-row: 28px;
+  --w-detail: 1200px;
+  --w-form: 900px;
+  --w-settings: 560px;
+  --w-login: 384px;
+  --w-side: 360px;
 }
 
 /* 縦のスクロールバーが出入りしても、画面が左右に寄らない */
@@ -94,6 +110,7 @@ body:has([data-split-root]) {
   --color-pressed: #3a3a3a;
   /* 主の色 #4b4fbf を 25% だけ地に重ねた色 */
   --color-selected: #272844;
+  --color-selected-strong: #383b73;
   --color-primary: #4b4fbf;
   --color-primary-foreground: #ffffff;
   --color-primary-hover: #3b3ea3;
@@ -102,6 +119,7 @@ body:has([data-split-root]) {
   --color-link: #a5a8ff;
   --color-ring: #a5a8ff;
   --color-danger: #ff7b72;
+  --color-danger-foreground: #1b1b1b;
   --color-success: #3fb950;
   --color-warning: #d29922;
   /* モダリティの色分け（暗い地の上で見分けられる明るさにする） */

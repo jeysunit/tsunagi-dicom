@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { ActionButton, PendingText } from "@/components/ui/pending";
+import { ConfirmActions, ConfirmPanel } from "@/components/ui/confirm-panel";
+import { PendingText } from "@/components/ui/pending";
+import { ReauthForm } from "@/components/ui/reauth-form";
 import { Tabs } from "@/components/ui/tabs";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { handleAuthStatus, NETWORK_ERROR_MESSAGE } from "@/lib/client/api";
@@ -11,7 +13,7 @@ import { decideModify, decideStatus, type ModifyDecision, type StatusBody } from
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 import { checkFieldValue, FIELD_LABELS, type CorrectionField, type CorrectionKind, type CorrectionValues } from "@/lib/correction-fields";
 import type { StudyView } from "@/lib/fields";
-import { formatSlashDate } from "@/lib/format/japanese-date";
+import { formatBirthLine, formatSlashDate } from "@/lib/format/japanese-date";
 
 // 患者・検査の値の修正（docs/spec.md の 3.5。段 6）。一般と管理者。窓は2つに分ける。
 // - 患者情報修正：患者ID・氏名・生年月日・性別・受付番号。UID を保つ。氏名・生年月日・性別は同じ患者ID の全部の検査に、
@@ -150,7 +152,21 @@ export function ModifyPanel({
   }
 
   return (
-    <div id={panelId} role="group" aria-label="修正" className="mt-2 space-y-2 rounded-md border border-border bg-surface p-3" data-testid="modify-panel">
+    <ConfirmPanel
+      id={panelId}
+      label="修正"
+      testId="modify-panel"
+      focusReady={current !== null}
+      summary={
+        current
+          ? {
+              name: study.patientName ?? "",
+              patientId: study.patientId ?? "",
+              birthLine: formatBirthLine(study.patientBirthDate, study.patientSex, study.studyDate),
+            }
+          : undefined
+      }
+    >
       {!current && !loadError && (
         <p className="min-h-5">
           <PendingText pending>いまの値を読み込んでいます…</PendingText>
@@ -216,12 +232,12 @@ export function ModifyPanel({
           />
         </>
       )}
-    </div>
+    </ConfirmPanel>
   );
 }
 
 /** 欄を見える所へスクロールして、中の入力欄にフォーカスする */
-function revealAndFocus(form: HTMLFormElement | null, input: "input" | "textarea") {
+function revealAndFocus(form: HTMLElement | null, input: "input" | "textarea") {
   if (!form) return;
   form.scrollIntoView?.({ block: "nearest" });
   form.querySelector<HTMLElement>(input)?.focus({ preventScroll: true });
@@ -265,7 +281,7 @@ function CorrectionForm({
   const base = `/api/studies/${encodeURIComponent(uid)}/modify`;
   // 確かめの欄（確認の表と理由・再認証）を開いたら、その欄へスクロールして、入力欄にフォーカスする（docs/design-system/parts.md）
   const confirmRef = useRef<HTMLFormElement>(null);
-  const reauthRef = useRef<HTMLFormElement>(null);
+  const reauthRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (preview) revealAndFocus(confirmRef.current, "textarea");
   }, [preview]);
@@ -454,13 +470,8 @@ function CorrectionForm({
             </p>
           )}
           {!preview && (
-            <div className="flex gap-2 sm:col-span-2">
-              <Button type="button" size="sm" variant="outline" onClick={onClose}>
-                キャンセル
-              </Button>
-              <ActionButton type="submit" size="sm" variant="outline" pending={checking} data-testid={`modify-${kind}-check`}>
-                確認
-              </ActionButton>
+            <div className="sm:col-span-2">
+              <ConfirmActions confirmLabel="確認" confirmTestId={`modify-${kind}-check`} pending={checking} onCancel={onClose} />
             </div>
           )}
         </form>
@@ -542,34 +553,36 @@ function CorrectionForm({
               data-testid="modify-reason"
             />
           </label>
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setPreview(null)}>
-              キャンセル
-            </Button>
-            <ActionButton type="submit" size="sm" pending={busy} disabled={reason.trim() === ""} data-testid="modify-submit">
-              修正する
-            </ActionButton>
-          </div>
+          <ConfirmActions
+            confirmLabel="修正する"
+            confirmTestId="modify-submit"
+            confirmDisabled={reason.trim() === ""}
+            pending={busy}
+            cancelDisabled={busy}
+            onCancel={() => setPreview(null)}
+          />
         </form>
       )}
       {phase.kind === "reauth" && (
-        <form ref={reauthRef} onSubmit={(e) => void reauth(e)} aria-label="再認証" className="max-w-sm space-y-2" data-testid="modify-reauth">
-          <p className="text-label">修正にはパスワードの再入力が必要です</p>
-          <Input name="password" type="password" autoComplete="current-password" aria-label="パスワード" required />
-          {phase.error && (
-            <p role="alert" className="text-sm text-danger">
-              {phase.error}
-            </p>
-          )}
-          <div className="flex gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={authing} onClick={() => setPhase({ kind: "edit" })}>
-              キャンセル
-            </Button>
-            <ActionButton type="submit" size="sm" pending={authing}>
-              認証して続行
-            </ActionButton>
-          </div>
-        </form>
+        // 再認証はパスワードだけ（docs/design-system/parts.md の「確かめの使い分け」。削除の確かめと同じ部品）
+        <div ref={reauthRef}>
+          <ReauthForm
+            ariaLabel="再認証"
+            testId="modify-reauth"
+            className="max-w-sm"
+            message="修正にはパスワードの再入力が必要です"
+            error={phase.error}
+            pending={authing}
+            submitLabel="認証して続行"
+            focusOnMount
+            onSubmit={(e) => void reauth(e)}
+            secondary={
+              <Button type="button" size="sm" variant="outline" disabled={authing} onClick={() => setPhase({ kind: "edit" })}>
+                キャンセル
+              </Button>
+            }
+          />
+        </div>
       )}
       {busy && (
         <p>

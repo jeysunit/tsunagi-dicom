@@ -214,6 +214,8 @@ export interface OrthancStudyInfo {
   studyInstanceUid: string;
   patientId: string;
   patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
   studyDate: string;
   /** 検査名と受付番号（値の修正の確かめの画面と、中身の訂正の確かめに使う） */
   studyDescription: string;

@@ -53,7 +53,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           canCheckModalities: can(state.session.role, "modality.check"),
         })
       : undefined;
-  const main = <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-6 py-4">{children}</main>;
+  // 本文は左寄せで幅いっぱい。幅を絞る型（設定・ログイン）は頁の側で包む（docs/design-system/parts.md の「外枠」）
+  const main = <main className="flex min-h-0 w-full flex-1 flex-col px-6 pt-3 pb-6">{children}</main>;
   const content = navGroups ? (
     <div className="flex min-h-0 flex-1">
       <SideNav groups={navGroups} />
