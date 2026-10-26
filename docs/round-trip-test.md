@@ -55,7 +55,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 4. `http://127.0.0.1:3000/` を開き、`admin` と `docker/dev/secrets/initial_admin_password.txt` のパスワードでログインし、自分のパスワード（13 文字以上・英字と数字）に変える。
 5. 試す前に、管理者で `/api/audit/verify` を開き、`checked`（記録の行の数）を控える。
 
-ポートは環境変数で替えられる：`TSUNAGI_HTTP_PORT`（既定 3000）・`ORTHANC_DICOM_PORT`（既定 4242）・`DEV_DTG_WEB_PORT`（DTG の Web 画面。既定 18080）・`DEV_RIS_WEB_PORT`（ris-emulator の Web 画面。既定 18081。利用者 `ris`）。どれもホストの 127.0.0.1 だけで待ち受ける。ris-emulator の MWL（11112）はホストに公開しない。
+ポートは環境変数で替えられる：`TSUNAGI_HTTP_PORT`（既定 3000）・`ORTHANC_DICOM_PORT`（既定 4242）・`DEV_DTG_WEB_PORT`（DTG の Web 画面。既定 18080）・`DEV_RIS_WEB_PORT`（ris-emulator の Web 画面。既定 18081。利用者 `ris`）・`DEV_PORTAL_PORT`（3つの画面へのリンクだけの入口のページ。既定 80）。どれもホストの 127.0.0.1 だけで待ち受ける。ris-emulator の MWL（11112）はホストに公開しない。
 
 下の手順のコマンドは、リポジトリの直下で流す。`dc` は `docker compose -f docker/dev/compose.yaml` の略。Orthanc の REST（`/jobs` など）はホストに公開していないので、見るときは Orthanc のコンテナの中から読む。止めるときは `dc down`（volume も消して最初からにするときは `dc down --volumes`）。
 
