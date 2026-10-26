@@ -1101,6 +1101,8 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
 test("狭い画面では絞り込みが折り返し、横にはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await asRole(page, "一般");
+  // 一覧が出てから測る（asRole は頁を開いた直後に返るので、描き終わる前の幅を測ることがある）
+  await expect(page.getByTestId("study-count")).toHaveText("8");
   const g = await page.evaluate(() => {
     const f = document.querySelector("[data-testid=study-filters]")!;
     return { scroll: f.scrollWidth, client: f.clientWidth, page: document.documentElement.scrollWidth <= window.innerWidth };
