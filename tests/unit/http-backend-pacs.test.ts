@@ -110,6 +110,16 @@ beforeAll(async () => {
       if (typeof storeMode === "number") return json(storeMode, {});
       return json(200, storeMode === "missing-id" ? {} : { ID: JOB, Path: `/jobs/${JOB}` });
     }
+    if (url === "/jobs?expand") {
+      // 値の修正（段 6）：終わっていない書き換えの仕事を数える。送るの仕事・終わった書き換えは数えない
+      return json(200, [
+        { ID: "a", Type: "ResourceModification", State: "Running" },
+        { ID: "b", Type: "ResourceModification", State: "Pending" },
+        { ID: "c", Type: "ResourceModification", State: "Success" },
+        { ID: "d", Type: "ResourceModification", State: "Failure" },
+        { ID: "e", Type: "DicomModalityStore", State: "Running" },
+      ]);
+    }
     if (url === `/jobs/${JOB}`) {
       return json(200, {
         ID: JOB,
@@ -267,6 +277,8 @@ describe("実の Orthanc の REST（段 4）", () => {
     });
     expect(JSON.stringify(job)).not.toContain("secret-should-not-pass");
     expect(await b.jobStatus("not-a-job")).toBeNull();
+    // 終わっていない書き換えの仕事の数（仕事の ID が分からない値の修正を、管理者が解く前に見る）
+    expect(await b.unfinishedModifyJobs()).toBe(2);
   });
 
   it("送ったあとに答えが来ない・答えに仕事の ID が無いときは、結果不明（BackendUnknownError）", async () => {

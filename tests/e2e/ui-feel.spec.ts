@@ -41,9 +41,9 @@ test("今いる頁：左のナビの項目に aria-current と選んだ行の形
     await expect(page).toHaveURL(new RegExp(`${href}$`));
     await expect(page).toHaveTitle(`${title} - tsunagi-dicom`);
     await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", href);
-    // 頁の見出しの大きさは1つにそろえる（18px・太字）
+    // 頁の見出しの大きさは1つにそろえる（20px・太字）
     const h1 = page.locator("main h1").first();
-    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("18px");
+    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("20px");
   }
 });
 
@@ -322,6 +322,9 @@ const RETIRED_WORDS = [
   "頁",
   "患者氏名",
   "消去",
+  // 値の修正の2種類の呼び名（画面は「患者情報修正」「検査情報修正」。docs/spec.md の 2.2）
+  "属性の訂正",
+  "中身の訂正",
   "再送せず",
 ];
 
@@ -378,5 +381,81 @@ test("一覧の列：患者 ID・生年月日・年齢・性別は切らない�
     }
     // ID は「…」で切らない
     expect(await page.getByTestId("patient-id").first().evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis");
+  }
+});
+
+/** 計算した色（`rgb(r, g, b)`）の相対輝度（WCAG 2.2） */
+function luminance(rgb: string): number {
+  const m = rgb.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  expect(m, rgb).not.toBeNull();
+  const [r, g, b] = m!.slice(1, 4).map((v) => {
+    const c = Number(v) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+const contrastOf = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+};
+
+test("入力欄・選択欄・枠のボタンの枠は、まわりの地との対比が 3:1 以上（WCAG 2.2 の 1.4.11）。明るい地と暗い地", async ({ page }) => {
+  await asAdmin(page);
+  await expect(rows(page)).toHaveCount(8);
+  /**
+   * 見えている部品ごとに、枠の色と、部品の外側の地を読む。地は親をたどって透けていない地まで重ね（透ける地は上に重ねる）、
+   * 色の書き方（rgb・oklab など）に関わらず、1 画素の canvas に塗って sRGB の値にする
+   */
+  const measure = (where: string) =>
+    page
+      .locator("input[data-slot=input], select, textarea, button[data-slot=button][class*='border'], [data-testid=filter-more]")
+      .evaluateAll(
+        (els, label) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+          const paint = (colors: string[]) => {
+            ctx.clearRect(0, 0, 1, 1);
+            for (const c of colors) {
+              ctx.fillStyle = c;
+              ctx.fillRect(0, 0, 1, 1);
+            }
+            const d = ctx.getImageData(0, 0, 1, 1).data;
+            return { rgb: `rgb(${d[0]}, ${d[1]}, ${d[2]})`, alpha: d[3]! };
+          };
+          return els
+            // 見えていて、枠を持つもの（枠の無いボタンは外す）
+            .filter((el) => (el as HTMLElement).offsetParent !== null && getComputedStyle(el).borderTopWidth !== "0px")
+            .map((el) => {
+              const layers: string[] = [];
+              for (let outer = el.parentElement; outer; outer = outer.parentElement) {
+                const c = getComputedStyle(outer).backgroundColor;
+                const { alpha } = paint([c]);
+                if (alpha === 0) continue;
+                layers.unshift(c);
+                if (alpha === 255) break;
+              }
+              const bg = paint(["rgb(255, 255, 255)", ...layers]).rgb;
+              const border = paint([bg, getComputedStyle(el).borderTopColor]).rgb;
+              const id = el.getAttribute("data-testid") ?? el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 12) ?? "";
+              return { name: `${label} ${el.tagName.toLowerCase()} ${id}`, border, bg };
+            });
+        },
+        where,
+      );
+  const check = async (where: string) => {
+    const found = await measure(where);
+    expect(found.length, where).toBeGreaterThan(0);
+    for (const f of found) expect(contrastOf(f.border, f.bg), `${f.name}：枠 ${f.border}・地 ${f.bg}`).toBeGreaterThanOrEqual(3);
+  };
+  for (const theme of ["light", "dark"] as const) {
+    await page.goto("/");
+    await page.evaluate((t) => (document.documentElement.dataset.theme = t), theme);
+    await page.getByTestId("filter-more").click();
+    await expect(page.getByTestId("filter-more-panel")).toBeVisible();
+    await check(`${theme} 検査一覧`);
+    await page.goto("/admin/viewers");
+    await page.evaluate((t) => (document.documentElement.dataset.theme = t), theme);
+    await check(`${theme} ビューア設定`);
   }
 });

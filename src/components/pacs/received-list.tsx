@@ -1,13 +1,15 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, ChevronLeft, ChevronRight, RotateCw, Search, XCircle } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, RotateCw, Search } from "lucide-react";
 import Link from "next/link";
 import type * as React from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button, buttonVariants, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
+import { Notice } from "@/components/ui/notice";
 import { ActionButton, PendingText } from "@/components/ui/pending";
+import { Select } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getJson } from "@/lib/client/api";
 import {
@@ -73,23 +75,6 @@ export function studyListHref(r: ReceivedView): string | null {
 /** 数を、画面の数の書き方（3 桁ごとの区切り）にする */
 const countText = (n: number) => n.toLocaleString("ja-JP");
 
-/** 知らせ（docs/design-system/parts.md の「知らせ」。左 4px の状態の色・印・文） */
-function Notice({ kind, children, ...props }: { kind: "warn" | "err"; children: React.ReactNode } & React.ComponentProps<"div">) {
-  const Icon = kind === "warn" ? AlertTriangle : XCircle;
-  return (
-    <div
-      data-slot="notice"
-      data-kind={kind}
-      role={kind === "err" ? "alert" : "status"}
-      className={cn("flex items-start gap-2 border-l-4 bg-surface px-3 py-2 text-sm text-foreground", kind === "warn" ? "border-l-warning" : "border-l-danger")}
-      {...props}
-    >
-      <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", kind === "warn" ? "text-warning" : "text-danger")} />
-      <div className="min-w-0">{children}</div>
-    </div>
-  );
-}
-
 /** 期間の切り替え（押すとすぐ読む）。選んだものは aria-pressed と地の色で示す */
 function PeriodChip({ pressed, onClick, children, testId }: { pressed: boolean; onClick: () => void; children: React.ReactNode; testId: string }) {
   return (
@@ -108,8 +93,6 @@ function PeriodChip({ pressed, onClick, children, testId }: { pressed: boolean; 
     </button>
   );
 }
-
-const SELECT = "h-7 rounded-md border border-border bg-background px-2 text-sm text-value";
 
 export function ReceivedList({
   initial,
@@ -280,13 +263,14 @@ export function ReceivedList({
         </div>
         <label className="flex items-center gap-1.5">
           <span className="text-xs text-label">送信元 AE</span>
-          <select
+          <Select
+            size="sm"
             value={source}
             onChange={(e) => {
               setSource(e.target.value);
               setPage(0);
             }}
-            className={cn(SELECT, "w-36")}
+            className="w-36"
             data-testid="received-source"
           >
             <option value="">すべて</option>
@@ -295,7 +279,7 @@ export function ReceivedList({
                 {s}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <div className="relative w-56 max-w-full">
           <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-label" />
@@ -333,12 +317,12 @@ export function ReceivedList({
       </form>
 
       {error && (
-        <Notice kind="err" data-testid="received-error">
+        <Notice kind="err" alert data-testid="received-error">
           {error}
         </Notice>
       )}
       {badRange && (
-        <Notice kind="err" data-testid="received-range-error">
+        <Notice kind="err" alert data-testid="received-range-error">
           受信一覧の期間を読み込めません。開始日が終了日より後です。期間を選び直してください
         </Notice>
       )}
@@ -532,13 +516,13 @@ export function ReceivedList({
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-1.5">
               <span className="text-xs text-label">1 ページに</span>
-              <select
+              <Select
+                size="sm"
                 value={pageSize}
                 onChange={(e) => {
                   setPageSize(Number(e.target.value));
                   setPage(0);
                 }}
-                className={SELECT}
                 data-testid="received-page-size"
               >
                 {PAGE_SIZES.map((n) => (
@@ -546,7 +530,7 @@ export function ReceivedList({
                     {n} 件
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <Button type="button" size="sm" variant="outline" disabled={current === 0} onClick={() => setPage(current - 1)} data-testid="received-prev">
               <ChevronLeft aria-hidden />

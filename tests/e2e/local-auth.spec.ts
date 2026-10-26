@@ -190,12 +190,45 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
 
   // 役割の変更（管理者 → 一般）。役割の選択欄は管理者と一般の2つだけ
   await expect(row.getByLabel(`${DOCTOR.username} の役割`).locator("option")).toHaveText(["管理者", "一般"]);
-  await row.getByLabel(`${DOCTOR.username} の役割`).selectOption("general");
+  // 期待の変更：前は選んだ瞬間に変更を送っていた。いまは確認の窓を挟み、誰を何から何へ替えるかを出す（H6）。
+  // キャンセルなら送らず、選択欄も元の役割に戻る。初期のフォーカスはキャンセル
+  const roleSelect = row.getByLabel(`${DOCTOR.username} の役割`);
+  const confirm = page.getByTestId("user-confirm");
+  const patches: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "PATCH" && r.url().includes("/api/admin/users/")) patches.push(r.url());
+  });
+  await roleSelect.selectOption("general");
+  await expect(confirm).toBeVisible();
+  await expect(confirm.getByRole("heading")).toHaveText(`${DOCTOR.username}（試験 医師）の役割を変更しますか？`);
+  await expect(confirm).toContainText("管理者 → 一般。削除・ユーザー管理・システムの設定ができなくなります");
+  await expect(confirm.getByRole("button", { name: "キャンセル" })).toBeFocused();
+  await confirm.getByRole("button", { name: "キャンセル" }).click();
+  await expect(confirm).toBeHidden();
+  await expect(roleSelect).toHaveValue("admin");
+  expect(patches).toEqual([]);
+  await roleSelect.selectOption("general");
+  await confirm.getByRole("button", { name: "変更する" }).click();
   await expect(page.getByRole("main").getByRole("status")).toContainText("役割を「一般」に変更しました");
+  expect(patches).toHaveLength(1);
   await page.reload();
   await expect(table.locator(`tr[data-username="${DOCTOR.username}"]`).getByLabel(`${DOCTOR.username} の役割`)).toHaveValue(
     "general",
   );
+  // 管理者への格上げも同じ窓を挟む（できるようになることを書く）。無効にするのも確認の窓。どちらもキャンセルで何も変えない
+  await table.locator(`tr[data-username="${DOCTOR.username}"]`).getByLabel(`${DOCTOR.username} の役割`).selectOption("admin");
+  await expect(confirm).toContainText("一般 → 管理者。削除・ユーザー管理・システムの設定ができるようになります");
+  await confirm.getByRole("button", { name: "キャンセル" }).click();
+  await table.locator(`tr[data-username="${DOCTOR.username}"]`).getByRole("button", { name: "無効にする" }).click();
+  await expect(confirm.getByRole("heading")).toHaveText(`${DOCTOR.username}（試験 医師）を無効にしますか？`);
+  await expect(confirm).toContainText("ログインできなくなります");
+  await confirm.getByRole("button", { name: "キャンセル" }).click();
+  await expect(confirm).toBeHidden();
+  await expect(table.locator(`tr[data-username="${DOCTOR.username}"]`)).toContainText("有効");
+  await expect(table.locator(`tr[data-username="${DOCTOR.username}"]`).getByLabel(`${DOCTOR.username} の役割`)).toHaveValue(
+    "general",
+  );
+  expect(patches).toHaveLength(1);
   // 自分の二要素認証のリセットのボタンは出さない（別の管理者が行う）
   await expect(adminRow.getByRole("button", { name: "二要素認証をリセット" })).toHaveCount(0);
 
@@ -257,7 +290,9 @@ test("役割ごとにできる操作：一般は検査と画像を見られ、�
     ).status(),
   ).toBe(403);
   await page.goto("/admin/users");
-  await expect(page.getByRole("main").getByRole("alert")).toHaveText("管理者のみ利用できます");
+  // 期待の変更：alert の段落「管理者のみ利用できます」から、空の状態（denied）の「この画面は管理者のみ利用できます。」に替えた
+  await expect(page.getByRole("main")).toContainText("この画面は管理者のみ利用できます。");
+  await expect(page.getByRole("main").getByRole("link", { name: "検査一覧へ" })).toBeVisible();
   await context.close();
 });
 
@@ -305,6 +340,8 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
   await page.getByTestId("send-open").click();
   const panel = page.getByTestId("send-panel");
+  // 開いたら、最初の入力（送信先の選択欄）へフォーカスが移る
+  await expect(panel.getByTestId("send-modality")).toBeFocused();
   await panel.getByTestId("send-modality").selectOption("dtg");
   await expect(panel.getByTestId("send-confirm")).toContainText("JP-TEST-0004");
   await expect(panel.getByTestId("send-confirm")).toContainText("dtg（DTG_SCP）");
@@ -318,6 +355,8 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   await expect(panel.getByTestId("send-submit")).toHaveCount(0);
   // 閉じて開き直すと、新しい送信の確かめの画面になる
   await panel.getByTestId("send-close").click();
+  // 閉じたら、開いたボタンへフォーカスが戻る（body に落ちない）
+  await expect(page.getByTestId("send-open")).toBeFocused();
   await page.getByTestId("send-open").click();
   await expect(page.getByTestId("send-panel").getByTestId("send-submit")).toBeVisible();
   await expect(page.getByTestId("send-panel").getByTestId("send-status")).toHaveCount(0);
@@ -657,6 +696,8 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await expect(panel.getByTestId("delete-confirm")).toContainText("JP-TEST-0003");
   await expect(panel.getByTestId("delete-confirm")).toContainText("この操作は取り消せません");
   await expect(panel.getByTestId("delete-submit")).toBeDisabled();
+  // 開いたら、最初の入力（削除の理由）へフォーカスが移る
+  await expect(panel.getByTestId("delete-reason")).toBeFocused();
   await panel.getByTestId("delete-reason").fill("取り違えた検査（試験）");
   await panel.getByTestId("delete-submit").click();
   // 再認証の前は消さない（パスワードだけを求め、検査はまだ一覧にある）。
