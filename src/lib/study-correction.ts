@@ -207,7 +207,8 @@ export async function readSnapshot(
       ? Object.fromEntries(PATIENT_ATTRS.map((k) => [k, basis[0]![k]]))
       : Object.fromEntries(PATIENT_ATTRS.filter((k) => values[k] !== undefined).map((k) => [k, values[k]!]));
     if (basis.length && PATIENT_ATTRS.some((k) => values[k] !== undefined && values[k] !== attributes[k])) {
-      throw new CorrectionRefused(409, "target_mismatch", "付け替え先の患者の氏名・生年月日・性別と、入力した値が違います", { target: attributes });
+      // 付け替え先の患者の値は、断る応答にも監査の記録にも入れない（見せるのは、記録を残す確かめの画面の成功の応答だけ）
+      throw new CorrectionRefused(409, "target_mismatch", "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います");
     }
     // 付け替え先の患者に同じ UID の検査があり、同じ画像（UID の組）を持っていれば、書き換えた画像が上書きになるので断る
     const sent = new Set(selected.alongside.filter((i) => i.PatientID === to).map(triple));

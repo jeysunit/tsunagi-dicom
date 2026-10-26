@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ConfirmActions, ConfirmPanel } from "@/components/ui/confirm-panel";
+import { Notice } from "@/components/ui/notice";
 import { PendingText } from "@/components/ui/pending";
 import { ReauthForm } from "@/components/ui/reauth-form";
+import { Select } from "@/components/ui/select";
 import { Tabs } from "@/components/ui/tabs";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { handleAuthStatus, NETWORK_ERROR_MESSAGE } from "@/lib/client/api";
@@ -173,9 +175,9 @@ export function ModifyPanel({
         </p>
       )}
       {loadError && !candidates && (
-        <p role="alert" className="text-danger" data-testid="modify-load-error">
+        <Notice kind="err" alert data-testid="modify-load-error">
           {loadError}
-        </p>
+        </Notice>
       )}
       {candidates && (
         // 同じ StudyInstanceUID の検査が複数ある（付け替えの後に、元の患者ID で同じ検査の画像が届いたときなど）。修正する検査を選ぶ
@@ -211,9 +213,9 @@ export function ModifyPanel({
       {current && !pending[0] && (
         <>
           {current.mixed.length > 0 && (
-            <p className="text-sm text-danger" data-testid="modify-mixed">
+            <Notice kind="warn" data-testid="modify-mixed">
               画像ごとに値が揃っていない項目があります（{current.mixed.map((f) => FIELD_LABELS[f as CorrectionField] ?? f).join("・")}）。修正すると、全部の画像が同じ値になります。
-            </p>
+            </Notice>
           )}
           <Tabs
             label="修正の種類"
@@ -438,18 +440,13 @@ function CorrectionForm({
                 <Input value={values.PatientBirthDate ?? ""} onChange={(e) => set("PatientBirthDate", e.target.value)} inputMode="numeric" data-testid="modify-PatientBirthDate" />
               </Field>
               <Field label="性別">
-                <select
-                  value={values.PatientSex ?? ""}
-                  onChange={(e) => set("PatientSex", e.target.value)}
-                  className="h-8 w-full rounded-md border border-border-input bg-background px-2 text-value focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid="modify-PatientSex"
-                >
+                <Select className="w-full" value={values.PatientSex ?? ""} onChange={(e) => set("PatientSex", e.target.value)} data-testid="modify-PatientSex">
                   {Object.entries(SEX_LABELS).map(([v, label]) => (
                     <option key={v} value={v}>
                       {label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
             </>
           )}
@@ -464,10 +461,10 @@ function CorrectionForm({
             </>
           )}
           {problem && (
-            <p role="alert" className="text-sm text-danger sm:col-span-2" data-testid="modify-problem">
+            <Notice kind="err" alert className="sm:col-span-2" data-testid="modify-problem">
               {problem.field ? `${FIELD_LABELS[problem.field as CorrectionField] ?? problem.field}：` : ""}
               {problem.text}
-            </p>
+            </Notice>
           )}
           {!preview && (
             <div className="sm:col-span-2">
@@ -499,7 +496,7 @@ function CorrectionForm({
           {preview.studies.some((s) => Object.entries(s.before ?? {}).some(([f, v]) => v !== preview.fields[f]?.before)) && (
             // 同じ患者IDの検査どうしで修正前の値が違う（取り違え・前の修正の途中で止まったなど）。検査ごとの値を並べる
             <div className="space-y-1" data-testid="modify-studies">
-              <p className="text-sm text-danger">検査ごとに修正前の値が違います。全部の検査が修正後の値になります。</p>
+              <Notice kind="warn">検査ごとに修正前の値が違います。全部の検査が修正後の値になります。</Notice>
               <table className="text-sm">
                 <thead>
                   <tr className="text-xs text-label">
@@ -533,7 +530,7 @@ function CorrectionForm({
             {preview.scope === "content" && "修正した検査を、新しい StudyInstanceUID で作ります。元の検査は残ります（元の検査を消すときは、削除を使います）。"}
           </p>
           {preview.studies.some((s) => s.mixed.length > 0) && (
-            <p className="text-sm text-danger">画像ごとに値が揃っていない検査があります。修正すると、直す項目は全部の画像で同じ値になります。</p>
+            <Notice kind="warn">画像ごとに値が揃っていない検査があります。修正すると、直す項目は全部の画像で同じ値になります。</Notice>
           )}
           <label className="block space-y-1">
             <span className="text-xs text-label">修正理由（必須・操作ログに記録）</span>
@@ -595,8 +592,9 @@ function CorrectionForm({
         </p>
       )}
       {phase.kind === "unknown" && (
-        <div role="alert" className="space-y-1" data-testid="modify-status">
-          <p className="text-danger">
+        <Notice kind="err" alert data-testid="modify-status">
+          <div className="space-y-1">
+          <p>
             {phase.hl7
               ? "この検査に、結果不明のHL7の更新があります。管理者が確認するまで、修正はできません"
               : phase.partial
@@ -628,12 +626,13 @@ function CorrectionForm({
               </Button>
             </form>
           )}
-        </div>
+          </div>
+        </Notice>
       )}
       {phase.kind === "error" && (
-        <p role="alert" className="text-danger" data-testid="modify-error">
+        <Notice kind="err" alert data-testid="modify-error">
           {phase.text}
-        </p>
+        </Notice>
       )}
     </div>
   );

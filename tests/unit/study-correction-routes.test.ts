@@ -306,11 +306,18 @@ describe("属性の訂正（患者情報修正）", () => {
     // JP-TEST-0002 の氏名は Shiken^Hanako=試験^花子=しけん^はなこ
     const mismatch = await preview("attribute", { PatientID: "JP-TEST-0002", PatientName: "Yamada^Taro" });
     expect(mismatch.status).toBe(409);
-    expect((await mismatch.json()).target).toMatchObject({ PatientName: "Shiken^Hanako=試験^花子=しけん^はなこ" });
+    // 期待の変更：前は断る応答に付け替え先の患者の値（target）を返していた。患者の値は記録を残す確かめの成功の応答だけで見せるので、
+    // 断る応答には「違う」ことだけを返し、付け替え先の氏名・生年月日・性別を含めない
+    const mismatchBody = await mismatch.json();
+    expect(mismatchBody).toEqual({ error: "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います" });
+    expect(JSON.stringify(mismatchBody)).not.toMatch(/Shiken|試験|しけん|1995/);
     const spy = vi.spyOn(await backend(), "modifyStudyKeepingUids");
     const requestId = crypto.randomUUID();
     const res = await modify({ requestId, kind: "attribute", values: { PatientID: "JP-TEST-0002", PatientName: "Yamada^Taro" }, confirmToken: "m1.x.x.x" });
     expect(res.status).toBe(409);
+    // 実行の断りの応答と監査の記録にも、付け替え先の患者の値は入らない
+    expect(JSON.stringify(await res.json())).not.toMatch(/Shiken|試験|しけん|1995/);
+    expect(JSON.stringify(await rowsOf(requestId))).not.toMatch(/Shiken|試験|しけん|1995/);
     expect(spy).not.toHaveBeenCalled();
     const p = await (await preview("attribute", { PatientID: "JP-TEST-0002" })).json();
     expect(p.target).toMatchObject({ exists: true, PatientName: "Shiken^Hanako=試験^花子=しけん^はなこ" });
