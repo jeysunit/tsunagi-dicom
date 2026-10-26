@@ -90,7 +90,8 @@ test("送信一覧：状態の要約・上限の知らせ・件数・ページ�
     ),
   );
   expect(order).toEqual(["sent-summary", "sent-searchband", "sent-limit", "sent-count", "sent-table", "sent-pager"]);
-  await expect(page.getByTestId("sent-limit")).toHaveText("！送信ジョブが 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。");
+  // 期待の変更：先頭の「！」の文字を Lucide の印（知らせの部品）に替えたので、文だけを見る
+  await expect(page.getByTestId("sent-limit")).toHaveText("送信ジョブが 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。");
   await expect(page.getByTestId("sent-count")).toHaveText("120");
   await expect(page.getByTestId("sent-sum-all")).toContainText("120");
   await expect(page.getByTestId("sent-sum-failed")).toContainText("送信失敗24");

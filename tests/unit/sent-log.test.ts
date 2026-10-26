@@ -242,6 +242,22 @@ describe("送信一覧の画面の API", () => {
     expect(detailOf(row)).toMatchObject({ reason: "forbidden", permission: "send.view" });
   });
 
+  it("仕事の状態を読めない送信は、一覧全体の誤りにせず、その行だけ結果不明にする", async () => {
+    state.role = "general";
+    const { getBackend } = await import("@/lib/backend");
+    const unknownCount = (items: { status: string }[]) => items.filter((r) => r.status === "unknown").length;
+    await send("dtg");
+    await send("dtg");
+    // 前の試験の送信も同じ記録に残っているので、まず読んで、結果不明の数を控える
+    const before = await (await sentLog()).json();
+    vi.spyOn(getBackend(), "jobStatus").mockRejectedValueOnce(new Error("Orthanc に接続できません"));
+    const res = await sentLog();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items).toHaveLength(before.items.length);
+    expect(unknownCount(body.items)).toBe(unknownCount(before.items) + 1);
+  });
+
   it("形の合わない期間は 400 で、記録の中身を返さない", async () => {
     state.role = "general";
     const res = await sentLog("period=range&from=2026-10-03&to=2026-10-01");

@@ -290,7 +290,8 @@ export async function sentLogView(deps: SentLogDeps, range: SentRange): Promise<
   });
   const statuses = await mapLimit(staged, CONCURRENCY, async (r): Promise<{ status: SentStatus; finishedAt: Date | null }> => {
     if (r.stage.kind === "final") return { status: r.stage.status, finishedAt: r.stage.finishedAt };
-    const job = await backend.jobStatus(r.stage.jobId);
+    // 仕事を読めない（Orthanc の通信の失敗・拒否）ときは、一覧全体の誤りにせず、その行だけ結果不明にする
+    const job = await backend.jobStatus(r.stage.jobId).catch(() => null);
     const status = jobSentStatus(job?.state ?? null);
     if (job && (job.state === "Success" || job.state === "Failure")) {
       return { status, finishedAt: await recordDone(session, r, job.id, job.state, job.errorCode) };

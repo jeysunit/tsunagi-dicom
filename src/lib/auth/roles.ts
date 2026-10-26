@@ -40,6 +40,8 @@ export const PERMISSIONS = [
   "receive.view",
   // 機器の一覧（名前と AE タイトル。住所は許可の一覧の modality で絞る）と、つながるかの確かめ（C-ECHO）
   "modality.check",
+  // 上の帯の接続の状態を見る（画像サーバー・HL7 の受け口・接続先の直近の接続確認。読むだけで、相手に何も送らない）
+  "connection.view",
   // ほかの機器へ送る（書き込みの操作。docs/spec.md の 3.5 の共通の決まりを通す）
   "study.send",
   // 送った記録を見る（送信一覧。監査の記録の送信の行と Orthanc の仕事から読む。読むだけ。docs/spec.md の 3.4）
@@ -50,6 +52,8 @@ export const PERMISSIONS = [
   "study.export",
   // 削除（管理者だけ。理由を必須・再認証の後）
   "study.delete",
+  // 段 6：患者・検査の値の修正（一般と管理者。理由を必須・再認証の後。docs/spec.md の 3.5）
+  "study.modify",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -66,8 +70,10 @@ const GENERAL: readonly Permission[] = [
   // 同じ検査を重ねて送らないために見えるほうがよい。返す項目は許可の一覧の sent・study で絞り、開いたことを記録する）
   "send.view",
   "modality.check",
+  "connection.view",
   "study.send",
   "study.export",
+  "study.modify",
 ];
 
 export const ROLE_PERMISSIONS: PermissionMap = {

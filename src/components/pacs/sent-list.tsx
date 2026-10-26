@@ -1,11 +1,13 @@
 "use client";
 
-import { ArrowRight, Check, Copy, X } from "lucide-react";
+import { ArrowRight, Check, Copy, X, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
+import { Notice } from "@/components/ui/notice";
+import { Select } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getJson } from "@/lib/client/api";
@@ -179,11 +181,10 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
       >
         <label className="flex flex-col gap-1" htmlFor={ids.period}>
           <span className="text-xs text-label">期間</span>
-          <select
+          <Select
             id={ids.period}
             value={draft.period}
             onChange={(e) => setDraft((d) => ({ ...d, period: e.target.value as Period }))}
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm text-value"
             data-testid="sent-period"
           >
             {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
@@ -191,7 +192,7 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
                 {PERIOD_LABELS[p]}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         {draft.period === "range" && (
           <div className="flex items-end gap-1">
@@ -226,11 +227,11 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
         )}
         <label className="flex flex-col gap-1" htmlFor={ids.dest}>
           <span className="text-xs text-label">送信先</span>
-          <select
+          <Select
             id={ids.dest}
             value={draft.destination}
             onChange={(e) => setDraft((d) => ({ ...d, destination: e.target.value }))}
-            className="h-8 min-w-32 rounded-md border border-border bg-background px-2 text-sm text-value"
+            className="min-w-32"
             data-testid="sent-destination"
           >
             <option value="">すべて</option>
@@ -239,7 +240,7 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
                 {d}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1" htmlFor={ids.text}>
           <span className="text-xs text-label">患者ID・氏名</span>
@@ -261,27 +262,22 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
           </Button>
         </div>
         {rangeProblem && (
-          <p id={ids.range} className="w-full text-xs text-danger" data-testid="sent-range-problem">
-            ✕ {rangeProblem}
+          <p id={ids.range} className="flex w-full items-center gap-1 text-xs text-danger" data-testid="sent-range-problem">
+            <XCircle aria-hidden className="size-3.5 shrink-0" />
+            {rangeProblem}
           </p>
         )}
       </form>
 
       {error && (
-        <div role="alert" className="flex items-center gap-2 border-l-4 border-danger bg-surface px-3 py-2 text-sm text-value" data-testid="sent-error">
-          <span aria-hidden className="text-danger">
-            ✕
-          </span>
+        <Notice kind="err" alert data-testid="sent-error">
           {error}
-        </div>
+        </Notice>
       )}
       {data?.truncated && (
-        <div role="status" className="flex items-center gap-2 border-l-4 border-warning bg-surface px-3 py-2 text-sm text-value" data-testid="sent-limit">
-          <span aria-hidden className="text-warning">
-            ！
-          </span>
+        <Notice kind="warn" data-testid="sent-limit">
           {sentLimitNotice(limit)}
-        </div>
+        </Notice>
       )}
 
       <CountRow
@@ -434,14 +430,14 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
           <label htmlFor={ids.size} className="text-xs text-label">
             1 ページに
           </label>
-          <select
+          <Select
+            size="sm"
             id={ids.size}
             value={pageSize}
             onChange={(e) => {
               setPageSize(Number(e.target.value));
               setPage(1);
             }}
-            className="h-7 rounded-md border border-border bg-background px-2 text-sm text-value"
             data-testid="sent-page-size"
           >
             {PAGE_SIZES.map((n) => (
@@ -449,7 +445,7 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
                 {n} 件
               </option>
             ))}
-          </select>
+          </Select>
           <Button type="button" size="sm" variant="outline" disabled={slice.page <= 1} onClick={() => setPage(slice.page - 1)} data-testid="sent-prev">
             前のページ
           </Button>
