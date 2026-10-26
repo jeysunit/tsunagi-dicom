@@ -89,7 +89,7 @@ export function ViewerDefaults({
               </span>
               <select
                 aria-label={`${m} の標準のビューア`}
-                className="h-8 rounded-md border border-border bg-background px-2 text-value"
+                className="h-8 rounded-md border border-border-input bg-background px-2 text-value"
                 value={values[m] ?? ""}
                 disabled={openers.length === 0}
                 aria-busy={saving === m || undefined}

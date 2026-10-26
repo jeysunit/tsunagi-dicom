@@ -214,6 +214,8 @@ export function studyInfoFromRest(json: unknown): OrthancStudyInfo | null {
     studyInstanceUid: str(main.StudyInstanceUID),
     patientId: str(patient.PatientID),
     patientName: str(patient.PatientName),
+    patientBirthDate: str(patient.PatientBirthDate),
+    patientSex: str(patient.PatientSex),
     studyDate: str(main.StudyDate),
     seriesCount: Array.isArray(s.Series) ? s.Series.length : 0,
     version: str(s.LastUpdate),

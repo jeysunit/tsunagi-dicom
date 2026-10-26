@@ -26,6 +26,29 @@ export async function storescuToOrthanc(batch: string): Promise<void> {
   });
 }
 
+export interface FindAnswer {
+  characterSet: string | null;
+  patientName: string | null;
+  studyDescription: string | null;
+}
+
+/**
+ * Orthanc へ C-FIND（検査の単位。患者 ID で絞る）を送り、答えの 1 件目の文字の集合・氏名・検査名を返す（文字の集合の測定用）。
+ * queryCharset を省くと、問い合わせの SpecificCharacterSet は空（全部に合う）
+ */
+export async function findscuStudy(patientId: string, queryCharset = ""): Promise<FindAnswer> {
+  const dump = await compose(
+    ["run", "--rm", "--no-deps", "scu", "find-study", ITEST.scuAet, ITEST.orthancAet, "orthanc", "4242", patientId, ...(queryCharset ? [queryCharset] : [])],
+    { timeoutMs: 60_000 },
+  );
+  // dcmdump の行：`(0010,0010) PN [値]   # …`。値が無いときは `(no value available)`
+  const read = (tag: string) => {
+    const m = new RegExp(`^\\(${tag}\\) \\w\\w (?:\\[(.*)\\]|\\(no value available\\))\\s+#`, "m").exec(dump);
+    return m ? (m[1] ?? "") : null;
+  };
+  return { characterSet: read("0008,0005"), patientName: read("0010,0010"), studyDescription: read("0008,1030") };
+}
+
 export interface ReceivedFile {
   sopInstanceUid: string;
   studyInstanceUid: string;

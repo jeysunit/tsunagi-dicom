@@ -23,6 +23,8 @@ interface Preview {
   patientId: string;
   patientName: string;
   patientKana: string;
+  patientBirthDate: string;
+  patientSex: string;
   studyDate: string;
   seriesCount: number;
   instanceCount: number;
@@ -182,7 +184,7 @@ export function DeletePanel({
           ? {
               name: preview.patientName,
               patientId: preview.patientId,
-              birthLine: formatBirthLine(study.patientBirthDate, study.patientSex, preview.studyDate),
+              birthLine: formatBirthLine(preview.patientBirthDate, preview.patientSex, preview.studyDate),
             }
           : undefined
       }
@@ -233,7 +235,7 @@ export function DeletePanel({
               maxLength={500}
               required
               rows={2}
-              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-value"
+              className="w-full rounded-md border border-border-input bg-background px-2 py-1 text-sm text-value"
               data-testid="delete-reason"
             />
           </label>
@@ -294,7 +296,7 @@ export function DeletePanel({
                 maxLength={500}
                 rows={2}
                 aria-label="確認内容"
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-value"
+                className="w-full rounded-md border border-border-input bg-background px-2 py-1 text-sm text-value"
               />
               <Button type="submit" size="sm" variant="outline">
                 確認済みとして解除

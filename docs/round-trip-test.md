@@ -162,6 +162,21 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 | SpecificCharacterSet が `\ISO 2022 IR 87` の画像の WADO-RS の `metadata` | 氏名は `Alphabetic` が `ITEST^HANAKO`、`Ideographic` が `試験^花子`、`Phonetic` が `しけん^はなこ`。検査名は `頭部単純`。どれも Unicode に直して返した。`00080005` の値は `["ISO 2022 IR 87"]`（先頭の空の値を落とした 1 つ） | BFF は文字コードを読み替えず、受けた文字をそのまま返す前提と合う。答えの写しは `tests/fixtures/orthanc/dicom-web/iso2022-instance-metadata.json` |
 | WADO-RS の `metadata` のファイルのメタ情報（転送構文 (0002,0010)） | 入っていなかった | 既定の主なタグに入れていない前提と合う。施設が `INSTANCE_TAGS` に足すと、値は「—」になる |
 
+### 結合の試験で測った、文字の集合の組み合わせ（2026-10-25）
+
+結合の試験の 22 で、同じ版の Orthanc に 6 通りの SpecificCharacterSet の検査を送って測った（理由と対応は `spec.md` の 7）。
+
+| SpecificCharacterSet | Orthanc の REST の氏名 | 正しい氏名での検索 |
+|---|---|---|
+| `\ISO 2022 IR 87` | 崩れない（`試験^花子`） | 見つかる |
+| `ISO 2022 IR 13\ISO 2022 IR 87` | 崩れる（`;n83^2V;R`） | 見つからない |
+| `ISO 2022 IR 6\ISO 2022 IR 87` | 崩れる（`$B;n83(B^$B2V;R(B`） | 見つからない |
+| `ISO_IR 13`（半角カナ） | 崩れない | 見つかる |
+| `\ISO 2022 IR 149` | 崩れない（ハングル） | 見つかる |
+| `ISO 2022 IR 6\ISO 2022 IR 149` | 崩れる（ハングルが消える） | 見つからない |
+
+C-FIND の答えは、6 通りとも `SpecificCharacterSet` が `ISO_IR 100` で、漢字・かな・ハングルが消えた。問い合わせの SpecificCharacterSet を空にしても `ISO_IR 192` にしても同じ。
+
 ### 結合の試験で見つけて直した、BFF の食い違い
 
 結合の試験の 10 で見つけ、PR #33 で直した（いまは結合の試験の 10 が緑）。

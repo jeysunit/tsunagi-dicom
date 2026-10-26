@@ -197,6 +197,8 @@ export interface OrthancStudyInfo {
   studyInstanceUid: string;
   patientId: string;
   patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
   studyDate: string;
   seriesCount: number;
   /** 版（Orthanc の LastUpdate）。確かめの画面を出した後に検査が変われば、この値が変わる */

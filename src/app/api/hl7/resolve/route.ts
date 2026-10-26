@@ -3,7 +3,7 @@ import { checkedScreenWrite, readJson } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { auditIf, requirePermission } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
-import { enqueue, history, unresolved, verify } from "@/lib/hl7/apply";
+import { enqueue, history, unresolved, verify } from "@/lib/keep-uid-write";
 import { visible } from "../../../../../hl7-receiver/visible";
 const Body = z.object({ writeId: z.uuid(), note: z.string().trim().min(1).max(500) }).strict();
 
