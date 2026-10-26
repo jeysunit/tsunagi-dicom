@@ -37,7 +37,7 @@ export function ThemeToggle({ initial, csrfToken }: { initial: Theme; csrfToken?
         type="button"
         variant="ghost"
         size="sm"
-        aria-label="明るい地と暗い地を切り替える"
+        aria-label="表示をライトとダークで切り替える"
         aria-pressed={theme === "dark"}
         data-testid="theme-toggle"
         onClick={() => void toggle()}

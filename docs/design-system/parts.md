@@ -40,7 +40,7 @@
       <div class="ft"><button type="button" class="btn btn-sm">接続確認</button><a class="btn btn-sm" href="/modalities">接続先を開く</a></div>
     </div>
   </span>
-  <button type="button" class="iconbtn" data-act="theme" aria-label="明るい地と暗い地を切り替える">…sun…moon…</button>
+  <button type="button" class="iconbtn" data-act="theme" aria-label="表示をライトとダークで切り替える">…sun…moon…</button>
   <span class="div" aria-hidden="true"></span>
   <span class="who"><b>試験 管理者</b><span>admin（管理者）</span></span>
   <button type="button" class="btn btn-sm">画面ロック</button>

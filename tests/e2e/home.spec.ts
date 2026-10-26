@@ -35,10 +35,10 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
   });
 
   test("暗い地に切り替えると、利用者ごとに覚えて、開き直しても暗い地のまま", async ({ page }) => {
-    // 期待の変更：切り替えは、絵の押しボタン 1 つ（aria-label「明るい地と暗い地を切り替える」）にした。押している状態（aria-pressed）が暗い地。
+    // 期待の変更：切り替えは、絵の押しボタン 1 つ（aria-label「表示をライトとダークで切り替える」）にした。押している状態（aria-pressed）が暗い地。
     // 前は「表示」のライト・ダークの 2 つのボタンだった。押すたびに替える
     await page.goto("/");
-    const toggle = page.getByRole("button", { name: "明るい地と暗い地を切り替える" });
+    const toggle = page.getByRole("button", { name: "表示をライトとダークで切り替える" });
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const saved = page.waitForResponse((r) => r.url().endsWith("/api/preferences/theme") && r.ok());
