@@ -162,6 +162,17 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 | SpecificCharacterSet が `\ISO 2022 IR 87` の画像の WADO-RS の `metadata` | 氏名は `Alphabetic` が `ITEST^HANAKO`、`Ideographic` が `試験^花子`、`Phonetic` が `しけん^はなこ`。検査名は `頭部単純`。どれも Unicode に直して返した。`00080005` の値は `["ISO 2022 IR 87"]`（先頭の空の値を落とした 1 つ） | BFF は文字コードを読み替えず、受けた文字をそのまま返す前提と合う。答えの写しは `tests/fixtures/orthanc/dicom-web/iso2022-instance-metadata.json` |
 | WADO-RS の `metadata` のファイルのメタ情報（転送構文 (0002,0010)） | 入っていなかった | 既定の主なタグに入れていない前提と合う。施設が `INSTANCE_TAGS` に足すと、値は「—」になる |
 
+### 値の修正（段 6）で測った結果（2026-10-25）
+
+同じ版の Orthanc（26.9.1。Orthanc 1.13.0）を相手に、結合の試験の 23〜25 と、手元で立てた使い捨ての Orthanc（`OverwriteInstances` の無いもの）で測った。
+
+| 項目 | 測った結果 | BFF の前提・決めたこと |
+|---|---|---|
+| `/system` の設定の値 | `OverwriteInstances`（真偽）・`OverwriteInstancesMode`（`Always`／`Never`）・`UserMetadata`（名前と番号。`TsunagiLock` は 1024）を返す | 属性の訂正の前に、この2つで設定を確かめ、無ければ断る（[`spec.md`](spec.md) の 3.5） |
+| `OverwriteInstances` の無い Orthanc での `Keep` の書き換え | 仕事を作らずに 400。`Details` に `OverwriteInstances` が要ることが書かれる。画像は変わらない | 前もって `/system` で断るので、この答えには行き着かない（行き着いても、書き換えなかった失敗として残る） |
+| 患者 ID を変えない属性の訂正で置き換えた画像のメタデータ | `ReceptionDate` は書き換えの時刻、`RemoteAET` は空、`Origin` は `RestApi` になり、`CalledAET` は無くなる（前は `DicomProtocol` と、送ってきた側の AE タイトル） | 受信一覧では、直した検査が先頭に、送信元 AE 無し・`RestApi` で出る。直し方は段 6 の別の PR で決める（[`spec.md`](spec.md) の 3.5） |
+| `Keep` の無い書き換え（中身の訂正）で `Replace` に StudyInstanceUID を渡したとき | 渡した UID の検査ができ、SeriesInstanceUID と SOPInstanceUID は新しくなる。元の検査は残る。仕事の `Content.ID` は新しい検査の ID | BFF が UID を決め、結果不明のときもその UID で探して照らす |
+
 ### 結合の試験で測った、文字の集合の組み合わせ（2026-10-25）
 
 結合の試験の 22 で、同じ版の Orthanc に 6 通りの SpecificCharacterSet の検査を送って測った（理由と対応は `spec.md` の 7）。

@@ -21,8 +21,12 @@ export const REMEMBER_TTL_MS = 24 * 60 * 60 * 1000;
 /** BFF の時計の巻き戻りを許す幅（design.md §15.2） */
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-/** 覚えに、受理した順（監査の記録の並び）と受理の時刻を添えたもの。前後は順で決め、時刻は期限だけに使う */
-type Ordered<T> = T & { seq: number; time: number };
+/**
+ * 覚えに、受理した順（監査の記録の並び）と受理の時刻を添えたもの。前後は順で決め、時刻は期限だけに使う。
+ * order は監査の記録の行の番号（画面の付け替えは「求めた」の行の番号。結果を後から決めた行でも、求めた順で並ぶ）
+ */
+type Ordered<T> = T & { seq: number; time: number; order?: number };
+const orderOf = (a: { seq: number; order?: number }) => a.order ?? a.seq;
 type Alias = Ordered<Extract<Remembered, { kind: "alias" }>>;
 type Order = Ordered<Extract<Remembered, { kind: "order" }>>;
 
@@ -36,15 +40,23 @@ export interface SweepResult {
 }
 
 /**
- * 覚えを、受理した順に全部取り出す（ack の行の AA だけ）。期限はここでは切らない。統合の段と前後は全部の覚えで
- * 決めてから、最初の段の時刻で期限を見る（期限で古い A40 だけが落ちて、送り直しが新しい段に見えることを防ぐ）。
+ * 覚えを、受理した順に全部取り出す（HL7 の ack の行の AA と、画面の患者 ID の付け替えの成功の行）。期限はここでは切らない。
+ * 統合の段と前後は全部の覚えで決めてから、最初の段の時刻で期限を見る（期限で古い A40 だけが落ちて、送り直しが新しい段に
+ * 見えることを防ぐ）。画面の付け替えの覚えは、付け替えた検査の分だけの統合（kind alias・origin screen）として受ける
+ * （openspec/changes/add-study-value-correction/design.md の 2）
  */
 export function memory(rows: HistoryRow[]): { aliases: Alias[]; orders: Order[] } {
   const remembered = rows
-    .filter(r => r.detail?.event === "ack" && r.detail?.code === "AA" && r.detail?.remember)
+    .filter(r => r.detail?.remember && (
+      (r.action !== "modify" && r.detail?.event === "ack" && r.detail?.code === "AA")
+      || (r.action === "modify" && (r.detail?.phase === "result" || r.detail?.phase === "reconcile") && r.outcome === "success"
+        && (r.detail.remember as Remembered).kind === "alias" && (r.detail.remember as Alias).origin === "screen")
+    ))
     .map((r, seq) => {
-      const m = r.detail!.remember as Remembered;
-      return { ...m, seq, time: Date.parse(m.at) };
+      const m = r.detail!.remember as Remembered & { requestSeq?: unknown };
+      const auditSeq = (r as { seq?: unknown }).seq;
+      const order = typeof m.requestSeq === "number" ? m.requestSeq : typeof auditSeq === "number" ? auditSeq : seq;
+      return { ...m, seq, time: Date.parse(m.at), order } as Ordered<Remembered>;
     })
     .filter(m => Number.isFinite(m.time));
   return {
@@ -198,11 +210,13 @@ export async function sweepArrivals(
       moved.set(i.PatientID, set);
     }
   }
-  for (const source of [...new Set(aliases.map(a => a.from))]) {
-    const links = resolveAlias(aliases, source);
+  // 画面の患者 ID の付け替えの覚えは、A40 の統合の続きとは別に、検査ごとに扱う（下の sweepScreenArrivals）
+  const chain = aliases.filter(a => a.origin !== "screen");
+  for (const source of [...new Set(chain.map(a => a.from))]) {
+    const links = resolveAlias(chain, source);
     if (!links) {
       // 期限の中の A40 があるときだけ知らせる（古い覚えのたびに Orthanc を探さない）
-      if (aliases.some(a => a.from === source && withinTtl(a, now))) {
+      if (chain.some(a => a.from === source && withinTtl(a, now))) {
         for (const id of await backend.findStudiesByPatientId(source)) {
           skip("統合の先を決められない", source, id);
         }
@@ -307,6 +321,134 @@ export async function sweepArrivals(
         // 書き換えの失敗・結果不明は監査の記録に残っている。次の書き換えは、照らせるまで止める
         result.blocked = e instanceof BackendError ? e.message : "書き換えに失敗した";
         return result;
+      }
+    }
+  }
+  return await sweepScreenArrivals(backend, aliases.filter(a => a.origin === "screen"), chain, now, moved, skip, row, sweepId, options, result);
+}
+
+/**
+ * 画面の患者 ID の付け替えの後に、付け替えの前の患者 ID・同じ StudyInstanceUID で届いた画像を、その検査がいまある患者へ
+ * まとめる（openspec/changes/add-study-value-correction/design.md の 2）。画面の付け替えは1つの検査だけを移し、元の患者は
+ * 別の患者のままなので、A40 の統合の続き（患者 ID ごとの段）にはまとめず、検査（StudyInstanceUID）ごとに扱う。
+ * - 期限は、その検査の最後の付け替えの受理から 24 時間（ほかの検査の古い付け替えに引きずられない）
+ * - 付け替えの前の患者 ID は、その検査の期限の中の付け替えの元の患者 ID の全部（装置は最初の患者 ID のまま送る）
+ * - まとめる先は、同じ UID の検査がいまある患者（ちょうど1人で、元の患者でないこと）。付け替えの後の HL7 の A40 などで
+ *   移った先にも追いつき、人が元の患者へ書き戻していれば（先の検査が無い）まとめない
+ * - 予約（ORM）の検査には広げない。統合の前の値・同じ画像・書き戻しの確かめは、A40 の見回りと同じ
+ */
+async function sweepScreenArrivals(
+  backend: Backend,
+  screen: Alias[],
+  /** A40 の統合の覚え（付け替えの後に、付け替え先の患者がさらに統合されたかを見る） */
+  chain: Alias[],
+  now: number,
+  moved: Map<string, Set<string>>,
+  skip: (reason: string, patientId: string, uid: string) => void,
+  row: AuditRow,
+  sweepId: string,
+  options: ProcessOptions,
+  result: SweepResult,
+): Promise<SweepResult> {
+  const byStudy = new Map<string, Alias[]>();
+  for (const a of screen) {
+    for (const uid of a.studies) byStudy.set(uid, [...byStudy.get(uid) ?? [], a]);
+  }
+  for (const [uid, list] of byStudy) {
+    // 最後の付け替えは、求めた順（監査の記録の行の番号）で決める。時計が戻っても前後を取り違えない。時刻は期限だけに使う
+    const latest = list.reduce((a, b) => (orderOf(b) > orderOf(a) ? b : a));
+    if (!withinTtl(latest, now)) {
+      continue;
+    }
+    const live = list.filter(a => withinTtl(a, now));
+    for (const source of [...new Set(live.map(a => a.from))]) {
+      // 前の旧い患者 ID の画像をまとめた後の形で読み直す（まとめた先の検査の画像が増えている）
+      const ids = await backend.lookupStudyIds(uid);
+      const tags = new Map<string, PatientInstance[]>();
+      for (const id of ids) tags.set(id, await backend.studyInstanceTags(id));
+      for (const id of ids) {
+        const before = tags.get(id)!;
+        if (!before.length || before[0]!.PatientID !== source) {
+          continue;
+        }
+        if (!await backend.studyIsStable(id)) {
+          continue;
+        }
+        if (!before.every(i => i.PatientID === source && i.StudyInstanceUID === uid)) {
+          skip("画像の患者 ID が付け替えの前の患者 ID と違う", source, uid);
+          continue;
+        }
+        if (before.some(i => moved.get(source)?.has(instanceKey(i)))) {
+          skip("前に付け替えた画像が付け替えの前の患者 ID に戻っている（書き戻されたかもしれない）", source, uid);
+          continue;
+        }
+        const from = live.filter(a => a.from === source);
+        const names = [...new Set(from.flatMap(a => a.fromNames))];
+        const births = [...new Set(from.flatMap(a => a.fromBirthDates ?? []))].filter(Boolean);
+        const sexes = [...new Set(from.flatMap(a => a.fromSexes ?? []))].filter(Boolean);
+        if (names.length && before.some(i => !names.includes(i.PatientName))) {
+          skip("付け替えの前の氏名と違う", source, uid);
+          continue;
+        }
+        if (births.length && before.some(i => i.PatientBirthDate && !births.includes(i.PatientBirthDate))) {
+          skip("付け替えの前の生年月日と違う", source, uid);
+          continue;
+        }
+        if (sexes.length && before.some(i => i.PatientSex && !sexes.includes(i.PatientSex))) {
+          skip("付け替えの前の性別と違う", source, uid);
+          continue;
+        }
+        // まとめる先は、最後の付け替えの先（その後の A40 で統合されていれば、統合の続きの先）。付け替えの前の患者 ID の検査
+        // （ほかの旧い患者 ID で届いた画像）は先の候補にしない。先の患者に同じ UID の検査が無ければ（消された・書き戻された）まとめない
+        const later = chain.filter(a => orderOf(a) > orderOf(latest));
+        const target = resolveAlias(later, latest.to)?.at(-1)?.to ?? latest.to;
+        const olds = new Set(list.map(a => a.from));
+        const others = ids.filter(other => other !== id);
+        if (others.some(other => !olds.has(tags.get(other)![0]?.PatientID ?? "") && tags.get(other)![0]?.PatientID !== target)) {
+          skip("同じ StudyInstanceUID の検査が、付け替え先のほかの患者にある", source, uid);
+          continue;
+        }
+        const atTarget = others.filter(other => tags.get(other)![0]?.PatientID === target).flatMap(other => tags.get(other)!);
+        if (!atTarget.length || target === source) {
+          skip("付け替えた検査が付け替え先に無い（消された・書き戻されたかもしれない）", source, uid);
+          continue;
+        }
+        // 書き換えの前後の確かめは、同じ UID の検査の全部の画像で見るので、ほかの旧い患者 ID で届いた画像も足す
+        const alongside = others.flatMap(other => tags.get(other)!);
+        const sent = new Set(atTarget.map(instanceKey));
+        if (before.some(i => sent.has(instanceKey(i)))) {
+          skip("付け替え先の検査に同じ画像がすでにある", source, uid);
+          continue;
+        }
+        const basis = (await Promise.all((await backend.findStudiesByPatientId(target)).map(t => backend.studyInstanceTags(t)))).flat();
+        if (!basis.length || !uniform(basis, ["PatientName", "PatientBirthDate", "PatientSex"])) {
+          skip("付け替え先の患者の検査どうしで属性が揃っていない", source, uid);
+          continue;
+        }
+        const attributes = { PatientName: basis[0]!.PatientName, PatientBirthDate: basis[0]!.PatientBirthDate, PatientSex: basis[0]!.PatientSex };
+        // 受付番号は、付け替え先の同じ検査の画像の値（揃っていなければ届いた画像の値）。届いた画像に別の値があれば書き換えない
+        const accession = uniform(atTarget, ["AccessionNumber"]) ? atTarget[0]!.AccessionNumber : before[0]!.AccessionNumber;
+        if (before[0]!.AccessionNumber && before[0]!.AccessionNumber !== accession) {
+          skip("届いた画像に別の受付番号が入っている", source, uid);
+          continue;
+        }
+        let plan;
+        try {
+          plan = planStudy({ kind: "A40", patientId: target, priorPatientId: source, attributes }, attributes, id, before);
+        } catch (e) {
+          skip(e instanceof Error ? e.message : "画像の値が正しくない", source, uid);
+          continue;
+        }
+        const replace = { ...plan.replace, AccessionNumber: accession };
+        const merged = { ...plan, replace, after: before.map(p => ({ ...p, ...replace })), alongside };
+        try {
+          if (await writeAndVerify(backend, merged, sweepId, row, options)) {
+            result.count++;
+          }
+        } catch (e) {
+          result.blocked = e instanceof BackendError ? e.message : "書き換えに失敗した";
+          return result;
+        }
       }
     }
   }

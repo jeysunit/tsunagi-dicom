@@ -101,6 +101,8 @@ export type Remembered = {
   /** 統合した先の患者の値（Orthanc に統合した先の検査が無いときに使う） */
   attributes: Record<string, string>;
   at: string;
+  /** 画面の患者 ID の付け替えの覚え（監査の記録の modify の結果の行に入れる。付け替えた検査だけを統合する） */
+  origin?: "screen";
 } | {
   kind: "order";
   patientId: string;

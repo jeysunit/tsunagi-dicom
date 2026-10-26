@@ -1265,3 +1265,157 @@ test("21 HL7 A40：書き換えた画像が元を消す前に REST で同じ UID
   // 付け替えの印は外れている
   expect((await orthanc(`studies/${oldId}/metadata/TsunagiLock`)).status).toBe(404);
 });
+
+// ── 段 6：患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/add-study-value-correction） ──
+
+/** 管理者でログインし直し、再認証（パスワード）を済ませて、画面の書き込みの API を呼ぶ形を返す */
+async function correctionSession(browser: Browser) {
+  const fresh = await newContext(browser);
+  const user = adminUser();
+  await submitLogin(fresh.page, user.username, user.changed);
+  await expect(fresh.page).toHaveURL(`${bffUrl}/`);
+  const headers = { origin: bffUrl, "x-csrf-token": latestCsrfToken() };
+  expect((await fresh.page.request.post("/api/auth/reauth", { headers, data: { password: user.changed } })).status()).toBe(200);
+  const post = (path: string, data: unknown) => fresh.page.request.post(path, { headers, data });
+  /** 確かめの画面を開き、見せた token で修正する */
+  const correct = async (uid: string, kind: "attribute" | "content", values: Record<string, string>) => {
+    const preview = await post(`/api/studies/${uid}/modify/preview`, { kind, values });
+    expect(preview.status(), await preview.text()).toBe(200);
+    const shown = await preview.json();
+    const res = await post(`/api/studies/${uid}/modify`, {
+      requestId: crypto.randomUUID(),
+      kind,
+      values,
+      reason: "結合の試験：値の修正",
+      confirmToken: shown.confirmToken,
+    });
+    return { status: res.status(), body: await res.json(), shown };
+  };
+  return { ...fresh, post, correct };
+}
+
+/**
+ * 前の試験（19・21）が残した部分反映の書き換えを、管理者が解く（属性の訂正は、HL7 と同じく、どこかに部分反映・結果不明が
+ * 残るあいだは書き換えない）
+ */
+async function resolveLeftovers(post: (path: string, data: unknown) => Promise<{ status(): number }>) {
+  const rows = readAudit().filter((r) => (r.action === "hl7" || r.action === "modify") && typeof r.detail.writeId === "string");
+  const writes = new Set(rows.filter((r) => r.detail.event === "request").map((r) => String(r.detail.writeId)));
+  for (const writeId of writes) {
+    const last = rows.filter((r) => r.detail.writeId === writeId && ["result", "reconcile"].includes(String(r.detail.event))).at(-1);
+    if (last && (last.detail.manual === true || (last.outcome !== "unknown" && last.detail.partial !== true))) continue;
+    expect((await post("/api/hl7/resolve", { writeId, note: "結合の試験：前の試験の部分反映を確かめた" })).status()).toBe(200);
+  }
+}
+
+/** 検査の最初の画像の、受信の記録のメタデータ（受信の日時・送信元 AE・入った道）。RemoteIP などの住所は読まない */
+async function receptionOf(orthancStudyId: string) {
+  const [first] = await orthancJson<{ ID: string }[]>(`studies/${orthancStudyId}/instances`);
+  const read = async (name: string) => {
+    const res = await orthanc(`instances/${first!.ID}/metadata/${name}`);
+    return res.ok ? (await res.text()).trim() : null;
+  };
+  return { ReceptionDate: await read("ReceptionDate"), RemoteAET: await read("RemoteAET"), Origin: await read("Origin") };
+}
+
+test("23 患者情報修正（氏名）：全画像の氏名が直り、Study・Series・SOP の UID は変わらない。受信の記録のメタデータの変化を測る（2026-10-25）", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const system = await orthancJson<{ OverwriteInstances?: unknown; OverwriteInstancesMode?: unknown; UserMetadata?: Record<string, unknown> }>("system");
+  observe("orthanc.system.keep-uid-settings", {
+    OverwriteInstances: system.OverwriteInstances,
+    OverwriteInstancesMode: system.OverwriteInstancesMode,
+    TsunagiLock: system.UserMetadata?.TsunagiLock ?? null,
+  });
+  const study = syntheticStudy("attr-name", 70, 3);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [id] = await waitFor("患者情報修正の検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  await waitFor("落ち着く", () => orthancJson<{ IsStable: boolean }>(`studies/${id}`), (s) => s.IsStable);
+  const reception = await receptionOf(id!);
+  const s = await correctionSession(browser);
+  try {
+    await resolveLeftovers(s.post);
+    const name = "ITEST^CORRECTED=試験^訂正=しけん^ていせい";
+    const { status, body, shown } = await s.correct(study.studyInstanceUid, "attribute", { PatientName: name });
+    expect(shown).toMatchObject({ scope: "patient", fields: { PatientName: { before: study.patientName, after: name } } });
+    expect(status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({ outcome: "modified", count: 1, total: 1 });
+    for (const t of await hl7Tags(study)) expect(t).toMatchObject({ PatientID: study.patientId, PatientName: name, AccessionNumber: study.accessionNumber });
+    // 患者 ID を変えない訂正は、OverwriteInstances で元の画像を置き換え、同じ検査の ID のまま
+    expect(await lookupStudy(study.studyInstanceUid)).toEqual([id]);
+    // 置き換えた画像の受信の記録のメタデータ（docs/round-trip-test.md の「実測で決めること」に写す）
+    const after = await receptionOf(id!);
+    observe("modify.keep-uid.reception-metadata", {
+      before: { RemoteAET: reception.RemoteAET, Origin: reception.Origin },
+      after: { RemoteAET: after.RemoteAET, Origin: after.Origin },
+      receptionDateChanged: reception.ReceptionDate !== after.ReceptionDate,
+    });
+    // 受信一覧は Orthanc の変更の記録から読むので、置き換えた検査がどう出るかを記録する
+    const log = (await (await s.page.request.get("/api/receive-log")).json()) as {
+      items: { remoteAet: string | null; origin: string | null; study: { studyInstanceUid: string } }[];
+    };
+    const index = log.items.findIndex((r) => r.study.studyInstanceUid === study.studyInstanceUid);
+    const row = log.items[index];
+    observe("modify.keep-uid.receive-log", row ? { listed: true, position: index, remoteAet: row.remoteAet, origin: row.origin } : { listed: false });
+    // 監査の記録：求めた・書き換えの request・dispatch・result・結果が、要求の ID で結ばれる
+    const rows = readAudit().filter((r) => r.action === "modify" && r.detail.requestId === body.requestId);
+    expect(rows.map((r) => r.detail.phase ?? r.detail.event)).toEqual(["request", "request", "dispatch", "result", "result"]);
+    expect(rows[0]!.detail).toMatchObject({ kind: "attribute", scope: "patient", fields: { PatientName: { before: study.patientName, after: name } } });
+  } finally {
+    await s.context.close();
+  }
+});
+
+test("24 患者情報修正（患者IDの付け替え）：選んだ検査だけが新しい患者IDへ移り、UID は変わらず、元の画像は残らない（2026-10-25）", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const study = syntheticStudy("attr-reassign", 71, 2);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [oldId] = await waitFor("付け替えの検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  const s = await correctionSession(browser);
+  try {
+    await resolveLeftovers(s.post);
+    const to = "JP-TEST-IT71-NEW";
+    const { status, body, shown } = await s.correct(study.studyInstanceUid, "attribute", { PatientID: to });
+    expect(shown).toMatchObject({ scope: "reassign", target: { exists: false } });
+    expect(status, JSON.stringify(body)).toBe(200);
+    for (const t of await hl7Tags(study)) {
+      expect(t).toMatchObject({ PatientID: to, PatientName: study.patientName, PatientBirthDate: study.patientBirthDate, AccessionNumber: study.accessionNumber });
+    }
+    expect((await orthanc(`studies/${oldId}`)).status).toBe(404);
+    const [newId] = await lookupStudy(study.studyInstanceUid);
+    expect((await orthanc(`studies/${newId}/metadata/TsunagiLock`)).status).toBe(404);
+    const result = readAudit().filter((r) => r.action === "modify" && r.detail.requestId === body.requestId && r.detail.phase === "result").at(-1);
+    expect(result).toMatchObject({ outcome: "success", detail: { remember: { kind: "alias", origin: "screen", from: study.patientId, to } } });
+  } finally {
+    await s.context.close();
+  }
+});
+
+test("25 検査情報修正（検査日・検査名）：新しい StudyInstanceUID の検査ができ、Series・SOP の UID も新しく、元の検査は残る（2026-10-25）", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const study = syntheticStudy("content-date", 72, 2);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [sourceId] = await waitFor("検査情報修正の検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  const s = await correctionSession(browser);
+  try {
+    const { status, body } = await s.correct(study.studyInstanceUid, "content", { StudyDate: "20250101", StudyDescription: "ITEST corrected" });
+    expect(status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({ outcome: "created", studyInstanceUid: study.studyInstanceUid });
+    expect(await lookupStudy(study.studyInstanceUid)).toEqual([sourceId]);
+    const [newId] = await lookupStudy(body.newStudyInstanceUid);
+    expect(newId).toBeTruthy();
+    const created = Object.values(await orthancJson<Record<string, Record<string, string>>>(`studies/${newId}/instances-tags?simplify`));
+    expect(created).toHaveLength(study.sopInstanceUids.length);
+    for (const t of created) {
+      expect(t).toMatchObject({ StudyInstanceUID: body.newStudyInstanceUid, StudyDate: "20250101", StudyDescription: "ITEST corrected", PatientID: study.patientId });
+      expect(t.SeriesInstanceUID).not.toBe(study.seriesInstanceUid);
+      expect(study.sopInstanceUids).not.toContain(t.SOPInstanceUID);
+    }
+    const rows = readAudit().filter((r) => r.action === "modify" && r.detail.requestId === body.requestId);
+    expect(rows.map((r) => `${r.detail.phase}:${r.outcome}`)).toEqual(["request:success", "dispatch:success", "result:success"]);
+  } finally {
+    await s.context.close();
+  }
+});
