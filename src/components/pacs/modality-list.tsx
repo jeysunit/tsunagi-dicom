@@ -1,12 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Notice as NoticeBar } from "@/components/ui/notice";
+import { PageHeader } from "@/components/ui/page-header";
 import { ActionButton } from "@/components/ui/pending";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityView } from "@/lib/fields";
 import { formatDateTimeIn } from "@/lib/format/japanese-date";
-import { cn } from "@/lib/utils";
 
 // 接続先の表と接続確認（docs/spec.md の 3.3。段 4）。1 件 1 行。「接続確認」で Orthanc から C-ECHO を送る。
 // 「最後の接続確認」の列は、未確認「—」・確認中（札。その行のボタンは押せない）・成功（札と時刻）・失敗（札と時刻と理由の 1 句）。
@@ -108,19 +109,12 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
 
   return (
     <section className="space-y-2" data-testid="modalities-page">
-      <h1 className="text-lg font-bold text-value">接続先</h1>
+      <PageHeader title="接続先" />
+      <p className="text-xs text-label">Orthanc に登録された DICOM 接続先（登録・変更は Orthanc の設定で行います）</p>
       {notice && (
-        <div
-          role="status"
-          className={cn(
-            "rounded-md border border-border border-l-4 bg-surface px-3 py-1.5 text-sm text-foreground",
-            notice.kind === "ok" ? "border-l-success" : notice.kind === "err" ? "border-l-danger" : "border-l-ring",
-          )}
-          data-testid="echo-notice"
-          data-kind={notice.kind}
-        >
+        <NoticeBar kind={notice.kind} data-testid="echo-notice" data-kind={notice.kind}>
           {notice.text}
-        </div>
+        </NoticeBar>
       )}
       <div className="rounded-md border border-border bg-surface">
         <div className="flex items-center justify-between gap-2 px-3 py-1.5">

@@ -10,10 +10,10 @@ import {
   jobFromRest,
   modalitiesFromRest,
   orthancTime,
+  collectReceivedInPeriod,
   parseChanges,
-  readChanges,
-  receivedStudyIds,
   singleStudyId,
+  stableFromRest,
   studyInfoFromRest,
   receptionFromMetadata,
   studyFromRest,
@@ -37,6 +37,7 @@ import {
   type Backend,
   type InstanceSummary,
   type ReceivedStudy,
+  type ReceivedWindow,
   type RelayRequest,
   type SeriesSummary,
   type StudyQuery,
@@ -88,10 +89,23 @@ const testHolder = globalThis as typeof globalThis & {
 };
 const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map(), revision: 0 });
 
+/**
+ * 中身の訂正で作った検査（新しい StudyInstanceUID → 元の検査と直した値。段 6）。このプロセスの記憶の中だけ。
+ * 元の検査の値を写し、StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID を新しくした形で、検索・引き当て・詳細に出す
+ */
+const COPIES_KEY = Symbol.for("tsunagi-dicom.mock-copies");
+const copiesHolder = globalThis as typeof globalThis & {
+  [COPIES_KEY]?: Map<string, { id: string; sourceUid: string; replace: Record<string, string> }>;
+};
+const mockCopies = (copiesHolder[COPIES_KEY] ??= new Map<string, { id: string; sourceUid: string; replace: Record<string, string> }>());
+/** 中身の訂正で直せる値の DICOM のタグと VR */
+const CONTENT_TAGS: Record<string, [string, string]> = { StudyDate: ["00080020", "DA"], StudyDescription: ["00081030", "LO"] };
+
 /** 試験のため：モックで消した検査と、試験の変化を戻す */
 export function restoreMockStudies(): void {
   mockDeleted.clear();
   mockUpdates.clear();
+  mockCopies.clear();
   hl7Jobs.clear();
   hl7Instances.clear();
   hl7Locks.clear();
@@ -264,8 +278,23 @@ interface PreviewImage {
 
 export function createMockBackend(): Backend {
   // 消した検査は、どの読み取りにも出さない
+  /** 見本の検査に、中身の訂正で作った検査（元の検査の値の写しに、新しい UID と直した値を入れたもの）を足す */
+  const withCopies = (datasets: DicomJsonDataset[]) => [
+    ...datasets,
+    ...[...mockCopies].flatMap(([uid, copy]) => {
+      const source = datasets.find((ds) => stringValue(ds, TAG.StudyInstanceUID) === copy.sourceUid);
+      if (!source) return [];
+      const ds = structuredClone(source);
+      ds[TAG.StudyInstanceUID] = { vr: "UI", Value: [uid] };
+      for (const [name, value] of Object.entries(copy.replace)) {
+        const tag = CONTENT_TAGS[name];
+        if (tag) ds[tag[0]] = value === "" ? { vr: tag[1] } : { vr: tag[1], Value: [value] };
+      }
+      return [ds];
+    }),
+  ];
   const qidoStudies = async () =>
-    (await readJson<DicomJsonDataset[]>("dicom-web", "studies.json")).filter(
+    withCopies(await readJson<DicomJsonDataset[]>("dicom-web", "studies.json")).filter(
       (ds) => !mockDeleted.has(stringValue(ds, TAG.StudyInstanceUID)),
     ).map((ds) => {
       const update = mockUpdates.get(stringValue(ds, TAG.StudyInstanceUID));
@@ -278,8 +307,17 @@ export function createMockBackend(): Backend {
       }
       return copy;
     });
+  const restCopies = <T extends RestStudy>(studies: T[]): T[] => [
+    ...studies,
+    ...[...mockCopies].flatMap(([uid, copy]) => {
+      const source = studies.find((s) => s.MainDicomTags.StudyInstanceUID === copy.sourceUid);
+      if (!source) return [];
+      const main = { ...source.MainDicomTags, StudyInstanceUID: uid, ...copy.replace };
+      return [{ ...structuredClone(source), ID: copy.id, originalId: copy.id, MainDicomTags: main } as T];
+    }),
+  ];
   const restStudies = async <T extends RestStudy>() =>
-    (await readAll<T>("studies")).filter((s) => !mockDeleted.has(s.MainDicomTags.StudyInstanceUID ?? "")).map((s) => {
+    restCopies(await readAll<T>("studies")).filter((s) => !mockDeleted.has(s.MainDicomTags.StudyInstanceUID ?? "")).map((s) => {
       const update = mockUpdates.get(s.MainDicomTags.StudyInstanceUID ?? "");
       if (!update) return s;
       return { ...s, originalId: s.ID, ID: update.id, PatientMainDicomTags: { ...s.PatientMainDicomTags, ...Object.fromEntries(Object.entries(update.replace).filter(([k]) => k.startsWith("Patient"))) }, MainDicomTags: { ...s.MainDicomTags, ...(update.replace.AccessionNumber !== undefined ? { AccessionNumber: update.replace.AccessionNumber } : {}) } };
@@ -293,6 +331,16 @@ export function createMockBackend(): Backend {
       const uid = uidById.get(s.ParentStudy);
       if (!uid) continue;
       out.set(uid, [...(out.get(uid) ?? []), s]);
+    }
+    // 中身の訂正で作った検査のシリーズ：元の検査のシリーズの写しに、新しい SeriesInstanceUID を入れる
+    for (const [uid, copy] of mockCopies) {
+      if (!studies.some((s) => s.MainDicomTags.StudyInstanceUID === uid)) continue;
+      out.set(uid, (out.get(copy.sourceUid) ?? []).map((s) => ({
+        ...s,
+        ID: mockInstanceId(`${uid}|${s.ID}`),
+        ParentStudy: copy.id,
+        MainDicomTags: { ...s.MainDicomTags, SeriesInstanceUID: syntheticUid(`${uid}|${s.MainDicomTags.SeriesInstanceUID ?? ""}`) },
+      })));
     }
     return out;
   }
@@ -325,7 +373,8 @@ export function createMockBackend(): Backend {
           studyInstanceUid,
           seriesInstanceUid,
           patientId,
-          sopInstanceUid: tags?.SOPInstanceUID ?? syntheticUid(id),
+          // 中身の訂正で作った検査の画像は、新しい SOPInstanceUID にする
+          sopInstanceUid: mockCopies.has(studyInstanceUid) ? syntheticUid(`${studyInstanceUid}|${id}`) : tags?.SOPInstanceUID ?? syntheticUid(id),
           sopClassUid: SOP_CLASS[series.MainDicomTags.Modality ?? ""] ?? SOP_CLASS.OT!,
           instanceNumber,
           numberOfFrames: null,
@@ -367,7 +416,7 @@ export function createMockBackend(): Backend {
 
     async countStudies() {
       const stats = await readJson<{ CountStudies: number }>("rest", "statistics.json");
-      return { count: stats.CountStudies - mockDeleted.size, exact: true };
+      return { count: stats.CountStudies + mockCopies.size - mockDeleted.size, exact: true };
     },
 
     async studyListVersion() {
@@ -435,24 +484,26 @@ export function createMockBackend(): Backend {
       return Response.json({ error: "見本に無い" }, { status: 404 });
     },
 
-    async receivedStudies(limit: number) {
-      // 実の Orthanc と同じく、1 回に返す数に上限（MOCK_CHANGES_MAX）のある頁を、since・Last・Done で読み切る
+    async receivedStudies(window: ReceivedWindow) {
+      // 実の Orthanc と同じく、1 回に返す数に上限（MOCK_CHANGES_MAX）のある頁を、since・Last・Done で読む。
+      // 遡り方（区切り・止め方・上限）は実の Orthanc と同じ collectReceivedInPeriod
       const all = parseChanges(await readJson<unknown>("made", "changes.json"));
-      const { changes, complete } = await readChanges(
+      const read = await collectReceivedInPeriod(
         async (since, pageLimit) => {
           const part = all.changes.filter((c) => c.seq > since).slice(0, Math.min(pageLimit, MOCK_CHANGES_MAX));
           const last = part.at(-1)?.seq ?? since;
           return { changes: part, last, done: last >= all.last };
         },
-        0,
-        { limit: 100, maxCalls: 200 },
+        all.last,
+        window,
+        { block: 10, pageLimit: 1000, maxCalls: 200 },
       );
       const [studies, series, metadata] = await Promise.all([
         restStudies<RestStudy & { Series?: string[] }>(),
         readAll<RestSeries>("series"),
         readJson<Record<string, unknown>>("made", "instance-metadata.json"),
       ]);
-      const received = receivedStudyIds(changes, limit).flatMap(({ id, date }): ReceivedStudy[] => {
+      const received = read.ids.flatMap(({ id, date }): ReceivedStudy[] => {
         const study = studies.find((s) => s.ID === id || s.originalId === id);
         if (!study) return [];
         // Orthanc の /studies/{id}/series の形（検査のシリーズの順）
@@ -460,9 +511,9 @@ export function createMockBackend(): Backend {
         const { summary, instanceCount } = studyFromRest(study, rows);
         const first = firstInstanceId(rows);
         const reception = receptionFromMetadata(first ? metadata[first] : undefined);
-        return [{ orthancId: study.ID, receivedAt: orthancTime(date), ...reception, instanceCount, summary }];
+        return [{ orthancId: study.ID, receivedAt: orthancTime(date), ...reception, instanceCount, stable: stableFromRest(study), summary }];
       });
-      return { studies: received, complete };
+      return { studies: received, overLimit: read.overLimit, complete: read.complete };
     },
 
     async listModalities() {
@@ -508,6 +559,10 @@ export function createMockBackend(): Backend {
     // モックは検査を 1 件ずつしか持たないので、患者 ID が変わると元の検査を残さず新しい ID へ移す（元の画像を名指しで
     // 消した後の形）。後の deleteStudyInstances は、元の検査がもう無いので何もしない
     async modifyStudyKeepingUids(id: string, replace: Record<string, string>) {
+      // 実の Orthanc と同じく、OverwriteInstances が無ければ仕事を作らずに 400 で断る（2026-10-25 に実測）
+      if (hl7Simulation.noOverwriteInstances) {
+        throw new BackendError("画像サーバーが書き換えを断りました（400）。Orthanc の OverwriteInstances が要る", 400);
+      }
       const study = (await restStudies()).find((s) => s.ID === id);
       if (!study) {
         throw new BackendError("検査が見つかりません", 404);
@@ -527,6 +582,32 @@ export function createMockBackend(): Backend {
       const changedCount = hl7Simulation.changedInstances ?? (state === "Failure" ? 0 : before.length);
       hl7Instances.set(uid, before.map((instance, index) =>
         index < changedCount ? { ...instance, ...replace } : instance));
+      hl7Jobs.set(jobId, { state });
+      if (hl7Simulation.dispatchTimeout) {
+        throw new BackendUnknownError();
+      }
+      return { jobId };
+    },
+    async keepUidSettings() {
+      return { overwriteInstances: !hl7Simulation.noOverwriteInstances, lockMetadata: !hl7Simulation.lockRefused };
+    },
+    // 中身の訂正：元の検査を残し、新しい UID の検査を足す（仕事は書き換えと同じく、試験から状態を差し替えられる）
+    async modifyStudyNewUid(id: string, replace: Record<string, string>) {
+      const study = (await restStudies()).find((s) => s.ID === id);
+      if (!study) {
+        throw new BackendError("検査が見つかりません", 404);
+      }
+      const { StudyInstanceUID: uid, ...values } = replace;
+      if (!uid || mockCopies.has(uid)) {
+        throw new BackendError("新しい StudyInstanceUID が正しくありません", 400);
+      }
+      const jobId = crypto.randomUUID();
+      const state = hl7Simulation.state ?? "Success";
+      if (state !== "Failure") {
+        mockTest.revision++;
+        const newId = createHash("sha256").update(`copy:${uid}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-");
+        mockCopies.set(uid, { id: newId, sourceUid: study.MainDicomTags.StudyInstanceUID!, replace: values });
+      }
       hl7Jobs.set(jobId, { state });
       if (hl7Simulation.dispatchTimeout) {
         throw new BackendUnknownError();
@@ -594,6 +675,10 @@ export function createMockBackend(): Backend {
       return { jobId: id };
     },
 
+    async unfinishedModifyJobs() {
+      return [...hl7Jobs.values()].filter((j) => j.state !== "Success" && j.state !== "Failure").length;
+    },
+
     async jobStatus(jobId: string) {
       const hl7 = hl7Jobs.get(jobId);
       if (hl7) {
@@ -659,6 +744,8 @@ let hl7Simulation: {
   lockRefused?: boolean;
   /** 写しの ModifiedFrom が元の画像の ID と合わない（写しが別の画像に置き換わった形） */
   foreignCopies?: boolean;
+  /** Orthanc に OverwriteInstances が無い形（UID を保つ書き換えに要る設定が無い） */
+  noOverwriteInstances?: boolean;
 } = {};
 /** 次の書き換えを、動き続ける仕事・失敗・一部だけの変更・応答の時間切れにする。 */
 export function simulateMockHl7(options: typeof hl7Simulation): void {
