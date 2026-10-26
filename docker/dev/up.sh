@@ -9,7 +9,8 @@
 #   TSUNAGI_IMAGE=ghcr.io/jeysunit/tsunagi-dicom:sha-xxxxxxx docker/dev/up.sh   # GHCR のイメージを使うとき
 #
 # ポートは環境変数で替えられる：TSUNAGI_HTTP_PORT（既定 3000）・ORTHANC_DICOM_PORT（既定 4242）・DEV_DTG_WEB_PORT（既定 18080）・
-# DEV_RIS_WEB_PORT（既定 18081）・DEV_VIEWER_PORT（既定 18042。ビューアの入口）
+# DEV_RIS_WEB_PORT（既定 18081）・DEV_VIEWER_PORT（既定 18042。ビューアの入口）・
+# DEV_PORTAL_PORT（既定 80。入口のページ）
 set -eu
 
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -68,6 +69,7 @@ docker compose -f "$here/compose.yaml" up -d --build --wait --wait-timeout 600 -
 cat <<EOF
 
 起動した。架空の患者だけで使う。
+  入口（3つの画面へのリンク） http://127.0.0.1:${DEV_PORTAL_PORT:-80}/
   tsunagi-dicom           http://127.0.0.1:${TSUNAGI_HTTP_PORT:-3000}/
                           最初の管理者は admin。パスワードは $secrets/initial_admin_password.txt
                           （最初のログインで、自分のパスワード（13 文字以上・英字と数字）に変える）
