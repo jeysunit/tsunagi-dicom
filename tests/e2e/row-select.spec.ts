@@ -26,6 +26,8 @@ const hasMarkLine = (row: Locator) =>
     const style = getComputedStyle(el);
     return style.boxShadow !== "none" && /\b3px\b/.test(style.boxShadow);
   });
+/** 先頭のセルが太字か。一覧の表（ui/table）の選んだ行は太字にしない（幅が変わるため。docs/design-system/parts.md） */
+const isBold = (row: Locator) => row.locator("td").first().evaluate((el) => Number(getComputedStyle(el).fontWeight) >= 700);
 /** 受信一覧の選んだ行：左の 3px の線で示し、太字にしない（幅が変わるため。docs/design-system/components.md の「一覧の表」） */
 const hasLineNotBold = (row: Locator) =>
   row.locator("td").first().evaluate((el) => {
