@@ -319,7 +319,7 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
               <TableHead className="h-7 text-right">画像数</TableHead>
               <TableHead className="h-7">状態</TableHead>
               <TableHead className="h-7">保管の確認</TableHead>
-              <TableHead className="h-7">
+              <TableHead className="h-7" pinned>
                 <span className="sr-only">操作</span>
               </TableHead>
             </TableRow>
@@ -348,6 +348,8 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
                   data-row-key={key}
                   data-testid="sent-row"
                   aria-selected={isPicked}
+                  // 右端に固定した操作の列の地を、選んだ行の地にそろえる印（PINNED_CELL）
+                  data-selected={isPicked || undefined}
                   tabIndex={key === tabStop ? 0 : -1}
                   className={cn(
                     "h-10 cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
@@ -405,7 +407,8 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
                   <TableCell className="text-label" data-testid="sent-commit">
                     —
                   </TableCell>
-                  <TableCell className="text-right">
+                  {/* 操作の列は右端に固定する（表が横にスクロールしても見切らない） */}
+                  <TableCell className="text-right" pinned data-testid="sent-actions">
                     {href && (
                       // 頁の移動なのでリンク。押せる物と分かるように、ボタンの形にする（受信一覧と同じ）
                       <Link href={href} className={buttonVariants({ variant: "outline", size: "xs" })} data-testid="sent-open">

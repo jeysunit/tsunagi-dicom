@@ -214,7 +214,7 @@ export function UserAdmin({
             <TableHead>二要素認証</TableHead>
             <TableHead>最終ログイン</TableHead>
             <TableHead>作成日</TableHead>
-            <TableHead>操作</TableHead>
+            <TableHead pinned>操作</TableHead>
           </tr>
         </TableHeader>
         <TableBody>
@@ -255,7 +255,8 @@ export function UserAdmin({
                 )}
               </TableCell>
               <TableCell>{u.created}</TableCell>
-              <TableCell className="space-x-1 whitespace-nowrap">
+              {/* 操作の列は右端に固定する（狭い画面で表が横にスクロールしても見切らない） */}
+              <TableCell className="space-x-1 whitespace-nowrap" pinned data-testid="user-actions">
                 {u.id !== selfId && (
                   <Button
                     size="sm"

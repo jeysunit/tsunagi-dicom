@@ -5,9 +5,11 @@ import { Notice as NoticeBar } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
 import { ActionButton } from "@/components/ui/pending";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { PINNED_HEAD } from "@/components/ui/table";
 import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityView } from "@/lib/fields";
 import { formatDateTimeIn } from "@/lib/format/japanese-date";
+import { cn } from "@/lib/utils";
 
 // 接続先の表と接続確認（docs/spec.md の 3.3。段 4）。1 件 1 行。「接続確認」で Orthanc から C-ECHO を送る。
 // 「最後の接続確認」の列は、未確認「—」・確認中（札。その行のボタンは押せない）・成功（札と時刻）・失敗（札と時刻と理由の 1 句）。
@@ -143,7 +145,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
                   <th className="px-2 py-1 font-normal">AEタイトル</th>
                   {showAddress && <th className="px-2 py-1 font-normal">ホスト名:ポート番号</th>}
                   <th className="px-2 py-1 font-normal">最後の接続確認</th>
-                  <th className="px-2 py-1 font-normal">操作</th>
+                  <th className={cn("px-2 py-1 font-normal", PINNED_HEAD)}>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -186,7 +188,8 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
                           </span>
                         )}
                       </td>
-                      <td className="h-7 px-2 py-0">
+                      {/* 操作の列は右端に固定する（狭い画面で表が横にスクロールしても見切らない）。行は選ばないので地は背景のまま */}
+                      <td className="sticky right-0 h-7 bg-background px-2 py-0" data-testid="modality-actions">
                         <ActionButton type="button" size="xs" variant="outline" pending={r === "busy"} onClick={() => void echoOne(id)} data-testid="echo">
                           接続確認
                         </ActionButton>

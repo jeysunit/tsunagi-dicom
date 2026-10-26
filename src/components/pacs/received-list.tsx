@@ -11,6 +11,7 @@ import { Notice } from "@/components/ui/notice";
 import { ActionButton, PendingText } from "@/components/ui/pending";
 import { Select } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { PINNED_CELL, PINNED_HEAD } from "@/components/ui/table";
 import { getJson } from "@/lib/client/api";
 import {
   forgetPreviousSeen,
@@ -38,6 +39,9 @@ import { cn } from "@/lib/utils";
 // - 「検査一覧で表示」はボタンの形のリンク（頁の移動なのでリンク）。検査一覧でその検査を選び、詳細を開いた形で開く。
 
 const CELL = "h-7 px-2 py-0 overflow-hidden text-ellipsis whitespace-nowrap";
+/** 新着の行（地 selected/50）の、右端に固定した操作の列の地。透けないよう、背景の色と混ぜた不透明の色にする */
+const FRESH_PINNED =
+  "[tr[data-new]:not([data-selected]):not(:hover)>&]:bg-[color-mix(in_oklab,var(--color-selected)_50%,var(--color-background))]";
 const PAGE_SIZES = [20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -388,7 +392,7 @@ export function ReceivedList({
               <th className="px-2 py-0 font-normal">モダリティ／検査名</th>
               <th className="px-2 py-0 text-right font-normal">画像数</th>
               <th className="px-2 py-0 font-normal">状態</th>
-              <th className="px-2 py-0 font-normal">
+              <th className={cn("px-2 py-0 font-normal", PINNED_HEAD)}>
                 <span className="sr-only">操作</span>
               </th>
             </tr>
@@ -491,7 +495,8 @@ export function ReceivedList({
                       <span className="text-label">—</span>
                     )}
                   </td>
-                  <td className="h-7 px-2 py-0 text-right">
+                  {/* 操作の列は右端に固定する（表が横にスクロールしても見切らない）。新着の行は、行と同じ薄い地にそろえる */}
+                  <td className={cn("h-7 px-2 py-0 text-right", PINNED_CELL, FRESH_PINNED)} data-testid="received-actions">
                     {href && (
                       // 頁の移動なのでリンク。押せる物と分かるように、ボタンの形にする
                       <Link href={href} className={buttonVariants({ variant: "outline", size: "xs" })} data-testid="received-open">
