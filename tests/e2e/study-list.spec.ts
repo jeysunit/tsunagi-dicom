@@ -1106,11 +1106,23 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
 test("狭い画面では絞り込みが折り返し、横にはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await asRole(page, "一般");
+  // 一覧が出てから測る（asRole は頁を開いた直後に返るので、描き終わる前の幅を測ることがある）
+  await expect(page.getByTestId("study-count")).toHaveText("8");
   const g = await page.evaluate(() => {
     const f = document.querySelector("[data-testid=study-filters]")!;
     return { scroll: f.scrollWidth, client: f.clientWidth, page: document.documentElement.scrollWidth <= window.innerWidth };
   });
   expect(g.scroll).toBeLessThanOrEqual(g.client + 1);
+  // 上の帯の接続の状態の札が一番長い「一部が接続不可」でも、頁は横にはみ出さない
+  await page.route("**/api/connection-status", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { connection?: Record<string, unknown> };
+    await route.fulfill({ response: res, json: { ...body, connection: { ...body.connection, overall: "ng" } } });
+  });
+  await page.reload();
+  await expect(page.getByTestId("conn-button")).toHaveAttribute("data-overall", "ng");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(g.page).toBe(true);
 });
 
