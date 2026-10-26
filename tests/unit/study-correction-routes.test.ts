@@ -317,7 +317,9 @@ describe("属性の訂正（患者情報修正）", () => {
     expect(res.status).toBe(409);
     // 実行の断りの応答と監査の記録にも、付け替え先の患者の値は入らない
     expect(JSON.stringify(await res.json())).not.toMatch(/Shiken|試験|しけん|1995/);
-    expect(JSON.stringify(await rowsOf(requestId))).not.toMatch(/Shiken|試験|しけん|1995/);
+    const refusedRows = JSON.stringify(await rowsOf(requestId));
+    expect(refusedRows).toContain("target_mismatch");
+    expect(refusedRows).not.toMatch(/Shiken|試験|しけん|1995/);
     expect(spy).not.toHaveBeenCalled();
     const p = await (await preview("attribute", { PatientID: "JP-TEST-0002" })).json();
     expect(p.target).toMatchObject({ exists: true, PatientName: "Shiken^Hanako=試験^花子=しけん^はなこ" });
