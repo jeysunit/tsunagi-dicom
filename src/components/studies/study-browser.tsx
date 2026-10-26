@@ -7,7 +7,7 @@ import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
 import { ModalityMark } from "@/components/ui/modality-mark";
-import { CellMain, isRowControl, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CellMain, isRowControl, PINNED_CELL, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
 import { Notice } from "@/components/ui/notice";
 import { Select } from "@/components/ui/select";
@@ -609,7 +609,8 @@ function StudyRows({
               </SortTh>
             )}
             {has("agesex") && <TableHead>年齢・性別</TableHead>}
-            <SortTh sortKey="desc" sort={sort} onSort={onSort}>
+            {/* 詰めた形では見出しが `…` で切れるので、全文を title に置く */}
+            <SortTh sortKey="desc" sort={sort} onSort={onSort} title="モダリティ／検査名">
               モダリティ／検査名
             </SortTh>
             {has("count") && (
@@ -618,7 +619,7 @@ function StudyRows({
               </TableHead>
             )}
             {has("viewer") && (
-              <TableHead>
+              <TableHead pinned>
                 <span className="sr-only">ビューア</span>
               </TableHead>
             )}
@@ -735,7 +736,8 @@ function StudyRows({
                     </td>
                   )}
                   {has("viewer") && (
-                    <td className={cn(CELL, "text-right")}>
+                    // 操作の列は右端に固定する（一覧が横にスクロールしても「開く」を見切らない。PINNED_CELL）
+                    <td className={cn(CELL, PINNED_CELL, "text-right")} data-testid="study-actions">
                       {uid && (
                         <ViewerMenu
                           compact
