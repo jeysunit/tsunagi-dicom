@@ -124,7 +124,8 @@ describe("見出し（患者バナー）と「検査の情報」", () => {
     const withInfo = render(true, full);
     expect(withInfo).not.toContain('role="tablist"');
     const info = infoOf(withInfo);
-    expect(info).toContain("grid-cols-3");
+    // 3 列（2 列目は中身の幅）。期待の変更：旧 "grid-cols-3" → 新 "grid-cols-[1fr_auto_1fr]"（列の数は同じ 3）
+    expect(info).toContain("grid-cols-[1fr_auto_1fr]");
     expect([...info.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map((m) => m[1])).toEqual(INFO_LABELS);
     expect(info).toContain("試験 医師");
     expect(info).toContain("1960/07/15（昭和35年）");
