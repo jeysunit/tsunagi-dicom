@@ -21,6 +21,10 @@ import { expect, test, type Page } from "@playwright/test";
 // 5. 照合（PIR）：DTG で緊急の患者を撮る（MPPS だけが ris-emulator に残る）→ ris-emulator の reconcile list に出る →
 //    reconcile run で正式な患者と予約を結ぶ（A40・ORM を受け口が受ける）→ 同じ StudyInstanceUID の検査が 1 件だけ、
 //    正式な患者 ID・氏名・受付番号で一覧に出て、ris-emulator の予約は同じ StudyInstanceUID の完了になる。
+// 6. 照合の後の追加撮影（IHE PIR の Case 6）：5 と同じ照合の後、DTG で同じ検査に仮の患者情報のまま追加で撮って送る →
+//    受け口の見回し（60 秒ごと）が、追加の画像も正式な患者・受付番号に書き換え、同じ StudyInstanceUID の検査 1 件にまとまる。
+// 7. 取消の ORM（RAD-13 の CA）：5 と同じ照合の後、ris-emulator の pir send --kind orm --order-control CA を受け口が受ける →
+//    検査と画像は残り、受付番号だけが外れる。
 // 前の試験の結果に依らないが、順に流す（管理者のパスワードは 2 で変え、3 はそのパスワードでログインする）。
 
 test.describe.configure({ mode: "serial" });
@@ -28,12 +32,13 @@ test.describe.configure({ mode: "serial" });
 const run = promisify(execFile);
 const root = process.cwd();
 const composeFile = path.join(root, "docker/dev/compose.yaml");
-const secretsDir = path.join(root, "docker/dev/secrets");
+const secretsDir = path.resolve(process.env.TSUNAGI_DEV_SECRETS_DIR ?? path.join(root, "docker/dev/secrets"));
 /** docker/dev/orthanc/site.json に登録した送信先（storescp） */
 const SCP = { id: "dev-scp", aet: "DEV_SCP" };
 /** docker/dev/dtg/app_config.yaml の dicom-test-generator（DTG）の AE タイトル（ris-emulator の CT の予約の予定の AE タイトルと同じ） */
 const DTG_AET = "DTG_CT01";
 const dicomPort = process.env.ORTHANC_DICOM_PORT ?? "4242";
+const viewerPort = process.env.DEV_VIEWER_PORT ?? "18042";
 
 async function docker(args: string[], timeoutMs = 120_000): Promise<string> {
   try {
@@ -184,7 +189,13 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
     Containers: Record<string, unknown>;
   }[];
   expect(backend!.Internal).toBe(true);
-  expect(Object.keys(backend!.Containers).sort()).toEqual([orthanc.Id, tsunagi.Id, hl7Receiver.Id].sort());
+  const viewerProxy = await inspect(await containerId("viewer-proxy"));
+  expect(Object.keys(backend!.Containers).sort()).toEqual([orthanc.Id, tsunagi.Id, hl7Receiver.Id, viewerProxy.Id].sort());
+
+  // ビューアの入口（viewer-proxy）：ホストの 127.0.0.1 の 8080 だけを出し、backend（Orthanc へ）と web（ホストへ）に入る
+  expect(viewerProxy.Config.Image).toBe(`${project}-viewer-proxy:local`);
+  expect(viewerProxy.HostConfig.PortBindings).toEqual({ "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: viewerPort }] });
+  expect(Object.keys(viewerProxy.NetworkSettings.Networks).sort()).toEqual([net("backend"), net("web")].sort());
   // dicom のコンテナどうしの通信は、開発用の compose だけが許す（dev.env の ORTHANC_DICOM_ICC=true が届いている）
   const [dicom] = JSON.parse(await docker(["network", "inspect", net("dicom")])) as { Options: Record<string, string> }[];
   expect(dicom!.Options["com.docker.network.bridge.enable_icc"]).toBe("true");
@@ -232,7 +243,28 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   expect(orthancLog).not.toMatch(/invalid AET/i);
 });
 
-test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の送信 → storescp", async ({ page }) => {
+test("1b ビューア：入口は読み取り専用で、Orthanc の OHIF と Stone の画面が認証つきで届く", async () => {
+  const base = `http://127.0.0.1:${viewerPort}`;
+  const password = readFileSync(path.join(secretsDir, "backend_password.txt"), "utf8").replace(/\r?\n$/, "");
+  const basic = `Basic ${Buffer.from(`tsunagi:${password}`).toString("base64")}`;
+  const get = (url: string, headers: Record<string, string> = {}) => fetch(`${base}${url}`, { headers, redirect: "manual", signal: AbortSignal.timeout(10_000) });
+
+  // 認証なしは Orthanc が断る（入口は資格情報を持たない）
+  expect((await get("/ohif/app-config.js")).status).toBe(401);
+  expect((await get("/dicom-web/studies")).status).toBe(401);
+  // 認証つきなら、OHIF の設定と画面、Stone の画面が返る（tsunagi-dicom の「開く」が開く形：/ohif/viewer と /stone-webviewer/index.html）
+  expect((await get("/ohif/app-config.js", { authorization: basic })).status).toBe(200);
+  expect((await get("/ohif/viewer", { authorization: basic })).status).toBe(200);
+  expect((await get("/stone-webviewer/index.html", { authorization: basic })).status).toBe(200);
+  expect((await get("/dicom-web/studies", { authorization: basic })).status).toBeLessThan(300);
+  // 書き込みの方法は、認証つきでも Orthanc に届かず 405
+  for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
+    const res = await fetch(`${base}/instances`, { method, headers: { authorization: basic }, body: method === "DELETE" ? undefined : "x", signal: AbortSignal.timeout(10_000) });
+    expect(res.status, `${method} が通った`).toBe(405);
+  }
+});
+
+test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → tsunagi-dicom の送信 → storescp", async ({ page, browser }) => {
   // 架空の患者（患者 ID は試験ごとに変える）
   const patientId = `DEVFLOW${randomBytes(4).toString("hex").toUpperCase()}`;
   const out = await compose(
@@ -276,6 +308,26 @@ test("2 流れ：dicom-test-generator → Orthanc → tsunagi-dicom の受信一
   await panel.getByTestId("send-submit").click();
   await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 120_000 });
   await expect(panel.getByTestId("send-status")).toContainText(`${SCP.id}（${SCP.aet}） へ ${sent.length} 画像`);
+
+  // 「開く」：BFF が OHIF の URL（入口の /ohif/viewer?StudyInstanceUIDs=）へ移す。その URL を OHIF で開くと、
+  // OHIF が DICOMweb（入口の /dicom-web）からこの検査を取って、画像を描く
+  const opened = await page.request.get(`/api/viewers/open?${new URLSearchParams({ study: uid, viewer: "ohif" })}`, {
+    maxRedirects: 0,
+    headers: { "sec-fetch-site": "same-origin" },
+  });
+  expect(opened.status()).toBe(302);
+  const viewerUrl = opened.headers()["location"]!;
+  expect(viewerUrl).toBe(`http://127.0.0.1:${viewerPort}/ohif/viewer?StudyInstanceUIDs=${uid}`);
+  const viewerContext = await browser.newContext({ httpCredentials: { username: "tsunagi", password: readFileSync(path.join(secretsDir, "backend_password.txt"), "utf8").replace(/\r?\n$/, "") } });
+  try {
+    const viewerPage = await viewerContext.newPage();
+    const studyLoaded = viewerPage.waitForResponse((r) => r.url().includes(`/dicom-web/studies`) && r.url().includes(uid) && r.status() === 200, { timeout: 90_000 });
+    await viewerPage.goto(viewerUrl);
+    await studyLoaded;
+    await expect(viewerPage.locator("canvas").first()).toBeVisible({ timeout: 90_000 });
+  } finally {
+    await viewerContext.close();
+  }
 
   // storescp に、同じ StudyInstanceUID の画像が同じ数だけ、同じ SOPInstanceUID で届く
   const received = await waitFor(
@@ -379,7 +431,7 @@ test("4 HL7：緊急の患者で撮る → ris-emulator の pir send（A40）→
   // ris-emulator から受け口（hl7-receiver）へ A40 を送る。受理（AA）なら終了コード 0
   await compose(
     ["exec", "-T", "ris", "python", "-m", "app.cli", "pir", "send", "--host", "hl7-receiver", "--kind", "a40",
-      "--patient-id", patientId, "--prior-patient-id", priorId, "--name", "FLOW^HL7=流れ^太郎=ナガレ^タロウ"],
+      "--patient-id", patientId, "--prior-patient-id", priorId, "--name", "FLOW^MERGE=流れ^太郎=ナガレ^タロウ"],
     120_000,
   );
 
@@ -466,4 +518,113 @@ test("5 照合：緊急の患者で撮る → ris-emulator の未照合に出る
   expect(rest.some((i) => i.sop_instance_uid === item.sop_instance_uid)).toBe(false);
 
   console.log(`[flow] 照合：A40・ORM を受理 2・照合した検査 1・画像 ${exam.files.length}`);
+});
+
+type FlowStudy = {
+  studyInstanceUid: string;
+  patientId?: string;
+  accessionNumber?: string;
+  instanceCount?: number;
+};
+
+/**
+ * 5 と同じ流れで、緊急の患者（仮の患者 ID）の検査を撮って送り、ris-emulator で正式な患者に照合する（A40・ORM が受理されるまで）。
+ * 6・7 が、この後の動きを確かめる出発点にする。ログインは済ませておく
+ */
+async function emergencyReconciled(page: Page, prefix: string) {
+  const suffix = Date.now().toString().slice(-8);
+  const priorId = `${prefix}${suffix}`;
+  const patientId = `PR${prefix}${suffix}`;
+  const priorName = "FLOW^UNKNOWN";
+  const ris = (...args: string[]) => compose(["exec", "-T", "ris", "python", "-m", "app.cli", ...args], 120_000);
+  const dtg = (...args: string[]) => compose(["exec", "-T", "dtg", "python", "-m", "app.cli", ...args], 300_000);
+
+  const exam = JSON.parse(
+    await dtg("exam", "--emergency", "--patient-id", priorId, "--patient-name", priorName, "-s", "1", "-i", "2", "--send", "--json"),
+  ) as { study_instance_uid: string; files: string[]; send: { status: string } };
+  expect(exam.send).toMatchObject({ status: "sent" });
+
+  const listed = async () => ((await (await page.request.get("/api/studies")).json()) as { studies: FlowStudy[] }).studies;
+  await waitFor("緊急の検査が一覧に出る", listed, (studies) => studies.some((s) => s.studyInstanceUid === exam.study_instance_uid));
+
+  const unreconciled = await waitFor(
+    "未照合に出る",
+    async () => JSON.parse(await ris("reconcile", "list", "--json")) as { sop_instance_uid: string; patient_id: string }[],
+    (items) => items.some((i) => i.patient_id === priorId),
+  );
+  const item = unreconciled.find((i) => i.patient_id === priorId)!;
+  const result = JSON.parse(
+    await ris("reconcile", "run", item.sop_instance_uid, "--patient-id", patientId, "--name", "FLOW^PIR=流れ^照合=ナガレ^ショウゴウ",
+      "--birth-date", "19980312", "--sex", "M", "--json"),
+  ) as { accession_number: string; deliveries: { message_type: string; outcome: string }[] };
+  expect(result.deliveries.map((d) => [d.message_type, d.outcome])).toEqual([
+    ["ADT^A40", "accepted"],
+    ["ORM^O01", "accepted"],
+  ]);
+  const accession = result.accession_number;
+  await waitFor("正式な患者・受付番号で出る", listed, (studies) =>
+    studies.some((s) => s.studyInstanceUid === exam.study_instance_uid && s.patientId === patientId && s.accessionNumber === accession),
+  );
+  return { uid: exam.study_instance_uid, priorId, priorName, patientId, accession, imageCount: exam.files.length, ris, dtg, listed };
+}
+
+test("6 照合の後の追加撮影：仮の患者情報で追加で撮って送る → 見回しが書き換え、同じ UID の検査 1 件に正式な患者・受付番号でまとまる", async ({ page }) => {
+  await loginAsInitialAdmin(page);
+  const flow = await emergencyReconciled(page, "EA");
+
+  // 照合の後に、同じ検査（同じ StudyInstanceUID）へ、仮の患者 ID・氏名のまま追加で撮って Orthanc へ送る（新しいシリーズ）
+  const added = JSON.parse(
+    await flow.dtg("exam", "--emergency", "--append", "--study-uid", flow.uid, "--patient-id", flow.priorId, "--patient-name", flow.priorName,
+      "-s", "1", "-i", "2", "--send", "--json"),
+  ) as { study_instance_uid: string; files: string[]; send: { status: string } };
+  expect(added.study_instance_uid).toBe(flow.uid);
+  expect(added.send).toMatchObject({ status: "sent" });
+  const total = flow.imageCount + added.files.length;
+
+  // 受け口の見回し（60 秒ごと）が、届き終えた（Orthanc の IsStable）追加の画像を、正式な患者・受付番号の検査にまとめる。
+  // 待つのは、見回しの間隔と、画像が安定するまでの時間
+  const after = await waitFor(
+    "追加の画像が正式な患者・受付番号の検査にまとまる",
+    flow.listed,
+    (studies) => {
+      const same = studies.filter((s) => s.studyInstanceUid === flow.uid);
+      return same.length === 1 && same[0]!.patientId === flow.patientId && same[0]!.instanceCount === total;
+    },
+    240_000,
+  );
+  const same = after.filter((s) => s.studyInstanceUid === flow.uid);
+  expect(same).toHaveLength(1);
+  expect(same[0]).toMatchObject({ patientId: flow.patientId, accessionNumber: flow.accession, instanceCount: total });
+  expect(after.some((s) => s.patientId === flow.priorId)).toBe(false);
+
+  console.log(`[flow] 追加撮影：画像 ${flow.imageCount} + ${added.files.length} が正式な患者の検査 1 にまとまった`);
+});
+
+test("7 取消の ORM：照合の後に ORM の CA を送る → 検査と画像は残り、受付番号だけが外れる", async ({ page }) => {
+  await loginAsInitialAdmin(page);
+  const flow = await emergencyReconciled(page, "EC");
+  const before = (await flow.listed()).filter((s) => s.studyInstanceUid === flow.uid);
+  expect(before).toHaveLength(1);
+  expect(before[0]).toMatchObject({ patientId: flow.patientId, accessionNumber: flow.accession, instanceCount: flow.imageCount });
+
+  // ris-emulator から、照合で作った予約の取消（ORC-1 = CA）を受け口へ送る。受理（AA）なら終了コードは 0
+  const cancel = () => flow.ris("pir", "send", "--host", "hl7-receiver", "--kind", "orm", "--accession", flow.accession, "--order-control", "CA");
+  expect(await cancel()).toContain("受理されました");
+
+  // 検査も画像も消さず、受付番号だけが外れる。患者は変わらない
+  const after = await waitFor(
+    "受付番号が外れる",
+    async () => (await flow.listed()).filter((s) => s.studyInstanceUid === flow.uid),
+    (studies) => studies.length === 1 && !studies[0]!.accessionNumber,
+  );
+  expect(after[0]).toMatchObject({ patientId: flow.patientId, instanceCount: flow.imageCount });
+
+  // 受付番号がすでに空の検査への CA は、何も変えずに受理される（同じ取消の送り直し）
+  expect(await cancel()).toContain("受理されました");
+  const again = (await flow.listed()).filter((s) => s.studyInstanceUid === flow.uid);
+  expect(again).toHaveLength(1);
+  expect(again[0]).toMatchObject({ patientId: flow.patientId, instanceCount: flow.imageCount });
+  expect(again[0]!.accessionNumber ?? "").toBe("");
+
+  console.log(`[flow] 取消：ORM の CA を受理 2・検査 1 の受付番号が外れた・画像 ${flow.imageCount}`);
 });

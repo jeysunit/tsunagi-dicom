@@ -24,10 +24,10 @@ import {
   jobFromRest,
   modalitiesFromRest,
   orthancTime,
+  collectReceivedInPeriod,
   parseChanges,
-  readChanges,
-  receivedStudyIds,
   singleStudyId,
+  stableFromRest,
   studyIdsFromLookup,
   studyInfoFromRest,
   receptionFromMetadata,
@@ -39,10 +39,14 @@ import {
   BackendError,
   BackendUnknownError,
   clampStudyLimit,
+  LOCK_CLOCK_TOLERANCE_MS,
   STUDY_LIMIT,
   type Backend,
   type InstanceSummary,
+  type PatientInstance,
   type ReceivedStudy,
+  type ReceivedWindow,
+  type SourceFiles,
   type RelayRequest,
   type StudyQuery,
 } from "@/lib/backend/types";
@@ -61,16 +65,23 @@ const EXPORT_TIMEOUT_MS = 10 * 60_000;
 /** 書き出しの本文を流す間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
 const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
+/** 付け替えの印の、Orthanc の利用者のメタデータの名前（deploy/orthanc/tsunagi-lock.lua と同じ。design.md §15.4） */
+const LOCK_METADATA = "TsunagiLock";
+/** 画像の UID の組（studyInstanceFiles の鍵） */
+const instanceKey = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
 /**
  * 書き込みの操作の答えのうち、Orthanc が受けなかったと確かめられないもの（docs/spec.md の 3.5 の結果不明）：
  * 手前の入口の 502・503・504（Orthanc が受けた後に、入口が待ちきれなかったことがある）と、移す答え（3xx）
  */
 export const isUncertainStatus = (status: number) => status === 502 || status === 503 || status === 504 || (status >= 300 && status < 400);
 
-/** 受け取りの記録のために、変更の記録を 1 回に求める数（Orthanc が切り詰めても、Last から続けて読む） */
-const CHANGES_PAGE = 100;
-/** 読む範囲（直近の変更の数）と、読む回数の上限（Orthanc が 1 回の数を切り詰めても範囲を読み切れるだけの回数） */
-const CHANGES_WINDOW = 5000;
+/**
+ * 受信一覧のために変更の記録を遡るときの、1 回に求める数・1 区切りの数・読む回数の上限（docs/spec.md の 3.3）。
+ * Orthanc が 1 回の数を切り詰めても、Last から続けて読む。1000 件は試験の Orthanc で切り詰めずに返ると測った数
+ * （docs/round-trip-test.md）。回数の上限で、1 回の表示で読む変更の記録は 20 万件まで
+ */
+const CHANGES_PAGE = 1000;
+const CHANGES_BLOCK = 1000;
 const CHANGES_MAX_CALLS = 200;
 /** 受け取った検査を組み立てるときに、同時に Orthanc へ求める数 */
 const RECEIVED_PARALLEL = 8;
@@ -100,13 +111,13 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     base: string,
     path: string,
     init: {
-      method?: "GET" | "HEAD" | "POST" | "DELETE";
+      method?: "GET" | "HEAD" | "POST" | "PUT" | "DELETE";
       headers?: Record<string, string>;
       body?: string;
       timeoutMs?: number;
       /** 書き込みの操作：送った後に答えが来なければ、届いたかが分からない（結果不明） */
       write?: boolean;
-      /** どの資格情報で求めるか。既定は GET・HEAD が読む資格情報、POST が書く資格情報 */
+      /** どの資格情報で求めるか。既定は GET・HEAD が読む資格情報、POST・PUT・DELETE が書く資格情報 */
       credential?: "read" | "write";
       /** 時間切れを呼ぶ側で決める（本文を流す間は別の時間切れにする書き出しなど）。あれば timeoutMs は使わない */
       signal?: AbortSignal;
@@ -115,7 +126,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     const method = init.method ?? "GET";
     const headers: Record<string, string> = { ...init.headers };
     const auth =
-      (init.credential ?? (method === "POST" || method === "DELETE" ? "write" : "read")) === "write" ? writeAuthorization : authorization;
+      (init.credential ?? (method === "GET" || method === "HEAD" ? "read" : "write")) === "write" ? writeAuthorization : authorization;
     if (auth) headers.authorization = auth;
     try {
       return await fetch(`${base.replace(/\/+$/, "")}/${path}`, {
@@ -145,6 +156,100 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     }
     return res.json();
+  }
+
+  /** 検査の全画像の Orthanc の画像の ID と、患者の値と UID の組（design.md §4） */
+  async function instanceTags(id: string): Promise<[string, PatientInstance][]> {
+    if (!isOrthancId(id)) {
+      throw new BackendError("検査の ID が正しくありません", 400);
+    }
+    const json = await restJsonOrNull(`studies/${id}/instances-tags?simplify`);
+    if (!json || typeof json !== "object" || Array.isArray(json)) {
+      throw new BackendError("画像のタグを読み込めません");
+    }
+    return Object.entries(json).map(([instanceId, raw]): [string, PatientInstance] => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new BackendError("画像のタグが正しくありません");
+      }
+      const tags = raw as Record<string, unknown>;
+      const get = (key: string) => {
+        const v = tags[key];
+        if (v === undefined) {
+          return "";
+        }
+        if (typeof v !== "string") {
+          throw new BackendError("画像のタグが正しくありません");
+        }
+        return v;
+      };
+      return [instanceId, {
+        PatientID: get("PatientID"),
+        PatientName: get("PatientName"),
+        PatientBirthDate: get("PatientBirthDate"),
+        PatientSex: get("PatientSex"),
+        AccessionNumber: get("AccessionNumber"),
+        StudyInstanceUID: get("StudyInstanceUID"),
+        SeriesInstanceUID: get("SeriesInstanceUID"),
+        SOPInstanceUID: get("SOPInstanceUID"),
+        SpecificCharacterSet: get("SpecificCharacterSet")
+      }];
+    });
+  }
+
+  /** Orthanc の変更の記録（/changes）のいまの位置 */
+  async function lastChange(): Promise<number> {
+    const json = await restJsonOrNull("changes?last");
+    const last = json && typeof json === "object" ? (json as { Last?: unknown }).Last : undefined;
+    if (typeof last !== "number" || !Number.isSafeInteger(last) || last < 0) {
+      throw new BackendError("画像サーバーの変更の記録を読み込めません");
+    }
+    return last;
+  }
+
+  /** since より後の変更の記録に、ids の画像が届いた記録（NewInstance）があるか。読み切れなければ、あるとする */
+  async function arrivedSince(since: number, ids: ReadonlySet<string>): Promise<boolean> {
+    let position = since;
+    for (let page = 0; page < 1000; page++) {
+      const json = await restJsonOrNull(`changes?since=${position}&limit=1000`);
+      const body = (json && typeof json === "object" ? json : {}) as { Changes?: unknown; Done?: unknown; Last?: unknown };
+      if (!Array.isArray(body.Changes) || typeof body.Last !== "number" || typeof body.Done !== "boolean") {
+        throw new BackendError("画像サーバーの変更の記録を読み込めません");
+      }
+      for (const change of body.Changes as { ChangeType?: unknown; ID?: unknown }[]) {
+        if (change?.ChangeType === "NewInstance" && typeof change.ID === "string" && ids.has(change.ID)) {
+          return true;
+        }
+      }
+      if (body.Done || body.Last <= position) {
+        return false;
+      }
+      position = body.Last;
+    }
+    return true;
+  }
+
+  /** 検査の全画像の、Orthanc の画像の ID・UID の組・ファイルの印（`/studies/{id}/instances` の FileUuid） */
+  async function instanceFiles(id: string): Promise<{ instanceId: string; key: string; file: string }[]> {
+    const tags = await instanceTags(id);
+    const json = await restJsonOrNull(`studies/${id}/instances`);
+    if (!Array.isArray(json)) {
+      throw new BackendError("画像の一覧を読み込めません");
+    }
+    const files = new Map<string, string>();
+    for (const raw of json) {
+      const { ID, FileUuid } = (raw ?? {}) as { ID?: unknown; FileUuid?: unknown };
+      if (typeof ID !== "string" || typeof FileUuid !== "string" || !FileUuid) {
+        throw new BackendError("画像のファイルの印を読み込めません");
+      }
+      files.set(ID, FileUuid);
+    }
+    return tags.map(([instanceId, instance]) => {
+      const file = files.get(instanceId);
+      if (!file || !isOrthancId(instanceId)) {
+        throw new BackendError("画像のファイルの印を読み込めません");
+      }
+      return { instanceId, key: instanceKey(instance), file };
+    });
   }
 
   /**
@@ -179,6 +284,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       remoteAet: reception?.remoteAet ?? null,
       origin: reception?.origin ?? null,
       instanceCount,
+      stable: stableFromRest(study),
       summary,
     };
   }
@@ -260,6 +366,8 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const query = new URLSearchParams();
       query.append("includefield", TAG.InstanceNumber);
       query.append("includefield", TAG.NumberOfFrames);
+      // スライス位置は、画像サーバーが返したときだけ一覧に添える（返さなくてもよい）
+      query.append("includefield", TAG.SliceLocation);
       // 監査の記録の「どの患者」に使う
       query.append("includefield", TAG.PatientID);
       const rows = await getJson<DicomJsonDataset[]>(
@@ -341,24 +449,24 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return new Response(res.body as ReadableStream<Uint8Array> | null, { status: res.status, headers: out });
     },
 
-    async receivedStudies(limit: number) {
-      // 変更の記録の最後の番号から CHANGES_WINDOW 件前を since にして、Orthanc Book の追い方（Last・Done）どおりに読み切る。
-      // 読む範囲の前にも記録があり、受け取りの検査が limit 件に届かなければ「ここまでしか読めていない」（complete=false）
-      const head = parseChanges(await restJsonOrNull("changes?last"));
-      const from = Math.max(0, head.last - CHANGES_WINDOW);
-      const read = await readChanges(
+    async receivedStudies(window: ReceivedWindow) {
+      // 変更の記録の最後の番号から、期間の始まりまで新しい側から遡る（orthanc-rest.ts の collectReceivedInPeriod）
+      const last = await restJsonOrNull("changes?last");
+      if (!last || typeof (last as { Last?: unknown }).Last !== "number") throw new BackendError("画像サーバーの変更の記録を読み込めませんでした");
+      const head = parseChanges(last);
+      const read = await collectReceivedInPeriod(
         async (since, pageLimit) =>
           parseChanges(await restJsonOrNull(`changes?${new URLSearchParams({ since: String(since), limit: String(pageLimit) })}`)),
-        from,
-        { limit: CHANGES_PAGE, maxCalls: CHANGES_MAX_CALLS },
+        head.last,
+        window,
+        { block: CHANGES_BLOCK, pageLimit: CHANGES_PAGE, maxCalls: CHANGES_MAX_CALLS },
       );
-      const ids = receivedStudyIds(read.changes, limit);
       const out: ReceivedStudy[] = [];
-      for (let i = 0; i < ids.length; i += RECEIVED_PARALLEL) {
-        const batch = await Promise.all(ids.slice(i, i + RECEIVED_PARALLEL).map((x) => receivedOne(x.id, x.date)));
+      for (let i = 0; i < read.ids.length; i += RECEIVED_PARALLEL) {
+        const batch = await Promise.all(read.ids.slice(i, i + RECEIVED_PARALLEL).map((x) => receivedOne(x.id, x.date)));
         for (const r of batch) if (r) out.push(r);
       }
-      return { studies: out, complete: read.complete && (from === 0 || ids.length >= limit) };
+      return { studies: out, overLimit: read.overLimit, complete: read.complete };
     },
 
     async listModalities() {
@@ -401,47 +509,146 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       return studyPatientFromRest(await restJsonOrNull(`studies/${orthancStudyId}`));
     },
 
-    // 検査の要約だけでは部分反映を見落とすので、全画像を読む（design.md §4）。
-    async studyInstanceTags(id: string) {
+    // 届き終えていない検査を書き換えると、書き換えの最中に届いた画像が元の検査ごと消えうる（design.md §15）。
+    async studyIsStable(id: string) {
       if (!isOrthancId(id)) {
         throw new BackendError("検査の ID が正しくありません", 400);
       }
-      const json = await restJsonOrNull(`studies/${id}/instances-tags?simplify`);
-      if (!json || typeof json !== "object" || Array.isArray(json)) {
-        throw new BackendError("画像のタグを読み込めません");
-      }
-      return Object.values(json).map((raw): import("./types").PatientInstance => {
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          throw new BackendError("画像のタグが正しくありません");
-        }
-        const tags = raw as Record<string, unknown>;
-        const get = (key: string) => {
-          const v = tags[key];
-          if (v === undefined) {
-            return "";
-          }
-          if (typeof v !== "string") {
-            throw new BackendError("画像のタグが正しくありません");
-          }
-          return v;
-        };
-        return {
-          PatientID: get("PatientID"),
-          PatientName: get("PatientName"),
-          PatientBirthDate: get("PatientBirthDate"),
-          PatientSex: get("PatientSex"),
-          AccessionNumber: get("AccessionNumber"),
-          StudyInstanceUID: get("StudyInstanceUID"),
-          SeriesInstanceUID: get("SeriesInstanceUID"),
-          SOPInstanceUID: get("SOPInstanceUID"),
-          SpecificCharacterSet: get("SpecificCharacterSet")
-        };
-      });
+      const json = await restJsonOrNull(`studies/${id}`);
+      return Boolean(json && typeof json === "object" && (json as { IsStable?: unknown }).IsStable === true);
     },
 
-    // 仕事の完了は呼び手が確かめる（design.md §4）。元を消す（KeepSource: false）のは患者 ID が変わるときだけ。
-    // 患者 ID が同じなら OverwriteInstances で元の画像が置き換わり、元を消すと置き換えた画像ごと消える（2026-10-24 の開発の一式）
-    async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>, options: { removeSource: boolean }) {
+    // 検査の要約だけでは部分反映を見落とすので、全画像を読む（design.md §4）。
+    async studyInstanceTags(id: string) {
+      return (await instanceTags(id)).map(([, instance]) => instance);
+    },
+
+    // 変更の記録の位置を先に読む（印を読んだ後に届いた画像は、位置より後の記録に必ず残る）
+    async studyInstanceFiles(id: string) {
+      const since = await lastChange();
+      const files = await instanceFiles(id);
+      return {
+        since,
+        files: Object.fromEntries(files.map(f => [f.key, f.file])),
+        ids: Object.fromEntries(files.map(f => [f.key, f.instanceId]))
+      };
+    },
+
+    // Lua は Orthanc の時計で印の期限と比べるので、Orthanc の時計（/tools/now。UTC の秒まで）とのずれを確かめる。
+    // Orthanc の時刻は now から now + 1 秒の間、この機でそれを読んだ時刻は sent から received の間なので、ずれはその幅で見る
+    async checkLockClock() {
+      const sent = Date.now();
+      const clock = await call(orthancUrl, "tools/now");
+      const received = Date.now();
+      const now = Date.parse(orthancTime(clock.ok ? (await clock.text()).trim() : ""));
+      if (!clock.ok) {
+        await clock.body?.cancel();
+      }
+      if (!Number.isFinite(now) || Math.max(Math.abs(now - received), Math.abs(now + 1000 - sent)) > LOCK_CLOCK_TOLERANCE_MS) {
+        throw new BackendError("画像サーバーの時計を読めないか、この機の時計とずれています（付け替えの印を確かめられません）");
+      }
+    },
+
+    // 印の値は期限の UNIX 秒（Orthanc の Lua が os.time() と比べる）。印の名前は Orthanc の UserMetadata に要る
+    // （無ければ 404。検査が無いときも 404）
+    async lockStudy(id: string, untilEpochSeconds: number) {
+      if (!isOrthancId(id)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      if (!Number.isSafeInteger(untilEpochSeconds) || untilEpochSeconds <= 0) {
+        throw new BackendError("付け替えの印の期限が正しくありません", 400);
+      }
+      // 付ける前に、Orthanc の時計とのずれを確かめる
+      await this.checkLockClock();
+      const res = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, {
+        method: "PUT",
+        headers: { "content-type": "text/plain" },
+        body: String(untilEpochSeconds),
+        timeoutMs: POST_TIMEOUT_MS
+      });
+      await res.body?.cancel();
+      if (!res.ok) {
+        const hint = res.status === 404 ? `。Orthanc の UserMetadata に ${LOCK_METADATA} が要る` : "";
+        throw new BackendError(`画像サーバーが付け替えの印を断りました（${res.status}）${hint}`);
+      }
+      // 印が確かに立ったことを読み直して確かめる（PUT の答えだけで信じない）。入口で道を絞るときに印の道を 1 つの
+      // 資格情報にまとめられるよう、書いたのと同じ資格情報で読む
+      const check = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, { credential: "write" });
+      const value = check.ok ? (await check.text()).trim() : "";
+      if (!check.ok) {
+        await check.body?.cancel();
+      }
+      if (value !== String(untilEpochSeconds)) {
+        throw new BackendError("付け替えの印を付けたのに、読み直すと値が違います");
+      }
+    },
+
+    async unlockStudy(id: string) {
+      if (!isOrthancId(id)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      const res = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, { method: "DELETE", timeoutMs: POST_TIMEOUT_MS });
+      await res.body?.cancel();
+      if (!res.ok && res.status !== 404) {
+        throw new BackendError(`画像サーバーが付け替えの印を外せませんでした（${res.status}）`);
+      }
+    },
+
+    async studyInstanceOrigins(id: string) {
+      const origins: Record<string, string | null> = {};
+      for (const [instanceId, instance] of await instanceTags(id)) {
+        if (!isOrthancId(instanceId)) {
+          throw new BackendError("画像の ID が正しくありません");
+        }
+        const res = await call(orthancUrl, `instances/${instanceId}/metadata/ModifiedFrom`);
+        if (res.status === 404) {
+          await res.body?.cancel();
+          origins[instanceKey(instance)] = null;
+          continue;
+        }
+        if (!res.ok) {
+          await res.body?.cancel();
+          throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+        }
+        const value = (await res.text()).trim();
+        origins[instanceKey(instance)] = isOrthancId(value) ? value : null;
+      }
+      return origins;
+    },
+
+    // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
+    // 書き換えの前とファイルの印が違う画像と、消す直前に変更の記録で届き直しの見える画像（同じ UID で届き直して
+    // 置き換わった画像）も消さない。Orthanc は画像を消すとその変更の記録も消すので、届き直しは消す前に確かめる。
+    // 記録を読んでから消すまでの間に届き直した画像は消えうる（Orthanc の削除に条件を付けられない）。C-STORE はこの間、
+    // 付け替えの印で Orthanc の Lua が断るので、残るのは REST・STOW-RS で届き直した画像だけ（design.md §15.4）
+    async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles, beforeEach?: () => Promise<void>) {
+      const named = new Set(instances.map(instanceKey));
+      for (const { instanceId, key, file } of await instanceFiles(id)) {
+        if (!named.has(key) || source.files[key] !== file) {
+          continue;
+        }
+        if (await arrivedSince(source.since, new Set([instanceId]))) {
+          continue;
+        }
+        // 変更の記録を読み終えた後、消す直前に呼ぶ（読むのに時間がかかっても、その間に印が切れていれば消さない）
+        await beforeEach?.();
+        const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
+        await res.body?.cancel();
+        if (res.status === 404) {
+          continue;
+        }
+        if (!res.ok && isUncertainStatus(res.status)) {
+          throw new BackendUnknownError();
+        }
+        if (!res.ok) {
+          throw new BackendError(`画像サーバーが画像の削除を断りました（${res.status}）`);
+        }
+      }
+    },
+
+    // 仕事の完了は呼び手が確かめる（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
+    // OverwriteInstances で元の画像が置き換わる。患者 ID が変わると元の検査が残り、呼び手が deleteStudyInstances で消す
+    async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>) {
       if (!isOrthancId(orthancStudyId)) {
         throw new BackendError("検査の ID が正しくありません", 400);
       }
@@ -449,7 +656,6 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         Replace: replace,
         Keep: ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"],
         Force: true,
-        ...(options.removeSource ? { KeepSource: false } : {}),
         Asynchronous: true
       }), { write: true });
       if (!res.ok) {
@@ -472,6 +678,49 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const id = body && typeof body === "object" ? (body as {
         ID?: unknown;
       }).ID : undefined;
+      if (!isJobId(id)) {
+        throw new BackendUnknownError();
+      }
+      return { jobId: id };
+    },
+
+    // Orthanc 26.9.1（Orthanc 1.13.0）の /system は OverwriteInstances（真偽）と UserMetadata（名前と番号）を返す
+    // （2026-10-25 に実測。docs/round-trip-test.md の「実測で決めること」）。形が違えば、入っていないとみなす
+    async keepUidSettings() {
+      const system = await restJsonOrNull("system");
+      const s = system && typeof system === "object" ? (system as Record<string, unknown>) : {};
+      const metadata = s.UserMetadata && typeof s.UserMetadata === "object" ? (s.UserMetadata as Record<string, unknown>) : {};
+      return { overwriteInstances: s.OverwriteInstances === true, lockMetadata: typeof metadata[LOCK_METADATA] === "number" };
+    },
+
+    // 中身の訂正：新しい UID の検査を作る。StudyInstanceUID は BFF が決めて渡す（結果不明のときに、その UID で探して照らす）。
+    // Orthanc は Keep の無い書き換えで SeriesInstanceUID・SOPInstanceUID を新しく作り、元の検査を残す（2026-10-25 に実測）
+    async modifyStudyNewUid(orthancStudyId: string, replace: Record<string, string>) {
+      if (!isOrthancId(orthancStudyId)) {
+        throw new BackendError("検査の ID が正しくありません", 400);
+      }
+      if (!isDicomUid(replace.StudyInstanceUID)) {
+        throw new BackendError("新しい StudyInstanceUID が正しくありません", 400);
+      }
+      const res = await restPost(`studies/${orthancStudyId}/modify`, JSON.stringify({
+        Replace: replace,
+        Force: true,
+        Asynchronous: true
+      }), { write: true });
+      if (!res.ok) {
+        await res.body?.cancel();
+        if (isUncertainStatus(res.status)) {
+          throw new BackendUnknownError();
+        }
+        throw new BackendError(`画像サーバーが書き換えを断りました（${res.status}）`, res.status === 400 ? 400 : 502);
+      }
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        throw new BackendUnknownError();
+      }
+      const id = body && typeof body === "object" ? (body as { ID?: unknown }).ID : undefined;
       if (!isJobId(id)) {
         throw new BackendUnknownError();
       }
@@ -530,6 +779,18 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!isJobId(jobId)) return null;
       const json = await restJsonOrNull(`jobs/${jobId}`);
       return json ? jobFromRest(json) : null;
+    },
+
+    // 読めない・形が違えば投げる（数えられないまま、終わっていないとも終わったとも言わない）
+    async unfinishedModifyJobs() {
+      const json = await restJsonOrNull("jobs?expand");
+      if (!Array.isArray(json)) {
+        throw new BackendError("画像サーバーのジョブの一覧を読み込めません");
+      }
+      return json.filter((j) => {
+        const job = j && typeof j === "object" ? (j as { Type?: unknown; State?: unknown }) : {};
+        return job.Type === "ResourceModification" && job.State !== "Success" && job.State !== "Failure";
+      }).length;
     },
 
     async exportStudy(orthancStudyId: string) {

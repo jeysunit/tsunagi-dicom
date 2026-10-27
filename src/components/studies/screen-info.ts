@@ -22,6 +22,8 @@ export interface ScreenInfo {
     export: boolean;
     /** 削除（段 5。管理者だけ）。検証モードで書き込みを止めているときは false */
     delete: boolean;
+    /** 患者情報修正・検査情報修正（段 6。一般と管理者）。検証モードで書き込みを止めているときは false */
+    modify?: boolean;
   };
   /** 大事な操作の前の再認証がある（AUTH_MODE=local のときだけ）。再認証はパスワードだけ（docs/spec.md の 3.6） */
   reauth?: boolean;

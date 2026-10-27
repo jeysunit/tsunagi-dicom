@@ -1,5 +1,8 @@
 import { StudyBrowser } from "@/components/studies/study-browser";
 import type { ScreenInfo } from "@/components/studies/screen-info";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Notice } from "@/components/ui/notice";
+import { PageHeader } from "@/components/ui/page-header";
 import { pageAccess } from "@/lib/auth/page-session";
 import { can } from "@/lib/auth/roles";
 import { audit } from "@/lib/auth/session";
@@ -11,7 +14,7 @@ import { searchAuditFields } from "@/lib/search-audit";
 import { filterToSearchParams, parseFilter } from "@/lib/study-filter";
 import { resolveSearchTrigger } from "@/lib/search-trigger";
 import { listStudies, type StudyListResult } from "@/lib/study-list";
-import { FORBIDDEN_PAGE, loadFailed } from "@/lib/ui-text";
+import { loadFailed } from "@/lib/ui-text";
 
 // 検査の一覧の頁（docs/spec.md の 3.1）。最初の描画はサーバーの側で画面の API と同じ一覧を取り、
 // 後の絞り込み・ビューアの覚えの変更は画面（TanStack Query）が画面の API から取る。
@@ -25,11 +28,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   // 画面のロック中は中身を描かない（ロックの画面は layout が出す）
   if (access.kind === "locked") return null;
   if (access.kind === "forbidden") {
-    return (
-      <p role="alert" className="text-label">
-        {FORBIDDEN_PAGE}
-      </p>
-    );
+    return <EmptyState kind="denied" adminOnly={false} />;
   }
   const { session } = access;
   const params = await searchParams;
@@ -52,9 +51,12 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     const message = error instanceof BackendError ? error.message : loadFailed("検査");
     if (!(error instanceof BackendError)) console.error(error);
     return (
-      <p role="alert" className="text-label">
-        {message}
-      </p>
+      <>
+        <PageHeader title="検査一覧" className="mb-3" />
+        <Notice kind="err" alert>
+          {message}
+        </Notice>
+      </>
     );
   }
   // 頁を開いたことは手動の検索（自動更新の読み直しを認める基準の条件として覚える。src/lib/search-trigger.ts）
@@ -76,13 +78,14 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       reconcile: can(role, "pacs.reconcile"),
       export: can(role, "study.export") && writes,
       delete: can(role, "study.delete") && writes,
+      modify: can(role, "study.modify") && writes,
     },
     ...(session.local ? { reauth: true } : {}),
   };
 
   return (
     <>
-      {deps.backend.mock && <p className="mb-3 text-xs text-label">バックエンド：モック</p>}
+      <PageHeader title="検査一覧" className="mb-3 shrink-0" />
       <StudyBrowser
         initialFilter={filter}
         initialData={{ count: result.count, studies: result.studies, facets: result.facets }}

@@ -132,12 +132,20 @@ describe("HL7 の解析と反映の中身", () => {
     "扱わない種類 %s",
     (type) => expect(update(changed("MSH", 8, type))).toMatchObject({ ok: false, code: "AR" })
   );
-  it("ORM CA は AR", () => expect(update(changed("ORC", 1, "CA", "orm"))).toMatchObject({ ok: false, code: "AR" }));
+  // RAD-13 の CA・DC・XO を受けるようにしたので、断るのは表に無い ORC-1 だけ（design.md §16）
+  it.each(["OC", "SC", "nw", ""])("ORM の ORC-1 %s は AR", (control) =>
+    expect(update(changed("ORC", 1, control, "orm"))).toMatchObject({ ok: false, code: "AR" }));
+  it.each(["NW", "CA", "DC", "XO"])("ORM の ORC-1 %s を受ける", (control) =>
+    expect(update(changed("ORC", 1, control, "orm"))).toMatchObject({ ok: true, command: { kind: "ORM", control } }));
   it.each(["", "1..2", "1.a", "1.02", "1." + "2".repeat(64)])(
     "UID を断る %s",
     (uid) => expect(update(changed("ZDS", 1, uid, "orm"))).toMatchObject({ ok: false, code: "AE" })
   );
-  it("MSH-18 が空で日本語があれば断る", () => expect(parseMessage(Buffer.from(changed("MSH", 17, ""))).ok).toBe(false));
+  it.each(["ISO IR87", "ISO IR14", "8859/1", "UNICODE", "ASCII"])(
+    "MSH-18 が UNICODE UTF-8 以外なら断る %s",
+    (charset) => expect(parseMessage(Buffer.from(changed("MSH", 17, charset)))).toMatchObject({ ok: false, reason: "文字コードが違う" })
+  );
+  it("MSH-18 が空で日本語があれば断る",() => expect(parseMessage(Buffer.from(changed("MSH", 17, ""))).ok).toBe(false));
   it("発番元の subcomponent は分けて読む", () => {
     const p = parseMessage(Buffer.from(changed("PID", 3, "P1^^^ISSUER&1.2.3&ISO^PI")));
     expect(p.ok).toBe(true);

@@ -4,6 +4,10 @@
 export const MODALITY_GROUPS = ["CT", "MR", "CR/DX", "US", "ES", "MG", "DOC", "SR"] as const;
 export type ModalityGroup = (typeof MODALITY_GROUPS)[number];
 
+/** 詳細条件の中にだけ出すモダリティ（文書・レポート）。一覧の上の見出し（すべて・CT・MR・CR/DX・US・ES・MG）には出さない */
+export const DETAIL_GROUPS: readonly ModalityGroup[] = ["DOC", "SR"];
+export const LIST_GROUPS: readonly ModalityGroup[] = MODALITY_GROUPS.filter((g) => !DETAIL_GROUPS.includes(g));
+
 /** 群に入る DICOM の Modality の値 */
 const MEMBERS: Record<ModalityGroup, readonly string[]> = {
   CT: ["CT"],
@@ -20,6 +24,23 @@ const MEMBERS: Record<ModalityGroup, readonly string[]> = {
 
 export function isModalityGroup(value: unknown): value is ModalityGroup {
   return typeof value === "string" && (MODALITY_GROUPS as readonly string[]).includes(value);
+}
+
+/** 群の並びを、見出しの順（MODALITY_GROUPS）にそろえ、重複を除く */
+export function orderGroups(groups: readonly ModalityGroup[]): ModalityGroup[] {
+  return MODALITY_GROUPS.filter((g) => groups.includes(g));
+}
+
+/** 選んだ群に、群を足す（もう入っていれば外す）。見出しの順にそろえる。空になれば undefined（絞らない） */
+export function toggleGroup(selected: readonly ModalityGroup[] | undefined, group: ModalityGroup): ModalityGroup[] | undefined {
+  const current = selected ?? [];
+  const next = orderGroups(current.includes(group) ? current.filter((g) => g !== group) : [...current, group]);
+  return next.length > 0 ? next : undefined;
+}
+
+/** コンマで区切った群の名前（`CT,MR`）を読む。群でない名前は捨てる。見出しの順にそろえる */
+export function parseGroups(value: string | undefined): ModalityGroup[] {
+  return orderGroups((value ?? "").split(",").filter(isModalityGroup));
 }
 
 /** DICOM の Modality の値が入る群。どれにも入らなければ null */

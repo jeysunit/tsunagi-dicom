@@ -108,7 +108,8 @@ describe("入力欄・ボタンの輪郭（border-input）は、地との対比�
     ["明るい地", light],
     ["暗い地", dark],
   ] as const) {
-    it.each(["background", "surface"])(`${name}：border-input と %s の地`, (bg) => {
+    // 検索の帯（muted-strong）と一覧の hover の地（muted）の上にも入力欄・ボタンを置く（前の #8c8c8c は帯の上で 2.6:1 だった）
+    it.each(["background", "surface", "muted", "muted-strong"])(`${name}：border-input と %s の地`, (bg) => {
       expect(contrast(set["border-input"]!, set[bg]!)).toBeGreaterThanOrEqual(3);
     });
   }
@@ -136,7 +137,7 @@ describe("グレーは色味のない中立（R=G=B）", () => {
     ["明るい地", light],
     ["暗い地", dark],
   ] as const) {
-    it.each(["background", "surface", "foreground", "label", "value", "border", "border-input", "muted", "muted-strong", "hover", "pressed", "chrome"])(`${name}：%s`, (key) => {
+    it.each(["background", "surface", "foreground", "label", "value", "border", "border-input", "muted", "muted-strong", "hover", "pressed"])(`${name}：%s`, (key) => {
       const hex = set[key]!;
       expect(hex.slice(1, 3), key).toBe(hex.slice(3, 5));
       expect(hex.slice(3, 5), key).toBe(hex.slice(5, 7));
@@ -153,10 +154,10 @@ describe("spec の 2 の色の値", () => {
       label: "#5f5f5f",
       value: "#1a1a1a",
       border: "#d2d2d2",
-      "border-input": "#8c8c8c",
+      // 期待の変更（2026-10-26）：#8c8c8c → #7a7a7a（検索の帯の上で 2.6:1 だった。spec の 2）
+      "border-input": "#7a7a7a",
       muted: "#eeeeee",
       "muted-strong": "#e2e2e2",
-      chrome: "#333333",
       primary: "#4b4fbf",
       "primary-foreground": "#ffffff",
       "primary-hover": "#3b3ea3",
@@ -172,10 +173,10 @@ describe("spec の 2 の色の値", () => {
       label: "#a3a3a3",
       value: "#ffffff",
       border: "#3a3a3a",
-      "border-input": "#777777",
+      // 期待の変更（2026-10-26）：#777777 → #8a8a8a（muted-strong の上で 2.6:1 だった。spec の 2）
+      "border-input": "#8a8a8a",
       muted: "#2d2d2d",
       "muted-strong": "#383838",
-      chrome: "#121212",
       primary: "#4b4fbf",
       "primary-foreground": "#ffffff",
       "primary-hover": "#3b3ea3",
@@ -186,6 +187,13 @@ describe("spec の 2 の色の値", () => {
   it("状態の色（誤り・終わったこと）は、主の色とは別の枠で、前の値のまま", () => {
     expect(light).toMatchObject({ danger: "#d1242f", success: "#1a7f37" });
     expect(dark).toMatchObject({ danger: "#ff7b72", success: "#3fb950" });
+  });
+
+  it("MR の印は赤紫（青い CT と見分ける）。暗い外枠のトークンは持たない", () => {
+    expect(light["mod-mr"]).toBe("#9333ea");
+    expect(dark["mod-mr"]).toBe("#c084fc");
+    expect(light).not.toHaveProperty("chrome");
+    expect(dark).not.toHaveProperty("chrome");
   });
 
   it("前の主の色（#2f81f7 に白い字。対比が足りない）と、前の青の値を使っていない", () => {

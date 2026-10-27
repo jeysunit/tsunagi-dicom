@@ -43,6 +43,9 @@ export const AUDIT_ACTIONS = [
   "user_create",
   "user_status_change",
   "role_change",
+  // 管理者のパスワードを失くしたときに、コンテナの中のコマンドで一時のパスワードを出した（src/lib/auth/admin-reset.ts）。
+  // 画面・API からは使えない。detail の via は container_cli
+  "admin_password_reset",
   // 段 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
   // 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、段 3 で道を外すまでこの名前で記録した
   "study_state",
@@ -51,6 +54,8 @@ export const AUDIT_ACTIONS = [
   "receive_log",
   "echo",
   "send",
+  // 送信一覧を開いた（送った記録を読んだ。detail の returned に、返した患者 ID と StudyInstanceUID の組）
+  "send_log",
   // 段 5：書き出し（ZIP）。削除は上の delete（detail の phase は send と同じ）
   "export",
   // つなぎの鍵が替わった（鍵つきにした・SESSION_SECRET を替えた）。detail の from（前の行の keyId。鍵の無い行なら sha256）と to
@@ -285,6 +290,11 @@ export interface AuditChainOptions {
    * 控えを1つ以上渡したときも、設定しているとみなす
    */
   requireAnchors?: boolean;
+  /**
+   * 確かめた行を 1 行ずつ渡す（食い違いの見つかった行と、その後の行は渡さない）。確かめた行をそのまま使い、確かめた後に
+   * 読み直して、その間に書き換えられた行を使うことを防ぐ（HL7 の経過。src/lib/hl7/apply.ts）
+   */
+  onRow?: (row: AuditRow) => void;
 }
 
 /**
@@ -414,6 +424,7 @@ export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditC
         }
         anchorsChecked += 1;
       }
+      options.onRow?.(row);
       prevHash = hash;
       expectedSeq += 1;
       checked += 1;

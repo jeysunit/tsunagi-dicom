@@ -31,20 +31,29 @@ const dateOf = (filter: StudyFilter) => (v: StudyView) => v.studyDate! >= (filte
 
 describe("見出しの件数", () => {
   it("全部の見出しで、件数は押したあとの一覧の件数と同じ（ほかの見出しと検索は、いまの値のまま）", () => {
-    const filters: StudyFilter[] = [{ date: "all" }, { date: "all", modality: "CT" }, { date: "all", q: "山田" }, { date: "all", modality: "CT", q: "山田" }];
+    const filters: StudyFilter[] = [{ date: "all" }, { date: "all", modalities: ["CT"] }, { date: "all", q: "山田" }, { date: "all", modalities: ["CT"], q: "山田" }];
     for (const filter of filters) {
       const f = computeFacets(views, views, filter, today, ALL_FIELDS);
-      expect(f.modality!.all).toBe(views.filter((v) => matchesFilter(v, { ...filter, modality: undefined })).length);
+      expect(f.modality!.all).toBe(views.filter((v) => matchesFilter(v, { ...filter, modalities: undefined })).length);
       for (const g of MODALITY_GROUPS) {
-        expect(f.modality![g]).toBe(views.filter((v) => matchesFilter(v, { ...filter, modality: g })).length);
+        expect(f.modality![g]).toBe(views.filter((v) => matchesFilter(v, { ...filter, modalities: [g] })).length);
       }
     }
+  });
+
+  it("モダリティを複数選んでも、群ごとの件数はその群だけの数。検査日の件数は選んだ群のどれかに合う数", () => {
+    const filter: StudyFilter = { date: "all", modalities: ["CT", "MR"] };
+    const f = computeFacets(views, views, filter, today, ALL_FIELDS);
+    const single = computeFacets(views, views, { date: "all" }, today, ALL_FIELDS);
+    expect(f.modality).toEqual(single.modality);
+    expect(f.date!.all).toBe(views.filter((v) => matchesFilter(v, filter)).length);
+    expect(f.date!.all).toBe(views.filter((v) => v.modalities?.some((m) => m === "CT" || m === "MR")).length);
   });
 
   it("検査日の件数は、検査日で絞らない一覧を元に、モダリティ・検索を当てて数える", () => {
     // いまの一覧は「今日」だけ。検査日の件数は全期間の元（dateViews）から数える
     const nowList = views.filter(dateOf({ date: "today" }));
-    const f = computeFacets(nowList, views, { date: "today", modality: "CT" }, today, ALL_FIELDS);
+    const f = computeFacets(nowList, views, { date: "today", modalities: ["CT"] }, today, ALL_FIELDS);
     expect(f.date).toEqual({ today: 1, yesterday: 0, week: 1, month: 2, all: 2 });
     const g = computeFacets(nowList, views, { date: "today" }, today, ALL_FIELDS);
     expect(g.date).toEqual({ today: 2, yesterday: 1, week: 3, month: 4, all: 5 });

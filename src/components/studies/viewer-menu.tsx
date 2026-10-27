@@ -103,13 +103,15 @@ export function ViewerMenu({
   return (
     <div
       ref={root}
-      className={cn("relative inline-flex items-end gap-1", compact ? "max-w-full flex-row-reverse items-center gap-1.5" : "flex-col")}
+      className={cn("relative inline-flex gap-1", compact ? "max-w-full flex-row-reverse items-center gap-1.5" : "flex-col items-start")}
       data-row-control
     >
       <div className="inline-flex shrink-0">
         <Button
           type="button"
           size={compact ? "xs" : "sm"}
+          // 一覧の行の中のボタンは副（白地・枠）。主（藍）は、詳細の操作の行の「開く」だけ（docs/design-system の「ボタン」）
+          variant={compact ? "outline" : "default"}
           className="rounded-r-none"
           disabled={!defaultViewer}
           title={defaultViewer ? undefined : "ビューア未設定"}
@@ -123,7 +125,8 @@ export function ViewerMenu({
         <Button
           type="button"
           size={compact ? "xs" : "sm"}
-          className="rounded-l-none border-l border-primary-foreground/30 px-1.5"
+          variant={compact ? "outline" : "default"}
+          className={cn("rounded-l-none px-1.5", compact ? "border-l-0" : "border-l border-primary-foreground/30")}
           aria-label="ビューアを選択"
           aria-haspopup="menu"
           aria-expanded={open}
@@ -145,8 +148,9 @@ export function ViewerMenu({
           id={menuId}
           role="menu"
           className={cn(
-            "absolute right-0 z-30 min-w-56 rounded-md border border-border bg-background py-1 text-left shadow-md",
-            compact ? "top-7" : "top-8",
+            "absolute z-30 min-w-56 rounded-md border border-border bg-background py-1 text-left shadow-md",
+            // 一覧の行の中は、右端のボタンの下に右そろえで開く。詳細の操作の行は、左のボタンの下に左そろえで開く（右の区画の外へ、一覧の上にはみ出さない）
+            compact ? "top-7 right-0" : "top-8 left-0",
           )}
         >
           {openers.map((v) => (

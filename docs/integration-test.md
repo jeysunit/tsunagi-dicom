@@ -19,7 +19,7 @@ flowchart LR
   G["入口（gate。試験の中）"]:::box
   OR[("Orthanc<br/>（コンテナ）")]:::box
   SCU["DCMTK storescu<br/>（コンテナ）"]:::box
-  SCP["DCMTK storescp<br/>（コンテナ。送り先のダミー）"]:::box
+  SCP["DCMTK storescp<br/>（コンテナ。送信先のダミー）"]:::box
 
   SCU -->|"1 C-STORE（架空の患者）"| OR
   T -->|"画面と API"| BFF
@@ -34,8 +34,8 @@ flowchart LR
 | ファイル | 中身 |
 |---|---|
 | `docker/test/compose.yaml` | Orthanc・storescp・storescu（`scu`。profile `tools`）。待ち受けは 127.0.0.1 だけ |
-| `docker/test/orthanc/orthanc.json` | Orthanc の設定（秘密は無い）。送り先 `itest-scp`（`ITEST_SCP`・`storescp`・11112）を設定のファイルで登録する |
-| `docker/test/dcmtk/Dockerfile` | DCMTK のイメージ（Debian の公式のイメージと Debian の包みで作る。配布しない） |
+| `docker/test/orthanc/orthanc.json` | Orthanc の設定（秘密は無い）。送信先 `itest-scp`（`ITEST_SCP`・`storescp`・11112）を設定のファイルで登録する。HL7 の付け替えの印の Lua（`deploy/orthanc/tsunagi-lock.lua`。compose が読み込ませる）と `UserMetadata`（`TsunagiLock`）を足す。試験の Orthanc だけ `ExecuteLuaEnabled` を開け、Lua が印を確かめられないときに断ることを、`/tools/execute-script` で Orthanc の REST の失敗を差し替えて確かめる（施設の Orthanc では開けない） |
+| `docker/test/dcmtk/Dockerfile` | DCMTK のイメージ（Debian の公式のイメージと Debian の包みで作る。配布しない）。中の `send-dumps` が画像を送り、`find-study` が C-FIND の答えを読む（試験の 22。試験の Orthanc だけ `DicomAlwaysAllowFind` を開ける） |
 | `tests/integration/run.mjs` | 資格情報を作り、コンテナを立て、Playwright を流し、片付ける |
 | `tests/integration/orthanc.spec.ts` | 試験の本体 |
 | `tests/integration/support/` | 試験の画像（dump）・コンテナの操作・Orthanc の REST・入口（gate）・ZIP の読み取り・実測の記録 |
@@ -54,23 +54,27 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 
 | # | 試験 | 確かめること |
 |---|---|---|
-| 1 | 受信一覧 | storescu（`ITEST_SCU`）から送った検査が、受け取りの記録（`/api/receive-log`）に新しい順に出る。送り元の AE タイトル・`Origin`（`DicomProtocol`）・画像の数が合う。時刻が Orthanc の時計のとおりに出る |
-| 2 | 接続先の一覧と接続確認 | 設定のファイルで登録した `itest-scp` が、名前・AE タイトル・住所とともに出る。C-ECHO で「成功」（時刻つき） |
+| 1 | 受信一覧 | storescu（`ITEST_SCU`）から送った検査が、受け取りの記録（`/api/receive-log`）に新しい順に出る。送り元の AE タイトル・`Origin`（`DicomProtocol`）・画像の数が合う。落ち着いた検査の状態は受信完了。時刻が Orthanc の時計のとおりに出る。期間は初期設定の今日で読み、昨日の期間には出ない（変更の記録を新しい側から遡り、期間の始まりで止まる） |
+| 2 | 接続先の一覧と接続確認 | 設定のファイルで登録した `itest-scp` が、名称・AEタイトル・ホスト名・ポート番号とともに出る。C-ECHO で「成功」（時刻つき） |
 | 3 | 検査の一覧・詳細 | QIDO-RS と REST の本物の答えで一覧と詳細が開く。氏名（`ISO_IR 192`。ローマ字・漢字・かな）が崩れない。中継は WADO-RS の metadata を通し、検索は通さない。Orthanc のパスワードが頁と API の答えに出ない |
 | 4 | 送信 | 画面から `itest-scp` へ送ると「送信完了」（送信先・画像の数・時刻つき）になり、storescp に同じ SOPInstanceUID の画像が同じ数だけ届く |
-| 5 | 送り先を止めて送る | storescp を止めると、C-ECHO は「失敗」、送ると「送信失敗」と Orthanc の誤りの文言が出る |
+| 5 | 送信先を止めて送る | storescp を止めると、C-ECHO は「失敗」、送ると「送信失敗」と Orthanc の誤りの文言が出る |
 | 6 | エクスポート | ZIP が開け、中の DICOM のファイルの数が画像の数と合う |
 | 7 | 削除 | 管理者が理由と再認証（パスワード）を通して消すと、Orthanc から消える（再認証の前は消えない） |
-| 8 | 答えが失われたとき（[`round-trip-test.md`](round-trip-test.md) の 7） | 入口（gate）が送る要求の答えを捨てて 504 を返すと、Orthanc は送るが画面は「送信結果を確認できません」と要求の ID を出す。同じ検査・同じ送り先へは重ねて送れない。管理者が「送信済みとして記録」すると、開き直してまた送れる |
+| 8 | 答えが失われたとき（[`round-trip-test.md`](round-trip-test.md) の 7） | 入口（gate）が送る要求の答えを捨てて 504 を返すと、Orthanc は送るが画面は「送信結果を確認できません」と要求の ID を出す。同じ検査・同じ送信先へは重ねて送れない。管理者が「送信済みとして記録」すると、開き直してまた送れる |
 | 9 | 監査のつなぎ | `/api/audit/verify` が `ok`。送る・削除・照らし合わせの要求ごとに「求めた」「結果」「終わり」の行が要求の ID で結ばれ、結果不明の間に重ねた要求は断った行だけが残る。C-ECHO の成功と失敗が残る |
 | 10 | 見つけて直した食い違い | 書き出しの「結果」の行が残る。サムネイルがブラウザの Accept のまま画像で返る。2026-10-20 に見つけ、PR #33 で直した（[`round-trip-test.md`](round-trip-test.md) の「結合の試験で見つけて直した、BFF の食い違い」） |
 | 11 | 詳細条件（2026-10-21） | 生年月日・性別・受付番号・検査名で、画面の API（`/api/studies?birth=…&sex=…&accession=…&desc=…`）が Orthanc の QIDO-RS で絞った検査を返す。小文字で求めたときの Orthanc の答えと BFF の答えを並べて記録する（Orthanc 26.9.1 は大文字と小文字を区別しなかった） |
 | 12 | 画像の一覧とすべてのタグ（2026-10-21） | シリーズの中の画像の並び（QIDO-RS）が画像の番号の順に出て、1 枚の値（WADO-RS の metadata）がその画像の SOPInstanceUID のものになる。別のシリーズの下としては返さない |
 | 13 | 上限を超えたとき（2026-10-21） | 古い検査 1001 件のあとに、いちばん新しい検査を入れる（Orthanc の REST の `tools/create-dicom`。架空の患者）。画面の API（`/api/studies`）の一覧の先頭に、いちばん新しい検査が出る。件数は「以上」（`exact: false`）で、外れるのは古い側の検査だけ。範囲（2020 年 1 月）の中は確定の 31 件。Orthanc の QIDO-RS が `limit` で切ったときに返す順と、`Warning` の有無を記録する（[`spec.md`](spec.md) の 3.1「上限に届いたとき」） |
 | 14 | 画像ごとの主なタグと日本語の値（2026-10-23） | SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の検査を送り、主なタグ（`…/instances/{sop}/tags`）が `INSTANCE_TAGS` の順に、設定のタグだけを返す。氏名（漢字・かな）と検査名が崩れない。画像に無いタグは null。画面でサムネイルから開いた表にも日本語の氏名が出る。転送構文（(0002,0010)）が metadata に入るかと、metadata の文字の集合の値を記録する。流すのは 13 より前（13 が検査を 1001 件足すと、一覧の上限を超えて画面で開けなくなることがあるため） |
+| 22 | 文字の集合の組み合わせ（2026-10-25） | 6 通りの SpecificCharacterSet（`\ISO 2022 IR 87`・`ISO 2022 IR 13\ISO 2022 IR 87`・`ISO 2022 IR 6\ISO 2022 IR 87`・`ISO_IR 13`・`\ISO 2022 IR 149`・`ISO 2022 IR 6\ISO 2022 IR 149`）の検査を送り、Orthanc の REST の値と検索（`tools/find`）、DCMTK の findscu（`find-study`）の C-FIND の答えを測る。**今の振る舞いを固める試験**で、Orthanc が最初の値が空でない組を読み崩すこと（`spec.md` の 7）を期待にする。Orthanc が直すと落ちる。C-FIND の答えは `ISO_IR 100` で、漢字・かな・ハングルが消えることも固める。流すのは 13 より前 |
 | 15 | HL7 の A40 | 仮の患者 ID の検査を BFF の `/api/hl7/messages` から更新する。AA が返り、Study・Series・SOP の UID は同じで、患者 ID が替わり、元の患者の検査が残らず、監査の received・request・dispatch・result・ack が残る。token は試験のたびに乱数で作る |
+| 22 | 患者情報修正（氏名。2026-10-25） | 管理者が再認証の後に、確かめの画面（`/api/studies/{uid}/modify/preview`）と実行（`/api/studies/{uid}/modify`）で氏名を直す。全画像の氏名が直り、Study・Series・SOP の UID と Orthanc の中の検査の ID は変わらない。監査の求めた・書き換えの request・dispatch・result・結果が要求の ID で結ばれる。Orthanc の `/system` の設定の値と、置き換えた画像の受信の記録のメタデータ・受信一覧での出方を記録する。前の試験（19・21）が残した部分反映を、先に `/api/hl7/resolve` で解く |
+| 23 | 患者情報修正（患者IDの付け替え。2026-10-25） | 選んだ検査が新しい患者ID へ移り、UID は変わらず、元の患者の検査が残らず、付け替えの印が外れている。結果の行に、HL7 の見回りの覚え（`origin: screen`）が残る |
+| 24 | 検査情報修正（検査日・検査名。2026-10-25） | BFF が決めた新しい StudyInstanceUID の検査ができ、全画像の検査日・検査名が直り、SeriesInstanceUID と SOPInstanceUID も新しい。元の検査は残る。監査の request・dispatch・result が残る |
 
-試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報と住所は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」に写す。
+試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報とホスト名は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」に写す。
 
 ## 流し方
 

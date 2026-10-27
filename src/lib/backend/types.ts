@@ -46,6 +46,8 @@ export interface InstanceSummary {
   sopClassUid: string;
   instanceNumber: string;
   numberOfFrames: number | null;
+  /** スライス位置 SliceLocation (0020,1041)。画像サーバーの QIDO-RS が返し、値が数のときだけ（それ以外は null）。並びには使わない */
+  sliceLocation: number | null;
 }
 
 /** 検査の検索の条件。日付は DICOM の DA（YYYYMMDD）。画像サーバーへは QIDO-RS の条件として渡す */
@@ -71,16 +73,66 @@ export interface Backend {
   /** A40 の空欄を補うために、現在の患者の値を読む（design.md §9）。 */
   studyPatient(orthancStudyId: string): Promise<StudyPatient | null>;
   /**
-   * UID を保つ書き換えの仕事を作る（design.md §4）。removeSource は患者 ID が変わるときだけ true（KeepSource: false）。
-   * 患者 ID が変わらないと Orthanc の中の ID が元と同じなので、元を消すと書き換えた画像ごと消える
+   * UID を保つ書き換えの仕事を作る（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
+   * OverwriteInstances で元の画像が置き換わる。患者 ID が変わると書き換えた画像は別の検査になり、元の検査も残る。
+   * 元の画像は、書き換えた画像を確かめてから deleteStudyInstances で名指しで消す（Orthanc に元を消させると、
+   * 書き換えの最中に同じ検査へ届いた画像も一緒に消えうるため。design.md §15）
    */
-  modifyStudyKeepingUids(
+  modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
+  /**
+   * UID を保つ書き換えに要る Orthanc の設定が入っているか（Orthanc の /system の OverwriteInstances と UserMetadata）。
+   * overwriteInstances が無ければ、UID を保つ書き換えを Orthanc が断る（400）。lockMetadata（UserMetadata の TsunagiLock）が
+   * 無ければ付け替えの印を付けられない。付け替えの印の Lua が読み込まれているかは、REST からは分からない
+   */
+  keepUidSettings(): Promise<{ overwriteInstances: boolean; lockMetadata: boolean }>;
+  /**
+   * 新しい UID の検査を作る書き換えの仕事を作る（中身の訂正。docs/spec.md の 3.5）。replace の StudyInstanceUID を
+   * 新しい検査の UID にし、SeriesInstanceUID と SOPInstanceUID は Orthanc が新しく作る（Keep を渡さない）。
+   * 元の検査は残す（KeepSource は既定の true）
+   */
+  modifyStudyNewUid(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
+  /**
+   * 検査の画像ごとの、Orthanc が持つファイルの印（FileUuid）と、読む前の Orthanc の変更の記録（/changes）の位置。
+   * 鍵は UID の組（Study・Series・SOP を `|` でつないだもの）。同じ UID の画像が届き直して置き換わると、印が変わる
+   */
+  studyInstanceFiles(orthancStudyId: string): Promise<SourceFiles>;
+  /**
+   * 検査の画像のうち、UID の組（Study・Series・SOP）が instances のどれかと同じで、ファイルの印が source.files と同じ
+   * ものだけを 1 枚ずつ消す。消す直前に、変更の記録の source.since より後にその画像が届いた記録（NewInstance）があれば
+   * 消さない（同じ UID で届き直した画像）。ほかの画像（後から届いた画像）は残す。すでに無い画像は飛ばす。
+   * Orthanc の削除には条件を付けられないので、記録を読んでから消すまでの間に届き直した画像は消えうる。C-STORE は
+   * 付け替えの印（lockStudy）の間 Orthanc の Lua が断るので、残るのは REST・STOW-RS で届き直した画像だけ（design.md §15.4）
+   */
+  deleteStudyInstances(
     orthancStudyId: string,
-    replace: Record<string, string>,
-    options: { removeSource: boolean },
-  ): Promise<{ jobId: string }>;
+    instances: PatientInstance[],
+    source: SourceFiles,
+    /** 1 枚を消す直前（変更の記録を読んだ後）に呼ぶ（付け替えの印が続いているかを確かめる）。投げれば、残りを消さずに投げる */
+    beforeEach?: () => Promise<void>,
+  ): Promise<void>;
+  /**
+   * 検査に付け替えの印（利用者のメタデータ TsunagiLock。値は期限の UNIX 秒）を付ける（design.md §15.4）。Orthanc の Lua
+   * （deploy/orthanc/tsunagi-lock.lua）が、期限の切れていない印のある検査と同じ StudyInstanceUID の C-STORE を断る。
+   * 付け直せば期限が延びる。Orthanc の UserMetadata に TsunagiLock が無ければ投げる。Lua は Orthanc の時計で期限と
+   * 比べるので、Orthanc の時計がこの機の時計と LOCK_CLOCK_TOLERANCE_MS より大きくずれている（測れないときも）と投げる
+   */
+  lockStudy(orthancStudyId: string, untilEpochSeconds: number): Promise<void>;
+  /**
+   * Orthanc の時計とこの機の時計のずれが LOCK_CLOCK_TOLERANCE_MS の内かを確かめ、外か読めなければ投げる（印を外す時に、
+   * 印の間に Orthanc の時計が進んで、Lua が印を切れたと読んだかもしれないことを見つける）
+   */
+  checkLockClock(): Promise<void>;
+  /** 付け替えの印を外す。検査か印がもう無ければ何もしない */
+  unlockStudy(orthancStudyId: string): Promise<void>;
+  /**
+   * 検査の画像ごとの、写しの元の画像の ID（Orthanc のメタデータ ModifiedFrom。書き換えの写しにだけある）。
+   * 鍵は UID の組。無ければ null（書き換えの写しでない画像。写しが同じ UID の別の画像に置き換わったときも無くなる）
+   */
+  studyInstanceOrigins(orthancStudyId: string): Promise<Record<string, string | null>>;
   /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
+  /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */
+  studyIsStable(orthancStudyId: string): Promise<boolean>;
   /**
    * QIDO-RS の検査の検索（検査日の範囲で絞れる）。検査日の新しい順に limit 件まで。
    * QIDO-RS は返す順を決めていない（PS3.18 8.3.4.4）ので、limit を超える検査があれば、検査日の範囲で区切って
@@ -121,10 +173,10 @@ export interface Backend {
   // ── 段 4：受け取ったものを見る・機器・送る（docs/spec.md の 3.3・3.4）。Orthanc の REST を使う ──
 
   /**
-   * 受け取った検査（Orthanc の変更の記録 /changes から、新しい順に limit 件まで）。
-   * complete=false は、読む範囲（直近の変更の数・読む回数）の上限で止まり、もっと古い受け取りを読めていないこと
+   * 期間の中で受け取った検査（Orthanc の変更の記録 /changes を新しい側から遡り、新しい順に limit 件まで）。
+   * overLimit は期間の中に limit 件より多くあったこと。complete=false は、読む回数の上限などで期間の始まりまで遡れなかったこと
    */
-  receivedStudies(limit: number): Promise<ReceivedStudies>;
+  receivedStudies(window: ReceivedWindow): Promise<ReceivedStudies>;
   /** Orthanc に登録された機器（/modalities?expand） */
   listModalities(): Promise<ModalityEntry[]>;
   /** Orthanc から機器へ C-ECHO（/modalities/{id}/echo）。つながったら true。機器が無ければ BackendError(404) */
@@ -142,6 +194,11 @@ export interface Backend {
   sendStudy(modalityId: string, orthancStudyId: string): Promise<{ jobId: string }>;
   /** Orthanc の仕事の状態（/jobs/{id}）。無ければ null */
   jobStatus(jobId: string): Promise<JobStatus | null>;
+  /**
+   * 終わっていない書き換えの仕事（/jobs?expand の Type が ResourceModification で、State が Success・Failure でないもの）の数。
+   * 仕事の ID が分からない書き換えを、管理者が解く前に確かめる（その仕事がまだ動いているかもしれない）
+   */
+  unfinishedModifyJobs(): Promise<number>;
 
   // ── 段 5：書き出し・削除（docs/spec.md の 3.5） ──
 
@@ -157,15 +214,29 @@ export interface OrthancStudyInfo {
   studyInstanceUid: string;
   patientId: string;
   patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
   studyDate: string;
+  /** 検査名と受付番号（値の修正の確かめの画面と、中身の訂正の確かめに使う） */
+  studyDescription: string;
+  accessionNumber: string;
   seriesCount: number;
   /** 版（Orthanc の LastUpdate）。確かめの画面を出した後に検査が変われば、この値が変わる */
   version: string;
 }
 
+/** 受信一覧の期間（[fromMs, toMs) の UTC のミリ秒）と、返す数の上限 */
+export interface ReceivedWindow {
+  fromMs: number;
+  toMs: number;
+  limit: number;
+}
+
 export interface ReceivedStudies {
   studies: ReceivedStudy[];
-  /** 読むと決めた範囲を読み切ったうえで、それより古い変更の記録が無い（false なら「ここまでしか読めていない」） */
+  /** 期間の中に上限の数より多くあり、新しい上限の数だけを返した */
+  overLimit: boolean;
+  /** 期間の始まりまで遡れた（false なら、期間の古い側を読めていない） */
   complete: boolean;
 }
 
@@ -181,6 +252,8 @@ export interface ReceivedStudy {
   origin: string | null;
   /** 検査の画像の数 */
   instanceCount: number;
+  /** 検査が落ち着いた（Orthanc の `/studies/{id}` の IsStable。StableStudy の後）。分からなければ null */
+  stable: boolean | null;
   summary: StudySummary;
 }
 
@@ -208,6 +281,12 @@ export interface JobStatus {
   creationTime: string;
   completionTime: string | null;
 }
+
+/**
+ * 付け替えの印で許す、Orthanc とこの機の時計のずれ（design.md §15.4）。lockStudy はこれより大きくずれていれば投げ、
+ * BFF は印の期限のこれだけ前から、印が切れたかもしれないとみなす
+ */
+export const LOCK_CLOCK_TOLERANCE_MS = 5_000;
 
 /** 書き込みの要求の答えが分からなかった（時間切れ・通信の切れ。docs/spec.md の 3.5 の結果不明） */
 export class BackendUnknownError extends Error {
@@ -269,6 +348,17 @@ export interface StudyPatient {
   PatientSex: string;
   AccessionNumber: string;
   StudyInstanceUID: string;
+}
+
+/** 書き換えの前に読んだ、元の検査の画像ごとのファイルの印と、Orthanc の変更の記録の位置（design.md §15.4） */
+export interface SourceFiles {
+  since: number;
+  files: Record<string, string>;
+  /**
+   * 画像ごとの Orthanc の画像の ID（鍵は files と同じ）。書き換えの写しの ModifiedFrom と照らす（design.md §15.4）。
+   * この欄の無い前の版の記録では、元を消さない
+   */
+  ids?: Record<string, string>;
 }
 
 export interface PatientInstance extends StudyPatient {

@@ -107,7 +107,7 @@ export class AuthFailure extends Error {
 
 /** ログインの失敗の文言は1つにする（利用者名の有無・一時停止の有無を、答えの違いで知られないように） */
 export const LOGIN_FAILED_MESSAGE =
-  "ユーザーID・パスワード・認証コードのいずれかが正しくありません。続けて失敗すると、しばらくログインできなくなります";
+  "ログインできませんでした。ユーザーID・パスワード・認証コードのいずれかが合いません。続けて失敗すると、しばらくログインできなくなります";
 /** 大事な操作の前に、本人の確かめが要るときの印（AuthFailure の problems） */
 export const REAUTH_REQUIRED = "reauth_required";
 /** パスワードの確かめが混んで断ったときの文言（503） */
@@ -406,7 +406,7 @@ async function verifyAgain(
   }
   if (!passwordOk || !totpOk) {
     const locked = await registerFailure(ctx, user, passwordOk ? "bad_totp" : "bad_password", action);
-    throw new AuthFailure(401, checkTotp ? "パスワードまたは認証コードが正しくありません" : "パスワードが正しくありません", locked ? ["locked"] : []);
+    throw new AuthFailure(401, checkTotp ? "パスワードまたは認証コードが合いません" : "パスワードが合いません", locked ? ["locked"] : []);
   }
   if (checkTotp || user.totpSecretEnc === null) {
     // 利用者が持つ確かめを全部通した（TOTP を登録していればそれも）ので、続けての失敗の数を0に戻す
@@ -735,7 +735,7 @@ export async function confirmEnrollment(
   const step = verifyTotp(secret, code, now(ctx).getTime());
   if (step === null) {
     await record(ctx, actorOf(user), { action: "mfa_enroll", outcome: "denied", detail: { reason: "bad_totp" } });
-    throw new AuthFailure(400, "認証コードが正しくありません。認証アプリのコードを入力し直してください");
+    throw new AuthFailure(400, "認証コードが合いません。認証アプリに出ている最新のコードを入力し直してください");
   }
   const at = now(ctx);
   const enrolled = {

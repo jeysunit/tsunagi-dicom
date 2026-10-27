@@ -108,6 +108,38 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3000/api/dicom-web/studies)" = 405
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/dicom-web/studies)" = 404
           test "$(docker compose exec -T tsunagi id -u)" != 0
+      - name: 管理者のパスワードを戻すコマンドを、コンテナの中で流す（AUTH_MODE=local）
+        run: |
+          set -eu
+          mkdir -p reset-secrets
+          openssl rand -base64 48 > reset-secrets/session_secret.txt
+          printf '%s\n' 'init7pass-Kw3x' > reset-secrets/initial_admin_password.txt
+          chmod 0644 reset-secrets/*.txt
+          docker run -d --name tsunagi-reset -p 127.0.0.1:3100:3000 \
+            -e BACKEND_MOCK=true -e AUTH_MODE=local -e MFA_REQUIRED=false \
+            -e SESSION_SECRET_FILE=/run/secrets/session_secret \
+            -e INITIAL_ADMIN_USERNAME=admin1 -e INITIAL_ADMIN_PASSWORD_FILE=/run/secrets/initial_admin_password \
+            -v "$PWD/reset-secrets/session_secret.txt:/run/secrets/session_secret:ro" \
+            -v "$PWD/reset-secrets/initial_admin_password.txt:/run/secrets/initial_admin_password:ro" \
+            tsunagi-dicom:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3100/api/health && break
+            sleep 2
+          done
+          login() {
+            curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3100/api/auth/login \
+              -H 'Origin: http://127.0.0.1:3100' -H 'Content-Type: application/json' \
+              -d "{\"username\":\"admin1\",\"password\":\"$1\"}"
+          }
+          test "$(login 'init7pass-Kw3x')" = 200
+          # いない利用者は断る（終了コード 1。標準出力には何も出さない）
+          out="$(docker exec tsunagi-reset node cli/reset-admin-password.mjs --user nobody1 2>/dev/null)" && exit 1
+          test -z "$out"
+          # 戻すと、標準出力に一時のパスワードが 1 行だけ出る
+          pw="$(docker exec tsunagi-reset node cli/reset-admin-password.mjs --user admin1 --operator ci 2>/dev/null)"
+          test "$(printf '%s\n' "$pw" | wc -l)" = 1
+          test "$(login 'init7pass-Kw3x')" = 401
+          test "$(login "$pw")" = 200
       - name: 起動の記録
         if: always()
         run: docker compose logs

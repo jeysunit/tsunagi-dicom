@@ -22,6 +22,8 @@ services:
       TZ: Asia/Tokyo
     volumes:
       - ./orthanc/orthanc.json:/etc/orthanc/itest.json:ro
+      # HL7 の付け替えの最中の検査への C-STORE を断る Lua（配るものと同じファイル。design.md §15.4）
+      - ../../deploy/orthanc/tsunagi-lock.lua:/lua/tsunagi-lock.lua:ro
     secrets:
       # /run/secrets の JSON は Orthanc の設定として読まれる（RegisteredUsers）
       - source: orthanc_users

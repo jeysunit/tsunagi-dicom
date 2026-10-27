@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { TotpEnrollment } from "@/components/auth/totp-enrollment";
+import { PageHeader } from "@/components/ui/page-header";
 import { startEnrollment } from "@/lib/auth/local-auth";
 import { pageAccess } from "@/lib/auth/page-session";
 import { authContext } from "@/lib/auth/session";
@@ -17,8 +18,8 @@ export default async function AccountTotpPage() {
   if (user.totpSecretEnc) redirect("/account");
   const enrollment = await startEnrollment(await authContext(), row, user);
   return (
-    <section className="max-w-md space-y-4">
-      <h1 className="text-lg font-bold text-value">二要素認証の設定</h1>
+    <section className="max-w-[var(--w-settings)] space-y-4">
+      <PageHeader title="二要素認証の設定" />
       <TotpEnrollment secret={enrollment.secret} uri={enrollment.uri} csrfToken={row.csrfToken} askPassword />
     </section>
   );

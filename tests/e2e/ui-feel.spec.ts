@@ -19,21 +19,22 @@ const nav = (page: Page) => page.getByRole("navigation", { name: "ページ" });
 const rows = (page: Page) => page.getByTestId("study-table").locator("tbody > tr[data-study-uid]");
 const bg = (page: Page, selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).backgroundColor);
 
-test("今いる頁：ナビゲーションの項目に aria-current とタブの形、ブラウザのタブの題名は頁ごと", async ({ page }) => {
+test("今いる頁：左のナビの項目に aria-current と選んだ行の形、ブラウザのタブの題名は頁ごと", async ({ page }) => {
   await asAdmin(page);
   await expect(page).toHaveTitle("検査一覧 - tsunagi-dicom");
   const current = nav(page).locator("[aria-current=page]");
   await expect(current).toHaveCount(1);
   await expect(current).toHaveAttribute("href", "/");
-  // 色だけで示さない：太字と下の線
+  // 色だけで示さない：太字と左の線（左のナビの現在地。docs/design-system/menu.md）
   expect(await current.evaluate((el) => getComputedStyle(el).fontWeight)).toBe("700");
-  expect(await current.evaluate((el) => getComputedStyle(el).borderBottomWidth)).toBe("2px");
+  expect(await current.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("3px");
   const other = nav(page).locator("a[href='/received']");
   await expect(other).not.toHaveAttribute("aria-current", /.*/);
   expect(await other.evaluate((el) => getComputedStyle(el).fontWeight)).not.toBe("700");
 
   for (const [href, title] of [
     ["/received", "受信一覧"],
+    ["/sent", "送信一覧"],
     ["/modalities", "接続先"],
     ["/admin/viewers", "ビューア設定"],
   ] as const) {
@@ -41,10 +42,81 @@ test("今いる頁：ナビゲーションの項目に aria-current とタブの
     await expect(page).toHaveURL(new RegExp(`${href}$`));
     await expect(page).toHaveTitle(`${title} - tsunagi-dicom`);
     await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", href);
-    // 頁の見出しの大きさは1つにそろえる（18px・太字）
+    // 頁の見出しの大きさは1つにそろえる（20px・太字）
     const h1 = page.locator("main h1").first();
-    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("18px");
+    expect(await h1.evaluate((el) => getComputedStyle(el).fontSize)).toBe("20px");
   }
+});
+
+test("左のナビ：本文の左に幅 208px で置き、群の名前を出す。上の帯のボタンで 56px に閉じ、読み込み直しても閉じたまま", async ({ page }) => {
+  await asAdmin(page);
+  const side = nav(page);
+  const main = page.locator("main").first();
+  const sideBox = (await side.boundingBox())!;
+  const mainBox = (await main.boundingBox())!;
+  expect(sideBox.x + sideBox.width).toBeLessThanOrEqual(mainBox.x + 1);
+  expect(Math.round(sideBox.width)).toBe(208);
+  for (const group of ["業務", "接続", "管理"]) await expect(side.getByText(group, { exact: true })).toBeVisible();
+  // 上の帯には、画面への道を置かない
+  await expect(page.locator("header").getByRole("link", { name: "受信一覧" })).toHaveCount(0);
+
+  const toggle = page.getByTestId("nav-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => Math.round((await side.boundingBox())!.width)).toBe(56);
+  // 閉じても項目は押せて、名前は読み上げと title に残る
+  await expect(side.getByRole("link", { name: "受信一覧" })).toHaveAttribute("title", "受信一覧");
+  await page.reload();
+  await expect(page.getByTestId("nav-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  await page.getByTestId("nav-toggle").click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
+});
+
+test("左のナビ：390px の画面では閉じた形で始め、そこで開いても広い画面の形は変えない", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await asAdmin(page);
+  const toggle = page.getByTestId("nav-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  await toggle.click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
+  await toggle.click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  // 狭い画面で閉じたことは覚えない。広い画面で開き直すと、開いた形で始まる
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.reload();
+  await expect(page.getByTestId("nav-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
+});
+
+test("左のナビ：低い画面でも、末尾の項目まで届く（ナビの中でスクロールする）", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await asAdmin(page);
+  const side = nav(page);
+  expect(await side.evaluate((el) => getComputedStyle(el).overflowY)).toBe("auto");
+  // 最後の項目（検証モードの管理者では、管理の群のビューア設定）に、ナビの中のスクロールで届いて押せる
+  const last = side.getByRole("link").last();
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", "/admin/viewers");
+});
+
+test("左のナビ：頁を移る待ちの間は、閉じた幅でも、項目の絵の場所に待ちの印を出す", async ({ page }) => {
+  await asAdmin(page);
+  await page.getByTestId("nav-toggle").click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  // 受信一覧の頁の取得を遅らせる（頁の切り替えが 0.3 秒を超えて待つ）
+  await page.route("**/received**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  const link = nav(page).locator("a[href='/received']");
+  await link.click();
+  await expect(link.getByTestId("spinner")).toBeVisible();
+  await expect(page).toHaveURL(/\/received$/);
+  await page.getByTestId("nav-toggle").click();
 });
 
 test("押せる物：カーソルは指の形、押せないときは禁止の形。hover で地が変わる", async ({ page }) => {
@@ -192,13 +264,15 @@ test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に�
     await new Promise((r) => setTimeout(r, 1500));
     await route.continue();
   });
+  // 旧：MR を押すと CT から MR に替わった（2 件）→ 新：モダリティは複数選べて押すと足される（CT と MR で 8 件）。
+  // 取り直しが要るよう、まだ読んでいない組み合わせにする
   await page.getByTestId("modality-MR").click();
   await expect(page.getByTestId("progress-bar")).toBeVisible();
   await expect(page.getByTestId("study-count")).toHaveText("—");
   await expect(page.getByTestId("study-table").locator("tbody")).toHaveAttribute("data-dim", "true");
   await expect(page.getByTestId("pending-text")).toContainText("読み込み中");
   // 終われば消える（画面全体を覆う幕は出さない）
-  await expect(page.getByTestId("study-count")).toHaveText("2", { timeout: 10_000 });
+  await expect(page.getByTestId("study-count")).toHaveText("8", { timeout: 10_000 });
   await expect(page.getByTestId("progress-bar")).toHaveCount(0);
   await page.unroute("**/api/studies?*");
 });
@@ -266,6 +340,9 @@ const RETIRED_WORDS = [
   "頁",
   "患者氏名",
   "消去",
+  // 値の修正の2種類の呼び名（画面は「患者情報修正」「検査情報修正」。docs/spec.md の 2.2）
+  "属性の訂正",
+  "中身の訂正",
   "再送せず",
 ];
 
@@ -294,10 +371,10 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   await collect("詳細とビューアのメニュー");
   await page.keyboard.press("Escape");
   await page.getByTestId("series-open").first().click();
-  await page.getByTestId("tag-set-study").click();
+  await page.getByTestId("study-tags-open").click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
   await collect("詳細の UID と検査のタグ");
-  for (const path of ["/received", "/modalities", "/admin/viewers"]) {
+  for (const path of ["/received", "/sent", "/modalities", "/admin/viewers"]) {
     await page.goto(path);
     if (path === "/modalities") {
       await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
@@ -322,5 +399,81 @@ test("一覧の列：患者 ID・生年月日・年齢・性別は切らない�
     }
     // ID は「…」で切らない
     expect(await page.getByTestId("patient-id").first().evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis");
+  }
+});
+
+/** 計算した色（`rgb(r, g, b)`）の相対輝度（WCAG 2.2） */
+function luminance(rgb: string): number {
+  const m = rgb.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  expect(m, rgb).not.toBeNull();
+  const [r, g, b] = m!.slice(1, 4).map((v) => {
+    const c = Number(v) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+const contrastOf = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+};
+
+test("入力欄・選択欄・枠のボタンの枠は、まわりの地との対比が 3:1 以上（WCAG 2.2 の 1.4.11）。明るい地と暗い地", async ({ page }) => {
+  await asAdmin(page);
+  await expect(rows(page)).toHaveCount(8);
+  /**
+   * 見えている部品ごとに、枠の色と、部品の外側の地を読む。地は親をたどって透けていない地まで重ね（透ける地は上に重ねる）、
+   * 色の書き方（rgb・oklab など）に関わらず、1 画素の canvas に塗って sRGB の値にする
+   */
+  const measure = (where: string) =>
+    page
+      .locator("input[data-slot=input], select, textarea, button[data-slot=button][class*='border'], [data-testid=filter-more]")
+      .evaluateAll(
+        (els, label) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+          const paint = (colors: string[]) => {
+            ctx.clearRect(0, 0, 1, 1);
+            for (const c of colors) {
+              ctx.fillStyle = c;
+              ctx.fillRect(0, 0, 1, 1);
+            }
+            const d = ctx.getImageData(0, 0, 1, 1).data;
+            return { rgb: `rgb(${d[0]}, ${d[1]}, ${d[2]})`, alpha: d[3]! };
+          };
+          return els
+            // 見えていて、枠を持つもの（枠の無いボタンは外す）
+            .filter((el) => (el as HTMLElement).offsetParent !== null && getComputedStyle(el).borderTopWidth !== "0px")
+            .map((el) => {
+              const layers: string[] = [];
+              for (let outer = el.parentElement; outer; outer = outer.parentElement) {
+                const c = getComputedStyle(outer).backgroundColor;
+                const { alpha } = paint([c]);
+                if (alpha === 0) continue;
+                layers.unshift(c);
+                if (alpha === 255) break;
+              }
+              const bg = paint(["rgb(255, 255, 255)", ...layers]).rgb;
+              const border = paint([bg, getComputedStyle(el).borderTopColor]).rgb;
+              const id = el.getAttribute("data-testid") ?? el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 12) ?? "";
+              return { name: `${label} ${el.tagName.toLowerCase()} ${id}`, border, bg };
+            });
+        },
+        where,
+      );
+  const check = async (where: string) => {
+    const found = await measure(where);
+    expect(found.length, where).toBeGreaterThan(0);
+    for (const f of found) expect(contrastOf(f.border, f.bg), `${f.name}：枠 ${f.border}・地 ${f.bg}`).toBeGreaterThanOrEqual(3);
+  };
+  for (const theme of ["light", "dark"] as const) {
+    await page.goto("/");
+    await page.evaluate((t) => (document.documentElement.dataset.theme = t), theme);
+    await page.getByTestId("filter-more").click();
+    await expect(page.getByTestId("filter-more-panel")).toBeVisible();
+    await check(`${theme} 検査一覧`);
+    await page.goto("/admin/viewers");
+    await page.evaluate((t) => (document.documentElement.dataset.theme = t), theme);
+    await check(`${theme} ビューア設定`);
   }
 });
