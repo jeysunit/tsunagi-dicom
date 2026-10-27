@@ -8,6 +8,7 @@
   "DicomCheckCalledAet": false,
   "DicomAlwaysAllowStore": true,
   "DicomAlwaysAllowEcho": true,
+  "DicomAlwaysAllowFind": true,
   "DicomModalitiesInDatabase": false,
   "DicomModalities": {
     "itest-scp": {

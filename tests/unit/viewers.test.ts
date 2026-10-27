@@ -36,6 +36,13 @@ describe("開く URL", () => {
     expect(viewerUrl("dicomweb", ALL, UID, relay)).toBe(`https://pacs.example.org/dicom-web/studies/${UID}`);
   });
 
+  it("OHIF は Orthanc の plugin の根（/ohif）に、OHIF の検査を開く道 /viewer を 1 回だけ足す", () => {
+    // Orthanc の OHIF の plugin の根は /ohif/（RouterBasename）、OHIF の検査を開く道は /viewer?StudyInstanceUIDs=
+    const url = viewerUrl("ohif", { ohifUrl: "https://pacs.example.org/ohif", weasisEnabled: false }, UID, "");
+    expect(url).toBe(`https://pacs.example.org/ohif/viewer?StudyInstanceUIDs=${UID}`);
+    expect(new URL(url ?? "").pathname).toBe("/ohif/viewer");
+  });
+
   it("設定に無いビューアは null", () => {
     expect(viewerUrl("ohif", { weasisEnabled: false }, UID, "")).toBeNull();
   });

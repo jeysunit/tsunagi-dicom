@@ -15,7 +15,15 @@ const root = path.resolve(import.meta.dirname, "../..");
 process.chdir(root);
 
 const composeFile = path.join(root, "docker/dev/compose.yaml");
-const secretsDir = path.join(root, "docker/dev/secrets");
+// secrets の置き場は TSUNAGI_DEV_SECRETS_DIR で替えられる（up.sh と同じ。docs/round-trip-test.md）
+// ~ で始まる値は $HOME に展開する（docker/dev/lib.sh と同じ）
+const rawSecretsDir = process.env.TSUNAGI_DEV_SECRETS_DIR ?? path.join(root, "docker/dev/secrets");
+const home = process.env.HOME ?? "";
+const secretsDir = path.resolve(
+  rawSecretsDir === "~" ? home : rawSecretsDir.startsWith("~/") ? path.join(home, rawSecretsDir.slice(2)) : rawSecretsDir,
+);
+process.env.TSUNAGI_DEV_SECRETS_DIR = secretsDir;
+process.env.TSUNAGI_SECRETS_DIR = secretsDir;
 
 // 試験だけの compose のプロジェクトとポートにする。手元で使っている開発用の一式（プロジェクト tsunagi-dev）の
 // volume を消さず、ポートもぶつけない。tests/flow/flow.spec.ts と playwright.config.ts も、この環境変数を読む
@@ -25,6 +33,10 @@ process.env.ORTHANC_DICOM_PORT ??= "14242";
 // （開発用の一式の DTG 18080・ris-emulator 18081 とぶつけない）
 process.env.DEV_DTG_WEB_PORT ??= "18180";
 process.env.DEV_RIS_WEB_PORT ??= "18181";
+// （開発用の一式のビューアの入口 18042 とぶつけない）
+process.env.DEV_VIEWER_PORT ??= "18142";
+// （開発用の一式の入口のページ 80 とぶつけない）
+process.env.DEV_PORTAL_PORT ??= "18280";
 if (process.env.COMPOSE_PROJECT_NAME === "tsunagi-dev") {
   console.error("COMPOSE_PROJECT_NAME に tsunagi-dev（開発用の一式）は使えない。試験は終わったときに volume を消すため");
   process.exit(1);

@@ -16,6 +16,7 @@ import type { SimpleDate } from "@/lib/format/japanese-date";
 import { MODALITY_GROUPS, primaryGroup, studyInGroup } from "@/lib/modalities";
 import {
   advancedQuery,
+  attachSearchNames,
   blockedConditions,
   dateQuery,
   DEFAULT_FILTER,
@@ -69,7 +70,10 @@ async function decorate(deps: ListDeps, studies: StudySummary[]) {
     const remembered = memory.get(s.studyInstanceUid) ?? EMPTY_VIEWER_MEMORY;
     const group = primaryGroup(s.modalities);
     const viewer = resolveDefaultViewer(remembered.rememberedViewer, group && defaults ? defaults[group] : null, deps.viewers ?? []);
-    return { summary: s, view: projectStudy(studyRecord(s, remembered, viewer), allowlist) };
+    const view = projectStudy(studyRecord(s, remembered, viewer), allowlist);
+    // 氏名の検索は第3〜5成分まで含める（画面に出す値は姓と名のまま。検索にだけ使うので、行の object に結びつけて持つ）
+    attachSearchNames(view, s.patientName);
+    return { summary: s, view };
   });
 }
 
@@ -90,7 +94,8 @@ export function computeFacets(
 ): StudyFacets {
   const facets: StudyFacets = {};
   if (fields.includes("modalities")) {
-    const base = views.filter((v) => matchesFilter(v, { ...filter, modality: undefined }));
+    // 群ごとの件数は、選んだモダリティを外した一覧の中の、その群の検査の数（複数選んでも、その群だけの数）
+    const base = views.filter((v) => matchesFilter(v, { ...filter, modalities: undefined }));
     const modality: NonNullable<StudyFacets["modality"]> = { all: base.length };
     for (const g of MODALITY_GROUPS) modality[g] = base.filter((v) => v.modalities && studyInGroup(v.modalities, g)).length;
     facets.modality = modality;
@@ -196,7 +201,8 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
         date: filter.date,
         ...(filter.from ? { from: filter.from } : {}),
         ...(filter.to ? { to: filter.to } : {}),
-        ...(filter.modality ? { modality: filter.modality } : {}),
+        // 選んだ群の名前（複数ならコンマで区切る）
+        ...(filter.modalities?.length ? { modality: filter.modalities.join(",") } : {}),
         query: !!filter.q,
         // 詳細条件は、効かせた条件の名前だけ（値は患者の値なので入れない）
         ...(Object.keys(advanced).length > 0 ? { conditions: Object.keys(advanced) } : {}),

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Field, Input } from "@/components/ui/input";
+import { Notice } from "@/components/ui/notice";
 import { ActionButton } from "@/components/ui/pending";
 import { errorText, postJson } from "@/lib/client/post-json";
 
@@ -15,9 +16,9 @@ function go(next: string | undefined) {
 
 function ErrorLine({ message }: { message: string | null }) {
   return message ? (
-    <p role="alert" className="text-sm text-danger">
+    <Notice kind="err" alert>
       {message}
-    </p>
+    </Notice>
   ) : null;
 }
 
@@ -181,11 +182,7 @@ export function PasswordForm({
         <Input name="confirm" type="password" autoComplete="new-password" required />
       </Field>
       <ErrorLine message={error} />
-      {done && (
-        <p role="status" className="text-sm">
-          パスワードを変更しました
-        </p>
-      )}
+      {done && <Notice kind="ok">パスワードを変更しました</Notice>}
       <ActionButton type="submit" pending={busy}>
         変更
       </ActionButton>

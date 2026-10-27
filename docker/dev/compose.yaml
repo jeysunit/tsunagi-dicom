@@ -17,8 +17,12 @@
 #   hl7.host で受け口にしてある。`--host hl7-receiver` を付けても同じ）。
 #   受け口のための token と発番元は hl7.override.yaml で tsunagi-dicom に渡す。患者 ID を変えない書き換え（A08・ORM）のために、
 #   Orthanc を OverwriteInstances: true にする（docker/dev/orthanc/site.json。同じ SOP Instance UID の送り直しは上書きになる）。
+# - ビューア：Orthanc に OHIF と Stone の plugin を入れ（viewer.override.yaml）、読み取り専用の入口 viewer-proxy（GET と HEAD だけ）を
+#   127.0.0.1:${DEV_VIEWER_PORT:-18042} に公開する。tsunagi-dicom の「開く」はこの入口の /ohif/viewer と /stone-webviewer/index.html を
+#   別のタブで開く（VIEWER_OHIF_URL・VIEWER_STONE_URL。viewer.override.yaml）。Orthanc の REST（8042）そのものはホストに出さない。
 # - Orthanc は送り元の IP アドレスを確かめない（docker/dev/orthanc/site.json の DicomCheckModalityHost: false。接続先の Host が
 #   コンテナの名前のため）。
+# - 入口のページ（portal）は 127.0.0.1:${DEV_PORTAL_PORT:-80} に公開する。tsunagi-dicom・DTG・ris-emulator の画面へのリンクが3つあるだけ。
 # - DTG の Web 画面は 127.0.0.1:${DEV_DTG_WEB_PORT:-18080}（利用者 dtg）、ris-emulator の Web 画面は
 #   127.0.0.1:${DEV_RIS_WEB_PORT:-18081}（利用者 ris）に公開する（どちらも HTTP Basic）。MWL（ris:11112）はホストに出さない。
 # - DTG と ris-emulator の時間帯は Asia/Tokyo（Orthanc と同じ）。コンテナの既定の UTC のままだと、検査日・時刻（StudyDate・StudyTime）を
@@ -36,15 +40,16 @@ include:
   - path:
       - ../../deploy/compose.yaml
       - ./hl7.override.yaml
+      - ./viewer.override.yaml
     env_file: ./dev.env
 
 services:
   ris:
-    # ris-emulator の Dockerfile から作る。版は commit で固定する（RIS_GIT_REF で替えられる）
+    # ris-emulator の Dockerfile から作る。版は RIS_GIT_REF（ブランチ名か commit）で決める。既定は main
+    # （作るたびに main の先頭を取る。commit に固定するときは RIS_GIT_REF=<commit> を渡す。docker/dev/refresh.sh は commit を決めてから作る）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-ris:local
     build:
-      # 既定は main の 3006b30（照合 reconcile と、ORM の取消 CA のある版。ris-emulator の #32 のマージ）
-      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-3006b3029bcb84e3ab56ab2c65c435bdaf11b5ad}
+      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-main}
     environment:
       RIS_WEB_PASSWORD_FILE: /run/secrets/ris_web_password
       # Web 画面と MWL を、コンテナの中では 0.0.0.0 で待ち受ける（イメージの既定と同じ。設定ファイルより先に効く）
@@ -94,11 +99,11 @@ services:
     restart: unless-stopped
 
   dtg:
-    # dicom-test-generator の Dockerfile から作る。版は commit で固定する（DTG_GIT_REF で替えられる）
+    # dicom-test-generator の Dockerfile から作る。版は DTG_GIT_REF（ブランチ名か commit）で決める。既定は main
+    # （作るたびに main の先頭を取る。commit に固定するときは DTG_GIT_REF=<commit> を渡す。docker/dev/refresh.sh は commit を決めてから作る）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-dtg:local
     build:
-      # 既定は main の 99eff67（緊急の患者の追加撮影 --append --study-uid のある版。dicom-test-generator の #78 のマージ）
-      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-99eff672c621b2bdbf17e1ad4aab93d1d450c7f9}
+      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-main}
     environment:
       DTG_WEB_PASSWORD_FILE: /run/secrets/dtg_web_password
       # 検査日・時刻を日本の時刻で書く（Orthanc の TZ と同じ）
@@ -181,15 +186,85 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  viewer-proxy:
+    # Orthanc のビューア（OHIF・Stone。viewer.override.yaml で入れる）を、ホストの 127.0.0.1 に見せる読み取り専用の入口。
+    # GET と HEAD だけを Orthanc に通し、書き込みは 405 で断る。Orthanc の REST（8042）そのものはホストに出さない。
+    # 認証は Orthanc のもの（ブラウザが聞かれる）。この入口は資格情報を持たない。backend（Orthanc へ）と web（ホストへ出す）に入る
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-viewer-proxy:local
+    build:
+      context: ../..
+      dockerfile: docker/dev/viewer-proxy/Dockerfile
+    environment:
+      VIEWER_PROXY_UPSTREAM: http://orthanc:8042
+      TZ: Asia/Tokyo
+    ports:
+      - "127.0.0.1:${DEV_VIEWER_PORT:-18042}:8080"
+    networks:
+      - backend
+      - web
+    depends_on:
+      orthanc:
+        condition: service_healthy
+    healthcheck:
+      # 待ち受けているか（Orthanc は認証を求めるので 401 が返る。応答があればよい）
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:8080/system',r=>process.exit(0)).on('error',()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  portal:
+    # 3つの画面（tsunagi-dicom・DTG・ris-emulator）へのリンクだけの入口のページ。ホストの 127.0.0.1:${DEV_PORTAL_PORT:-80} に出す。
+    # リンクのポートは、上の3つの公開のポートの変数（既定も同じ）を受けて埋める。ほかのサービスには依存しない（単独で up できる）
+    image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-portal:local
+    build:
+      context: ../..
+      dockerfile: docker/dev/portal/Dockerfile
+    environment:
+      PORTAL_TSUNAGI_PORT: ${TSUNAGI_HTTP_PORT:-3000}
+      PORTAL_DTG_PORT: ${DEV_DTG_WEB_PORT:-18080}
+      PORTAL_RIS_PORT: ${DEV_RIS_WEB_PORT:-18081}
+      TZ: Asia/Tokyo
+    ports:
+      - "127.0.0.1:${DEV_PORTAL_PORT:-80}:8080"
+    networks:
+      - web
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:8080/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 networks:
   # ris-emulator と HL7 の受け口だけのネットワーク
   hl7: {}
 
 secrets:
   ris_web_password:
-    file: ./secrets/ris_web_password.txt
+    file: ${TSUNAGI_DEV_SECRETS_DIR:-./secrets}/ris_web_password.txt
   dtg_web_password:
-    file: ./secrets/dtg_web_password.txt
+    file: ${TSUNAGI_DEV_SECRETS_DIR:-./secrets}/dtg_web_password.txt
   # hl7_receiver_token は hl7.override.yaml（include）で決める。ここで決め直すと、取り込んだものとぶつかる
 
 volumes:

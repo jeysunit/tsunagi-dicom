@@ -141,7 +141,11 @@ describe("HL7 の解析と反映の中身", () => {
     "UID を断る %s",
     (uid) => expect(update(changed("ZDS", 1, uid, "orm"))).toMatchObject({ ok: false, code: "AE" })
   );
-  it("MSH-18 が空で日本語があれば断る", () => expect(parseMessage(Buffer.from(changed("MSH", 17, ""))).ok).toBe(false));
+  it.each(["ISO IR87", "ISO IR14", "8859/1", "UNICODE", "ASCII"])(
+    "MSH-18 が UNICODE UTF-8 以外なら断る %s",
+    (charset) => expect(parseMessage(Buffer.from(changed("MSH", 17, charset)))).toMatchObject({ ok: false, reason: "文字コードが違う" })
+  );
+  it("MSH-18 が空で日本語があれば断る",() => expect(parseMessage(Buffer.from(changed("MSH", 17, ""))).ok).toBe(false));
   it("発番元の subcomponent は分けて読む", () => {
     const p = parseMessage(Buffer.from(changed("PID", 3, "P1^^^ISSUER&1.2.3&ISO^PI")));
     expect(p.ok).toBe(true);

@@ -181,6 +181,7 @@ const TOKEN_SALT = Buffer.from("tsunagi-dicom", "utf8");
 const TOKEN_KINDS = {
   job: { version: "j1", info: "tsunagi-dicom/job-token/v1", aad: Buffer.from("tsunagi-dicom/job-token", "utf8") },
   deleteConfirm: { version: "d1", info: "tsunagi-dicom/delete-confirm/v1", aad: Buffer.from("tsunagi-dicom/delete-confirm", "utf8") },
+  modifyConfirm: { version: "m1", info: "tsunagi-dicom/modify-confirm/v1", aad: Buffer.from("tsunagi-dicom/modify-confirm", "utf8") },
 } as const;
 type TokenKind = keyof typeof TOKEN_KINDS;
 /** token が使える時間（ミリ秒） */
@@ -245,6 +246,36 @@ export function openDeleteConfirm(token: string, sessionSecret: string, now = Da
   const { orthancId, studyInstanceUid, patientId, version, actorId } = p;
   if (![orthancId, studyInstanceUid, patientId, version, actorId].every((v) => typeof v === "string")) return null;
   return { orthancId, studyInstanceUid, patientId, version, actorId } as DeleteConfirmPayload;
+}
+
+/**
+ * 値の修正の確かめの画面で見せたもの（段 6）。見せた利用者・URL の StudyInstanceUID・選んだ検査（Orthanc の中の ID）・
+ * 種類と範囲と、見せた状態の印（state。直す検査の全部の画像の UID の組と値・直す値・替え先の患者の値から作る SHA-256）。
+ * 状態の全部を token に入れると、検査の多い患者で大きくなるので、印にする。書き換える直前に、いまの状態から同じ印を作り、
+ * 違えば書き換えずに断る
+ */
+export interface ModifyConfirmPayload {
+  actorId: string;
+  studyInstanceUid: string;
+  orthancId: string;
+  kind: string;
+  scope: string;
+  state: string;
+}
+
+/** 値の修正の確かめの token が使える時間（削除と同じ） */
+export const MODIFY_CONFIRM_TTL_MS = DELETE_CONFIRM_TTL_MS;
+
+export function signModifyConfirm(payload: ModifyConfirmPayload, sessionSecret: string, now = Date.now()): string {
+  return sealToken("modifyConfirm", payload, sessionSecret, MODIFY_CONFIRM_TTL_MS, now);
+}
+
+export function openModifyConfirm(token: string, sessionSecret: string, now = Date.now()): ModifyConfirmPayload | null {
+  const p = openToken("modifyConfirm", token, sessionSecret, now);
+  if (!p) return null;
+  const { actorId, studyInstanceUid, orthancId, kind, scope, state } = p;
+  if (![actorId, studyInstanceUid, orthancId, kind, scope, state].every((v) => typeof v === "string")) return null;
+  return { actorId, studyInstanceUid, orthancId, kind, scope, state } as ModifyConfirmPayload;
 }
 
 export interface JobTokenPayload {
