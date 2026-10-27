@@ -91,8 +91,8 @@ cat <<EOF
                           ユーザー名とパスワードをブラウザが聞く（パスワードは $secrets/backend_password.txt）
   Orthanc の DICOM        127.0.0.1:${ORTHANC_DICOM_PORT:-4242}（AE タイトル ORTHANC）。REST はホストに出していない
 
-以下の docker compose を直に流すときも、置き場を替えているなら同じ値を渡す（渡さないと、compose が別の置き場の secret を探す）：
-  TSUNAGI_DEV_SECRETS_DIR=$secrets docker compose -f $here/compose.yaml ps
+以下の docker compose を直に流すときも、置き場を替えているなら同じ値を2つの変数に渡す（渡さないと、compose が別の置き場の secret を探す）：
+  TSUNAGI_DEV_SECRETS_DIR=$secrets TSUNAGI_SECRETS_DIR=$secrets docker compose -f $here/compose.yaml ps
 
 ris-emulator で今日の CT の予約を 3 件作る（dicom-test-generator のワークリストに出る）：
   docker compose -f $here/compose.yaml exec ris python -m app.cli create CT=3

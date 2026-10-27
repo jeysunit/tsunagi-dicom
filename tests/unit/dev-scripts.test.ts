@@ -206,7 +206,13 @@ describe("up.sh：最後の表示", () => {
   it("compose を直に使うときも TSUNAGI_DEV_SECRETS_DIR を同じに渡すと案内する", () => {
     const dir = path.join(work, "s2");
     const r = run("docker/dev/up.sh", { TSUNAGI_DEV_SECRETS_DIR: dir, TSUNAGI_IMAGE: "example/img:1" });
-    expect(r.out).toContain(`TSUNAGI_DEV_SECRETS_DIR=${dir}`);
+    expect(r.out).toContain(`TSUNAGI_DEV_SECRETS_DIR=${dir} TSUNAGI_SECRETS_DIR=${dir} docker compose`);
+  });
+
+  it("tests/flow/run.mjs も、~ で始まる置き場を $HOME に展開してから決める", () => {
+    const src = read("tests/flow/run.mjs");
+    expect(src).toContain('startsWith("~/")');
+    expect(src).toContain("process.env.HOME");
   });
 
   const env = (extra: Record<string, string>) => ({

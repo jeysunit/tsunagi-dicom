@@ -65,7 +65,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 
 ポートは環境変数で替えられる：`TSUNAGI_HTTP_PORT`（既定 3000）・`ORTHANC_DICOM_PORT`（既定 4242）・`DEV_DTG_WEB_PORT`（DTG の Web 画面。既定 18080）・`DEV_RIS_WEB_PORT`（ris-emulator の Web 画面。既定 18081。利用者 `ris`）・`DEV_PORTAL_PORT`（3つの画面へのリンクだけの入口のページ。既定 80）。どれもホストの 127.0.0.1 だけで待ち受ける。ris-emulator の MWL（11112）はホストに公開しない。
 
-下の手順のコマンドは、リポジトリの直下で流す。`dc` は `docker compose -f docker/dev/compose.yaml` の略。`dc` や `docker compose -f …` を直に使うときも、`up.sh` に渡したのと同じ値を `TSUNAGI_DEV_SECRETS_DIR` に渡す（TSUNAGI_DEV_SECRETS_DIR を同じに渡す。渡さないと、compose が既定の置き場の secret を探す）。Orthanc の REST（`/jobs` など）はホストに公開していないので、見るときは Orthanc のコンテナの中から読む。止めるときは `dc down`（volume も消して最初からにするときは `dc down --volumes`）。
+下の手順のコマンドは、リポジトリの直下で流す。`dc` は `docker compose -f docker/dev/compose.yaml` の略。`dc` や `docker compose -f …` を直に使うときも、`up.sh` に渡したのと同じ値を `TSUNAGI_DEV_SECRETS_DIR` と `TSUNAGI_SECRETS_DIR` の両方に渡す（TSUNAGI_DEV_SECRETS_DIR を同じに渡す。前者は DTG・ris-emulator・HL7 の受け口の secret、後者は配る compose の tsunagi-dicom・Orthanc の secret の置き場。片方だけだと、compose が既定の置き場の secret を探す）。Orthanc の REST（`/jobs` など）はホストに公開していないので、見るときは Orthanc のコンテナの中から読む。止めるときは `dc down`（volume も消して最初からにするときは `dc down --volumes`）。
 
 ## 手順と、確かめること
 
