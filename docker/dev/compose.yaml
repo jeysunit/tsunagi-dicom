@@ -45,11 +45,11 @@ include:
 
 services:
   ris:
-    # ris-emulator の Dockerfile から作る。版は commit で固定する（RIS_GIT_REF で替えられる）
+    # ris-emulator の Dockerfile から作る。版は RIS_GIT_REF（ブランチ名か commit）で決める。既定は main
+    # （作るたびに main の先頭を取る。commit に固定するときは RIS_GIT_REF=<commit> を渡す。docker/dev/refresh.sh は commit を決めてから作る）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-ris:local
     build:
-      # 既定は main の c374db4（患者バナーなど画面の部品をそろえた版。ris-emulator の #40 のマージ。照合 reconcile と ORM の取消 CA を含む）
-      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-c374db468e1e2e2a83dfbc5e7df6e45aa988f881}
+      context: https://github.com/jeysunit/ris-emulator.git#${RIS_GIT_REF:-main}
     environment:
       RIS_WEB_PASSWORD_FILE: /run/secrets/ris_web_password
       # Web 画面と MWL を、コンテナの中では 0.0.0.0 で待ち受ける（イメージの既定と同じ。設定ファイルより先に効く）
@@ -99,11 +99,11 @@ services:
     restart: unless-stopped
 
   dtg:
-    # dicom-test-generator の Dockerfile から作る。版は commit で固定する（DTG_GIT_REF で替えられる）
+    # dicom-test-generator の Dockerfile から作る。版は DTG_GIT_REF（ブランチ名か commit）で決める。既定は main
+    # （作るたびに main の先頭を取る。commit に固定するときは DTG_GIT_REF=<commit> を渡す。docker/dev/refresh.sh は commit を決めてから作る）
     image: ${COMPOSE_PROJECT_NAME:-tsunagi-dev}-dtg:local
     build:
-      # 既定は main の 8803893（撮った後は緊急の患者を変えない直しのある版。dicom-test-generator の #86 のマージ。追加撮影 --append --study-uid を含む）
-      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-8803893a483bfed4fbf238be7d3298ac607c5902}
+      context: https://github.com/jeysunit/dicom-test-generator.git#${DTG_GIT_REF:-main}
     environment:
       DTG_WEB_PASSWORD_FILE: /run/secrets/dtg_web_password
       # 検査日・時刻を日本の時刻で書く（Orthanc の TZ と同じ）
@@ -262,9 +262,9 @@ networks:
 
 secrets:
   ris_web_password:
-    file: ./secrets/ris_web_password.txt
+    file: ${TSUNAGI_DEV_SECRETS_DIR:-./secrets}/ris_web_password.txt
   dtg_web_password:
-    file: ./secrets/dtg_web_password.txt
+    file: ${TSUNAGI_DEV_SECRETS_DIR:-./secrets}/dtg_web_password.txt
   # hl7_receiver_token は hl7.override.yaml（include）で決める。ここで決め直すと、取り込んだものとぶつかる
 
 volumes:

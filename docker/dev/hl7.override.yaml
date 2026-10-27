@@ -18,5 +18,5 @@ services:
 
 secrets:
   hl7_receiver_token:
-    # 相対のパスは deploy/ から数える（include の最初のファイルの場所）。up.sh が作る
-    file: ../docker/dev/secrets/hl7_receiver_token.txt
+    # 相対のパスは deploy/ から数える（include の最初のファイルの場所）。up.sh が作る。置き場は TSUNAGI_DEV_SECRETS_DIR で替える
+    file: ${TSUNAGI_DEV_SECRETS_DIR:-../docker/dev/secrets}/hl7_receiver_token.txt

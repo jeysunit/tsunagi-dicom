@@ -9,16 +9,31 @@
 #   orthanc-users.json          Orthanc の RegisteredUsers（tsunagi と、上と同じパスワード）
 #   initial_admin_password.txt  tsunagi-dicom の最初の管理者（admin）のパスワード。最初のログインで変える
 #
-# 置き場は、作った利用者だけが開ける（0700）。ファイルは、コンテナの中の root でない利用者
-# （tsunagi-dicom は uid 1000）が読めるように 0644 にする。
+# 置き場は、この台本で新しく作ったときだけ、作った利用者だけが開ける（0700）にする。もとからあるディレクトリの権限は
+# 変えない。group か others に開いている（mode & 077 が 0 でない）ときは、何も作らずに止まる（承知のうえで続けるときだけ
+# ALLOW_INSECURE_SECRETS_DIR=1 を付ける。警告を出して続ける）。外の置き場は専用のディレクトリを指す（~/.config そのものを指さない）。
+# ファイルは、コンテナの中の root でない利用者（tsunagi-dicom は uid 1000）が読めるように 0644 にする。
 set -eu
 
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 dir=${1:-"$here/secrets"}
 
 umask 077
-mkdir -p "$dir"
-chmod 0700 "$dir"
+if [ -d "$dir" ]; then
+  mode=$(stat -c %a "$dir" 2> /dev/null || stat -f %Lp "$dir")
+  # group か others に、読み・書き・実行のどれかを許していれば止める（0 から始めて 8 進数として数える）
+  if [ $((0$mode & 077)) -ne 0 ]; then
+    if [ "${ALLOW_INSECURE_SECRETS_DIR:-}" = 1 ]; then
+      echo "警告：置き場 $dir の権限（$mode）が group か others に開いている。ALLOW_INSECURE_SECRETS_DIR=1 なので続ける（権限は変えない）" >&2
+    else
+      echo "置き場 $dir の権限（$mode）が group か others に開いている。secret を置かずに止める。専用のディレクトリを指すか、権限を締める（chmod 0700）。承知のうえで続けるときだけ ALLOW_INSECURE_SECRETS_DIR=1 を付ける" >&2
+      exit 1
+    fi
+  fi
+else
+  mkdir -p "$dir"
+  chmod 0700 "$dir"
+fi
 
 # 英数字だけの乱数（JSON とファイルにそのまま書ける字）
 rand() {
