@@ -74,6 +74,23 @@ test("左のナビ：本文の左に幅 208px で置き、群の名前を出す�
   await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
 });
 
+test("左のナビ：390px の画面では閉じた形で始め、そこで開いても広い画面の形は変えない", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await asAdmin(page);
+  const toggle = page.getByTestId("nav-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  await toggle.click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
+  await toggle.click();
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(56);
+  // 狭い画面で閉じたことは覚えない。広い画面で開き直すと、開いた形で始まる
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.reload();
+  await expect(page.getByTestId("nav-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(async () => Math.round((await nav(page).boundingBox())!.width)).toBe(208);
+});
+
 test("左のナビ：低い画面でも、末尾の項目まで届く（ナビの中でスクロールする）", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 300 });
   await asAdmin(page);

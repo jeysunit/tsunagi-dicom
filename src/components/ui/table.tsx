@@ -8,6 +8,16 @@ import { cn } from "@/lib/utils";
 // 行の全体を押せ、tabindex を付けて Enter・Space で選べる。行の中のリンク・ボタン・入力は、押しても行を選ばない。
 // 名前の列だけ太字（CellMain）、補足は 12px の label（CellSub）、数は右寄せ（TableCell の num）。
 
+/**
+ * 操作の列（行のボタン・リンク）を、表の右端に固定する（docs/design-system/components.md の「一覧の表」）。
+ * 表が包みより広く横にスクロールするときも、操作の列は見切れない。縮めて切るのは文字の列で、操作の列は切らない。
+ * 下の列が透けないよう地を塗る。地は行の地（hover の muted・選んだ行の selected-strong）にそろえる。
+ * sticky のセルは重なりの文脈を作るので、行の中のメニュー（role="menu"）を開いている間だけ、そのセルを下の行の固定のセルより上に出す（z-20）
+ */
+export const PINNED_HEAD = "sticky right-0 bg-surface";
+export const PINNED_CELL =
+  "sticky right-0 bg-background has-[[role=menu]]:z-20 [tr:not([data-selected]):hover>&]:bg-muted [tr[data-selected]>&]:bg-selected-strong";
+
 /** 行を選ぶ操作にしない部品（行の中のリンク・ボタン・入力。印を付けた部品も） */
 export const ROW_CONTROL_SELECTOR = "a,button,input,select,textarea,label,summary,[role=menu],[data-row-control]";
 
@@ -136,14 +146,20 @@ function TableRow({
   );
 }
 
-/** 見出しのセル（28px・12px・label。並べ替えない列） */
-function TableHead({ className, num = false, ...props }: React.ComponentProps<"th"> & { num?: boolean }) {
+/** 見出しのセル（28px・12px・label。並べ替えない列）。pinned は操作の列（右端に固定。PINNED_HEAD） */
+function TableHead({
+  className,
+  num = false,
+  pinned = false,
+  ...props
+}: React.ComponentProps<"th"> & { num?: boolean; pinned?: boolean }) {
   return (
     <th
       data-slot="table-head"
       className={cn(
         "h-7 overflow-hidden px-2 py-0 text-left align-middle text-xs font-normal text-ellipsis whitespace-nowrap text-label",
         num && "text-right",
+        pinned && PINNED_HEAD,
         className,
       )}
       {...props}
@@ -190,12 +206,17 @@ function SortableHead({
   );
 }
 
-/** 1 つのセル。num は数（右寄せ・桁をそろえる） */
-function TableCell({ className, num = false, ...props }: React.ComponentProps<"td"> & { num?: boolean }) {
+/** 1 つのセル。num は数（右寄せ・桁をそろえる）。pinned は操作の列（右端に固定。PINNED_CELL） */
+function TableCell({
+  className,
+  num = false,
+  pinned = false,
+  ...props
+}: React.ComponentProps<"td"> & { num?: boolean; pinned?: boolean }) {
   return (
     <td
       data-slot="table-cell"
-      className={cn("px-2 py-0 align-middle", num && "num text-right tabular-nums", className)}
+      className={cn("px-2 py-0 align-middle", num && "num text-right tabular-nums", pinned && PINNED_CELL, className)}
       {...props}
     />
   );
