@@ -656,6 +656,35 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   await page.close();
 });
 
+test("画面のロック：ロックの POST が届かず頁を読み直していなくても、上の帯に利用者・画面ロック・ログアウトを出さない", async () => {
+  test.setTimeout(120_000);
+  await admin.page.goto("about:blank");
+  const page = await admin.context.newPage();
+  await page.goto("/");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("current-user")).toContainText("e2e-admin（管理者）");
+
+  // POST を落とすので、頁は読み直されない（読み直した頁は BFF が利用者を渡さず、この確かめにならない）
+  await page.route("**/api/auth/lock", (route) => route.abort("internetdisconnected"));
+  await page.getByRole("button", { name: "画面ロック", exact: true }).click();
+  const lock = page.getByTestId("screen-lock");
+  await expect(lock).toBeVisible();
+  const header = page.getByTestId("site-header");
+  await expect(header).toBeVisible();
+  await expect(page.getByTestId("current-user")).toHaveCount(0);
+  await expect(header).not.toContainText("e2e-admin");
+  await expect(header.getByRole("button", { name: "ログアウト" })).toHaveCount(0);
+  await expect(header.getByRole("button", { name: "画面ロック", exact: true })).toHaveCount(0);
+
+  // 後の試験のために解く
+  await page.unroute("**/api/auth/lock");
+  await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
+  await lock.getByRole("button", { name: "ロック解除" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("current-user")).toContainText("e2e-admin（管理者）");
+  await page.close();
+});
+
 test("画面のロック：ほかのタブの知らせを取りこぼしても、BFF の状態を確かめて閉じ、読み直す", async () => {
   test.setTimeout(120_000);
   const page = await admin.context.newPage();

@@ -2,7 +2,7 @@
 
 import { Lock, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ReauthForm } from "@/components/ui/reauth-form";
@@ -320,8 +320,9 @@ export function LockGuard({
     };
   }, [csrfToken, minutes, initiallyLocked, lockNow, confirmLock, onServerLocked, setPending, router]);
 
-  // 上の帯（LockGuard の外）にも、ロックの状態を伝える（利用者の名前・ログアウトを外す）
-  useEffect(() => {
+  // 上の帯（LockGuard の外）にも、ロックの状態を伝える（利用者の名前・ログアウトを外す）。
+  // ロックの画面と同じフレームで外すので、描画の前に走る useLayoutEffect を使う
+  useLayoutEffect(() => {
     setScreenLocked(locked);
     return () => setScreenLocked(false);
   }, [locked]);
