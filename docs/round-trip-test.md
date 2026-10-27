@@ -37,7 +37,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 
 1. Docker（Compose v2.24 以上。`include` と、`env_file` の `required` を使う）を入れる。
 2. リポジトリの直下で `docker/dev/up.sh` を流す。次を行う。
-   - secret のファイルを乱数で作る（既定は `docker/dev/secrets/`。リポジトリに入れない。あるファイルは書き換えない）。置き場は `TSUNAGI_DEV_SECRETS_DIR` で替えられる。作業ツリーの外（例 `~/.config/tsunagi-dev/secrets`）に置くと、作業ツリーを消してもパスワードが消えない。相対のパスは流した場所から数える。tsunagi-dicom の `SESSION_SECRET`、Orthanc の利用者 `tsunagi` のパスワード、最初の管理者 `admin` のパスワード、DTG の Web 画面のパスワード、ris-emulator の Web 画面のパスワード（DTG と ris-emulator のパスワードのファイルは、コンテナの中の利用者（uid 10001）が読める権限にする）。
+   - secret のファイルを乱数で作る（既定は `docker/dev/secrets/`。リポジトリに入れない。あるファイルは書き換えない）。置き場は `TSUNAGI_DEV_SECRETS_DIR` で替えられる。作業ツリーの外の専用のディレクトリ（例 `~/.config/tsunagi-dev/secrets`。`~/.config` そのものは指さない）に置くと、作業ツリーを消してもパスワードが消えない。`~` で始まる値は `$HOME` に展開する。相対のパスは流した場所から数える。置き場がもとからあるときは、権限を変えず、0700 でなければ警告だけ出す（置き場をその台本で新しく作ったときだけ 0700 にする）。tsunagi-dicom の `SESSION_SECRET`、Orthanc の利用者 `tsunagi` のパスワード、最初の管理者 `admin` のパスワード、DTG の Web 画面のパスワード、ris-emulator の Web 画面のパスワード（DTG と ris-emulator のパスワードのファイルは、コンテナの中の利用者（uid 10001）が読める権限にする）。
    - tsunagi-dicom のイメージを、このリポジトリから作る（`TSUNAGI_IMAGE` に GHCR のイメージを渡せば作らない）。
    - DTG と ris-emulator のイメージを、それぞれの main から作る（作るたびに main の先頭を取る）。`DTG_GIT_REF`・`RIS_GIT_REF` にブランチ名か commit を渡すと、そちらから作る。
    - 作るイメージの名前には、compose のプロジェクトの名前（`COMPOSE_PROJECT_NAME`。既定は `tsunagi-dev`）を入れる（`tsunagi-dev-tsunagi:local`・`tsunagi-dev-ris:local`・`tsunagi-dev-dtg:local`・`tsunagi-dev-dcmtk:local`）。`COMPOSE_PROJECT_NAME` とポートを替えて一式を2つ立てても、片方を作り直したときに、もう片方のイメージの名前は付け替わらない。
@@ -57,15 +57,15 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 
 **立て直し**：手元で立てている一式を、3つの製品（tsunagi-dicom・DTG・ris-emulator）の main に更新するときは、リポジトリの直下で `docker/dev/refresh.sh` を流す。次を行う。毎晩の自動実行にも使える（登録は各自の環境で行う）。
 
-- tsunagi-dicom：この作業ツリーを `origin/main` に早送りする（main でなければ main に切り替える。未コミットの変更・追跡していないファイル・origin/main より進んだ commit があれば、作らずに止まる）。`TSUNAGI_IMAGE` を渡したときは、早送りもイメージの作成もしない。
+- tsunagi-dicom：この作業ツリーを `origin/main` に早送りする。main 以外の枝・detached HEAD にいるときは、切り替えずに止まる（「main 以外の枝（…）にいるので立て直さない」。最後の 1 行は `結果=失敗（段：枝の確かめ。…）`）。毎晩の立て直しは main にいる専用の作業ツリーで流す。未コミットの変更・追跡していないファイル・origin/main より進んだ commit があるときも、作らずに止まる。`TSUNAGI_IMAGE` を渡したときは、早送りもイメージの作成もしない。
 - DTG と ris-emulator：main の commit を `git ls-remote` で決める（`DTG_GIT_REF`・`RIS_GIT_REF` に commit を渡してあれば、それを使う）。
 - 3つのイメージを先に作り、通ってから `docker compose up -d --build` で立て直す。作るところで失敗したら、動いているコンテナには触れない。
-- volume と secrets は消さない（`down -v`・`volume rm` を使わない）。secrets の置き場に secret が無いときは、作らずに止まる（先に `up.sh` を流す。置き場を替えているときは `TSUNAGI_DEV_SECRETS_DIR` を渡す）。
+- volume と secrets は消さない（`down -v`・`volume rm` を使わない）。secrets の置き場に、compose が読む 7 つのファイル（`session_secret.txt`・`backend_password.txt`・`initial_admin_password.txt`・`orthanc-users.json`・`dtg_web_password.txt`・`ris_web_password.txt`・`hl7_receiver_token.txt`）が1つでも無いときは、コンテナに触れる前に「secrets の置き場に <名前> が無い」で止まる（存在だけを見る。値は読まない。先に `up.sh` を流す。置き場を替えているときは `TSUNAGI_DEV_SECRETS_DIR` を渡す）。
 - 最後の 1 行に、3つの版と結果を出す。例：`refresh: tsunagi-dicom=abc1234 dtg=ddddddd ris=rrrrrrr 結果=成功`。
 
 ポートは環境変数で替えられる：`TSUNAGI_HTTP_PORT`（既定 3000）・`ORTHANC_DICOM_PORT`（既定 4242）・`DEV_DTG_WEB_PORT`（DTG の Web 画面。既定 18080）・`DEV_RIS_WEB_PORT`（ris-emulator の Web 画面。既定 18081。利用者 `ris`）・`DEV_PORTAL_PORT`（3つの画面へのリンクだけの入口のページ。既定 80）。どれもホストの 127.0.0.1 だけで待ち受ける。ris-emulator の MWL（11112）はホストに公開しない。
 
-下の手順のコマンドは、リポジトリの直下で流す。`dc` は `docker compose -f docker/dev/compose.yaml` の略。Orthanc の REST（`/jobs` など）はホストに公開していないので、見るときは Orthanc のコンテナの中から読む。止めるときは `dc down`（volume も消して最初からにするときは `dc down --volumes`）。
+下の手順のコマンドは、リポジトリの直下で流す。`dc` は `docker compose -f docker/dev/compose.yaml` の略。`dc` や `docker compose -f …` を直に使うときも、`up.sh` に渡したのと同じ値を `TSUNAGI_DEV_SECRETS_DIR` に渡す（TSUNAGI_DEV_SECRETS_DIR を同じに渡す。渡さないと、compose が既定の置き場の secret を探す）。Orthanc の REST（`/jobs` など）はホストに公開していないので、見るときは Orthanc のコンテナの中から読む。止めるときは `dc down`（volume も消して最初からにするときは `dc down --volumes`）。
 
 ## 手順と、確かめること
 

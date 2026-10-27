@@ -1,13 +1,17 @@
 # up.sh と refresh.sh が読み込む共通の決まり（単独では流さない）。
 #
 # secrets の置き場：TSUNAGI_DEV_SECRETS_DIR で替えられる（既定は docker/dev/secrets）。
-# 作業ツリーの外（例 ~/.config/tsunagi-dev/secrets）に置くと、作業ツリーを消してもパスワードが消えない。
-# 相対のパスは、流した場所から数える。
+# 作業ツリーの外の専用のディレクトリ（例 ~/.config/tsunagi-dev/secrets。~/.config そのものは指さない）に置くと、
+# 作業ツリーを消してもパスワードが消えない。~ で始まる値は $HOME に展開する。相対のパスは、流した場所から数える。
 
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$here/../.." && pwd)
 
 secrets=${TSUNAGI_DEV_SECRETS_DIR:-$here/secrets}
+case $secrets in
+  "~") secrets=$HOME ;;
+  "~/"*) secrets="$HOME/${secrets#"~/"}" ;;
+esac
 case $secrets in
   /*) ;;
   *) secrets="$PWD/$secrets" ;;

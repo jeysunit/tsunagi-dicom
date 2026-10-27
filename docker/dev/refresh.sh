@@ -1,7 +1,7 @@
 #!/bin/sh
 # 開発・試験用の一式（docker/dev/compose.yaml）を、3つの製品の main に立て直す（毎晩の自動実行にも使える）：
-#   1. tsunagi-dicom：このリポジトリの作業ツリーを origin/main に早送りする（main でなければ main に切り替える。
-#      未コミットの変更があるときは何もせずに止める）
+#   1. tsunagi-dicom：このリポジトリの作業ツリーを origin/main に早送りする（main 以外の枝・detached HEAD にいるときは、
+#      切り替えずに止める。毎晩の立て直しは main にいる専用の作業ツリーで流す。未コミットの変更があるときも何もせずに止める）
 #   2. DTG・ris-emulator：main の commit を git ls-remote で決める（DTG_GIT_REF・RIS_GIT_REF に commit を渡してあれば、それを使う）
 #   3. 3つのイメージを作る（ここで失敗したら、動いているコンテナには触れずに止める）
 #   4. docker compose up -d --build で立て直す
@@ -10,7 +10,7 @@
 #   docker/dev/refresh.sh
 #
 # volume と secrets は消さない（down -v・volume rm を使わない）。secrets の置き場は up.sh と同じ（TSUNAGI_DEV_SECRETS_DIR。
-# 既定 docker/dev/secrets）。置き場に secret が無いときは、作らずに止める（up.sh を先に流す）。
+# 既定 docker/dev/secrets）。置き場に compose が読む secret のファイルが1つでも無いときは、作らずに止める（up.sh を先に流す）。
 # TSUNAGI_IMAGE を渡したときは、tsunagi-dicom のイメージは作らずにそれを使う（作業ツリーの早送りもしない）。
 # ポートの環境変数は up.sh と同じ。
 #
@@ -61,21 +61,28 @@ main() {
     echo "docker compose（v2）が使えない" >&2
     return 1
   fi
-  if [ ! -f "$secrets/backend_password.txt" ]; then
-    echo "secrets の置き場（$secrets）に secret が無い。先に docker/dev/up.sh を流す（置き場を替えているなら TSUNAGI_DEV_SECRETS_DIR を渡す）" >&2
-    return 1
-  fi
+  # compose の secrets が file: で読む全部のファイルを、コンテナに触れる前に確かめる（存在だけを見る。値は読まない）
+  for f in session_secret.txt backend_password.txt initial_admin_password.txt orthanc-users.json dtg_web_password.txt ris_web_password.txt hl7_receiver_token.txt; do
+    if [ ! -f "$secrets/$f" ]; then
+      echo "secrets の置き場（$secrets）に $f が無い。先に docker/dev/up.sh を流す（置き場を替えているなら TSUNAGI_DEV_SECRETS_DIR を渡す）" >&2
+      return 1
+    fi
+  done
 
-  stage="tsunagi-dicom の取り込み"
+  stage="枝の確かめ"
   if [ -z "${TSUNAGI_IMAGE:-}" ]; then
+    # main 以外の枝・detached HEAD では切り替えず、触らずに止まる（作業中の枝を動かさないため）
+    branch=$(git -C "$root" symbolic-ref --short -q HEAD || true)
+    if [ "$branch" != main ]; then
+      echo "main 以外の枝（${branch:-detached HEAD}）にいるので立て直さない。main に戻すか、専用の作業ツリーで流す" >&2
+      return 1
+    fi
+    stage="tsunagi-dicom の取り込み"
     git -C "$root" fetch --quiet origin main
     # 未コミットの変更と、追跡していない新しいファイル（.gitignore の対象は除く）があれば止める。ビルドの入力に入るため
     if [ -n "$(git -C "$root" status --porcelain)" ]; then
       echo "作業ツリー（$root）に未コミットの変更か、追跡していないファイルがある。片付けてから流す" >&2
       return 1
-    fi
-    if [ "$(git -C "$root" symbolic-ref --short -q HEAD || true)" != main ]; then
-      git -C "$root" switch --quiet main
     fi
     git -C "$root" merge --quiet --ff-only origin/main
     # ローカルの main が origin/main より進んでいると、merge は何もせずに通る。そのまま作ると main でない版を配るので止める

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -32,13 +32,24 @@ case "$*" in
   *"ls-remote"*dicom-test-generator*) printf '%s\\trefs/heads/main\\n' dddddddddddddddddddddddddddddddddddddddd ;;
   *"ls-remote"*ris-emulator*) printf '%s\\trefs/heads/main\\n' rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ;;
   *"status --porcelain"*) [ "$FAKE_DIRTY" = 1 ] && echo " M docker/dev/up.sh" ;;
-  *"symbolic-ref"*) echo "\${FAKE_BRANCH:-main}" ;;
+  *"symbolic-ref"*) echo "\${FAKE_BRANCH-main}" ;;
   *"rev-parse HEAD"*) echo "aaa" ;;
   *"rev-parse origin/main"*) echo "\${FAKE_ORIGIN:-aaa}" ;;
   *"rev-parse"*) echo "abc1234" ;;
 esac
 exit 0
 `;
+
+// compose の secrets が file: で読む全部のファイル（deploy/compose.yaml・docker/dev/compose.yaml・hl7.override.yaml）
+const SECRET_FILES = [
+  "session_secret.txt",
+  "backend_password.txt",
+  "initial_admin_password.txt",
+  "orthanc-users.json",
+  "dtg_web_password.txt",
+  "ris_web_password.txt",
+  "hl7_receiver_token.txt",
+];
 
 let work: string;
 let fakeBin: string;
@@ -132,7 +143,72 @@ describe("up.sh：secrets の置き場", () => {
   });
 });
 
+describe("up.sh：~ で始まる置き場", () => {
+  it("~ は $HOME に展開する（流した場所の下に ~ のフォルダを作らない）", () => {
+    const r = run("docker/dev/up.sh", { TSUNAGI_DEV_SECRETS_DIR: "~/home-rel/secrets", TSUNAGI_IMAGE: "example/img:1" });
+    expect(r.status).toBe(0);
+    const dir = path.join(work, "home-rel/secrets");
+    expect(readFileSync(path.join(dir, "ris_web_password.txt"), "utf8").length).toBeGreaterThan(8);
+    expect(r.calls.find((c) => c.includes(" up -d"))).toContain(`secrets=${dir} `);
+    expect(existsSync(path.join(work, "~"))).toBe(false);
+  });
+});
+
+describe("deploy/init-secrets.sh：置き場の権限", () => {
+  const modeOf = (p: string) => (statSync(p).mode & 0o777).toString(8);
+
+  it("置き場を新しく作ったときは 0700 にする", () => {
+    const dir = path.join(work, "new", "secrets");
+    const r2 = spawnSync("sh", [path.join(repo, "deploy/init-secrets.sh"), dir], { encoding: "utf8" });
+    expect(r2.status).toBe(0);
+    expect(modeOf(dir)).toBe("700");
+  });
+
+  it("もとからある置き場の権限は変えず、0700 でなければ警告だけ出す", () => {
+    const dir = path.join(work, "existing");
+    mkdirSync(dir);
+    chmodSync(dir, 0o755);
+    const r = spawnSync("sh", [path.join(repo, "deploy/init-secrets.sh"), dir], { encoding: "utf8" });
+    expect(r.status).toBe(0);
+    expect(modeOf(dir)).toBe("755");
+    expect(r.stderr).toContain("0700 ではない");
+    expect(r.stderr).toContain(dir);
+  });
+
+  it("もとからある置き場が 0700 なら、警告を出さない", () => {
+    const dir = path.join(work, "existing700");
+    mkdirSync(dir);
+    chmodSync(dir, 0o700);
+    const r = spawnSync("sh", [path.join(repo, "deploy/init-secrets.sh"), dir], { encoding: "utf8" });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe("");
+  });
+});
+
+describe("文書：置き場と dc の使い方", () => {
+  it("外の置き場は専用のディレクトリを指す（~/.config そのものを指さない）", () => {
+    for (const p of ["docs/round-trip-test.md", "docker/dev/up.sh", "docker/dev/lib.sh", "deploy/init-secrets.sh"]) {
+      expect(read(p)).toContain("専用のディレクトリ");
+    }
+  });
+
+  it("dc を直に使うときも TSUNAGI_DEV_SECRETS_DIR を同じに渡す", () => {
+    expect(read("docs/round-trip-test.md")).toMatch(/`dc`[^\n]*TSUNAGI_DEV_SECRETS_DIR を同じに渡す/);
+  });
+
+  it("毎晩の立て直しは main にいる専用の作業ツリーで流す", () => {
+    expect(read("docs/round-trip-test.md")).toContain("毎晩の立て直しは main にいる専用の作業ツリーで流す");
+    expect(read("docker/dev/refresh.sh")).toContain("毎晩の立て直しは main にいる専用の作業ツリーで流す");
+  });
+});
+
 describe("up.sh：最後の表示", () => {
+  it("compose を直に使うときも TSUNAGI_DEV_SECRETS_DIR を同じに渡すと案内する", () => {
+    const dir = path.join(work, "s2");
+    const r = run("docker/dev/up.sh", { TSUNAGI_DEV_SECRETS_DIR: dir, TSUNAGI_IMAGE: "example/img:1" });
+    expect(r.out).toContain(`TSUNAGI_DEV_SECRETS_DIR=${dir}`);
+  });
+
   const env = (extra: Record<string, string>) => ({
     TSUNAGI_DEV_SECRETS_DIR: path.join(work, "s"),
     TSUNAGI_IMAGE: "example/img:1",
@@ -165,7 +241,7 @@ describe("refresh.sh", () => {
   const secretsDir = () => {
     const dir = path.join(work, "secrets");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "backend_password.txt"), "x\n");
+    for (const f of SECRET_FILES) writeFileSync(path.join(dir, f), "x\n");
     return dir;
   };
   const lastLine = (out: string) => out.trimEnd().split("\n").at(-1);
@@ -244,10 +320,48 @@ describe("refresh.sh", () => {
     expect(r.calls.find((c) => c.includes("status --porcelain"))).not.toContain("--untracked-files=no");
   });
 
-  it("main でない枝にいるときは main に切り替えてから早送りする", () => {
+  it("main でない枝にいるときは、切り替えずに止まる（枝の名前を出す）", () => {
     const r = run("docker/dev/refresh.sh", { TSUNAGI_DEV_SECRETS_DIR: secretsDir(), FAKE_BRANCH: "chore/other" });
+    expect(r.status).not.toBe(0);
+    expect(r.err).toContain("main 以外の枝（chore/other）にいるので立て直さない。main に戻すか、専用の作業ツリーで流す");
+    expect(find(r.calls, "switch")).toBe(-1);
+    expect(find(r.calls, "merge")).toBe(-1);
+    expect(find(r.calls, "docker build")).toBe(-1);
+    expect(find(r.calls, " up -d")).toBe(-1);
+    expect(lastLine(r.out)).toBe("refresh: tsunagi-dicom=- dtg=- ris=- 結果=失敗（段：枝の確かめ。動いているコンテナはそのまま）");
+  });
+
+  it("detached HEAD のときも、切り替えずに止まる", () => {
+    const r = run("docker/dev/refresh.sh", { TSUNAGI_DEV_SECRETS_DIR: secretsDir(), FAKE_BRANCH: "" });
+    expect(r.status).not.toBe(0);
+    expect(r.err).toContain("main 以外の枝（detached HEAD）にいるので立て直さない");
+    expect(find(r.calls, "switch")).toBe(-1);
+    expect(lastLine(r.out)).toContain("段：枝の確かめ");
+  });
+
+  for (const f of SECRET_FILES) {
+    it(`secrets の置き場に ${f} が無いときは、コンテナに触れずに止まる`, () => {
+      const dir = secretsDir();
+      rmSync(path.join(dir, f));
+      const r = run("docker/dev/refresh.sh", { TSUNAGI_DEV_SECRETS_DIR: dir });
+      expect(r.status).not.toBe(0);
+      expect(r.err).toContain(`secrets の置き場（${dir}）に ${f} が無い`);
+      expect(find(r.calls, "git")).toBe(-1);
+      expect(find(r.calls, "docker build")).toBe(-1);
+      expect(find(r.calls, " up -d")).toBe(-1);
+      expect(lastLine(r.out)).toMatch(/^refresh: .*結果=失敗/);
+    });
+  }
+
+  it("secrets の置き場の確かめは、中身を読まず、存在だけを見る", () => {
+    expect(read("docker/dev/refresh.sh")).not.toMatch(/\bcat\b[^\n]*\$secrets|<\s*"\$secrets/);
+  });
+
+  it("secrets の置き場が ~ で始まるときは $HOME で数える", () => {
+    const dir = secretsDir();
+    const r = run("docker/dev/refresh.sh", { TSUNAGI_DEV_SECRETS_DIR: "~/secrets" });
     expect(r.status).toBe(0);
-    expect(find(r.calls, "switch --quiet main")).toBeLessThan(find(r.calls, "merge --quiet --ff-only origin/main"));
+    expect(r.calls.find((c) => c.includes(" up -d --build"))).toContain(`secrets=${dir} `);
   });
 
   it("TSUNAGI_IMAGE を渡すと、早送りもイメージの作成もしない", () => {

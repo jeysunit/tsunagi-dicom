@@ -9,16 +9,24 @@
 #   orthanc-users.json          Orthanc の RegisteredUsers（tsunagi と、上と同じパスワード）
 #   initial_admin_password.txt  tsunagi-dicom の最初の管理者（admin）のパスワード。最初のログインで変える
 #
-# 置き場は、作った利用者だけが開ける（0700）。ファイルは、コンテナの中の root でない利用者
-# （tsunagi-dicom は uid 1000）が読めるように 0644 にする。
+# 置き場は、この台本で新しく作ったときだけ、作った利用者だけが開ける（0700）にする。もとからあるディレクトリの権限は
+# 変えない（0700 でなければ警告だけ出す）。外の置き場は専用のディレクトリを指す（~/.config そのものを指さない）。
+# ファイルは、コンテナの中の root でない利用者（tsunagi-dicom は uid 1000）が読めるように 0644 にする。
 set -eu
 
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 dir=${1:-"$here/secrets"}
 
 umask 077
-mkdir -p "$dir"
-chmod 0700 "$dir"
+if [ -d "$dir" ]; then
+  mode=$(stat -c %a "$dir" 2> /dev/null || stat -f %Lp "$dir")
+  if [ "$mode" != 700 ]; then
+    echo "警告：置き場 $dir の権限が 0700 ではない（$mode）。もとからあるので変えない。secret を置くのが専用のディレクトリか、必要なら自分で権限を締める" >&2
+  fi
+else
+  mkdir -p "$dir"
+  chmod 0700 "$dir"
+fi
 
 # 英数字だけの乱数（JSON とファイルにそのまま書ける字）
 rand() {

@@ -8,8 +8,9 @@
 #   docker/dev/up.sh
 #   TSUNAGI_IMAGE=ghcr.io/jeysunit/tsunagi-dicom:sha-xxxxxxx docker/dev/up.sh   # GHCR のイメージを使うとき
 #
-# secrets の置き場は TSUNAGI_DEV_SECRETS_DIR で替えられる（既定 docker/dev/secrets）。作業ツリーの外（例 ~/.config/tsunagi-dev/secrets）に
-# 置くと、作業ツリーを消してもパスワードが消えない。立て直しは docker/dev/refresh.sh。
+# secrets の置き場は TSUNAGI_DEV_SECRETS_DIR で替えられる（既定 docker/dev/secrets）。作業ツリーの外の専用のディレクトリ
+# （例 ~/.config/tsunagi-dev/secrets。~/.config そのものは指さない）に置くと、作業ツリーを消してもパスワードが消えない。
+# 立て直しは docker/dev/refresh.sh。
 # ポートは環境変数で替えられる：TSUNAGI_HTTP_PORT（既定 3000）・ORTHANC_DICOM_PORT（既定 4242）・DEV_DTG_WEB_PORT（既定 18080）・
 # DEV_RIS_WEB_PORT（既定 18081）・DEV_VIEWER_PORT（既定 18042。ビューアの入口）・
 # DEV_PORTAL_PORT（既定 80。入口のページ）
@@ -89,6 +90,9 @@ cat <<EOF
                           tsunagi-dicom の「開く」が開く。GET と HEAD だけを通す入口で、Orthanc の利用者 tsunagi の
                           ユーザー名とパスワードをブラウザが聞く（パスワードは $secrets/backend_password.txt）
   Orthanc の DICOM        127.0.0.1:${ORTHANC_DICOM_PORT:-4242}（AE タイトル ORTHANC）。REST はホストに出していない
+
+以下の docker compose を直に流すときも、置き場を替えているなら同じ値を渡す（渡さないと、compose が別の置き場の secret を探す）：
+  TSUNAGI_DEV_SECRETS_DIR=$secrets docker compose -f $here/compose.yaml ps
 
 ris-emulator で今日の CT の予約を 3 件作る（dicom-test-generator のワークリストに出る）：
   docker compose -f $here/compose.yaml exec ris python -m app.cli create CT=3
