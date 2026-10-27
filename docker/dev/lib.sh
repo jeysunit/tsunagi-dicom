@@ -9,13 +9,29 @@ root=$(CDPATH='' cd -- "$here/../.." && pwd)
 
 secrets=${TSUNAGI_DEV_SECRETS_DIR:-$here/secrets}
 case $secrets in
-  "~") secrets=$HOME ;;
-  "~/"*) secrets="$HOME/${secrets#"~/"}" ;;
+  "~") secrets=${HOME:-} ;;
+  "~/"*) secrets="${HOME:-}/${secrets#"~/"}" ;;
 esac
 case $secrets in
   /*) ;;
   *) secrets="$PWD/$secrets" ;;
 esac
+# $HOME・$HOME/.config・/ そのものは置き場にしない（秘密のファイルを広い場所に撒かない。専用のディレクトリを指す）。
+# 書いたままの値と、実体（シンボリックリンクを辿った値）の両方を、末尾のスラッシュを除いて照らす
+secrets_home=${HOME:-}
+secrets_real=$(CDPATH='' cd -P -- "$secrets" 2> /dev/null && pwd) || secrets_real=$secrets
+secrets_home_real=$(CDPATH='' cd -P -- "$secrets_home" 2> /dev/null && pwd) || secrets_home_real=$secrets_home
+for candidate in "$secrets" "$secrets_real"; do
+  while [ "${candidate%/}" != "$candidate" ]; do candidate=${candidate%/}; done
+  [ -n "$candidate" ] || candidate=/
+  for broad in / "$secrets_home" "$secrets_home/.config" "$secrets_home_real" "$secrets_home_real/.config"; do
+    if [ -z "$secrets_home" ] && [ "$broad" != / ]; then continue; fi
+    if [ "$candidate" = "$broad" ]; then
+      echo "secrets の置き場（$secrets）が広すぎる（\$HOME・\$HOME/.config・/ そのものは使えない）。専用のディレクトリ（例 ~/.config/tsunagi-dev/secrets）を指す" >&2
+      exit 1
+    fi
+  done
+done
 # compose.yaml・hl7.override.yaml・deploy/compose.yaml の secrets の file: が、同じ置き場を指すようにする
 TSUNAGI_DEV_SECRETS_DIR=$secrets
 TSUNAGI_SECRETS_DIR=$secrets
