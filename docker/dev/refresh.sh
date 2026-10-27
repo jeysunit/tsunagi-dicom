@@ -69,14 +69,20 @@ main() {
   stage="tsunagi-dicom の取り込み"
   if [ -z "${TSUNAGI_IMAGE:-}" ]; then
     git -C "$root" fetch --quiet origin main
-    if [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then
-      echo "作業ツリー（$root）に未コミットの変更がある。片付けてから流す" >&2
+    # 未コミットの変更と、追跡していない新しいファイル（.gitignore の対象は除く）があれば止める。ビルドの入力に入るため
+    if [ -n "$(git -C "$root" status --porcelain)" ]; then
+      echo "作業ツリー（$root）に未コミットの変更か、追跡していないファイルがある。片付けてから流す" >&2
       return 1
     fi
     if [ "$(git -C "$root" symbolic-ref --short -q HEAD || true)" != main ]; then
       git -C "$root" switch --quiet main
     fi
     git -C "$root" merge --quiet --ff-only origin/main
+    # ローカルの main が origin/main より進んでいると、merge は何もせずに通る。そのまま作ると main でない版を配るので止める
+    if [ "$(git -C "$root" rev-parse HEAD)" != "$(git -C "$root" rev-parse origin/main)" ]; then
+      echo "ローカルの main が origin/main と一致しない（先に進んだ commit がある）。origin/main に揃えてから流す" >&2
+      return 1
+    fi
     tsunagi_ver=$(git -C "$root" rev-parse --short=7 HEAD)
   else
     tsunagi_ver=$TSUNAGI_IMAGE

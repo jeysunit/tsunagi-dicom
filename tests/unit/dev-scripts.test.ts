@@ -33,6 +33,8 @@ case "$*" in
   *"ls-remote"*ris-emulator*) printf '%s\\trefs/heads/main\\n' rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ;;
   *"status --porcelain"*) [ "$FAKE_DIRTY" = 1 ] && echo " M docker/dev/up.sh" ;;
   *"symbolic-ref"*) echo "\${FAKE_BRANCH:-main}" ;;
+  *"rev-parse HEAD"*) echo "aaa" ;;
+  *"rev-parse origin/main"*) echo "\${FAKE_ORIGIN:-aaa}" ;;
   *"rev-parse"*) echo "abc1234" ;;
 esac
 exit 0
@@ -227,6 +229,19 @@ describe("refresh.sh", () => {
     expect(r.err).toContain("未コミット");
     expect(find(r.calls, "merge")).toBe(-1);
     expect(find(r.calls, "docker build")).toBe(-1);
+  });
+
+  it("ローカルの main が origin/main と一致しないときは、作らずに止まる", () => {
+    const r = run("docker/dev/refresh.sh", { TSUNAGI_DEV_SECRETS_DIR: secretsDir(), FAKE_ORIGIN: "bbb" });
+    expect(r.status).not.toBe(0);
+    expect(r.err).toContain("origin/main と一致しない");
+    expect(find(r.calls, "docker build")).toBe(-1);
+    expect(find(r.calls, " up -d")).toBe(-1);
+  });
+
+  it("未コミットの確かめは、追跡していないファイルも見る", () => {
+    const r = run("docker/dev/refresh.sh", { TSUNAGI_DEV_SECRETS_DIR: secretsDir(), FAKE_DIRTY: "1" });
+    expect(r.calls.find((c) => c.includes("status --porcelain"))).not.toContain("--untracked-files=no");
   });
 
   it("main でない枝にいるときは main に切り替えてから早送りする", () => {

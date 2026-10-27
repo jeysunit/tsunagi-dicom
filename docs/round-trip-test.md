@@ -57,7 +57,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 
 **立て直し**：手元で立てている一式を、3つの製品（tsunagi-dicom・DTG・ris-emulator）の main に更新するときは、リポジトリの直下で `docker/dev/refresh.sh` を流す。次を行う。毎晩の自動実行にも使える（登録は各自の環境で行う）。
 
-- tsunagi-dicom：この作業ツリーを `origin/main` に早送りする（main でなければ main に切り替える。未コミットの変更があれば、何もせずに止まる）。`TSUNAGI_IMAGE` を渡したときは、早送りもイメージの作成もしない。
+- tsunagi-dicom：この作業ツリーを `origin/main` に早送りする（main でなければ main に切り替える。未コミットの変更・追跡していないファイル・origin/main より進んだ commit があれば、作らずに止まる）。`TSUNAGI_IMAGE` を渡したときは、早送りもイメージの作成もしない。
 - DTG と ris-emulator：main の commit を `git ls-remote` で決める（`DTG_GIT_REF`・`RIS_GIT_REF` に commit を渡してあれば、それを使う）。
 - 3つのイメージを先に作り、通ってから `docker compose up -d --build` で立て直す。作るところで失敗したら、動いているコンテナには触れない。
 - volume と secrets は消さない（`down -v`・`volume rm` を使わない）。secrets の置き場に secret が無いときは、作らずに止まる（先に `up.sh` を流す。置き場を替えているときは `TSUNAGI_DEV_SECRETS_DIR` を渡す）。
