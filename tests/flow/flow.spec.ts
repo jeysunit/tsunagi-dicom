@@ -32,7 +32,7 @@ test.describe.configure({ mode: "serial" });
 const run = promisify(execFile);
 const root = process.cwd();
 const composeFile = path.join(root, "docker/dev/compose.yaml");
-const secretsDir = path.join(root, "docker/dev/secrets");
+const secretsDir = path.resolve(process.env.TSUNAGI_DEV_SECRETS_DIR ?? path.join(root, "docker/dev/secrets"));
 /** docker/dev/orthanc/site.json に登録した送信先（storescp） */
 const SCP = { id: "dev-scp", aet: "DEV_SCP" };
 /** docker/dev/dtg/app_config.yaml の dicom-test-generator（DTG）の AE タイトル（ris-emulator の CT の予約の予定の AE タイトルと同じ） */
