@@ -89,6 +89,24 @@ async function expectNoPatientValues(page: Page, values: string[]) {
     .toEqual([]);
 }
 
+/** 画面のロックの間、上の帯に前の利用者の名前・画面ロック・ログアウトが無く、Tab でも届かない */
+async function expectHeaderLocked(page: Page) {
+  const header = page.getByTestId("site-header");
+  await expect(header).toBeVisible();
+  await expect(page.getByTestId("current-user")).toHaveCount(0);
+  await expect(header).not.toContainText("e2e-admin");
+  await expect(header.getByRole("button", { name: "ログアウト" })).toHaveCount(0);
+  await expect(header.getByRole("button", { name: "画面ロック", exact: true })).toHaveCount(0);
+  // Tab を何度押しても、上の帯の中の押しボタンに届かない（ロックの画面の外の操作ができない）
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press("Tab");
+    const inHeaderButton = await page.evaluate(
+      () => !!document.activeElement?.closest('[data-testid="site-header"]') && document.activeElement?.tagName === "BUTTON",
+    );
+    expect(inHeaderButton).toBe(false);
+  }
+}
+
 let admin: { context: BrowserContext; page: Page };
 let adminSecret = "";
 
@@ -519,6 +537,7 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   // ぼかすだけでなく、中身（患者の情報）を頁から外す
   await expect(page.getByTestId("study-count")).toHaveCount(0);
   await expect(page.getByTestId("study-table")).toHaveCount(0);
+  await expectHeaderLocked(page);
   // 頁を読み直すので、頁の HTML（描画の元のデータ・RSC の payload を含む）にも患者の値が残らない
   await expectNoPatientValues(page, patient);
   const lockCsrf=(await lockRequest).headers()["x-csrf-token"]!;
@@ -532,6 +551,7 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await page.reload();
   await expect(page.getByTestId("screen-lock")).toBeVisible();
   await expect(page.getByTestId("study-count")).toHaveCount(0);
+  await expectHeaderLocked(page);
 
   // 既定（SCREEN_UNLOCK_REQUIRE_TOTP=false）では、6桁の欄を出さない
   // 画面の言葉は docs/spec.md の 2.2（確認の番号→認証コード・ロックを解く→ロック解除など）
@@ -548,6 +568,9 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await lock.getByRole("button", { name: "ロック解除" }).click();
   await expect(page.getByTestId("screen-lock")).toHaveCount(0);
   await expect(page.getByTestId("study-count")).toHaveText("8");
+  // 解けば、上の帯の利用者・ログアウトが戻る
+  await expect(page.getByTestId("current-user")).toContainText("e2e-admin（管理者）");
+  await expect(page.getByTestId("site-header").getByRole("button", { name: "ログアウト" })).toBeVisible();
   expect((await page.request.get("/api/studies")).status()).toBe(200);
   expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
 });
@@ -630,6 +653,35 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   // 解いたらロックの印は消え、読み直しても中身が出る
   await page.reload();
   await expect(page.getByTestId("study-count")).toHaveText("8");
+  await page.close();
+});
+
+test("画面のロック：ロックの POST が届かず頁を読み直していなくても、上の帯に利用者・画面ロック・ログアウトを出さない", async () => {
+  test.setTimeout(120_000);
+  await admin.page.goto("about:blank");
+  const page = await admin.context.newPage();
+  await page.goto("/");
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("current-user")).toContainText("e2e-admin（管理者）");
+
+  // POST を落とすので、頁は読み直されない（読み直した頁は BFF が利用者を渡さず、この確かめにならない）
+  await page.route("**/api/auth/lock", (route) => route.abort("internetdisconnected"));
+  await page.getByRole("button", { name: "画面ロック", exact: true }).click();
+  const lock = page.getByTestId("screen-lock");
+  await expect(lock).toBeVisible();
+  const header = page.getByTestId("site-header");
+  await expect(header).toBeVisible();
+  await expect(page.getByTestId("current-user")).toHaveCount(0);
+  await expect(header).not.toContainText("e2e-admin");
+  await expect(header.getByRole("button", { name: "ログアウト" })).toHaveCount(0);
+  await expect(header.getByRole("button", { name: "画面ロック", exact: true })).toHaveCount(0);
+
+  // 後の試験のために解く
+  await page.unroute("**/api/auth/lock");
+  await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
+  await lock.getByRole("button", { name: "ロック解除" }).click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+  await expect(page.getByTestId("current-user")).toContainText("e2e-admin（管理者）");
   await page.close();
 });
 

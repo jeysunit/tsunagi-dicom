@@ -26,8 +26,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const state = await getAuthState();
 
   const local = state.kind === "active" || state.kind === "locked" ? state.session.local : undefined;
+  // 画面のロックの間は、上の帯に前の利用者の名前・ログアウトを出さない（ログアウトはロックの画面のもの）
   const user: HeaderUser | undefined =
-    local && (state.kind === "active" || state.kind === "locked")
+    local && state.kind === "active"
       ? {
           displayName: local.user.displayName,
           username: local.user.username,
