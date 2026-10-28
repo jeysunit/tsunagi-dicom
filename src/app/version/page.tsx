@@ -22,7 +22,7 @@ export default async function VersionPage() {
         {info.commit && (
           <>
             <dt className="text-xs leading-5 text-label">ビルド</dt>
-            <dd className="break-all font-mono font-bold text-value" data-testid="build-commit">
+            <dd className="break-all font-mono text-[13px] font-bold leading-5 text-value" data-testid="build-commit">
               {info.commit}
             </dd>
           </>
