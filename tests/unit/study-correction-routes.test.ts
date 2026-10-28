@@ -323,6 +323,25 @@ describe("属性の訂正（患者情報修正）", () => {
     expect((await instancesOf(STUDY)).every((i) => i.PatientID === "JP-TEST-0002" && i.PatientName === "Shiken^Hanako=試験^花子=しけん^はなこ")).toBe(true);
   });
 
+  it("実行の道でも、確かめた値と違う氏名を添えた付け替えは、書き換えずに 409 で断る。応答と監査の行に付け替え先の値を入れない", async () => {
+    // 正しい確かめの token を取ってから、氏名を替えて実行する（confirm_invalid で先に断られず、target_mismatch の道に届く）
+    const token = await tokenOf("attribute", { PatientID: "JP-TEST-0002" });
+    expect(token).not.toBe("m1.none.none.none");
+    const before = await instancesOf(STUDY);
+    const spy = vi.spyOn(await backend(), "modifyStudyKeepingUids");
+    const requestId = crypto.randomUUID();
+    const res = await modify({ requestId, kind: "attribute", values: { PatientID: "JP-TEST-0002", PatientName: "Yamada^Taro" }, confirmToken: token });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await instancesOf(STUDY)).toEqual(before);
+    const rows = await rowsOf(requestId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: "denied", studyInstanceUid: STUDY });
+    expect(detailOf(rows[0])).toMatchObject({ reason: "target_mismatch" });
+    expect(rows[0]!.detail).not.toMatch(/Shiken|試験|しけん|1995/);
+  });
+
   it("確かめの画面を開いた後に検査が変わったら（HL7 の更新など）、書き換えずに 409", async () => {
     const p = await (await preview("attribute", { PatientSex: "F" })).json();
     // 確かめの後に、HL7 の A08 と同じ書き換えで氏名が変わった形
@@ -676,7 +695,25 @@ describe("属性の訂正（患者情報修正）", () => {
 });
 
 describe("修正の窓に最初に入れる、いまの値（GET …/modify/preview）", () => {
-  it("Orthanc から読んだいまの値を返し、患者の値を見せたことを記録する。役割の無い・形の違う検査の ID は断る", async () => {
+  it("study.modify の無い役割には 403 を返し、いまの値を返さず、断ったことを記録する", async () => {
+    const { ROLE_PERMISSIONS } = await import("@/lib/auth/roles");
+    const { GET } = await import("@/app/api/studies/[uid]/modify/preview/route");
+    const original = ROLE_PERMISSIONS.general;
+    ROLE_PERMISSIONS.general = original.filter((p) => p !== "study.modify");
+    try {
+      state.role = "general";
+      const res = await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/modify/preview`), uidParams(STUDY));
+      expect(res.status).toBe(403);
+      expect(JSON.stringify(await res.json())).not.toMatch(/JP-TEST-0001|Yamada/);
+      const row = await (await db()).auditLog.findFirst({ where: { action: "modify", outcome: "denied" }, orderBy: { seq: "desc" } });
+      expect(row).toMatchObject({ studyInstanceUid: STUDY });
+      expect(detailOf(row)).toMatchObject({ via: "current", reason: "forbidden", permission: "study.modify" });
+    } finally {
+      ROLE_PERMISSIONS.general = original;
+    }
+  });
+
+  it("Orthanc から読んだいまの値を返し、患者の値を見せたことを記録する。形の違う検査の ID は 400 で断る", async () => {
     const { GET } = await import("@/app/api/studies/[uid]/modify/preview/route");
     const res = await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/modify/preview`), uidParams(STUDY));
     expect(res.status).toBe(200);
