@@ -84,6 +84,10 @@ export async function POST(request: Request, { params }: Context) {
         if (e.reason === "ambiguous") {
           await audit(session, { action: "view_study", studyInstanceUid: uid, detail: { via: "modify_preview_candidates" } });
         }
+        // 付け替え先の患者と値が違う断りも、実行の段の断りと同じく残す。患者の値（入力も付け替え先も）は入れない
+        if (e.reason === "target_mismatch") {
+          await audit(session, { action: "modify", outcome: "denied", studyInstanceUid: uid, detail: { reason: e.reason, via: "preview" } });
+        }
         return Response.json({ error: e.message, ...e.extra }, { status: e.status });
       }
       throw e;

@@ -342,6 +342,19 @@ describe("属性の訂正（患者情報修正）", () => {
     expect(rows[0]!.detail).not.toMatch(/Shiken|試験|しけん|1995/);
   });
 
+  it("確かめの段で、替え先の患者と値が違って断ったときも、監査に1行残す。応答は変えず、行に患者の値を入れない", async () => {
+    const modifyRows = async () => (await db()).auditLog.findMany({ where: { action: "modify" }, orderBy: { seq: "asc" } });
+    const before = (await modifyRows()).length;
+    const res = await preview("attribute", { PatientID: "JP-TEST-0002", PatientName: "Yamada^Taro" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います" });
+    const added = (await modifyRows()).slice(before);
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({ outcome: "denied", studyInstanceUid: STUDY, patientId: null });
+    expect(detailOf(added[0])).toEqual({ reason: "target_mismatch", via: "preview" });
+    expect(added[0]!.detail).not.toMatch(/Shiken|試験|しけん|1995|Yamada|JP-TEST-0002/);
+  });
+
   it("確かめの画面を開いた後に検査が変わったら（HL7 の更新など）、書き換えずに 409", async () => {
     const p = await (await preview("attribute", { PatientSex: "F" })).json();
     // 確かめの後に、HL7 の A08 と同じ書き換えで氏名が変わった形
