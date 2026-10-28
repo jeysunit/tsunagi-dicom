@@ -12,24 +12,20 @@ export default async function VersionPage() {
   return (
     <section className="max-w-[var(--w-settings)] space-y-6">
       <PageHeader title="バージョン情報" />
-      <dl className="space-y-2" data-testid="version-info">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <dt className="text-label">アプリ</dt>
-          <dd className="font-bold text-value">tsunagi-dicom</dd>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <dt className="text-label">バージョン</dt>
-          <dd className="font-bold text-value" data-testid="app-version">
-            {info.version}
-          </dd>
-        </div>
+      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1" data-testid="version-info">
+        <dt className="text-xs leading-5 text-label">アプリ</dt>
+        <dd className="font-bold text-value">tsunagi-dicom</dd>
+        <dt className="text-xs leading-5 text-label">バージョン</dt>
+        <dd className="font-bold text-value" data-testid="app-version">
+          {info.version}
+        </dd>
         {info.commit && (
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-            <dt className="text-label">ビルド</dt>
-            <dd className="font-mono font-bold text-value" data-testid="build-commit">
+          <>
+            <dt className="text-xs leading-5 text-label">ビルド</dt>
+            <dd className="break-all font-mono font-bold text-value" data-testid="build-commit">
               {info.commit}
             </dd>
-          </div>
+          </>
         )}
       </dl>
     </section>

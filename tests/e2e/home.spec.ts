@@ -117,6 +117,11 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     const info = page.getByTestId("version-info");
     await expect(info).toContainText("tsunagi-dicom");
     await expect(info.getByTestId("app-version")).toHaveText(/^\d+\.\d+\.\d+/);
+    // 項目名と値の一覧（kv）：項目名の列は狭く左、値はそのすぐ右に左寄せ
+    await expect(info).toHaveCSS("display", "grid");
+    const label = await info.locator("dt").first().boundingBox();
+    const value = await info.locator("dd").first().boundingBox();
+    expect(value!.x - (label!.x + label!.width)).toBeLessThan(40);
     await expect(info.getByTestId("build-commit")).toHaveCount(0);
   });
 
