@@ -2,12 +2,13 @@
 
 import { Lock, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ReauthForm } from "@/components/ui/reauth-form";
 import { LOCK_COOKIE, type LockCookieReason } from "@/lib/auth/lock-cookie";
 import { errorText, postJson } from "@/lib/client/post-json";
+import { setScreenLocked } from "@/lib/client/screen-lock-store";
 import { cn } from "@/lib/utils";
 
 // 画面のロック（第7.0版 12 遵守事項⑥）。操作の無い時間が SCREEN_LOCK_MINUTES 続いたら、画面をぼかしてロックする。
@@ -318,6 +319,13 @@ export function LockGuard({
       channel.current = null;
     };
   }, [csrfToken, minutes, initiallyLocked, lockNow, confirmLock, onServerLocked, setPending, router]);
+
+  // 上の帯（LockGuard の外）にも、ロックの状態を伝える（利用者の名前・ログアウトを外す）。
+  // ロックの画面と同じフレームで外すので、描画の前に走る useLayoutEffect を使う
+  useLayoutEffect(() => {
+    setScreenLocked(locked);
+    return () => setScreenLocked(false);
+  }, [locked]);
 
   async function onUnlock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
