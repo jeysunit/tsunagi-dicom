@@ -18,21 +18,33 @@ describe("左のナビの項目", () => {
     expect(labels(groups)).toEqual([
       ["業務", ["検査一覧", "受信一覧", "送信一覧"]],
       ["接続", ["接続先"]],
-      ["管理", ["ビューア設定", "ユーザー管理", "個人設定"]],
+      ["管理", ["ビューア設定", "ユーザー管理", "個人設定", "バージョン情報"]],
     ]);
+  });
+
+  it("バージョン情報は、役割に関わらず管理の群の最後に出る", () => {
+    const groups = buildNavGroups({ canManageUsers: false, canEditViewerDefaults: false, account: false });
+    expect(labels(groups)).toEqual([
+      ["業務", ["検査一覧"]],
+      ["管理", ["バージョン情報"]],
+    ]);
+    expect(groups[1]!.items.at(-1)).toMatchObject({ href: "/version", icon: "version" });
   });
 
   it("一般：許された頁だけを出し、項目の無い群は出さない", () => {
     const groups = buildNavGroups({ canManageUsers: false, canEditViewerDefaults: false, account: false });
-    expect(labels(groups)).toEqual([["業務", ["検査一覧"]]]);
+    expect(labels(groups)).toEqual([
+      ["業務", ["検査一覧"]],
+      ["管理", ["バージョン情報"]],
+    ]);
     const withAccount = buildNavGroups({ canManageUsers: false, canEditViewerDefaults: false, account: true, canViewReceived: true });
     expect(labels(withAccount)).toEqual([
       ["業務", ["検査一覧", "受信一覧"]],
-      ["管理", ["個人設定"]],
+      ["管理", ["個人設定", "バージョン情報"]],
     ]);
     // 送信一覧は、send.view の役割にだけ出す（受信一覧の下）
     const withSent = buildNavGroups({ canManageUsers: false, canEditViewerDefaults: false, account: false, canViewReceived: true, canViewSent: true });
-    expect(labels(withSent)).toEqual([["業務", ["検査一覧", "受信一覧", "送信一覧"]]]);
+    expect(labels(withSent)[0]).toEqual(["業務", ["検査一覧", "受信一覧", "送信一覧"]]);
     expect(withSent[0]!.items.at(-1)).toMatchObject({ href: "/sent", icon: "sent" });
   });
 

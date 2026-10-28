@@ -29,7 +29,7 @@
 ```html
 <header class="topbar">
   <button type="button" class="iconbtn" data-act="nav" aria-expanded="true" aria-label="ナビを開閉する">…</button>
-  <span class="brand">tsunagi-dicom</span><span class="ver">0.9.0</span>
+  <span class="brand">tsunagi-dicom</span>
   <span class="sp"></span>
   <div class="qs">…直接の検索（tsunagi だけ）…</div>
   <span class="connwrap">

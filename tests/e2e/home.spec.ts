@@ -60,11 +60,13 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   });
 
-  test("上の帯：製品名の横に版、接続の状態の札と標準の popover、見出しの h1", async ({ page }) => {
+  test("上の帯：題はアプリの名前だけ（版は出さない）、接続の状態の札と標準の popover、見出しの h1", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("検査一覧");
     const header = page.getByTestId("site-header");
-    await expect(header.getByTestId("app-version")).toHaveText(/^\d+\.\d+\.\d+/);
+    await expect(header.getByRole("link", { name: "tsunagi-dicom", exact: true })).toBeVisible();
+    await expect(header.getByTestId("app-version")).toHaveCount(0);
+    await expect(header).not.toContainText(/\d+\.\d+\.\d+/);
     const button = header.getByRole("button", { name: "接続の状態を開く" });
     // 札は全体の状態 1 つ（接続中・一部が接続不可）。ほかの試験で接続確認が失敗していれば後者になる
     await expect(button).toContainText(/接続中|一部が接続不可/);
@@ -104,6 +106,23 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await pop.getByRole("link", { name: "接続先を開く" }).click();
     await expect(page).toHaveURL(/\/modalities$/);
     await expect(pop).toBeHidden();
+  });
+
+  test("バージョン情報：左のナビの管理の群から開き、アプリの名前と版を出す（ビルドの commit は渡されたときだけ）", async ({ page }) => {
+    await page.goto("/");
+    const nav = page.getByTestId("site-nav");
+    await nav.getByRole("link", { name: "バージョン情報" }).click();
+    await expect(page).toHaveURL(/\/version$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("バージョン情報");
+    const info = page.getByTestId("version-info");
+    await expect(info).toContainText("tsunagi-dicom");
+    await expect(info.getByTestId("app-version")).toHaveText(/^\d+\.\d+\.\d+/);
+    // 項目名と値の一覧（kv）：項目名の列は狭く左、値はそのすぐ右に左寄せ
+    await expect(info).toHaveCSS("display", "grid");
+    const label = await info.locator("dt").first().boundingBox();
+    const value = await info.locator("dd").first().boundingBox();
+    expect(value!.x - (label!.x + label!.width)).toBeLessThan(40);
+    await expect(info.getByTestId("build-commit")).toHaveCount(0);
   });
 
   test("上の帯：接続の状態を読めないとき（401・通信の失敗）は、「一部が接続不可」と言わず「確認できません」", async ({ page }) => {

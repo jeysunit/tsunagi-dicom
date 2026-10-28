@@ -1,7 +1,7 @@
 // 左のナビの項目（docs/design-system/menu.md）。群は「業務」「接続」「管理」。項目の名前は docs/spec.md の 2.2 の用語集（頁の題と同じ語）。
 // 出す項目は、役割に許された頁だけ。1 つも出せない群は出さない。
 
-export type NavIcon = "studies" | "received" | "sent" | "modalities" | "viewers" | "users" | "account";
+export type NavIcon = "studies" | "received" | "sent" | "modalities" | "viewers" | "users" | "account" | "version";
 
 export interface NavItem {
   href: string;
@@ -46,6 +46,8 @@ export function buildNavGroups(nav: NavAccess): NavGroup[] {
         ...(nav.canEditViewerDefaults ? [{ href: "/admin/viewers", label: "ビューア設定", icon: "viewers" as const }] : []),
         ...(nav.canManageUsers ? [{ href: "/admin/users", label: "ユーザー管理", icon: "users" as const }] : []),
         ...(nav.account ? [{ href: "/account", label: "個人設定", icon: "account" as const }] : []),
+        // 版は読むだけで秘密を含まないので、役割では絞らない（ナビを出す利用者の全員に出す）
+        { href: "/version", label: "バージョン情報", icon: "version" },
       ],
     },
   ];
