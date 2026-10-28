@@ -29,6 +29,16 @@ describe("バージョン情報の頁", () => {
     expect(cell![0]).toContain("leading-5");
   });
 
+  it("版は、タグの上は X.Y.Z、タグより後はビルドの印つき、渡されなければ 0.0.0+unknown で出す", async () => {
+    const shown = async (v: string) => {
+      vi.stubEnv("APP_VERSION", v);
+      return (await render()).match(/data-testid="app-version"[^>]*>([^<]*)</)?.[1];
+    };
+    expect(await shown("0.2.0")).toBe("0.2.0");
+    expect(await shown("0.2.0+37.g60970f9")).toBe("0.2.0+37.g60970f9");
+    expect(await shown("")).toBe("0.0.0+unknown");
+  });
+
   it("BUILD_COMMIT を渡さなければ、ビルドの行を出さない", async () => {
     vi.stubEnv("BUILD_COMMIT", "");
     expect(await render()).not.toContain('data-testid="build-commit"');

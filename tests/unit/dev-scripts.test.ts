@@ -343,8 +343,9 @@ describe("refresh.sh", () => {
     const r = run("docker/dev/refresh.sh", { TSUNAGI_DEV_SECRETS_DIR: dir });
     expect(r.status).toBe(0);
     expect(r.calls).toContain(`git -C ${repo} merge --quiet --ff-only origin/main`);
-    const order = ["fetch", "build -t tsunagi-dev-tsunagi:local", "compose -f", " up -d --build"].map((n) => find(r.calls, n));
+    const order = ["fetch", "-t tsunagi-dev-tsunagi:local", "compose -f", " up -d --build"].map((n) => find(r.calls, n));
     expect(order.every((i) => i >= 0)).toBe(true);
+    expect(find(r.calls, "build --build-arg APP_VERSION=")).toBeGreaterThanOrEqual(0);
     expect(find(r.calls, "compose -f " + path.join(repo, "docker/dev/compose.yaml") + " -p tsunagi-dev build")).toBeLessThan(
       find(r.calls, " up -d --build"),
     );

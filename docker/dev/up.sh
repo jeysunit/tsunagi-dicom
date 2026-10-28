@@ -53,7 +53,7 @@ if [ -z "${TSUNAGI_IMAGE:-}" ]; then
   TSUNAGI_IMAGE="$project-tsunagi:local"
   export TSUNAGI_IMAGE
   echo "tsunagi-dicom のイメージを作る（$TSUNAGI_IMAGE）"
-  docker build -t "$TSUNAGI_IMAGE" "$root"
+  docker build --build-arg APP_VERSION="$(sh "$root/scripts/app-version.sh")" -t "$TSUNAGI_IMAGE" "$root"
 fi
 
 # tsunagi-dicom の管理者の DB（volume tsunagi-data）が、立てる前からあるか。あれば、最初の管理者のパスワードは使えないことがある

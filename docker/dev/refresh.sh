@@ -111,7 +111,7 @@ main() {
   # 先に作るだけにする。ここで失敗しても、動いているコンテナは止まらない
   stage=イメージの作成
   if [ "$TSUNAGI_IMAGE" = "$COMPOSE_PROJECT_NAME-tsunagi:local" ]; then
-    docker build -t "$TSUNAGI_IMAGE" "$root"
+    docker build --build-arg APP_VERSION="$(sh "$root/scripts/app-version.sh")" -t "$TSUNAGI_IMAGE" "$root"
   fi
   docker compose -f "$here/compose.yaml" -p "$COMPOSE_PROJECT_NAME" build
 
