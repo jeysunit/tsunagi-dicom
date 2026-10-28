@@ -120,6 +120,20 @@ const int = (fallback: number, min: number, max = Number.MAX_SAFE_INTEGER) =>
 
 const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で始まる URL にする" });
 
+/**
+ * ビューアの根の URL。検査を開く道（OHIF の `/viewer`・Stone の `/index.html`）は src/lib/viewers.ts が足すので、根に書いた値は断る
+ * （書くと `/ohif/viewer/viewer` を開いて 404 になる。docs/spec.md の 2.1 の表）
+ */
+const viewerRoot = (route: string) =>
+  httpUrl.refine(
+    (url) => {
+      // URL でない値は httpUrl が誤りにする。zod はその後もここを呼ぶので、読めない値はここでは通す
+      if (!URL.canParse(url)) return true;
+      return !new URL(url).pathname.replace(/\/+$/, "").endsWith(route);
+    },
+    { error: `ビューアの根の URL にする（末尾の ${route} は付けない。開く時に足す）` },
+  );
+
 const envSchema = z.object({
   // 省ける（orthanc だけ）。前の設定の dicomweb は、黙って Orthanc として動かさずに断る
   HL7_RECEIVER_TOKEN_FILE: z.string().optional(),
@@ -137,8 +151,8 @@ const envSchema = z.object({
   BACKEND_WRITE_PASSWORD_FILE: z.string().optional(),
   BACKEND_CA_FILE: z.string().optional(),
   BACKEND_MOCK: bool(false),
-  VIEWER_OHIF_URL: httpUrl.optional(),
-  VIEWER_STONE_URL: httpUrl.optional(),
+  VIEWER_OHIF_URL: viewerRoot("/viewer").optional(),
+  VIEWER_STONE_URL: viewerRoot("/index.html").optional(),
   VIEWER_VOLVIEW_URL: httpUrl.optional(),
   VIEWER_WEASIS_ENABLED: bool(false),
   PUBLIC_DICOMWEB_URL: httpUrl.optional(),

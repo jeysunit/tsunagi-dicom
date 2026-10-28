@@ -54,7 +54,7 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 
 | # | 試験 | 確かめること |
 |---|---|---|
-| 1 | 受信一覧 | storescu（`ITEST_SCU`）から送った検査が、受け取りの記録（`/api/receive-log`）に新しい順に出る。送り元の AE タイトル・`Origin`（`DicomProtocol`）・画像の数が合う。時刻が Orthanc の時計のとおりに出る |
+| 1 | 受信一覧 | storescu（`ITEST_SCU`）から送った検査が、受け取りの記録（`/api/receive-log`）に新しい順に出る。送り元の AE タイトル・`Origin`（`DicomProtocol`）・画像の数が合う。落ち着いた検査の状態は受信完了。時刻が Orthanc の時計のとおりに出る。期間は初期設定の今日で読み、昨日の期間には出ない（変更の記録を新しい側から遡り、期間の始まりで止まる） |
 | 2 | 接続先の一覧と接続確認 | 設定のファイルで登録した `itest-scp` が、名称・AEタイトル・ホスト名・ポート番号とともに出る。C-ECHO で「成功」（時刻つき） |
 | 3 | 検査の一覧・詳細 | QIDO-RS と REST の本物の答えで一覧と詳細が開く。氏名（`ISO_IR 192`。ローマ字・漢字・かな）が崩れない。中継は WADO-RS の metadata を通し、検索は通さない。Orthanc のパスワードが頁と API の答えに出ない |
 | 4 | 送信 | 画面から `itest-scp` へ送ると「送信完了」（送信先・画像の数・時刻つき）になり、storescp に同じ SOPInstanceUID の画像が同じ数だけ届く |
@@ -70,6 +70,9 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 | 14 | 画像ごとの主なタグと日本語の値（2026-10-23） | SpecificCharacterSet が `\ISO 2022 IR 87` の架空の患者の検査を送り、主なタグ（`…/instances/{sop}/tags`）が `INSTANCE_TAGS` の順に、設定のタグだけを返す。氏名（漢字・かな）と検査名が崩れない。画像に無いタグは null。画面でサムネイルから開いた表にも日本語の氏名が出る。転送構文（(0002,0010)）が metadata に入るかと、metadata の文字の集合の値を記録する。流すのは 13 より前（13 が検査を 1001 件足すと、一覧の上限を超えて画面で開けなくなることがあるため） |
 | 22 | 文字の集合の組み合わせ（2026-10-25） | 6 通りの SpecificCharacterSet（`\ISO 2022 IR 87`・`ISO 2022 IR 13\ISO 2022 IR 87`・`ISO 2022 IR 6\ISO 2022 IR 87`・`ISO_IR 13`・`\ISO 2022 IR 149`・`ISO 2022 IR 6\ISO 2022 IR 149`）の検査を送り、Orthanc の REST の値と検索（`tools/find`）、DCMTK の findscu（`find-study`）の C-FIND の答えを測る。**今の振る舞いを固める試験**で、Orthanc が最初の値が空でない組を読み崩すこと（`spec.md` の 7）を期待にする。Orthanc が直すと落ちる。C-FIND の答えは `ISO_IR 100` で、漢字・かな・ハングルが消えることも固める。流すのは 13 より前 |
 | 15 | HL7 の A40 | 仮の患者 ID の検査を BFF の `/api/hl7/messages` から更新する。AA が返り、Study・Series・SOP の UID は同じで、患者 ID が替わり、元の患者の検査が残らず、監査の received・request・dispatch・result・ack が残る。token は試験のたびに乱数で作る |
+| 22 | 患者情報修正（氏名。2026-10-25） | 管理者が再認証の後に、確かめの画面（`/api/studies/{uid}/modify/preview`）と実行（`/api/studies/{uid}/modify`）で氏名を直す。全画像の氏名が直り、Study・Series・SOP の UID と Orthanc の中の検査の ID は変わらない。監査の求めた・書き換えの request・dispatch・result・結果が要求の ID で結ばれる。Orthanc の `/system` の設定の値と、置き換えた画像の受信の記録のメタデータ・受信一覧での出方を記録する。前の試験（19・21）が残した部分反映を、先に `/api/hl7/resolve` で解く |
+| 23 | 患者情報修正（患者IDの付け替え。2026-10-25） | 選んだ検査が新しい患者ID へ移り、UID は変わらず、元の患者の検査が残らず、付け替えの印が外れている。結果の行に、HL7 の見回りの覚え（`origin: screen`）が残る |
+| 24 | 検査情報修正（検査日・検査名。2026-10-25） | BFF が決めた新しい StudyInstanceUID の検査ができ、全画像の検査日・検査名が直り、SeriesInstanceUID と SOPInstanceUID も新しい。元の検査は残る。監査の request・dispatch・result が残る |
 
 試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報とホスト名は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」に写す。
 

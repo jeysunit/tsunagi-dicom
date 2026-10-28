@@ -40,7 +40,7 @@
       <div class="ft"><button type="button" class="btn btn-sm">接続確認</button><a class="btn btn-sm" href="/modalities">接続先を開く</a></div>
     </div>
   </span>
-  <button type="button" class="iconbtn" data-act="theme" aria-label="明るい地と暗い地を切り替える">…sun…moon…</button>
+  <button type="button" class="iconbtn" data-act="theme" aria-label="表示をライトとダークで切り替える">…sun…moon…</button>
   <span class="div" aria-hidden="true"></span>
   <span class="who"><b>試験 管理者</b><span>admin（管理者）</span></span>
   <button type="button" class="btn btn-sm">画面ロック</button>
@@ -49,7 +49,7 @@
 ```
 
 - 高さ 48px、地 `surface`、下に 1px `border`、間 12px。並びは上のとおりで、無い項目は詰める（dicom-test-generator と ris-emulator は `who`・画面ロック・ログアウトが無く、右端が表示）。
-- 接続の状態：閉じているときの札は全体の状態 1 つ（`ok`「接続中」／`ng`「一部が接続不可」）。popover は**標準の `popover` 属性**で開く（外を押す・Esc で閉じる。自前の開け閉めを書かない）。中身は相手ごとの 種類・名前・札・時刻と、「接続確認」と接続先の画面への道。接続先の画面の表と同じ相手・同じ札。
+- 接続の状態：閉じているときの札は全体の状態 1 つ（`ok`「接続中」／`ng`「一部が接続不可」。状態そのものを読めなかったとき（401・423・通信の失敗）は、接続先が落ちているとは言えないので「確認できません」）。popover は**標準の `popover` 属性**で開く（外を押す・Esc で閉じる。自前の開け閉めを書かない）。中身は相手ごとの 種類・名前・札・時刻と、「接続確認」と接続先の画面への道。接続先の画面の表と同じ相手・同じ札。幅が 640px に満たない画面では、上の帯が横にはみ出さないよう、札の前の「接続の状態」の文字を省く（ボタンの名前は `aria-label` が持つ）。
 - ris-emulator の MWL の待ち受けは popover の中に「待ち受け MWL（RIS_EMU）`listen`「待ち受け中」」。帯に住所や緑の塗りの札を出さない。tsunagi の「バックエンド：モック」も popover へ。
 - 表示：絵の押しボタン 1 つ。押すたびに `html[data-theme]` を `light`・`dark` で替え、覚える（tsunagi はサーバーの利用者の設定、ris-emulator と dicom-test-generator は `localStorage`）。
 - 状態：押せる物は hover で `hover` の地、押している間 `pressed`、フォーカスは 2px の `ring`。
@@ -196,7 +196,7 @@
 
 ## 検査の情報（`.finfo`）と UID の行（`.uidrow`）
 
-- `.finfo`：3 列×2 行（行 40px）に 英字氏名・生年月日（和暦）・紹介医・Study ID・シリーズ数と画像数。無い値は「—」。並びは 患者バナー → `.finfo` → Study UID の `.uidrow` → 操作の行（`.ops`）。
+- `.finfo`：3 列×2 行（行 40px）に 英字氏名・生年月日（和暦）・紹介医・Study ID・シリーズ数と画像数。2 列目（和暦つきの生年月日）は中身の幅、残りを 1 列目と 3 列目で分ける（折り返して行が 40px を超えない）。無い値は「—」。並びは 患者バナー → `.finfo` → Study UID の `.uidrow` → 操作の行（`.ops`）。
 - `.uidrow`：`<div class="uidrow"><span class="l">Study UID</span><span class="uid">…</span><button class="btn btn-ghost btn-sm">コピー</button></div>`。SOP Instance UID は表の上に置かず、タグの表の 1 行目に (0008,0018) を固定し、その行にコピーを置く。dicom-test-generator の送信ジョブの詳細にも Study UID の行を足す（受け手で探す鍵）。
 
 ## 一覧＋右に区画・一覧＋右に詳細の幅
@@ -225,6 +225,6 @@
 ```
 
 - 知らせ：左 4px の状態の色（`ok`・`warn`・`err`・`info`）・印・文。画面の上の誤りだけ `role="alert"`、ほかは `role="status"`。結果の文には 患者（氏名と ID）・相手・枚数を入れる。`.error`・`.notice-error` は使わず、これに揃える。
-- 空の状態：表の枠と見出しの行を残し、その下に `.empty`（1 行目 事実・2 行目 次の手・操作 1 つまで）。`.empty-box` と `.empty` を混ぜない。権限の無い頁は `.empty.denied`：「この画面は管理者だけが開けます。」／「管理者に役割の変更を頼んでください。」／「検査一覧へ」。黙って別の頁へ移さない。
+- 空の状態：表の枠と見出しの行を残し、その下に `.empty`（1 行目 事実・2 行目 次の手・操作 1 つまで）。`.empty-box` と `.empty` を混ぜない。権限の無い頁は `.empty.denied`：「この画面は管理者のみ利用できます。」／「管理者に役割の変更を頼んでください。」／「検査一覧へ」。黙って別の頁へ移さない。
 - 確認の窓：**標準の `dialog`**（`showModal()`）。題は「対象＋動詞」の疑問、本文は 何が・どうなる・戻せるか（ris-emulator は送る HL7 の種類も）。キャンセルを左・初期のフォーカス、実行を右。ris-emulator の照合・完了・取消・中止に入れる。
 - 確かめの使い分け：理由や再認証を書かせる確かめは区画の中の欄（開いたらその欄へスクロールとフォーカス）。理由の要らない最後の 1 回は確認の窓。権限・役割の変更は必ず確認の窓。

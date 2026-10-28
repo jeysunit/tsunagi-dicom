@@ -1,12 +1,16 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronRight, ChevronsUpDown, Inbox, RefreshCw, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Inbox, RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
+import { ModalityMark } from "@/components/ui/modality-mark";
+import { CellMain, isRowControl, PINNED_CELL, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
+import { Notice } from "@/components/ui/notice";
+import { Select } from "@/components/ui/select";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { StudyDetailPanel } from "@/components/studies/study-detail";
 import { openInViewer, ViewerMenu } from "@/components/studies/viewer-menu";
@@ -24,7 +28,7 @@ import {
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
-import { DETAIL_GROUPS, LIST_GROUPS, modalityGroupOf, toggleGroup, type ModalityGroup } from "@/lib/modalities";
+import { DETAIL_GROUPS, LIST_GROUPS, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
   DATE_LABELS,
@@ -58,9 +62,12 @@ export interface StudyListData {
 const DETAIL_DELAY_MS = 300;
 /** 削除が終わったことの知らせを出しておく時間（ミリ秒。docs/spec.md の 3.5） */
 const NOTICE_MS = 10_000;
+/** 一覧の中でキーを押した後、自動更新の行の差し込みを待つ時間（ミリ秒。docs/spec.md の 3.1） */
+const KEY_HOLD_MS = 3_000;
 
 const listKey =(filter: StudyFilter) => ["studies", filterToSearchParams(filter).toString()] as const;
 
+/** 絞り込みの見出しのモダリティの色の線（一覧の印 `.mod` と同じ左の線の形。丸の点は使わない） */
 const MODALITY_COLOR: Record<ModalityGroup, string> = {
   CT: "bg-mod-ct",
   MR: "bg-mod-mr",
@@ -72,16 +79,6 @@ const MODALITY_COLOR: Record<ModalityGroup, string> = {
   SR: "bg-mod-sr",
 };
 
-function ModalityTag({ modality }: { modality: string }) {
-  const group = modalityGroupOf(modality);
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap">
-      <span aria-hidden className={cn("inline-block size-2 rounded-full", group ? MODALITY_COLOR[group] : "bg-label")} />
-      {modality}
-    </span>
-  );
-}
-
 /** 見出しの名前に件数を添える（`CT (6)`）。件数が無い（許可されていない項目）ときは名前だけ */
 const withCount = (label: string, n: number | undefined, atLeast = false) =>
   n === undefined ? label : `${label} (${n}${atLeast ? " 以上" : ""})`;
@@ -90,7 +87,7 @@ const withCount = (label: string, n: number | undefined, atLeast = false) =>
 function Segmented({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     // 見える名前は付けない（幅のため）。読み上げにはグループの名前、マウスには title で知らせる
-    <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label={label} title={label}>
+    <div className="inline-flex overflow-hidden rounded-md border border-border-input" role="group" aria-label={label} title={label}>
       {children}
     </div>
   );
@@ -195,7 +192,7 @@ function FilterBar({
       testId={`modality-${m}`}
       dim={isZero(facets?.modality?.[m])}
     >
-      <span aria-hidden className={cn("mr-1 inline-block size-2 rounded-full", MODALITY_COLOR[m])} />
+      <span aria-hidden className={cn("mr-1 inline-block h-3.5 w-1", MODALITY_COLOR[m])} />
       {withCount(m, facets?.modality?.[m], facets?.atLeast?.list)}
     </Chip>
   );
@@ -259,7 +256,7 @@ function FilterBar({
           data-testid="filter-more"
           onClick={() => setMore((v) => !v)}
           className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-sm text-foreground shadow-xs hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "inline-flex h-7 items-center gap-1 rounded-md border border-border-input bg-background px-2 text-sm text-foreground shadow-xs hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             pressFeedback,
           )}
         >
@@ -298,7 +295,7 @@ function FilterBar({
         >
           <span className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-label">検査日</span>
-          <div className="inline-flex overflow-hidden rounded-md border border-border">
+          <div className="inline-flex overflow-hidden rounded-md border border-border-input">
             <Chip pressed={filter.date === "range"} onClick={() => onChange({ ...filter, date: "range" })} testId="date-range">
               {DATE_LABELS.range}
             </Chip>
@@ -339,10 +336,10 @@ function FilterBar({
           </span>
           <label className="flex items-center gap-1.5">
             <span className="shrink-0 text-xs text-label">性別</span>
-            <select
+            <Select
+              size="sm"
               value={filter.sex ?? ""}
               onChange={(e) => onChange({ ...filter, sex: (PATIENT_SEX as readonly string[]).includes(e.target.value) ? (e.target.value as PatientSex) : undefined })}
-              className="h-7 rounded-md border border-border bg-background px-2 text-sm text-value"
               data-testid="filter-sex"
             >
               <option value="">すべて</option>
@@ -351,7 +348,7 @@ function FilterBar({
                   {sexLabel(s)}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           {/* 一覧の上のモダリティの見出しに無い群（文書・レポート）。上の見出しと同じ選びに足される */}
           <span className="flex items-center gap-1.5">
@@ -391,7 +388,9 @@ const CELL_PAD = 18;
 /** モダリティ・検査の記述の列の最小の幅。一覧がこれより狭いときは、一覧の中で横にスクロールする */
 const DESC_MIN = 160;
 /** 詰めた形（詳細を開いている間）の、同じ列の最小の幅 */
-const DESC_MIN_COMPACT = 80;
+const DESC_MIN_COMPACT = 64;
+/** 詰めた形の日時の列（12px の「2026/10/25」が切れない幅） */
+const COMPACT_DATE = 84;
 
 /**
  * 一覧の列（px。docs/spec.md の 3.1）。患者 ID・生年月日・年齢・性別は切らない（患者 ID の列は、出している行のいちばん長い値に合わせる）。
@@ -423,7 +422,15 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
   // 年齢と性別は短い値なので 1 列にまとめる（一覧が 570px ほどでも、横にスクロールせずに収める）
   if (!compact) return all;
   const keep = (key: string) => all.filter((c) => c.key === key);
-  return [...keep("date"), ...keep("id"), ...keep("name"), { key: "agesex", width: 88 }, ...keep("desc")];
+  // 詰めた形の日時は 2 行（日付／時刻。12px の 2 行を 28px の行に収める）にして切らない（docs/design-system/parts.md の「一覧＋右に詳細の幅」）
+  // 既定の位置（一覧 45%）の 1280px の画面で、横にスクロールせずに収まる幅にする（氏名は詰めた形だけ下限を 88px に）
+  return [
+    { key: "date", width: COMPACT_DATE },
+    ...keep("id"),
+    { key: "name", width: fit((s) => s.patientName, 88, 200) },
+    { key: "agesex", width: 72 },
+    ...keep("desc"),
+  ];
 }
 
 /**
@@ -484,27 +491,16 @@ function SortTh({
   className?: string;
   title?: string;
 }) {
-  const active = sort.key === sortKey;
-  const Icon = !active ? ChevronsUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th
-      className={cn("px-2 py-1 font-normal", CUT, className)}
+    <SortableHead
+      className={className}
       title={title}
-      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+      sort={sort.key === sortKey ? sort.dir : undefined}
+      onSort={() => onSort(sortKey)}
+      buttonTestId={`sort-${sortKey}`}
     >
-      <button
-        type="button"
-        data-testid={`sort-${sortKey}`}
-        onClick={() => onSort(sortKey)}
-        className={cn(
-          "inline-flex max-w-full items-center gap-0.5 rounded-sm hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          active && "font-bold text-value",
-        )}
-      >
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{children}</span>
-        <Icon aria-hidden className={cn("size-3.5 shrink-0", !active && "opacity-50")} />
-      </button>
-    </th>
+      {children}
+    </SortableHead>
   );
 }
 
@@ -549,30 +545,35 @@ function StudyRows({
   const scrollRef = useRef<HTMLDivElement>(null);
   const onScroll = useScrollAnchor(scrollRef, studies, listKey);
   return (
-    <div
-      ref={scrollRef}
-      onScroll={onScroll}
+    <Table
+      wrapperRef={scrollRef}
+      onWrapperScroll={onScroll}
+      label="検査の一覧"
       // 行の位置は useScrollAnchor が保つ（ブラウザのスクロールの寄せと二重に動かさない）。
       // @container：0 件の案内を、横にスクロールする表の幅ではなく、見えている一覧の幅の中に置くため（100cqw）
-      className="@container min-h-0 flex-1 overflow-auto [overflow-anchor:none] rounded-md border border-border md:min-h-56"
-      data-testid="study-list-scroll"
-    >
-      {/* 取り直しの待ちの細い帯は、一覧の上の縁に重ねる（場所を取らない。画面は覆わない） */}
-      {dim && (
-        <div className="sticky top-0 z-20 h-0">
-          <div className="absolute inset-x-0 top-0">
-            <ProgressBar />
+      wrapperClassName="@container min-h-0 flex-1 [overflow-anchor:none] rounded-md border border-border focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring md:min-h-56"
+      wrapperTestId="study-list-scroll"
+      // 取り直しの待ちの細い帯は、一覧の上の縁に重ねる（場所を取らない。画面は覆わない）
+      overlay={
+        dim && (
+          <div className="sticky top-0 z-20 h-0">
+            <div className="absolute inset-x-0 top-0">
+              <ProgressBar />
+            </div>
           </div>
-        </div>
-      )}
-      <table className="w-full table-fixed border-collapse" style={{ minWidth }} data-testid="study-table">
+        )
+      }
+      className="table-fixed"
+      style={{ minWidth }}
+      data-testid="study-table"
+    >
         <colgroup>
           {columns.map((c) => (
             <col key={c.key} data-col={c.key} style={c.width ? { width: c.width } : undefined} />
           ))}
         </colgroup>
-        <thead className="sticky top-0 z-10 bg-surface text-left text-xs text-label shadow-[0_1px_0_var(--color-border)]">
-          <tr className="border-b border-border">
+        <TableHeader>
+          <tr className="h-7 border-b border-border">
             <SortTh sortKey="date" sort={sort} onSort={onSort}>
               検査日時
             </SortTh>
@@ -607,22 +608,23 @@ function StudyRows({
                 性別
               </SortTh>
             )}
-            {has("agesex") && <th className={cn("px-2 py-1 font-normal", CUT)}>年齢・性別</th>}
-            <SortTh sortKey="desc" sort={sort} onSort={onSort}>
+            {has("agesex") && <TableHead>年齢・性別</TableHead>}
+            {/* 詰めた形では見出しが `…` で切れるので、全文を title に置く */}
+            <SortTh sortKey="desc" sort={sort} onSort={onSort} title="モダリティ／検査名">
               モダリティ／検査名
             </SortTh>
             {has("count") && (
-              <th className={cn("px-2 py-1 text-right font-normal", CUT)} title="シリーズ数／画像数">
+              <TableHead num title="シリーズ数／画像数">
                 Se/Im
-              </th>
+              </TableHead>
             )}
             {has("viewer") && (
-              <th className="px-2 py-1 font-normal">
+              <TableHead pinned>
                 <span className="sr-only">ビューア</span>
-              </th>
+              </TableHead>
             )}
           </tr>
-        </thead>
+        </TableHeader>
         <tbody className={cn("transition-opacity", dim && "opacity-60")} data-dim={dim || undefined}>
           {studies.length === 0 && empty && (
             <tr>
@@ -639,35 +641,23 @@ function StudyRows({
             const birthTitle = formatBirthWareki(s.patientBirthDate);
             const desc = [s.modalities?.join("・"), s.studyDescription].filter(Boolean).join(" ");
             return (
-              <tr
+              <TableRow
                   key={uid || `row-${i}`}
                   data-study-uid={uid}
-                  aria-selected={isOpen}
+                  // 矢印で動く（ローヴィングの tabindex）。選んだ行は地 selected-strong と左 3px の primary で、太字にしない（ui/table）
                   tabIndex={uid === tabStop ? 0 : -1}
-                  // 選んだ行は主の色の薄い地と左の縦線（3px）。hover の地（muted）はそれより薄く、選んだ行には当てない（docs/spec.md の 3.1）
-                  data-selected={isOpen || undefined}
-                  className={cn(
-                    "h-7 cursor-pointer border-b border-border align-middle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-                    isOpen ? "bg-selected font-bold [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-ring)]" : "hover:bg-muted",
-                  )}
-                  onClick={(e) => {
-                    // ビューアの部品の中の操作は、選ぶ操作にしない。行を選んでも一覧の行は動かない（詳細は下の場所に出る）
-                    if ((e.target as HTMLElement).closest("[data-row-control]")) return;
-                    onSelect(uid, "click");
-                  }}
+                  selected={isOpen}
+                  // 行を押す・Space で選ぶ。行の中のビューアの部品の操作は、選ぶ操作にしない。行を選んでも一覧の行は動かない
+                  onSelect={() => onSelect(uid, "click")}
+                  // Enter は既定のビューアで開く（docs/spec.md の 3.1）
+                  onOpen={() => openInViewer(uid, s.defaultViewer)}
                   onDoubleClick={(e) => {
-                    if ((e.target as HTMLElement).closest("[data-row-control]")) return;
+                    if (isRowControl(e.target, e.currentTarget)) return;
                     openInViewer(uid, s.defaultViewer);
                   }}
                   onKeyDown={(e) => {
                     if (e.target !== e.currentTarget) return;
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      openInViewer(uid, s.defaultViewer);
-                    } else if (e.key === " ") {
-                      e.preventDefault();
-                      onSelect(uid, "click");
-                    } else if (e.key === "Escape") {
+                    if (e.key === "Escape") {
                       onSelect(null, "click");
                     } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                       e.preventDefault();
@@ -680,10 +670,18 @@ function StudyRows({
                     }
                   }}
                 >
-                  <td className={cn(CELL, CUT)} title={dateTime}>
-                    {formatSlashDate(s.studyDate)}
-                    <span className="ml-1.5 text-label">{formatDicomTime(s.studyTime)}</span>
-                  </td>
+                  {compact ? (
+                    // 詰めた形は 2 行（日付／時刻）にして切らない。12px の 2 行で 28px の行に収める（行の高さを変えない）
+                    <TableCell className="text-xs leading-3.5 whitespace-nowrap tabular-nums" title={dateTime} data-testid="study-datetime">
+                      <span className="block">{formatSlashDate(s.studyDate)}</span>
+                      <span className="block text-label">{formatDicomTime(s.studyTime)}</span>
+                    </TableCell>
+                  ) : (
+                    <TableCell className={cn(CUT, "tabular-nums")} title={dateTime} data-testid="study-datetime">
+                      {formatSlashDate(s.studyDate)}
+                      <span className="ml-1.5 text-label">{formatDicomTime(s.studyTime)}</span>
+                    </TableCell>
+                  )}
                   <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
                     {s.patientId}
                   </td>
@@ -694,9 +692,7 @@ function StudyRows({
                   )}
                   <td className={cn(CELL, CUT)} title={s.patientName}>
                     {s.patientName ? (
-                      <span className="font-bold text-value" data-testid="patient-name">
-                        {s.patientName}
-                      </span>
+                      <CellMain data-testid="patient-name">{s.patientName}</CellMain>
                     ) : (
                       <span className="text-label">（氏名未登録）</span>
                     )}
@@ -727,20 +723,21 @@ function StudyRows({
                     </td>
                   )}
                   <td className={cn(CELL, CUT)} title={desc}>
-                    <span className="mr-2 inline-flex gap-2 align-middle">
-                      {s.modalities?.map((m) => <ModalityTag key={m} modality={m} />)}
+                    <span className="mr-2 inline-flex gap-1 align-middle">
+                      {s.modalities?.map((m) => <ModalityMark key={m} modality={m} />)}
                     </span>
                     {s.studyDescription && <span className="text-label">{s.studyDescription}</span>}
                   </td>
                   {has("count") && (
-                    <td className={cn(CELL, CUT, "text-right")}>
+                    <td className={cn(CELL, CUT, "num text-right tabular-nums")}>
                       {s.seriesCount ?? "—"}
                       <span className="text-label"> / </span>
                       {s.instanceCount ?? "—"}
                     </td>
                   )}
                   {has("viewer") && (
-                    <td className={cn(CELL, "text-right")}>
+                    // 操作の列は右端に固定する（一覧が横にスクロールしても「開く」を見切らない。PINNED_CELL）
+                    <td className={cn(CELL, PINNED_CELL, "text-right")} data-testid="study-actions">
                       {uid && (
                         <ViewerMenu
                           compact
@@ -754,12 +751,11 @@ function StudyRows({
                       )}
                     </td>
                   )}
-                </tr>
+                </TableRow>
             );
           })}
         </tbody>
-      </table>
-    </div>
+    </Table>
   );
 }
 
@@ -768,9 +764,16 @@ function StudyRows({
  * 版が変わったときだけ一覧を読み直す（変わらなければ検査の検索をしない）。選んだ行・スクロール・開いている詳細はそのまま
  * （詳細は読み直さない。「詳細を開いた」の記録を増やさない）。この読み直しの間は待ちの印を出さない（quiet）。
  * タブを隠している間は読まず、戻ったらすぐ読む。seconds が 0 なら何もしない。
- * 読み直しの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）
+ * 読み直しの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）。
+ * hooks.tick は版を読むたび（読み直しの前）に、hooks.beforeAuto は一覧を読み直す直前に、hooks.afterAuto は答えが届いた後
+ * （読めなかったときも）に呼ぶ（行の差し込みを待つかを決める。Browser）
  */
-function useListRefresh(seconds: number, initialVersion: string | undefined, autoRef: React.RefObject<boolean>) {
+function useListRefresh(
+  seconds: number,
+  initialVersion: string | undefined,
+  autoRef: React.RefObject<boolean>,
+  hooks: React.RefObject<{ tick: () => void; beforeAuto: () => void; afterAuto: () => void }>,
+) {
   const queryClient = useQueryClient();
   const [quiet, setQuiet] = useState(false);
   // 基準の版。サーバーが一覧を取る前に読んだ版。無ければ、最初に読んだ版を基準にする
@@ -779,11 +782,13 @@ function useListRefresh(seconds: number, initialVersion: string | undefined, aut
     queryKey: ["studies-version"],
     queryFn: async ({ signal }) => {
       const { version: next } = await getJson<{ version: string }>("/api/studies/version", signal);
+      hooks.current.tick();
       if (base.current === undefined || base.current === next) {
         base.current = next;
         return next;
       }
       setQuiet(true);
+      hooks.current.beforeAuto();
       autoRef.current = true;
       try {
         // 開いていない絞り込みの一覧は古い印だけを付け、いま出している一覧を読み直す
@@ -798,6 +803,7 @@ function useListRefresh(seconds: number, initialVersion: string | undefined, aut
       } finally {
         autoRef.current = false;
         setQuiet(false);
+        hooks.current.afterAuto();
       }
       return next;
     },
@@ -856,7 +862,7 @@ function Browser({
   }, []);
 
   const box = useRef<HTMLElement>(null);
-  // 本文が左右に分けるには狭い（736px 未満）とき、詳細が一覧の上に重なる。開いたら詳細へフォーカスを移し、背後の一覧は操作・読み上げの対象から外し、閉じたら元の行へ戻す
+  // 本文が左右に分けるには狭い（852px 未満）とき、詳細が一覧の上に重なる。開いたら詳細へフォーカスを移し、背後の一覧は操作・読み上げの対象から外し、閉じたら元の行へ戻す
   const narrow = useNarrowerThan(box, SPLIT_MIN_BODY_REM);
   const paneRef = useRef<HTMLDivElement>(null);
   const restoreUid = useRef<string | null>(null);
@@ -890,14 +896,75 @@ function Browser({
     if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState(null, "", url);
   }, [params]);
 
-  const changed = () => void queryClient.invalidateQueries({ queryKey: ["studies"] });
-  const data = list.data;
+  // 自動更新の行の差し込みを待つ（docs/spec.md の 3.1）：ポインタが一覧の上にある間と、一覧の中でキーを押してから 3 秒の間は、
+  // 読み直した一覧を出さず、読み直す前の一覧（held）を出したままにする。押す直前に行がずれて、隣の検査を選ばないように。
+  // 新しい行は件数の行の「新着 n 件」で知らせ、押すか、待つ理由が無くなった後の次の版の読み取りで出す。
+  // 選んだ行は StudyInstanceUID で持つので、差し込んだ後も同じ検査を選んだまま
+  const hold = useRef({ pointer: false, keyAt: Number.NEGATIVE_INFINITY });
+  const [held, setHeld] = useState<{ key: string; data: StudyListData } | null>(null);
+  /** 出していない新しい行（新着）と、出したままの消えた行の数。行の出入りが無い読み直し（画像の枚数が増えただけなど）は、
+   * 行がずれないので、待たずに出す（null） */
+  const waiting = useMemo(() => {
+    if (!held || held.key !== params || !list.data || list.data === held.data) return null;
+    const shown = new Set(held.data.studies.map((s) => s.studyInstanceUid));
+    const next = new Set(list.data.studies.map((s) => s.studyInstanceUid));
+    const added = list.data.studies.filter((s) => !shown.has(s.studyInstanceUid)).length;
+    const removed = held.data.studies.filter((s) => !next.has(s.studyInstanceUid)).length;
+    return added > 0 || removed > 0 ? { added, removed } : null;
+  }, [held, params, list.data]);
+  const data = waiting && held ? held.data : list.data;
+  // fetching：読み直しを始める前から一覧を取っている（利用者の絞り込み・最初の読み込み。前の絞り込みの行を仮に出している間や、
+  // 覚えている一覧を出しながら取り直している間）
+  const latest = useRef({ params, shown: data, fetching: list.isFetching });
+  useEffect(() => {
+    latest.current = { params, shown: data, fetching: list.isFetching };
+  });
+  const refreshHooks = useRef({ tick: () => {}, beforeAuto: () => {}, afterAuto: () => {} });
+  useEffect(() => {
+    const holding = () => hold.current.pointer || Date.now() - hold.current.keyAt < KEY_HOLD_MS;
+    const release = () => {
+      if (!holding()) setHeld(null);
+    };
+    refreshHooks.current = {
+      tick: release,
+      // 読み直す前に、いま出している一覧を控える（待つかどうかは、答えが届いた時に決める。読み直しの間にポインタを
+      // 一覧へ移しても差し込まない）。利用者の検索の答えを待っている間は控えない（求めた結果を、古い一覧の裏に隠さない）
+      beforeAuto: () => {
+        const { params: key, shown, fetching } = latest.current;
+        if (fetching || !shown) setHeld(null);
+        else setHeld({ key, data: shown });
+      },
+      // 答えが届いた時：待つ理由が無ければ、そのまま出す
+      afterAuto: release,
+    };
+  }, []);
+  // ポインタと、一覧の中で押したキーを数える（一覧の外の要素の操作は数えない）
+  const listBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = listBox.current;
+    if (!el) return;
+    const enter = () => (hold.current.pointer = true);
+    const leave = () => (hold.current.pointer = false);
+    const key = () => (hold.current.keyAt = Date.now());
+    el.addEventListener("pointerenter", enter);
+    el.addEventListener("pointerleave", leave);
+    el.addEventListener("keydown", key);
+    return () => {
+      el.removeEventListener("pointerenter", enter);
+      el.removeEventListener("pointerleave", leave);
+      el.removeEventListener("keydown", key);
+    };
+  }, []);
+  const changed = () => {
+    setHeld(null);
+    void queryClient.invalidateQueries({ queryKey: ["studies"] });
+  };
   // 列見出しでの並べ替え。読み込んだ検査（上限 1000 件）の中だけを、この画面で並べる。絞り込みを替えても並びは保つ
   const [sort, setSort] = useState<StudySort>(DEFAULT_SORT);
   const rows = useMemo(() => (data ? (isDefaultSort(sort) ? data.studies : sortStudies(data.studies, sort)) : []), [data, sort]);
   const onSort = useCallback((key: SortKey) => setSort((current) => nextSort(current, key)), []);
   const refreshSeconds = screen.refreshSeconds ?? 0;
-  const refresh = useListRefresh(refreshSeconds, initialVersion, autoRefreshRef);
+  const refresh = useListRefresh(refreshSeconds, initialVersion, autoRefreshRef, refreshHooks);
   // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」。
   // 自動更新の読み直しには出さない（30 秒ごとに一覧がちらつかないように）
   const fetching = list.isFetching && !refresh.quiet;
@@ -913,6 +980,7 @@ function Browser({
   }, [notice]);
   const changeFilter = (f: StudyFilter) => {
     setNotice(null);
+    setHeld(null);
     setFilter(f);
   };
   /** 条件をクリア：絞り込みを既定に戻す。検索の欄の打ちかけの字も消すため、絞り込みの部品を作り直す */
@@ -961,7 +1029,7 @@ function Browser({
   };
 
   return (
-    // @container：左右に分けるかを、画面の幅ではなく本文の幅（46rem ＝ 736px）で決める（@[46rem]:）。JS 側の narrow（useNarrowerThan）と同じ値
+    // @container：左右に分けるかを、画面の幅ではなく本文の幅（53.25rem ＝ 852px）で決める（@[53.25rem]:）。JS 側の narrow（useNarrowerThan）と同じ値
     <section ref={box} data-split-root className="@container relative flex min-h-0 flex-1 flex-col gap-2">
       {/* 絞り込みの帯と件数の行は、左右をまたいで上に置く（docs/design-system/screen-types.md の「型 B の変種」） */}
       <div inert={overlayOpen || undefined} className="shrink-0 space-y-3">
@@ -970,24 +1038,34 @@ function Browser({
         <CountRow
           aside={
             refreshSeconds > 0 && (
-              <span
-                className={cn("inline-flex items-center gap-1", refresh.failed && "text-danger")}
-                data-testid="list-refresh"
-                data-failed={refresh.failed || undefined}
-              >
-                <RefreshCw aria-hidden className="size-3.5" />
-                {refresh.failed ? "自動更新：接続できません" : `自動更新（${refreshSeconds}秒）`}
-              </span>
+              <>
+                {/* 差し込みを待っている新しい行（上の held）。押すと一覧に出す。読み上げの場所は常に置き、中身だけを替える */}
+                <span aria-live="polite">
+                  {waiting && (
+                    <Button type="button" size="xs" variant="outline" data-testid="list-new" onClick={() => setHeld(null)}>
+                      {waiting.added > 0 ? `新着 ${waiting.added} 件` : "一覧を更新"}
+                    </Button>
+                  )}
+                </span>
+                <span
+                  className={cn("inline-flex items-center gap-1", refresh.failed && "text-danger")}
+                  data-testid="list-refresh"
+                  data-failed={refresh.failed || undefined}
+                >
+                  <RefreshCw aria-hidden className="size-3.5" />
+                  {refresh.failed ? "自動更新：接続できません" : `自動更新（${refreshSeconds}秒）`}
+                </span>
+              </>
             )
           }
         >
-          <h1 className="flex items-baseline gap-1" aria-live="polite" data-fetching={list.isFetching || undefined}>
+          <div className="flex items-baseline gap-1" aria-live="polite" data-fetching={list.isFetching || undefined}>
             {/* 取り直しの待ちの印が出ている間は、件数を「—」にする（古い件数を新しいものに見せない） */}
             <span className="text-lg font-bold text-value" data-testid="study-count">
               {data && !refetching ? `${data.count.count}${data.count.exact ? "" : " 以上"}` : "—"}
             </span>
             <span className="text-label">件</span>
-          </h1>
+          </div>
           <PendingText pending={fetching} />
           {/* 上限に届いて読みきれていないとき、並べ替えは読んだ範囲の中だけ（最初の並びは新しい順の先頭なので、替えたときだけ添える） */}
           {data && !data.count.exact && !isDefaultSort(sort) && (
@@ -996,18 +1074,17 @@ function Browser({
             </span>
           )}
           {notice && (
-            <p role="status" className="flex items-center gap-1.5 border-l-4 border-success bg-surface px-2 text-sm text-success" data-testid="list-notice">
-              <CheckCircle2 aria-hidden className="size-4" />
+            <Notice kind="ok" className="py-0.5" data-testid="list-notice">
               {notice}
-            </p>
+            </Notice>
           )}
         </CountRow>
       </div>
 
       {list.isError && (
-        <p role="alert" className="text-danger">
+        <Notice kind="err" alert>
           {list.error.message}
-        </p>
+        </Notice>
       )}
       {/* その下を左右に分ける。行を選ぶまでは一覧が全幅。選ぶと、左に一覧（列を詰めた形）、右に詳細（残りの幅） */}
       <div ref={body} className="flex min-h-0 flex-1">
@@ -1016,12 +1093,14 @@ function Browser({
         inert={overlayOpen || undefined}
         className={cn(
           "flex min-h-0 min-w-0 flex-col",
-          // 一覧は詰めた形の列が読める幅（20rem）より、詳細は 25rem（と境目の 0.75rem）より縮まない
+          // 一覧は 440px（27.5rem）より、詳細は 400px（25rem）と境目の 12px（0.75rem）より縮まない（docs/design-system/parts.md の「一覧＋右に詳細の幅」）
           detailOpen
-            ? "@max-[46rem]:flex-1 @[46rem]:max-w-[calc(100%-25rem-0.75rem)] @[46rem]:min-w-80 @[46rem]:flex-none @[46rem]:basis-(--split)"
+            ? "@max-[53.25rem]:flex-1 @[53.25rem]:max-w-[calc(100%-25rem-0.75rem)] @[53.25rem]:min-w-110 @[53.25rem]:flex-none @[53.25rem]:basis-(--split)"
             : "flex-1",
         )}
         style={{ "--split": `${split}%` } as React.CSSProperties}
+        // 自動更新の行の差し込みを待つ間を数える場所（上の hold）
+        ref={listBox}
       >
       {/* 0 件でも表の枠と見出しの行を出し、一覧の場所が分かるようにする（2026-10-21。空の場所が真っ白だった） */}
       <StudyRows
@@ -1072,7 +1151,7 @@ function Browser({
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         data-testid="split-handle"
-        className="group hidden w-3 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-none @[46rem]:flex"
+        className="group hidden w-3 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-none @[53.25rem]:flex"
         onKeyDown={(e) => {
           const next = splitAfterKey(split, e.key);
           if (next === null) return;
@@ -1103,14 +1182,14 @@ function Browser({
           if (e.currentTarget.querySelector("[role=menu]")) return;
           closeDetail();
         }}
-        className="bg-surface focus-visible:outline-none @max-[46rem]:absolute @max-[46rem]:inset-0 @max-[46rem]:z-30 @max-[46rem]:overflow-auto @[46rem]:min-h-0 @[46rem]:min-w-100 @[46rem]:flex-1 @[46rem]:overflow-auto @[46rem]:rounded-md @[46rem]:border @[46rem]:border-border"
+        className="bg-surface focus-visible:outline-none @max-[53.25rem]:absolute @max-[53.25rem]:inset-0 @max-[53.25rem]:z-30 @max-[53.25rem]:overflow-auto @[53.25rem]:min-h-0 @[53.25rem]:min-w-100 @[53.25rem]:flex-1 @[53.25rem]:overflow-auto @[53.25rem]:rounded-md @[53.25rem]:border @[53.25rem]:border-border"
       >
         <button
           type="button"
           aria-label="詳細を閉じる"
           onClick={closeDetail}
           className={cn(
-            "sticky top-0 float-right z-10 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "sticky top-0 float-right z-20 m-2 rounded p-1 text-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             pressFeedback,
           )}
         >

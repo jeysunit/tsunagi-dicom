@@ -106,25 +106,53 @@ describe("見出し（患者バナー）と「検査の情報」", () => {
     expect(banner).toContain("試験 髙子");
     expect(banner).toContain("しけん たかこ");
     const labels = [...banner.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時"]);
+    // 期待の変更：前は値の無い項目（この検査ではモダリティ・検査名）を出さなかった。いまは項目名を残して「—」を出す
+    expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
+    expect(banner).toMatch(/モダリティ・検査名<\/dt><dd[^>]*>—<\/dd>/);
     expect(banner).toContain("1960/07/15（65歳） 女");
     expect(banner).not.toContain("試験 医師");
     expect(banner).not.toContain("昭和");
   });
 
-  it("バナーに足さない値は、タブに隠さず、見出しの下の「検査の情報」に並べる。出す値が無いときは、区画ごと出さない", () => {
+  const INFO_LABELS = ["英字氏名", "生年月日（和暦）", "紹介医", "Study ID", "シリーズ / 画像"];
+  const infoOf = (html: string) => {
+    const start = html.lastIndexOf("<dl", html.indexOf('data-testid="detail-info"'));
+    return html.slice(start, html.indexOf("</dl>", start));
+  };
+
+  it("バナーに足さない値は、タブに隠さず、バナーの下の「検査の情報」に 3 列で並べる。並びは バナー → 検査の情報 → Study UID → 操作の行", () => {
     const withInfo = render(true, full);
     expect(withInfo).not.toContain('role="tablist"');
-    const info = withInfo.slice(withInfo.indexOf('data-testid="detail-info"'));
+    const info = infoOf(withInfo);
+    // 3 列（2 列目は中身の幅）。期待の変更：旧 "grid-cols-3" → 新 "grid-cols-[1fr_auto_1fr]"（列の数は同じ 3）
+    expect(info).toContain("grid-cols-[1fr_auto_1fr]");
+    expect([...info.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map((m) => m[1])).toEqual(INFO_LABELS);
     expect(info).toContain("試験 医師");
     expect(info).toContain("1960/07/15（昭和35年）");
     expect(info).toContain("1 / 4");
-    expect(render(true)).not.toContain('data-testid="detail-info"');
+    const at = (s: string) => withInfo.indexOf(s);
+    expect(at('aria-label="患者"')).toBeLessThan(at('data-testid="detail-info"'));
+    expect(at('data-testid="detail-info"')).toBeLessThan(at('data-testid="study-uid"'));
+    expect(at('data-testid="study-uid"')).toBeLessThan(at('aria-label="検査の操作"'));
   });
 
-  it("受付番号が空でも、項目ごと返らない（許可の一覧に無い）ときを除き、「受付番号 —」を出す", () => {
+  // 期待の変更：前は「出す値が無いときは、区画ごと出さない」だった。いまは値の無い項目も「—」で場所を残す
+  it("「検査の情報」は、値が 1 つも無くても同じ項目を同じ位置に出し、値は「—」", () => {
+    const info = infoOf(render(true));
+    expect([...info.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map((m) => m[1])).toEqual(INFO_LABELS);
+    expect(info.match(/>—</g)).toHaveLength(INFO_LABELS.length);
+  });
+
+  // 期待の変更：前は、受付番号が項目ごと返らない（許可の一覧に無い）ときは項目を出さなかった。いまはそのときも「受付番号 —」で場所を残す
+  it("受付番号が空でも、項目ごと返らないときも、「受付番号 —」を出す", () => {
     const empty = render(true, { accessionNumber: "" });
     expect(empty).toMatch(/<dt[^>]*>受付番号<\/dt><dd[^>]*>—<\/dd>/);
-    expect(render(true)).not.toContain("受付番号");
+    expect(render(true)).toMatch(/<dt[^>]*>受付番号<\/dt><dd[^>]*>—<\/dd>/);
+  });
+
+  it("患者バナーは区画の上に固定する（スクロールしても誰の検査かが残る）。一覧の右の詳細は 2 行の形", () => {
+    const html = render(true, full);
+    expect(html).toMatch(/<div class="sticky top-0 [^"]*" data-testid="detail-banner"><section aria-label="患者"/);
+    expect(html).toContain('data-layout="r2"');
   });
 });

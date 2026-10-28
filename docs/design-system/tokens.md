@@ -14,17 +14,19 @@
 | `--color-value` | 値（太字で出す） | #1A1A1A | #FFFFFF |
 | `--color-label` | 項目名・補足・表の見出し | #5F5F5F | #A3A3A3 |
 | `--color-border` | 区切りの線・区画の枠 | #D2D2D2 | #3A3A3A |
-| `--color-border-input` | 入力欄・ボタンの輪郭 | #8C8C8C | #777777 |
+| `--color-border-input` | 入力欄・ボタンの輪郭 | #7A7A7A | #8A8A8A |
 | `--color-primary` | 主ボタンの地・選択を示す線 | #4B4FBF | #4B4FBF |
 | `--color-primary-foreground` | 主ボタンの文字 | #FFFFFF | #FFFFFF |
 | `--color-primary-hover` | 主ボタンの hover | #3B3EA3 | #3B3EA3 |
 | `--color-primary-active` | 主ボタンを押している間 | #2F3288 | #2F3288 |
 | `--color-link` | リンクの文字 | #4B4FBF | #A5A8FF |
 | `--color-ring` | フォーカスの輪 | #4B4FBF | #A5A8FF |
-| `--color-selected` | 選択行・選択中のナビの地 | #EDEDF9 | #272844 |
+| `--color-selected` | 選択中のナビの地・選択の薄い地 | #EDEDF9 | #272844 |
+| `--color-selected-strong` | 一覧の選んだ行の地 | #D9DAF3 | #383B73 |
 | `--color-hover` | 押せる物の hover の地 | #E2E2E2 | #333333 |
 | `--color-pressed` | 押している間の地 | #D2D2D2 | #3A3A3A |
 | `--color-danger` | 失敗・中止・誤り・危険な操作 | #D1242F | #FF7B72 |
+| `--color-danger-foreground` | 危険の色を地にしたボタンの文字 | #FFFFFF | #1B1B1B |
 | `--color-success` | 完了・成功・確認済み | #1A7F37 | #3FB950 |
 | `--color-warning` | 実施中・送信中・注意 | #9A6700 | #D29922 |
 | `--color-dev-band` | 検証モードの帯の地 | #6B4A00 | #6B4A00 |
@@ -91,7 +93,7 @@
 | 影 | なし | 面は地の濃淡で分ける |
 | 影 lg | 0 4px 16px（明るい地 16%・暗い地 60% の黒） | 確認の窓・浮くメニューだけ |
 | 枠線 | 1px `--color-border` | 区画・表・バナー |
-| 入力の枠 | 1px `--color-border-input` | 入力欄・ボタン・選択。白との対比 3.36:1 |
+| 入力の枠 | 1px `--color-border-input` | 入力欄・ボタン・選択。白との対比 4.29:1、検索の帯（`muted-strong`）の上で 3.31:1（暗い地は `#383838` の上で 3.40:1）。前の #8C8C8C・#777777 は帯の上で 2.6:1 だった（2026-10-26） |
 | 選択の印 | 左に 3px の `--color-primary`（内側の線） | 選んだ行・選んだナビの項目 |
 | 知らせの印 | 左に 4px（状態の色） | 知らせ |
 | フォーカス | 2px の輪（`--color-ring`）、間隔 2px | 操作できるすべての部品 |

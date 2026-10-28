@@ -3,10 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
-import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ROLE_LABELS, ROLES, isRole } from "@/lib/auth/roles";
+import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
+import { CellMain, CellSub, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ROLE_LABELS, ROLES, isRole, type Role } from "@/lib/auth/roles";
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 
 export interface UserRowView {
@@ -50,6 +53,22 @@ export function UserAdmin({
   /** 再認証・ユーザーの追加の要求を送っている間（押したボタンに待ちの印を出す） */
   const [authing, setAuthing] = useState(false);
   const [creating, setCreating] = useState(false);
+  /** 確認の窓に出している変更（役割の変更・無効にする・二要素認証のリセット）。「変更する」などを押したら送る */
+  const [confirm, setConfirm] = useState<{ title: string; body: string; confirmLabel: string; run: () => void } | null>(null);
+
+  /** 役割の選択欄で選んだとき：すぐには送らず、誰を何から何へ替えるかを確認の窓に出す（選択欄は確定まで元の役割のまま） */
+  function askRole(u: UserRowView, role: Role) {
+    if (role === u.role) return;
+    const from = isRole(u.role) ? ROLE_LABELS[u.role] : u.role;
+    setConfirm({
+      title: `${u.username}（${u.displayName}）の役割を変更しますか？`,
+      body: `${from} → ${ROLE_LABELS[role]}。${
+        role === "admin" ? "削除・ユーザー管理・システムの設定ができるようになります" : "削除・ユーザー管理・システムの設定ができなくなります"
+      }。役割はあとで戻せます。`,
+      confirmLabel: "変更する",
+      run: () => void change(u.id, { role }, `${u.username} の役割を「${ROLE_LABELS[role]}」に変更しました`),
+    });
+  }
 
   /** 送って、再認証を求められたら、その画面を出して待つ */
   async function send(run: () => Promise<PostResult>, done: (res: PostResult) => void) {
@@ -133,7 +152,21 @@ export function UserAdmin({
 
   return (
     <section className="space-y-6">
-      <h1 className="text-lg font-bold text-value">ユーザー管理</h1>
+      <PageHeader title="ユーザー管理" />
+      {/* 確認の窓（docs/design-system/components.md）。押したら窓を閉じてから送る（再認証を求められたら、画面の再認証の欄に移る） */}
+      <ConfirmDialog
+        open={confirm !== null}
+        title={confirm?.title ?? ""}
+        body={confirm?.body ?? ""}
+        confirmLabel={confirm?.confirmLabel ?? ""}
+        testId="user-confirm"
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          const run = confirm?.run;
+          setConfirm(null);
+          run?.();
+        }}
+      />
       {reauth && (
         <form
           onSubmit={(e) => void onReauth(e)}
@@ -173,7 +206,7 @@ export function UserAdmin({
       <Table data-testid="user-table">
         <TableCaption>{users.length} 件</TableCaption>
         <TableHeader>
-          <TableRow>
+          <tr className="h-7">
             <TableHead>ユーザーID</TableHead>
             <TableHead>表示名</TableHead>
             <TableHead>役割</TableHead>
@@ -181,56 +214,64 @@ export function UserAdmin({
             <TableHead>二要素認証</TableHead>
             <TableHead>最終ログイン</TableHead>
             <TableHead>作成日</TableHead>
-            <TableHead>操作</TableHead>
-          </TableRow>
+            <TableHead pinned>操作</TableHead>
+          </tr>
         </TableHeader>
         <TableBody>
           {users.map((u) => (
-            <TableRow key={u.id} data-username={u.username}>
-              <TableCell className="font-mono">{u.username}</TableCell>
-              <TableCell className="font-bold text-value">{u.displayName}</TableCell>
+            // 行の中に選択欄とボタン、補足の 2 行目があるので 40px の行（docs/design-system/parts.md の「一覧の表」）
+            <TableRow key={u.id} data-username={u.username} tall>
+              <TableCell className="font-mono whitespace-nowrap">{u.username}</TableCell>
               <TableCell>
-                <select
+                <CellMain>{u.displayName}</CellMain>
+              </TableCell>
+              <TableCell>
+                <Select
+                  size="sm"
                   aria-label={`${u.username} の役割`}
                   value={u.role}
                   disabled={pending}
                   onChange={(e) => {
                     const role = e.target.value;
-                    if (isRole(role)) void change(u.id, { role }, `${u.username} の役割を「${ROLE_LABELS[role]}」に変更しました`);
+                    if (isRole(role)) askRole(u, role);
                   }}
-                  className="h-7 rounded-md border border-border bg-background px-1"
                 >
                   {ROLES.map((r) => (
                     <option key={r} value={r}>
                       {ROLE_LABELS[r]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </TableCell>
               <TableCell>
                 {u.status === "active" ? "有効" : "無効"}
-                {u.lockedUntil && <span className="block text-xs text-label">ロック中（{u.lockedUntil} まで）</span>}
+                {u.lockedUntil && <CellSub>ロック中（{u.lockedUntil} まで）</CellSub>}
               </TableCell>
               <TableCell>{u.totpEnabled ? "設定済み" : "未設定"}</TableCell>
               <TableCell data-testid="last-login">
                 {u.lastLogin ?? "—"}
                 {u.lastLoginDaysAgo !== null && u.lastLoginDaysAgo >= 90 && (
-                  <span className="block text-xs text-label">{u.lastLoginDaysAgo} 日前</span>
+                  <CellSub>{u.lastLoginDaysAgo} 日前</CellSub>
                 )}
               </TableCell>
               <TableCell>{u.created}</TableCell>
-              <TableCell className="space-x-1 whitespace-nowrap">
+              {/* 操作の列は右端に固定する（狭い画面で表が横にスクロールしても見切らない） */}
+              <TableCell className="space-x-1 whitespace-nowrap" pinned data-testid="user-actions">
                 {u.id !== selfId && (
                   <Button
                     size="sm"
                     variant="outline"
                     disabled={pending}
                     onClick={() =>
-                      void change(
-                        u.id,
-                        { status: u.status === "active" ? "disabled" : "active" },
-                        u.status === "active" ? `${u.username} を無効にしました` : `${u.username} を有効にしました`,
-                      )
+                      // 無効にするのは確認の窓を挟む（ログイン中のセッションも終わる）。有効に戻すのはすぐ送る
+                      u.status === "active"
+                        ? setConfirm({
+                            title: `${u.username}（${u.displayName}）を無効にしますか？`,
+                            body: "ログイン中のセッションは終わり、ログインできなくなります。「有効にする」で戻せます。",
+                            confirmLabel: "無効にする",
+                            run: () => void change(u.id, { status: "disabled" }, `${u.username} を無効にしました`),
+                          })
+                        : void change(u.id, { status: "active" }, `${u.username} を有効にしました`)
                     }
                   >
                     {u.status === "active" ? "無効にする" : "有効にする"}
@@ -242,7 +283,15 @@ export function UserAdmin({
                     size="sm"
                     variant="outline"
                     disabled={pending}
-                    onClick={() => void change(u.id, { resetTotp: true }, `${u.username} の二要素認証をリセットしました（次回ログイン時に再設定）`)}
+                    onClick={() =>
+                      setConfirm({
+                        title: `${u.username}（${u.displayName}）の二要素認証をリセットしますか？`,
+                        body: "登録した認証アプリは使えなくなり、ログイン中のセッションも終わります。次回のログイン時に設定し直します。",
+                        confirmLabel: "リセットする",
+                        run: () =>
+                          void change(u.id, { resetTotp: true }, `${u.username} の二要素認証をリセットしました（次回ログイン時に再設定）`),
+                      })
+                    }
                   >
                     二要素認証をリセット
                   </Button>
@@ -272,13 +321,13 @@ export function UserAdmin({
           <Input name="displayName" required autoComplete="off" />
         </Field>
         <Field label="役割">
-          <select name="role" defaultValue="general" className="h-8 w-full rounded-md border border-border bg-background px-2">
+          <Select name="role" defaultValue="general" className="w-full">
             {ROLES.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABELS[r]}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field
           label="初期パスワード"

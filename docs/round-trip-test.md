@@ -37,9 +37,9 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 
 1. Docker（Compose v2.24 以上。`include` と、`env_file` の `required` を使う）を入れる。
 2. リポジトリの直下で `docker/dev/up.sh` を流す。次を行う。
-   - secret のファイルを乱数で作る（`docker/dev/secrets/`。リポジトリに入れない。あるファイルは書き換えない）。tsunagi-dicom の `SESSION_SECRET`、Orthanc の利用者 `tsunagi` のパスワード、最初の管理者 `admin` のパスワード、DTG の Web 画面のパスワード、ris-emulator の Web 画面のパスワード（DTG と ris-emulator のパスワードのファイルは、コンテナの中の利用者（uid 10001）が読める権限にする）。
+   - secret のファイルを乱数で作る（既定は `docker/dev/secrets/`。リポジトリに入れない。あるファイルは書き換えない）。置き場は `TSUNAGI_DEV_SECRETS_DIR` で替えられる。作業ツリーの外の専用のディレクトリ（例 `~/.config/tsunagi-dev/secrets`。`~/.config` そのものは指さない）に置くと、作業ツリーを消してもパスワードが消えない。`~` で始まる値は `$HOME` に展開する。相対のパスは流した場所から数える。`$HOME`・`$HOME/.config`・`/` そのものは置き場にできず、止まる。置き場がもとからあるときは、権限を変えない。group か others に読み・書き・実行のどれかを許している（mode & 077 が 0 でない）ときは、何も作らずに止まる（0700 に締めるか、専用のディレクトリを指す。承知のうえで続けるときだけ `ALLOW_INSECURE_SECRETS_DIR=1` を付けると、警告を出して続ける）。置き場をその台本で新しく作ったときだけ 0700 にする。tsunagi-dicom の `SESSION_SECRET`、Orthanc の利用者 `tsunagi` のパスワード、最初の管理者 `admin` のパスワード、DTG の Web 画面のパスワード、ris-emulator の Web 画面のパスワード（DTG と ris-emulator のパスワードのファイルは、コンテナの中の利用者（uid 10001）が読める権限にする）。
    - tsunagi-dicom のイメージを、このリポジトリから作る（`TSUNAGI_IMAGE` に GHCR のイメージを渡せば作らない）。
-   - DTG と ris-emulator のイメージを、`docker/dev/compose.yaml` で固定した commit から作る（`DTG_GIT_REF`・`RIS_GIT_REF` で替えられる）。
+   - DTG と ris-emulator のイメージを、それぞれの main から作る（作るたびに main の先頭を取る）。`DTG_GIT_REF`・`RIS_GIT_REF` にブランチ名か commit を渡すと、そちらから作る。
    - 作るイメージの名前には、compose のプロジェクトの名前（`COMPOSE_PROJECT_NAME`。既定は `tsunagi-dev`）を入れる（`tsunagi-dev-tsunagi:local`・`tsunagi-dev-ris:local`・`tsunagi-dev-dtg:local`・`tsunagi-dev-dcmtk:local`）。`COMPOSE_PROJECT_NAME` とポートを替えて一式を2つ立てても、片方を作り直したときに、もう片方のイメージの名前は付け替わらない。
    - 一式を立て、起動を待ち、開く URL とパスワードのファイルの場所を出す。compose に無くなったサービスのコンテナは消す（`--remove-orphans`。ボリュームは消さない）。
    - 2026-10-21 に、dicom-test-generator の略称を DTG に直し、サービスの名前を `tdg` から `dtg` に替えた。それより前に立てた一式で `up.sh` を流し直すと、次のようになる。
@@ -52,12 +52,20 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
    - **DTG**：`docker/dev/dtg/app_config.yaml`（AE タイトル `DTG_CT01`、ワークリストは ris-emulator（AE タイトル `RIS_EMU`、`ris:11112`）、送信先 `orthanc:4242`）。予約が無いときは、緊急の患者で撮る。MPPS は送らない（ris-emulator はまだ受けない）。
    - **ris-emulator**：イメージの中の設定のまま（MWL の AE タイトル `RIS_EMU`・ポート 11112。CT の予約の予定の AE タイトルは `DTG_CT01`）。Web 画面と MWL は、コンテナの中では `0.0.0.0` で待ち受ける（`RIS_WEB_BIND_ADDRESS`・`RIS_MWL_BIND_ADDRESS`）。予約は名前付きのボリューム（`ris-state`）の SQLite に残る。予約の「今日」は `TZ`（`Asia/Tokyo`。DTG と同じ）で決まる。
    - **tsunagi-dicom**：つなぎ先は `deploy/compose.yaml` が固定する（`AUTH_MODE=local`・`BACKEND_MOCK=false`・`http://orthanc:8042`）。開発用だけの設定は `docker/dev/tsunagi.env`（`MFA_REQUIRED=false`）。
-4. `http://127.0.0.1:3000/` を開き、`admin` と `docker/dev/secrets/initial_admin_password.txt` のパスワードでログインし、自分のパスワード（13 文字以上・英字と数字）に変える。
+4. `http://127.0.0.1:3000/` を開き、`admin` と `initial_admin_password.txt`（secrets の置き場。既定は `docker/dev/secrets/`）のパスワードでログインし、自分のパスワード（13 文字以上・英字と数字）に変える。管理者の DB（volume `tsunagi-data`）が前からある一式に `up.sh` を流し直したときは、最初のログインでパスワードを変えていれば、このファイルの値は使えない。忘れたときは `docker compose -f docker/dev/compose.yaml exec tsunagi node cli/reset-admin-password.mjs --user admin` で戻す（`up.sh` の最後の表示にも出る）。
 5. 試す前に、管理者で `/api/audit/verify` を開き、`checked`（記録の行の数）を控える。
 
-ポートは環境変数で替えられる：`TSUNAGI_HTTP_PORT`（既定 3000）・`ORTHANC_DICOM_PORT`（既定 4242）・`DEV_DTG_WEB_PORT`（DTG の Web 画面。既定 18080）・`DEV_RIS_WEB_PORT`（ris-emulator の Web 画面。既定 18081。利用者 `ris`）。どれもホストの 127.0.0.1 だけで待ち受ける。ris-emulator の MWL（11112）はホストに公開しない。
+**立て直し**：手元で立てている一式を、3つの製品（tsunagi-dicom・DTG・ris-emulator）の main に更新するときは、リポジトリの直下で `docker/dev/refresh.sh` を流す。次を行う。毎晩の自動実行にも使える（登録は各自の環境で行う）。
 
-下の手順のコマンドは、リポジトリの直下で流す。`dc` は `docker compose -f docker/dev/compose.yaml` の略。Orthanc の REST（`/jobs` など）はホストに公開していないので、見るときは Orthanc のコンテナの中から読む。止めるときは `dc down`（volume も消して最初からにするときは `dc down --volumes`）。
+- tsunagi-dicom：この作業ツリーを `origin/main` に早送りする。main 以外の枝・detached HEAD にいるときは、切り替えずに止まる（「main 以外の枝（…）にいるので立て直さない」。最後の 1 行は `結果=失敗（段：枝の確かめ。…）`）。毎晩の立て直しは main にいる専用の作業ツリーで流す。未コミットの変更・追跡していないファイル・origin/main より進んだ commit があるときも、作らずに止まる。`TSUNAGI_IMAGE` を渡したときは、早送りもイメージの作成もしない。
+- DTG と ris-emulator：main の commit を `git ls-remote` で決める（`DTG_GIT_REF`・`RIS_GIT_REF` に commit を渡してあれば、それを使う）。
+- 3つのイメージを先に作り、通ってから `docker compose up -d --build` で立て直す。作るところで失敗したら、動いているコンテナには触れない。
+- volume と secrets は消さない（`down -v`・`volume rm` を使わない）。secrets の置き場に、compose が読む 7 つのファイル（`session_secret.txt`・`backend_password.txt`・`initial_admin_password.txt`・`orthanc-users.json`・`dtg_web_password.txt`・`ris_web_password.txt`・`hl7_receiver_token.txt`）が1つでも無いときは、コンテナに触れる前に「secrets の置き場に <名前> が無い」で止まる（存在だけを見る。値は読まない。先に `up.sh` を流す。置き場を替えているときは `TSUNAGI_DEV_SECRETS_DIR` を渡す）。
+- 最後の 1 行に、3つの版と結果を出す。例：`refresh: tsunagi-dicom=abc1234 dtg=ddddddd ris=rrrrrrr 結果=成功`。
+
+ポートは環境変数で替えられる：`TSUNAGI_HTTP_PORT`（既定 3000）・`ORTHANC_DICOM_PORT`（既定 4242）・`DEV_DTG_WEB_PORT`（DTG の Web 画面。既定 18080）・`DEV_RIS_WEB_PORT`（ris-emulator の Web 画面。既定 18081。利用者 `ris`）・`DEV_PORTAL_PORT`（3つの画面へのリンクだけの入口のページ。既定 80）。どれもホストの 127.0.0.1 だけで待ち受ける。ris-emulator の MWL（11112）はホストに公開しない。
+
+下の手順のコマンドは、リポジトリの直下で流す。`dc` は `docker compose -f docker/dev/compose.yaml` の略。`dc` や `docker compose -f …` を直に使うときも、`up.sh` に渡したのと同じ値を `TSUNAGI_DEV_SECRETS_DIR` と `TSUNAGI_SECRETS_DIR` の両方に渡す（TSUNAGI_DEV_SECRETS_DIR を同じに渡す。前者は DTG・ris-emulator・HL7 の受け口の secret、後者は配る compose の tsunagi-dicom・Orthanc の secret の置き場。片方だけだと、compose が既定の置き場の secret を探す）。Orthanc の REST（`/jobs` など）はホストに公開していないので、見るときは Orthanc のコンテナの中から読む。止めるときは `dc down`（volume も消して最初からにするときは `dc down --volumes`）。
 
 ## 手順と、確かめること
 
@@ -161,6 +169,17 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 |---|---|---|
 | SpecificCharacterSet が `\ISO 2022 IR 87` の画像の WADO-RS の `metadata` | 氏名は `Alphabetic` が `ITEST^HANAKO`、`Ideographic` が `試験^花子`、`Phonetic` が `しけん^はなこ`。検査名は `頭部単純`。どれも Unicode に直して返した。`00080005` の値は `["ISO 2022 IR 87"]`（先頭の空の値を落とした 1 つ） | BFF は文字コードを読み替えず、受けた文字をそのまま返す前提と合う。答えの写しは `tests/fixtures/orthanc/dicom-web/iso2022-instance-metadata.json` |
 | WADO-RS の `metadata` のファイルのメタ情報（転送構文 (0002,0010)） | 入っていなかった | 既定の主なタグに入れていない前提と合う。施設が `INSTANCE_TAGS` に足すと、値は「—」になる |
+
+### 値の修正（段 6）で測った結果（2026-10-25）
+
+同じ版の Orthanc（26.9.1。Orthanc 1.13.0）を相手に、結合の試験の 23〜25 と、手元で立てた使い捨ての Orthanc（`OverwriteInstances` の無いもの）で測った。
+
+| 項目 | 測った結果 | BFF の前提・決めたこと |
+|---|---|---|
+| `/system` の設定の値 | `OverwriteInstances`（真偽）・`OverwriteInstancesMode`（`Always`／`Never`）・`UserMetadata`（名前と番号。`TsunagiLock` は 1024）を返す | 属性の訂正の前に、この2つで設定を確かめ、無ければ断る（[`spec.md`](spec.md) の 3.5） |
+| `OverwriteInstances` の無い Orthanc での `Keep` の書き換え | 仕事を作らずに 400。`Details` に `OverwriteInstances` が要ることが書かれる。画像は変わらない | 前もって `/system` で断るので、この答えには行き着かない（行き着いても、書き換えなかった失敗として残る） |
+| 患者 ID を変えない属性の訂正で置き換えた画像のメタデータ | `ReceptionDate` は書き換えの時刻、`RemoteAET` は空、`Origin` は `RestApi` になり、`CalledAET` は無くなる（前は `DicomProtocol` と、送ってきた側の AE タイトル） | 受信一覧では、直した検査が先頭に、送信元 AE 無し・`RestApi` で出る。直し方は段 6 の別の PR で決める（[`spec.md`](spec.md) の 3.5） |
+| `Keep` の無い書き換え（中身の訂正）で `Replace` に StudyInstanceUID を渡したとき | 渡した UID の検査ができ、SeriesInstanceUID と SOPInstanceUID は新しくなる。元の検査は残る。仕事の `Content.ID` は新しい検査の ID | BFF が UID を決め、結果不明のときもその UID で探して照らす |
 
 ### 結合の試験で測った、文字の集合の組み合わせ（2026-10-25）
 

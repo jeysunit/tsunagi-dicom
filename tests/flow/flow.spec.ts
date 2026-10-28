@@ -32,7 +32,7 @@ test.describe.configure({ mode: "serial" });
 const run = promisify(execFile);
 const root = process.cwd();
 const composeFile = path.join(root, "docker/dev/compose.yaml");
-const secretsDir = path.join(root, "docker/dev/secrets");
+const secretsDir = path.resolve(process.env.TSUNAGI_DEV_SECRETS_DIR ?? path.join(root, "docker/dev/secrets"));
 /** docker/dev/orthanc/site.json に登録した送信先（storescp） */
 const SCP = { id: "dev-scp", aet: "DEV_SCP" };
 /** docker/dev/dtg/app_config.yaml の dicom-test-generator（DTG）の AE タイトル（ris-emulator の CT の予約の予定の AE タイトルと同じ） */
@@ -431,7 +431,7 @@ test("4 HL7：緊急の患者で撮る → ris-emulator の pir send（A40）→
   // ris-emulator から受け口（hl7-receiver）へ A40 を送る。受理（AA）なら終了コード 0
   await compose(
     ["exec", "-T", "ris", "python", "-m", "app.cli", "pir", "send", "--host", "hl7-receiver", "--kind", "a40",
-      "--patient-id", patientId, "--prior-patient-id", priorId, "--name", "FLOW^HL7=流れ^太郎=ナガレ^タロウ"],
+      "--patient-id", patientId, "--prior-patient-id", priorId, "--name", "FLOW^MERGE=流れ^太郎=ナガレ^タロウ"],
     120_000,
   );
 

@@ -2,8 +2,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { Button } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
+import { Input } from "@/components/ui/input";
 import { PatientBanner } from "@/components/ui/patient-banner";
+import { Select } from "@/components/ui/select";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 
 // 画面のデザインシステム（docs/design-system）を機械で守る検査。
@@ -161,6 +164,62 @@ describe("docs/design-system/tokens.md と globals.css の色", () => {
   });
 });
 
+/** CSS の `selector {` から最初の `}` までの塊から、`--<prefix>…` の宣言を名前と値（小文字）の対で返す */
+function declarations(text: string, selector: string, prefix: RegExp): Record<string, string> {
+  const plain = stripComments(text);
+  const start = plain.indexOf(`${selector} {`);
+  expect(start, selector).toBeGreaterThanOrEqual(0);
+  const body = plain.slice(start, plain.indexOf("}", start));
+  return Object.fromEntries(
+    [...body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)]
+      .filter((d) => prefix.test(d[1]!))
+      .map((d) => [d[1]!, d[2]!.trim().toLowerCase()]),
+  );
+}
+
+// ui-kit の写し（3 製品で同じ値）。写しは直さず、globals.css をこれに合わせる。
+// 文字の大きさ・余白・角は Tailwind の段（text-xs・p-3・rounded-md など）で書くので、ここでは比べない（docs/design-system/tokens.md の 2〜4）
+describe("ui-kit の tokens.css と globals.css", () => {
+  const kit = readFileSync("docs/design-system/ui-kit/tokens.css", "utf8");
+  const COLOR = /^--color-/;
+  const LAYOUT = /^--(?:w|h)-/;
+
+  it("明るい地の色は、名前も値も同じ（足りない色も余分な色も無い）", () => {
+    expect(declarations(css, "@theme", COLOR)).toEqual(declarations(kit, ":root", COLOR));
+  });
+
+  it("暗い地の色は、名前も値も同じ（globals.css の暗い地に無い色は明るい地の値を引き継ぐ）", () => {
+    const dark = { ...declarations(css, "@theme", COLOR), ...declarations(css, '[data-theme="dark"]', COLOR) };
+    expect(dark).toEqual(declarations(kit, ":root[data-theme=dark]", COLOR));
+  });
+
+  it("字体・外枠の高さ・本文の幅は同じ", () => {
+    expect(declarations(css, "@theme", /^--font-/)).toEqual(declarations(kit, ":root", /^--font-/));
+    const layout = declarations(css, ":root", LAYOUT);
+    expect(Object.keys(layout).length).toBeGreaterThan(5);
+    expect(layout).toEqual(declarations(kit, ":root", LAYOUT));
+  });
+
+  it("比べた変数は、比べた塊の外で定義し直さない（後ろの塊で上書きすると、画面の値が写しとずれる）", () => {
+    const plain = stripComments(css);
+    const all = /^--(?:color|font|w|h)-/;
+    const blocks = [declarations(css, "@theme", all), declarations(css, '[data-theme="dark"]', all), declarations(css, ":root", all)];
+    const names = new Set(blocks.flatMap((b) => Object.keys(b)));
+    for (const name of names) {
+      const defined = blocks.filter((b) => name in b).length;
+      const count = [...plain.matchAll(new RegExp(`${name}\\s*:`, "g"))].length;
+      expect(count, name).toBe(defined);
+    }
+    // 検査の目はある：後ろの塊の上書きを拾う
+    const sample = `${css}\n:root { --w-login: 1px; }`;
+    expect([...stripComments(sample).matchAll(/--w-login\s*:/g)].length).toBe(2);
+  });
+
+  it("写しの版は 1.0.1", () => {
+    expect(readFileSync("docs/design-system/ui-kit/VERSION", "utf8").trim()).toBe("1.0.1");
+  });
+});
+
 const badge = (kind: StatusKind, text: string) => createElement(StatusBadge, { kind, children: text });
 
 describe("部品", () => {
@@ -183,6 +242,46 @@ describe("部品", () => {
     expect(renderToStaticMarkup(badge("unknown", "結果不明"))).toContain("border-dashed");
   });
 
+  // 区切りの線（border。白の上で約 1.5:1）を入力の部品の枠に使わない（docs/design-system/tokens.md の「入力の枠」）。
+  // 対比そのものは tests/unit/design-tokens.test.ts（トークン）と tests/e2e/ui-feel.spec.ts（画面で計算した色）で見る
+  it("入力欄と枠のボタンの枠は border-input（区切りの線の border ではない）", () => {
+    const classes = (html: string) => html.match(/class="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
+    const input = classes(renderToStaticMarkup(createElement(Input, { name: "a" })));
+    expect(input).toContain("border-border-input");
+    expect(input).not.toContain("border-border");
+    const outline = classes(renderToStaticMarkup(createElement(Button, { variant: "outline" }, "キャンセル")));
+    expect(outline).toContain("border-border-input");
+    expect(outline).not.toContain("border-border");
+  });
+
+  it("画面の選択欄（select）と複数行の入力欄（textarea）の枠は、どれも border-input", () => {
+    const found: string[] = [];
+    let count = 0;
+    for (const file of sourceFiles("src").filter((f) => f.endsWith(".tsx"))) {
+      const text = readFileSync(file, "utf8");
+      // 開きの札の中（次の `>` まで。属性の中の矢印の関数 `=>` は飛ばす）の className。
+      // 選択欄は部品 <Select>（枠は部品の中で持つ。下の検査）を使い、素の <select> は部品の定義の中にだけ置く
+      for (const m of text.matchAll(/<(select|textarea|Select)\b((?:=>|[^>])*)>/g)) {
+        count += 1;
+        if (m[1] === "Select") continue;
+        if (m[1] === "select") {
+          if (!file.endsWith("components/ui/select.tsx")) found.push(`${file}: 素の <select>（部品 <Select> を使う）`);
+          continue;
+        }
+        const cls = m[2]!.match(/className="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
+        if (!cls.includes("border-border-input") || cls.includes("border-border")) found.push(`${file}: <${m[1]}> ${cls.join(" ")}`);
+      }
+    }
+    expect(count, "検査の目はある：select・textarea・Select を見つけた").toBeGreaterThanOrEqual(7);
+    expect(found).toEqual([]);
+  });
+
+  it("部品 Select の枠は border-input（区切りの線の border ではない）", () => {
+    const classes = renderToStaticMarkup(createElement(Select, { name: "a" })).match(/class="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
+    expect(classes).toContain("border-border-input");
+    expect(classes).not.toContain("border-border");
+  });
+
   it("件数の行：補足が無くても、高さ（min-h-7）を持つ。補足は件数と別の区画に出す", () => {
     const without = renderToStaticMarkup(createElement(CountRow, null, "8 件"));
     expect(without).toContain("min-h-7");
@@ -191,16 +290,23 @@ describe("部品", () => {
     expect(withAside).toMatch(/8 件<\/div><div[^>]*text-label[^>]*>自動更新（30秒）/);
   });
 
-  it("患者バナー：氏名・かな・項目を並べ、値の無い項目は出さない。右端に札を置ける", () => {
+  // 期待の変更：前は「値の無い項目は出さない（詰める）」だった。いまは、値の無い項目も項目名を残して「—」を出す
+  // （詰めると、検査ごとに項目の位置が替わる。docs/design-system/parts.md の「患者バナー（`.fb`）」）
+  const LABELS = ["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"];
+  const labelsOf = (html: string) => [...html.matchAll(/<dt[^>]*>([^<]*)<\/dt>/g)].map((m) => m[1]);
+
+  it("患者バナー：氏名・かな・項目をこの順に並べ、値の無い項目も項目名を残して「—」を出す。札を置ける", () => {
     const html = renderToStaticMarkup(
       createElement(PatientBanner, {
+        layout: "r2",
         name: "試験 太郎",
         kana: "シケン タロウ",
-        items: [
-          { label: "患者 ID", value: "P000101", mono: true },
-          { label: "受付番号", value: "" },
-          { label: "検査日時", value: "2026/10/24 09:12" },
-        ],
+        patientId: "P000101",
+        birthSex: "1970/04/01（56歳） 男",
+        accessionNumber: "",
+        studyDateTime: "2026/10/24 09:12",
+        modalities: ["CT"],
+        studyDescription: "胸部 単純",
         end: badge("confirmed", "保管の確認 済"),
       }),
     );
@@ -208,8 +314,52 @@ describe("部品", () => {
     expect(html).toContain("試験 太郎");
     expect(html).toContain("シケン タロウ");
     expect(html).toContain("P000101");
-    expect(html).not.toContain("受付番号");
-    expect(html.indexOf("患者 ID")).toBeLessThan(html.indexOf("検査日時"));
+    expect(labelsOf(html)).toEqual(LABELS);
+    // 受付番号は空でも項目名を残し、値は label の色の「—」
+    expect(html).toMatch(/受付番号<\/dt><dd[^>]*class="[^"]*\bnone\b[^"]*text-label[^"]*"[^>]*>—<\/dd>/);
     expect(html).toContain("保管の確認 済");
+    // モダリティの印は一覧と同じ左の線の形
+    expect(html).toContain("border-l-mod-ct");
+  });
+
+  it("患者バナー：値が 1 つも無くても、同じ項目を同じ順に出す（かなも「—」）", () => {
+    const html = renderToStaticMarkup(createElement(PatientBanner, { layout: "r2", name: "（氏名未登録）" }));
+    expect(labelsOf(html)).toEqual(LABELS);
+    expect(html.match(/>—</g)).toHaveLength(LABELS.length + 1);
+  });
+
+  it("患者バナー：かなとモダリティ・検査名は 1 行で切って title に全文。氏名・患者ID・受付番号は切らない", () => {
+    const html = renderToStaticMarkup(
+      createElement(PatientBanner, {
+        layout: "r2",
+        name: "試験 太郎",
+        kana: "シケン タロウ",
+        patientId: "P000101",
+        accessionNumber: "ACC-0001",
+        modalities: ["CT", "SR"],
+        studyDescription: "胸部 単純 造影",
+      }),
+    );
+    expect(html).toMatch(/<p class="k [^"]*text-ellipsis[^"]*whitespace-nowrap[^"]*" title="シケン タロウ"/);
+    expect(html).toMatch(/モダリティ・検査名<\/dt><dd[^>]*text-ellipsis[^>]*title="CT・SR 胸部 単純 造影"/);
+    for (const label of ["患者ID", "受付番号"]) {
+      const dd = html.slice(html.indexOf(`${label}</dt>`)).match(/<dd[^>]*>/)![0];
+      expect(dd, label).toContain("keep");
+      expect(dd, label).not.toContain("text-ellipsis");
+    }
+    expect(html.match(/<p class="n [^"]*"/)![0]).not.toContain("text-ellipsis");
+  });
+
+  it("患者バナー：形は 2 つ。r2 は 2 行（1 行目 氏名・患者ID・生年月日と性別、2 行目 受付番号・検査日時・モダリティ）、r1 は 1 行", () => {
+    const props = { name: "試験 太郎", patientId: "P000101", accessionNumber: "ACC-0001" };
+    const r2 = renderToStaticMarkup(createElement(PatientBanner, { ...props, layout: "r2" }));
+    const rows = r2.split('<div class="grid ');
+    expect(rows).toHaveLength(3);
+    expect(labelsOf(rows[1]!)).toEqual(["患者ID", "生年月日・性別"]);
+    expect(labelsOf(rows[2]!)).toEqual(["受付番号", "検査日時", "モダリティ・検査名"]);
+    expect(r2).toContain("min-h-10");
+    const r1 = renderToStaticMarkup(createElement(PatientBanner, { ...props, layout: "r1" }));
+    expect(r1).not.toContain('<div class="grid ');
+    expect(labelsOf(r1)).toEqual(LABELS);
   });
 });

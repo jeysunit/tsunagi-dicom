@@ -29,6 +29,19 @@ export function tagRowText(row: CopyableTagRow, format: CopyFormat = "all"): str
   return columns.map(cell).join("\t");
 }
 
+/** 画像の UID（SOPInstanceUID）のタグ。画像の場所のタグの表では 1 行目に固定する（docs/design-system/parts.md の `.uidrow`） */
+export const SOP_INSTANCE_UID_TAG = "0008,0018";
+
+/**
+ * タグの表の行のうち、tag の行を 1 行目に移す。表に無いとき（「主なタグ」の設定に入っていないなど）は fallback の行を 1 行目に足す。
+ * ほかの行の順は変えない
+ */
+export function pinTagRow<T extends CopyableTagRow>(rows: readonly T[], tag: string, fallback: T): T[] {
+  const at = rows.findIndex((r) => r.tag === tag);
+  if (at < 0) return [fallback, ...rows];
+  return [rows[at]!, ...rows.slice(0, at), ...rows.slice(at + 1)];
+}
+
 /** 複数の行：1 行ずつ改行でつなぐ。末尾に改行は付けない */
 export function tagRowsText(rows: readonly CopyableTagRow[], format: CopyFormat = "all"): string {
   return rows.map((row) => tagRowText(row, format)).join("\n");

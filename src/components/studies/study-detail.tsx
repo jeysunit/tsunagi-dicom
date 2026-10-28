@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
-import { PatientBanner, type PatientBannerItem } from "@/components/ui/patient-banner";
+import { PatientBanner } from "@/components/ui/patient-banner";
 import { PendingText, useDelayedPending } from "@/components/ui/pending";
 import type { ScreenInfo } from "@/components/studies/screen-info";
 import { PacsActions } from "@/components/studies/pacs-actions";
@@ -13,6 +13,7 @@ import { Thumbnail } from "@/components/studies/thumbnail";
 import { ViewerMenu } from "@/components/studies/viewer-menu";
 import type { DicomValueRow } from "@/lib/all-values";
 import { getJson } from "@/lib/client/api";
+import { pinTagRow, SOP_INSTANCE_UID_TAG } from "@/lib/client/tag-copy";
 import type { SeriesView, StudyView } from "@/lib/fields";
 import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { tagName } from "@/lib/instance-tags";
@@ -40,25 +41,29 @@ export const detailKey = (uid: string) => ["study", uid] as const;
 // UID は画像サーバーから来た値なので、path に入れるときは符号化する（BFF の側でも形を確かめる）
 export const fetchDetail = (uid: string) => getJson<StudyDetailData>(`/api/studies/${encodeURIComponent(uid)}`);
 
-/** 「検査の情報」の 1 行（項目名と値）。値が無い項目は渡さない */
+/** 「検査の情報」の 1 つの升（項目名と値）。値が無い項目も渡し、「—」で場所を残す */
 interface InfoRow {
   label: string;
-  value: string;
+  value: string | null | undefined;
   testId?: string;
   mono?: boolean;
 }
 
 /**
- * 「検査の情報」：バナーに足さない、毎回は見ない値（英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数）。
- * タブに隠さず、詳細の上部（バナーと UID の下）に、項目名と値の対を折り返して並べる（空白の多いタブをやめた）
+ * 「検査の情報」（docs/design-system/parts.md の `.finfo`）：バナーに足さない、毎回は見ない値。
+ * 3 列×2 行（各行 40px）に、英字氏名・生年月日（和暦）・紹介医・Study ID・シリーズ数と画像数の順で置く（6 つ目の升は空ける）。
+ * 値の無い項目も詰めずに「—」（検査を替えても、同じ項目が同じ位置にある）
  */
 function StudyInfo({ rows }: { rows: readonly InfoRow[] }) {
+  // 2 列目（和暦つきの生年月日）は中身の幅、残りを 1 列目と 3 列目で分ける（日本語の字体が広い環境でも、生年月日が折り返して行が 40px を超えない）
   return (
-    <dl className="flex flex-wrap gap-x-6 gap-y-1" data-testid="detail-info">
+    <dl className="finfo grid grid-cols-[1fr_auto_1fr] gap-x-4" data-testid="detail-info">
       {rows.map((r) => (
-        <div key={r.label} className="flex min-w-0 items-baseline gap-2" data-testid={r.testId}>
-          <dt className="shrink-0 text-xs text-label">{r.label}</dt>
-          <dd className={cn("min-w-0 break-words text-value", r.mono && "font-mono")}>{r.value}</dd>
+        <div key={r.label} className="flex min-h-10 min-w-0 flex-col justify-center" data-testid={r.testId}>
+          <dt className="text-xs text-label">{r.label}</dt>
+          <dd className={cn("break-words", r.value ? "font-bold text-value" : "text-label", r.value && r.mono && "font-mono")}>
+            {r.value || "—"}
+          </dd>
         </div>
       ))}
     </dl>
@@ -146,15 +151,22 @@ function TagTable<T>({
   pick,
   testId,
   className,
+  sop,
 }: {
   url: string;
   queryKey: readonly unknown[];
   pick: (body: T) => TagRow[];
   testId: string;
   className?: string;
+  /** 画像の場所の表：選んだ画像の SOPInstanceUID。(0008,0018) の行を 1 行目に固定し、その行に写すボタンを置く */
+  sop?: string;
 }) {
   const query = useQuery({ queryKey, queryFn: () => getJson<T>(url), ...AUDITED_READ });
-  const rows = query.isFetching || query.isError || !query.data ? undefined : pick(query.data);
+  const picked = query.isFetching || query.isError || !query.data ? undefined : pick(query.data);
+  const rows =
+    picked && sop
+      ? pinTagRow(picked, SOP_INSTANCE_UID_TAG, { tag: SOP_INSTANCE_UID_TAG, name: tagName(SOP_INSTANCE_UID_TAG), vr: "UI", value: sop })
+      : picked;
   return (
     <div className={cn("max-h-80 overflow-auto rounded border border-border bg-background", className)} data-testid={testId}>
       {query.isFetching && (
@@ -167,7 +179,7 @@ function TagTable<T>({
           {query.error.message}
         </p>
       )}
-      {rows && <TagGrid rows={rows} />}
+      {rows && <TagGrid rows={rows} copyTag={sop ? SOP_INSTANCE_UID_TAG : undefined} />}
     </div>
   );
 }
@@ -277,7 +289,7 @@ function SeriesImages({
         <PendingText pending={instances.isFetching} />
         {/* 切り替えは、画像の一覧の読み込みが終わってから。画像に関するタグだけ（検査のタグは、Study UID の横のボタンから） */}
         {items.length > 0 && (
-          <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="タグの表示">
+          <div className="ml-auto inline-flex overflow-hidden rounded-md border border-border-input" role="group" aria-label="タグの表示">
             <SegmentButton pressed={tagSet === "configured"} onClick={() => onTagSet("configured")} testId="tag-set-configured">
               主なタグ
             </SegmentButton>
@@ -333,8 +345,8 @@ function SeriesImages({
               </li>
             ))}
           </ul>
+          {/* 画像の UID は表の上に出さず、タグの表の 1 行目の (0008,0018) に固定する（写すボタンはその行。docs/design-system/parts.md の `.uidrow`） */}
           <div className="min-w-0 space-y-1">
-            <UidLine label="SOPInstanceUID" uid={sop} />
             {readSop === "" ? (
               <p className="p-2">
                 <PendingText pending />
@@ -345,6 +357,7 @@ function SeriesImages({
                 url={`${base}/tags`}
                 queryKey={["instance-tags", uid, seriesUid, readSop]}
                 pick={(body) => body.tags}
+                sop={readSop}
                 testId="instance-tags"
               />
             ) : (
@@ -353,6 +366,7 @@ function SeriesImages({
                 url={`${base}/values`}
                 queryKey={["instance-values", uid, seriesUid, readSop]}
                 pick={valueRows}
+                sop={readSop}
                 testId="instance-values"
               />
             )}
@@ -456,46 +470,20 @@ export function StudyDetailPanel({
   const seriesImagesId = useId();
   const openedSeries = data?.series.find((s) => s.seriesInstanceUid === openSeries);
 
-  // 患者バナー（氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名）。値の無い項目は PatientBanner が省く
+  // 患者バナー（氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名）。値の無い項目も「—」で場所を残す
   const birthDate = formatSlashDate(study.patientBirthDate);
   const age = formatAge(study.patientBirthDate, study.studyDate);
   const sex = sexLabel(study.patientSex);
-  const modalities = study.modalities?.join("・");
-  const bannerItems: PatientBannerItem[] = [
-    { label: "患者ID", value: study.patientId, mono: true },
-    { label: "生年月日・性別", value: `${birthDate}${age ? `（${age}）` : ""}${sex ? ` ${sex}` : ""}`.trim() },
-    // 受付番号は、値が空でも「受付番号 —」を出す。役割の許可の一覧に無い（項目ごと返らない）ときは出さない（空と見分ける）
-    {
-      label: "受付番号",
-      value: Object.hasOwn(study, "accessionNumber") ? study.accessionNumber || "—" : "",
-      mono: !!study.accessionNumber,
-      testId: "detail-accession",
-    },
-    { label: "検査日時", value: `${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim() },
-    {
-      label: "モダリティ・検査名",
-      value:
-        modalities || study.studyDescription ? (
-          <>
-            {modalities}
-            {study.studyDescription && <span className="ml-1 font-normal">{study.studyDescription}</span>}
-          </>
-        ) : (
-          ""
-        ),
-    },
-  ];
-  // 「検査の情報」：バナーに足さない値。値の無い項目は出さない
+  const birthSex = `${birthDate}${age ? `（${age}）` : ""}${sex ? ` ${sex}` : ""}`.trim();
+  // 「検査の情報」：バナーに足さない値。値の無い項目も「—」で場所を残す
   const counts = study.seriesCount == null && study.instanceCount == null ? "" : `${study.seriesCount ?? "—"} / ${study.instanceCount ?? "—"}`;
-  const infoRows: InfoRow[] = (
-    [
-      { label: "英字氏名", value: study.patientNameAlphabetic, testId: "detail-alphabetic" },
-      { label: "生年月日（和暦）", value: formatBirthWareki(study.patientBirthDate) },
-      { label: "紹介医", value: study.referringPhysicianName, testId: "detail-referring" },
-      { label: "Study ID", value: study.studyId, mono: true },
-      { label: "シリーズ / 画像", value: counts, testId: "detail-counts" },
-    ] as { label: string; value: string | null | undefined; testId?: string; mono?: boolean }[]
-  ).flatMap((r) => (r.value ? [{ ...r, value: r.value }] : []));
+  const infoRows: InfoRow[] = [
+    { label: "英字氏名", value: study.patientNameAlphabetic, testId: "detail-alphabetic" },
+    { label: "生年月日（和暦）", value: formatBirthWareki(study.patientBirthDate) },
+    { label: "紹介医", value: study.referringPhysicianName, testId: "detail-referring" },
+    { label: "Study ID", value: study.studyId, mono: true },
+    { label: "シリーズ / 画像", value: counts, testId: "detail-counts" },
+  ];
 
   // シリーズのタブ：サムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）と、開いた画像の場所
   const seriesPanel = (
@@ -572,17 +560,29 @@ export function StudyDetailPanel({
   );
 
   return (
-    <section aria-label="検査の詳細" className="space-y-1.5 px-3 py-2" data-testid="study-detail" data-study-uid={uid}>
-      {/* 見出し：患者バナーと検査の UID */}
+    <section aria-label="検査の詳細" className="space-y-1.5 px-3 pb-2" data-testid="study-detail" data-study-uid={uid}>
+      {/* 患者バナーは区画の上に固定する（シリーズや画像の場所までスクロールしても、誰の検査かが残る。docs/design-system/parts.md）。
+          左の縦線は、一覧で選んだ行の縦線と同じ（どの行の詳細かを示す。docs/spec.md の 3.1） */}
+      {/* flow-root：右上の閉じるボタン（float）の横で幅を詰め、ボタンの下にバナーを潜らせない */}
+      <div className="sticky top-0 z-10 flow-root border-l-[3px] border-ring bg-surface pt-2 pl-2" data-testid="detail-banner">
+        <PatientBanner
+          layout="r2"
+          name={study.patientName || <span className="font-normal text-label">（氏名未登録）</span>}
+          nameTestId="detail-name"
+          kana={study.patientKana || undefined}
+          patientId={study.patientId}
+          birthSex={birthSex}
+          // 受付番号が役割の許可の一覧に無い（項目ごと返らない）ときも、値の無いときと同じく「—」で場所を残す
+          accessionNumber={study.accessionNumber ?? undefined}
+          studyDateTime={`${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim()}
+          modalities={study.modalities ?? undefined}
+          studyDescription={study.studyDescription ?? undefined}
+        />
+      </div>
+      {/* 見出しの続き：検査の情報 → 検査の UID。並びは バナー → 検査の情報 → Study UID → 操作の行 */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-        {/* 左の縦線は、一覧で選んだ行の縦線と同じ（どの行の詳細かを示す。docs/spec.md の 3.1） */}
-        <div className="min-w-0 flex-1 basis-96 space-y-0.5 border-l-[3px] border-ring pl-2" data-testid="detail-head">
-          <PatientBanner
-            name={study.patientName || <span className="font-normal text-label">（氏名未登録）</span>}
-            nameTestId="detail-name"
-            kana={study.patientKana || undefined}
-            items={bannerItems}
-          />
+        <div className="-mt-1.5 min-w-0 flex-1 basis-96 space-y-0.5 border-l-[3px] border-ring pl-2" data-testid="detail-head">
+          <StudyInfo rows={infoRows} />
           {/* 検査の UID（写すボタンつき）と、その横の「検査のタグ」。前は下の「UID」のボタンの中にあった（#57） */}
           {uid && (
             <div className="flex items-start gap-2">
@@ -605,8 +605,6 @@ export function StudyDetailPanel({
               )}
             </div>
           )}
-          {/* 検査の情報：タブに隠さず、バナーと UID の下に並べる */}
-          {infoRows.length > 0 && <StudyInfo rows={infoRows} />}
         </div>
       </div>
 
@@ -616,6 +614,7 @@ export function StudyDetailPanel({
         study={study}
         screen={screen}
         onDeleted={(s) => (onDeleted ? onDeleted(s) : changed())}
+        onModified={changed}
         leading={
           <ViewerMenu
             studyUid={uid}

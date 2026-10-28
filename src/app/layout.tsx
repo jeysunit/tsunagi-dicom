@@ -26,8 +26,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const state = await getAuthState();
 
   const local = state.kind === "active" || state.kind === "locked" ? state.session.local : undefined;
+  // 画面のロックの間は、上の帯に前の利用者の名前・ログアウトを出さない（ログアウトはロックの画面のもの）
   const user: HeaderUser | undefined =
-    local && (state.kind === "active" || state.kind === "locked")
+    local && state.kind === "active"
       ? {
           displayName: local.user.displayName,
           username: local.user.username,
@@ -50,10 +51,12 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           canEditViewerDefaults: can(state.session.role, "viewer.defaults"),
           account: !!local,
           canViewReceived: can(state.session.role, "receive.view"),
+          canViewSent: can(state.session.role, "send.view"),
           canCheckModalities: can(state.session.role, "modality.check"),
         })
       : undefined;
-  const main = <main className="mx-auto flex min-h-0 w-full max-w-screen-2xl flex-1 flex-col px-6 py-4">{children}</main>;
+  // 本文は左寄せで幅いっぱい。幅を絞る型（設定・ログイン）は頁の側で包む（docs/design-system/parts.md の「外枠」）
+  const main = <main className="flex min-h-0 w-full flex-1 flex-col px-6 pt-3 pb-6">{children}</main>;
   const content = navGroups ? (
     <div className="flex min-h-0 flex-1">
       <SideNav groups={navGroups} />
@@ -71,6 +74,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           pendingCsrfToken={pendingCsrfToken}
           theme={state.kind === "active" ? { current: theme, csrfToken: local?.row.csrfToken } : undefined}
           navToggle={!!navGroups}
+          connection={state.kind === "active" && can(state.session.role, "connection.view") ? { timeZone: config.timeZone } : undefined}
         />
         {local ? (
           <LockGuard

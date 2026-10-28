@@ -290,7 +290,7 @@ describe("削除", () => {
     // 消えた検査は、受け取りの記録・引き当てにも出ない
     const { getBackend } = await import("@/lib/backend");
     expect(await getBackend().lookupStudy(STUDY)).toBeNull();
-    expect((await getBackend().receivedStudies(100)).studies.some((r) => r.summary.studyInstanceUid === STUDY)).toBe(false);
+    expect((await getBackend().receivedStudies({ fromMs: 0, toMs: Number.MAX_SAFE_INTEGER, limit: 1000 })).studies.some((r) => r.summary.studyInstanceUid === STUDY)).toBe(false);
   });
 
   it("管理者のほかの役割には断り、Orthanc を呼ばずに、断ったことを記録する", async () => {
@@ -574,6 +574,8 @@ describe("削除：違う検査を消さない", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ patientId: "JP-TEST-0004", patientName: "試験 髙子", studyDate: "20260410", seriesCount: 1, instanceCount: 4 });
+    // 要約の生年月日・性別は、一覧の行の値でなく Orthanc から読み直した値
+    expect(body).toMatchObject({ patientBirthDate: "19600715", patientSex: "F" });
     const { openDeleteConfirm } = await import("@/lib/pacs-ops");
     const { getBackend } = await import("@/lib/backend");
     const id = (await getBackend().lookupStudy(STUDY))!;
