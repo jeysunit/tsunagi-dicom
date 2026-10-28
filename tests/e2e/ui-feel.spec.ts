@@ -37,6 +37,7 @@ test("今いる頁：左のナビの項目に aria-current と選んだ行の形
     ["/sent", "送信一覧"],
     ["/modalities", "接続先"],
     ["/admin/viewers", "ビューア設定"],
+    ["/version", "バージョン情報"],
   ] as const) {
     await nav(page).locator(`a[href='${href}']`).click();
     await expect(page).toHaveURL(new RegExp(`${href}$`));
@@ -96,11 +97,11 @@ test("左のナビ：低い画面でも、末尾の項目まで届く（ナビ�
   await asAdmin(page);
   const side = nav(page);
   expect(await side.evaluate((el) => getComputedStyle(el).overflowY)).toBe("auto");
-  // 最後の項目（検証モードの管理者では、管理の群のビューア設定）に、ナビの中のスクロールで届いて押せる
+  // 最後の項目（管理の群のバージョン情報）に、ナビの中のスクロールで届いて押せる
   const last = side.getByRole("link").last();
   await last.scrollIntoViewIfNeeded();
   await last.click();
-  await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", "/admin/viewers");
+  await expect(nav(page).locator("[aria-current=page]")).toHaveAttribute("href", "/version");
 });
 
 test("左のナビ：頁を移る待ちの間は、閉じた幅でも、項目の絵の場所に待ちの印を出す", async ({ page }) => {
@@ -374,7 +375,7 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   await page.getByTestId("study-tags-open").click();
   await expect(page.getByTestId("all-values")).toContainText("0010,0020");
   await collect("詳細の UID と検査のタグ");
-  for (const path of ["/received", "/sent", "/modalities", "/admin/viewers"]) {
+  for (const path of ["/received", "/sent", "/modalities", "/admin/viewers", "/version"]) {
     await page.goto(path);
     if (path === "/modalities") {
       await page.locator('[data-modality="dtg"]').getByTestId("echo").click();

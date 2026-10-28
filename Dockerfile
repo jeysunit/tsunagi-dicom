@@ -53,6 +53,9 @@ ENV NODE_ENV=production \
     DATABASE_URL=file:/data/tsunagi.db \
     TZ=Asia/Tokyo
 WORKDIR /app
+# 「バージョン情報」の頁に出すビルドの commit（イメージを作る側が渡す。渡さなければ頁は行ごと出さない）
+ARG BUILD_COMMIT=""
+ENV BUILD_COMMIT=${BUILD_COMMIT}
 # アプリのファイルは root のもののまま（node の利用者からは読むだけ）
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

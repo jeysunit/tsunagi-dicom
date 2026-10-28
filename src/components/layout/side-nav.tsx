@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, Inbox, List, Network, Send, UserCog, Users, type LucideIcon } from "lucide-react";
+import { Eye, Inbox, Info, List, Network, Send, UserCog, Users, type LucideIcon } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { isCurrent, type NavGroup, type NavIcon } from "@/components/layout/nav-items";
@@ -15,6 +15,7 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   viewers: Eye,
   users: Users,
   account: UserCog,
+  version: Info,
 };
 
 /**

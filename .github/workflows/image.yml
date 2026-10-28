@@ -86,6 +86,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 「バージョン情報」の頁に出す（commit は公開の値）
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
           provenance: mode=max
           sbom: true
           # 週の作り直しでは層の cache を使わない（apt-get の層を作り直して、包みの更新を取り込む）
