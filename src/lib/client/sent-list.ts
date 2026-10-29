@@ -14,10 +14,10 @@ export const SENT_STATUS_LABELS: Record<SentStatus, string> = {
   unknown: "結果不明",
 };
 export const SENT_STATUS_KINDS: Record<SentStatus, StatusKind> = {
-  pending: "planned",
-  running: "sending",
-  sent: "confirmed",
-  failed: "failed",
+  pending: "plan",
+  running: "wait",
+  sent: "ok",
+  failed: "ng",
   unknown: "unknown",
 };
 

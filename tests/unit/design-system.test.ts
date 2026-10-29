@@ -220,22 +220,37 @@ const badge = (kind: StatusKind, text: string) => createElement(StatusBadge, { k
 
 describe("部品", () => {
   it("状態の札：どの種類も、文字と印（読み上げない）を持ち、色は枠と印に付く", () => {
-    const kinds: StatusKind[] = ["planned", "active", "done", "canceled", "stopped", "sending", "confirmed", "failed", "unknown", "notice"];
+    // 種類の名前は部品集の parts.md の data-k と同じ（plan・run・wait・check・done・ok・listen・cancel・stop・ng・unknown・note）
+    const kinds: StatusKind[] = ["plan", "run", "wait", "check", "done", "ok", "listen", "cancel", "stop", "ng", "unknown", "note"];
     for (const kind of kinds) {
       const html = renderToStaticMarkup(badge(kind, "ラベル"));
       expect(html, kind).toContain("ラベル");
-      expect(html, kind).toMatch(/<span aria-hidden="true" class="text-[a-z-]+">[^<]+<\/span>/);
-      expect(html, kind).toContain(`data-kind="${kind}"`);
+      expect(html, kind).toMatch(/<span aria-hidden="true" class="[^"]*\btext-(?:label|success|warning|danger)\b[^"]*">[^<]+<\/span>/);
+      expect(html, kind).toContain(`data-k="${kind}"`);
       expect(html, kind).not.toMatch(/bg-(?:danger|success|warning)/);
     }
   });
 
   it("状態の札：取消は文字に取り消し線を引かず（灰と「—」で示す）、結果不明は破線", () => {
-    const canceled = renderToStaticMarkup(badge("canceled", "取消"));
+    const canceled = renderToStaticMarkup(badge("cancel", "取消"));
     expect(canceled).not.toContain("line-through");
     expect(canceled).toContain("取消");
     expect(canceled).toContain("—");
     expect(renderToStaticMarkup(badge("unknown", "結果不明"))).toContain("border-dashed");
+  });
+
+  it("状態の札：待ち受け中（listen）は ● success、確認中（check）は ◔ warning。高さ 20px・角 3px・12px", () => {
+    const listen = renderToStaticMarkup(badge("listen", "待ち受け中"));
+    expect(listen).toContain("●");
+    expect(listen).toContain("border-success");
+    const check = renderToStaticMarkup(badge("check", "確認中"));
+    expect(check).toContain("◔");
+    expect(check).toContain("border-warning");
+    for (const html of [listen, check]) {
+      expect(html).toContain("h-5");
+      expect(html).toContain("rounded-[3px]");
+      expect(html).toContain("text-xs");
+    }
   });
 
   // 区切りの線（border。白の上で約 1.5:1）を入力の部品の枠に使わない（docs/design-system/tokens.md の「入力の枠」）。
@@ -303,7 +318,7 @@ describe("部品", () => {
         studyDateTime: "2026/10/24 09:12",
         modalities: ["CT"],
         studyDescription: "胸部 単純",
-        end: badge("confirmed", "保管の確認 済"),
+        end: badge("ok", "保管の確認 済"),
       }),
     );
     expect(html).toContain('aria-label="患者"');

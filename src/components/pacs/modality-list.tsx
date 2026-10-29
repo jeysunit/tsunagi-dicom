@@ -168,7 +168,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
                         {r === undefined && <span className="text-label">—</span>}
                         {r === "busy" && (
                           <span role="status" data-testid="echo-result" data-state="check">
-                            <StatusBadge kind="sending">確認中</StatusBadge>
+                            <StatusBadge kind="check">確認中</StatusBadge>
                           </span>
                         )}
                         {r && r !== "busy" && (
@@ -178,7 +178,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
                             data-testid="echo-result"
                             data-state={r.ok ? "ok" : "ng"}
                           >
-                            <StatusBadge kind={r.ok ? "confirmed" : "failed"}>{r.ok ? "成功" : "失敗"}</StatusBadge>
+                            <StatusBadge kind={r.ok ? "ok" : "ng"}>{r.ok ? "成功" : "失敗"}</StatusBadge>
                             <span className="text-xs text-label">{r.at}</span>
                             {!r.ok && r.reason && (
                               <span className="text-xs text-foreground" data-testid="echo-why">

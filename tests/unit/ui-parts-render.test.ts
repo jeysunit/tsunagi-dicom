@@ -1,7 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ConnStatus } from "@/components/layout/conn-status";
+import { ConnStatus, OverallBadge, type Overall } from "@/components/layout/conn-status";
+import { NavToggle } from "@/components/layout/nav-toggle";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
@@ -72,14 +73,63 @@ describe("選択欄（Select）", () => {
 });
 
 describe("接続の状態（ConnStatus）", () => {
-  it("標準の popover 属性で開く：ボタンは popovertarget、中身は popover。自前の開閉の属性（aria-expanded の固定など）を持たない", () => {
+  it("標準の popover 属性で開く：ボタンは popovertarget、中身は popover。自前の開け閉めを書かない", () => {
     const html = renderToStaticMarkup(createElement(ConnStatus, { timeZone: "Asia/Tokyo" }));
     // HTML の属性名は大文字小文字を区別しない（React の描画は popoverTarget と書く）
     expect(html).toMatch(/<button[^>]*popovertarget="conn-pop"/i);
     expect(html).toMatch(/<div[^>]*id="conn-pop"[^>]*popover="auto"/);
-    expect(html).not.toContain("aria-expanded");
     // 中身は接続先の頁への道を持つ
     expect(html).toContain('href="/modalities"');
     expect(html).toContain("接続先を開く");
+  });
+
+  // 上の帯の構造（parts.md の「上の帯」。C3）：枠つき 32px のボタンの中に 「接続の状態」・札・シェブロンをこの順で置く
+  it("ボタンは 32px の枠つき。「接続の状態」・全体の札・シェブロン（絵）の順で、aria-label は付けない", () => {
+    const html = renderToStaticMarkup(createElement(ConnStatus, { timeZone: "Asia/Tokyo" }));
+    const button = /<button\b[^>]*>(.*?)<\/button>/.exec(html);
+    expect(button).not.toBeNull();
+    const open = /<button\b[^>]*>/.exec(html)![0];
+    const classes = /class="([^"]*)"/.exec(open)![1]!.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(["h-8", "border", "border-border-input", "rounded", "px-2"]));
+    expect(open).not.toContain("aria-label");
+    expect(open).toContain('aria-expanded="false"');
+    const inner = button![1]!;
+    const at = (needle: string) => inner.indexOf(needle);
+    expect(at("接続の状態")).toBeGreaterThanOrEqual(0);
+    expect(at("接続の状態")).toBeLessThan(at('data-slot="status-badge"'));
+    expect(at('data-slot="status-badge"')).toBeLessThan(at("<svg"));
+    // 640px 未満は文字だけ視覚的に隠す（名前は残る）。シェブロンは読み上げない
+    expect(inner).toMatch(/<span class="max-sm:sr-only">接続の状態<\/span>/);
+    expect(inner).toMatch(/<svg[^>]*aria-hidden="true"/);
+  });
+
+  it("全体の状態の語は 5 つだけで、data-k は parts.md の表のとおり", () => {
+    const words: [Overall, string, string][] = [
+      ["loading", "確認中", "check"],
+      ["ok", "接続中", "ok"],
+      ["ng", "一部が接続不可", "ng"],
+      ["unchecked", "未確認", "plan"],
+      ["unknown", "確認できません", "unknown"],
+    ];
+    for (const [overall, word, k] of words) {
+      const html = renderToStaticMarkup(createElement(OverallBadge, { overall }));
+      expect(html, overall).toContain(`data-k="${k}"`);
+      expect(html, overall).toContain(`>${word}</span>`);
+    }
+  });
+
+});
+
+describe("ナビの開閉（NavToggle）", () => {
+  it("絵は Menu で固定し、名前は「ナビを開閉する」で固定。aria-expanded・aria-controls=sidenav・32px。title だけ替える", () => {
+    const html = renderToStaticMarkup(createElement(NavToggle));
+    expect(html).toContain('aria-label="ナビを開閉する"');
+    expect(html).toContain('aria-controls="sidenav"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('title="ナビを閉じる"');
+    expect(html).toMatch(/class="[^"]*\bh-8\b[^"]*\bmin-w-8\b/);
+    // Lucide の menu は 3 本線（path ではなく、横線 3 本）。開いても閉じても同じ絵（閉じる側の絵 panel-left は使わない）
+    expect(html).toContain("lucide-menu");
+    expect(html).not.toContain("lucide-panel-left");
   });
 });

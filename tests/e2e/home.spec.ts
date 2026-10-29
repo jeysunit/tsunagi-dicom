@@ -67,7 +67,7 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(header.getByRole("link", { name: "tsunagi-dicom", exact: true })).toBeVisible();
     await expect(header.getByTestId("app-version")).toHaveCount(0);
     await expect(header).not.toContainText(/\d+\.\d+\.\d+/);
-    const button = header.getByRole("button", { name: "接続の状態を開く" });
+    const button = header.getByRole("button", { name: /^接続の状態/ });
     // 札は全体の状態 1 つ（接続中・一部が接続不可）。ほかの試験で接続確認が失敗していれば後者になる
     await expect(button).toContainText(/接続中|一部が接続不可/);
     const pop = page.getByTestId("conn-popover");
@@ -77,8 +77,9 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await button.focus();
     await page.keyboard.press("Enter");
     await expect(pop).toBeVisible();
-    await expect(pop).toContainText("画像サーバー（Orthanc）");
-    await expect(pop).toContainText("HL7 の受け口");
+    await expect(pop).toContainText("画像サーバー");
+    await expect(pop).toContainText("Orthanc");
+    await expect(pop).toContainText("HL7");
     await expect(pop.getByTestId("backend-mock")).toHaveText("バックエンド：モック");
     await page.keyboard.press("Tab");
     await expect(pop.getByRole("link", { name: "接続先を開く" })).toBeFocused();
@@ -129,7 +130,7 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     // 期待の追加：状態の API が答えないだけでは、接続先が落ちているとは言えない
     await page.route("**/api/connection-status", (route) => route.fulfill({ status: 401, json: { error: "unauthorized" } }));
     await page.goto("/");
-    const button = page.getByTestId("site-header").getByRole("button", { name: "接続の状態を開く" });
+    const button = page.getByTestId("site-header").getByRole("button", { name: /^接続の状態/ });
     await expect(button).toContainText("確認できません");
     await expect(button).not.toContainText("一部が接続不可");
     await page.unroute("**/api/connection-status");
