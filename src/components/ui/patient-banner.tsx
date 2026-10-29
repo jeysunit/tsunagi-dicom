@@ -18,8 +18,12 @@ export interface PatientBannerProps extends Omit<React.ComponentProps<"section">
   name: React.ReactNode;
   kana?: string;
   patientId?: string;
-  /** 生年月日・年齢・性別をつないだ文字（「1970/04/01（56歳） 男」） */
-  birthSex?: string;
+  /** 生年月日の西暦（「1970/04/01」） */
+  birthDate?: string;
+  /** 生年月日の括弧（「（昭45・56歳）」）。西暦と分けるのは、狭い区画で西暦と括弧の間で折り返し、括弧の中では折り返さないため */
+  birthNote?: string;
+  /** 性別（「男」） */
+  sex?: string;
   accessionNumber?: string;
   /** 検査日時（「2026/10/24 09:12」） */
   studyDateTime?: string;
@@ -61,7 +65,7 @@ function Field({
           !empty && mono && "font-mono",
           cut ? "overflow-hidden text-ellipsis whitespace-nowrap" : "keep break-all",
         )}
-        title={!empty && cut ? title : undefined}
+        title={!empty && title ? title : undefined}
         data-none={empty || undefined}
       >
         {empty ? NONE : value}
@@ -74,7 +78,9 @@ export function PatientBanner({
   name,
   kana,
   patientId,
-  birthSex,
+  birthDate,
+  birthNote,
+  sex,
   accessionNumber,
   studyDateTime,
   modalities,
@@ -98,7 +104,25 @@ export function PatientBanner({
     </div>
   );
   const pid = <Field label="患者ID" value={patientId} mono testId="banner-patient-id" />;
-  const birth = <Field label="生年月日・性別" value={birthSex} testId="banner-birth" />;
+  const birthLine = `${birthDate ?? ""}${birthNote ?? ""}${sex ?? ""}`;
+  const birth = (
+    <Field
+      label="生年月日・性別"
+      title={birthLine}
+      testId="banner-birth"
+      value={
+        birthLine ? (
+          <>
+            {birthDate}
+            <span className="unit inline-block">
+              {birthNote}
+              {sex}
+            </span>
+          </>
+        ) : undefined
+      }
+    />
+  );
   const acc = <Field label="受付番号" value={accessionNumber} mono testId="detail-accession" />;
   const dt = <Field label="検査日時" value={studyDateTime} testId="banner-datetime" />;
   const md = (

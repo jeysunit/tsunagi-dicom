@@ -21,7 +21,7 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 ## 決まっていること
 
 - **画面への入り口は左のナビに置く。** 上の帯のタブは使わない（[menu.md](menu.md)）。項目の名前は用語集の語（検査一覧・受信一覧・接続先など）。
-- **詳細の見出しは患者バナーに替える。** 和暦・紹介医・英字氏名・Study ID・シリーズ数と画像数はバナーに足さず、「検査の情報」に置く。
+- **詳細の見出しは患者バナーに替える。** 紹介医・英字氏名・Study ID・シリーズ数と画像数はバナーに足さず、「検査の情報」に置く（和暦は生年月日の括弧の中）。
 - **モダリティ MR の印の色は `#9333EA`（暗い地は `#C084FC`）。**
 - **暗い外枠は使わない。** 上の帯・左のナビは `surface` の地にする。
 
@@ -56,7 +56,7 @@ ui-kit の写しは製品の側で直さない。`globals.css` の値はこの�
 |---|---|---|
 | 上の帯 | `src/components/layout/site-header.tsx`（接続の状態は `conn-status.tsx`、表示は `theme-toggle.tsx`） | あり。左は ナビの開閉・製品名・版、右は 接続の状態・表示（絵の押しボタン 1 つ）・利用者（2 行）・画面ロック・ログアウト。項目の置き方は [menu.md](menu.md) の「現状との差」 |
 | 左のナビ | `src/components/layout/side-nav.tsx`（項目は `nav-items.ts`、開閉は `nav-toggle.tsx`） | あり |
-| 患者バナー | `src/components/ui/patient-banner.tsx` | あり。検査の詳細の見出し（`study-detail.tsx`）が使う。和暦・紹介医などは、見出しの下の「検査の情報」（項目名と値の対）へ置いた |
+| 患者バナー | `src/components/ui/patient-banner.tsx` | あり。検査の詳細の見出し（`study-detail.tsx`）が使う。紹介医などは、見出しの下の「検査の情報」（項目名と値の対）へ置いた |
 | タブ | `src/components/ui/tabs.tsx` | 部品はある。使う画面は今は無い（検査の詳細は、「検査の情報」をタブに隠さず並べるようにした） |
 | 検索の帯 | `src/components/studies/study-browser.tsx` の `FilterBar` | あり |
 | 件数の行 | `src/components/ui/count-row.tsx` | あり。検査の一覧が使う |

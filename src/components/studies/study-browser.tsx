@@ -27,7 +27,7 @@ import {
 } from "@/lib/client/split-position";
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
-import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
+import { formatBirthCell, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { DETAIL_GROUPS, LIST_GROUPS, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
@@ -393,7 +393,7 @@ const DESC_MIN_COMPACT = 64;
 const COMPACT_DATE = 84;
 
 /**
- * 一覧の列（px。docs/spec.md の 3.1）。患者 ID・生年月日・年齢・性別は切らない（患者 ID の列は、出している行のいちばん長い値に合わせる）。
+ * 一覧の列（px。docs/spec.md の 3.1）。患者 ID・生年月日・性別は切らない（患者 ID の列は、出している行のいちばん長い値に合わせる）。
  * 氏名とかなも、いちばん長い値に合わせ、上限を超える値だけを `…` で切る（全文は title）。
  * モダリティ・検査の記述は残りの幅を取る。氏名の漢字とかなは別の列（かなは漢字の右）
  */
@@ -410,16 +410,16 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
     ...(showAccession ? [{ key: "accession", width: fit((s) => s.accessionNumber, 88, 160) }] : []),
     { key: "name", width: fit((s) => s.patientName, 104, 240) },
     { key: "kana", width: fit((s) => s.patientKana, 96, 200) },
-    { key: "birth", width: 104 },
-    { key: "age", width: 60 },
+    // 西暦と英字 1 字の元号と年齢（`1987/03/14 (S62・39歳)`）。Yu Gothic の実測で内側 160px 前後なので余白を足す
+    { key: "birth", width: 184 },
     { key: "sex", width: 64 },
     { key: "desc", width: undefined },
     { key: "count", width: 100 },
     { key: "viewer", width: 142 },
   ];
-  // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・年齢と性別（1 列）・モダリティと検査名。
+  // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・性別・モダリティと検査名。
   // 省く値（受付番号・カナ・生年月日・Se/Im・開く）は、詳細の見出し・検査の情報・操作の行で見る。
-  // 年齢と性別は短い値なので 1 列にまとめる（一覧が 570px ほどでも、横にスクロールせずに収める）
+  // 年齢は生年月日の列の中にあるので、列を畳んでも年齢だけの列は残さない（年齢は右の詳細の患者バナーで見る）
   if (!compact) return all;
   const keep = (key: string) => all.filter((c) => c.key === key);
   // 詰めた形の日時は 2 行（日付／時刻。12px の 2 行を 28px の行に収める）にして切らない（docs/design-system/parts.md の「一覧＋右に詳細の幅」）
@@ -428,7 +428,7 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
     { key: "date", width: COMPACT_DATE },
     ...keep("id"),
     { key: "name", width: fit((s) => s.patientName, 88, 200) },
-    { key: "agesex", width: 72 },
+    { key: "sexc", width: 56 },
     ...keep("desc"),
   ];
 }
@@ -598,17 +598,12 @@ function StudyRows({
                 生年月日
               </SortTh>
             )}
-            {has("age") && (
-              <SortTh sortKey="age" sort={sort} onSort={onSort}>
-                年齢
-              </SortTh>
-            )}
             {has("sex") && (
               <SortTh sortKey="sex" sort={sort} onSort={onSort}>
                 性別
               </SortTh>
             )}
-            {has("agesex") && <TableHead>年齢・性別</TableHead>}
+            {has("sexc") && <TableHead>性別</TableHead>}
             {/* 詰めた形では見出しが `…` で切れるので、全文を title に置く */}
             <SortTh sortKey="desc" sort={sort} onSort={onSort} title="モダリティ／検査名">
               モダリティ／検査名
@@ -638,7 +633,6 @@ function StudyRows({
             const uid = s.studyInstanceUid ?? "";
             const isOpen = selected !== null && uid === selected;
             const dateTime = `${formatSlashDate(s.studyDate)} ${formatDicomTime(s.studyTime)}`.trim();
-            const birthTitle = formatBirthWareki(s.patientBirthDate);
             const desc = [s.modalities?.join("・"), s.studyDescription].filter(Boolean).join(" ");
             return (
               <TableRow
@@ -703,13 +697,8 @@ function StudyRows({
                     </td>
                   )}
                   {has("birth") && (
-                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} title={birthTitle || undefined} data-testid="patient-birth">
-                      {formatSlashDate(s.patientBirthDate)}
-                    </td>
-                  )}
-                  {has("age") && (
-                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-age">
-                      {formatAge(s.patientBirthDate, s.studyDate)}
+                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-birth">
+                      {formatBirthCell(s.patientBirthDate, s.studyDate)}
                     </td>
                   )}
                   {has("sex") && (
@@ -717,9 +706,9 @@ function StudyRows({
                       {sexLabel(s.patientSex)}
                     </td>
                   )}
-                  {has("agesex") && (
-                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-agesex">
-                      {formatAge(s.patientBirthDate, s.studyDate)} {sexLabel(s.patientSex)}
+                  {has("sexc") && (
+                    <td className={cn(CELL, "whitespace-nowrap")} data-testid="patient-sex">
+                      {sexLabel(s.patientSex)}
                     </td>
                   )}
                   <td className={cn(CELL, CUT)} title={desc}>

@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // 画面の振る舞いの決まり（docs/spec.md の 2.3・3.1。2026-10-20 の画面の見直し）：
 // 今いる頁の印と頁ごとのタブの題名、押せる物の手応え（カーソル・hover・押している間）、選んだ行の見分け、
-// 一覧の列（患者 ID・生年月日・年齢・性別を切らない）。検証モード（AUTH_MODE=dev）とモックに対して流す。
+// 一覧の列（患者 ID・生年月日・性別を切らない）。検証モード（AUTH_MODE=dev）とモックに対して流す。
 
 test.describe.configure({ mode: "serial" });
 
@@ -388,12 +388,12 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   expect(seen).toEqual([]);
 });
 
-test("一覧の列：患者 ID・生年月日・年齢・性別は切らない（1280px と 1024px）", async ({ page }) => {
+test("一覧の列：患者 ID・生年月日・性別は切らない（1280px と 1024px）", async ({ page }) => {
   for (const width of [1280, 1024]) {
     await page.setViewportSize({ width, height: 720 });
     await asAdmin(page);
     await expect(rows(page)).toHaveCount(8);
-    for (const id of ["patient-id", "patient-birth", "patient-age", "patient-sex"]) {
+    for (const id of ["patient-id", "patient-birth", "patient-sex"]) {
       const cells = page.getByTestId(id);
       const cut = await cells.evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent));
       expect(cut, `${id} (${width}px)`).toEqual([]);

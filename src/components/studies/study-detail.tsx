@@ -15,7 +15,7 @@ import type { DicomValueRow } from "@/lib/all-values";
 import { getJson } from "@/lib/client/api";
 import { pinTagRow, SOP_INSTANCE_UID_TAG } from "@/lib/client/tag-copy";
 import type { SeriesView, StudyView } from "@/lib/fields";
-import { formatAge, formatBirthWareki, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
+import { birthParts, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { tagName } from "@/lib/instance-tags";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 // 見出しは、3 製品で共通の患者バナー（docs/design-system/components.md。2026-10-25 に、氏名などを数行に並べる形から替えた）。
 // バナーの並び：氏名（かな）・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名。
 // 値の無い項目は省く。受付番号だけは、無いときも「受付番号 —」を出す（無いこと自体が照合の手がかりになる）。
-// 英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数は、バナーに足さず、UID の行の下の「検査の情報」に項目名と値の対で並べる
+// 英字氏名・紹介医・Study ID・シリーズ数と画像数は、バナーに足さず、UID の行の下の「検査の情報」に項目名と値の対で並べる
 // （タブに隠さない。前のタブは中身が数行で空白が大きかった）。
 // その下に、シリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。DICOM の値を見る権限のある役割では、
 // サムネイルを押すと、その下にシリーズの画像の場所（画像の一覧と、画像ごとのタグ）を開く。もう一度押すと閉じる。
@@ -51,13 +51,12 @@ interface InfoRow {
 
 /**
  * 「検査の情報」（docs/design-system/parts.md の `.finfo`）：バナーに足さない、毎回は見ない値。
- * 3 列×2 行（各行 40px）に、英字氏名・生年月日（和暦）・紹介医・Study ID・シリーズ数と画像数の順で置く（6 つ目の升は空ける）。
+ * 3 列×2 行（各行 40px）に、英字氏名・紹介医・Study ID・シリーズ数と画像数の順で置く（5 つ目と 6 つ目の升は空ける）。
  * 値の無い項目も詰めずに「—」（検査を替えても、同じ項目が同じ位置にある）
  */
 function StudyInfo({ rows }: { rows: readonly InfoRow[] }) {
-  // 2 列目（和暦つきの生年月日）は中身の幅、残りを 1 列目と 3 列目で分ける（日本語の字体が広い環境でも、生年月日が折り返して行が 40px を超えない）
   return (
-    <dl className="finfo grid grid-cols-[1fr_auto_1fr] gap-x-4" data-testid="detail-info">
+    <dl className="finfo grid grid-cols-3 gap-x-4" data-testid="detail-info">
       {rows.map((r) => (
         <div key={r.label} className="flex min-h-10 min-w-0 flex-col justify-center" data-testid={r.testId}>
           <dt className="text-xs text-label">{r.label}</dt>
@@ -471,15 +470,12 @@ export function StudyDetailPanel({
   const openedSeries = data?.series.find((s) => s.seriesInstanceUid === openSeries);
 
   // 患者バナー（氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名）。値の無い項目も「—」で場所を残す
-  const birthDate = formatSlashDate(study.patientBirthDate);
-  const age = formatAge(study.patientBirthDate, study.studyDate);
-  const sex = sexLabel(study.patientSex);
-  const birthSex = `${birthDate}${age ? `（${age}）` : ""}${sex ? ` ${sex}` : ""}`.trim();
+  // 生年月日は西暦の後ろの括弧に元号と年・満年齢（検査日の時点）。和暦は帯に並べ、「検査の情報」には置かない
+  const birth = birthParts(study.patientBirthDate, study.studyDate);
   // 「検査の情報」：バナーに足さない値。値の無い項目も「—」で場所を残す
   const counts = study.seriesCount == null && study.instanceCount == null ? "" : `${study.seriesCount ?? "—"} / ${study.instanceCount ?? "—"}`;
   const infoRows: InfoRow[] = [
     { label: "英字氏名", value: study.patientNameAlphabetic, testId: "detail-alphabetic" },
-    { label: "生年月日（和暦）", value: formatBirthWareki(study.patientBirthDate) },
     { label: "紹介医", value: study.referringPhysicianName, testId: "detail-referring" },
     { label: "Study ID", value: study.studyId, mono: true },
     { label: "シリーズ / 画像", value: counts, testId: "detail-counts" },
@@ -571,7 +567,9 @@ export function StudyDetailPanel({
           nameTestId="detail-name"
           kana={study.patientKana || undefined}
           patientId={study.patientId}
-          birthSex={birthSex}
+          birthDate={birth.date}
+          birthNote={birth.note}
+          sex={sexLabel(study.patientSex)}
           // 受付番号が役割の許可の一覧に無い（項目ごと返らない）ときも、値の無いときと同じく「—」で場所を残す
           accessionNumber={study.accessionNumber ?? undefined}
           studyDateTime={`${formatSlashDate(study.studyDate)} ${formatDicomTime(study.studyTime)}`.trim()}

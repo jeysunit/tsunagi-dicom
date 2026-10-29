@@ -109,12 +109,13 @@ describe("見出し（患者バナー）と「検査の情報」", () => {
     // 期待の変更：前は値の無い項目（この検査ではモダリティ・検査名）を出さなかった。いまは項目名を残して「—」を出す
     expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
     expect(banner).toMatch(/モダリティ・検査名<\/dt><dd[^>]*>—<\/dd>/);
-    expect(banner).toContain("1960/07/15（65歳） 女");
+    expect(banner).toContain("1960/07/15");
+    expect(banner).toContain("（昭35・65歳）女");
     expect(banner).not.toContain("試験 医師");
     expect(banner).not.toContain("昭和");
   });
 
-  const INFO_LABELS = ["英字氏名", "生年月日（和暦）", "紹介医", "Study ID", "シリーズ / 画像"];
+  const INFO_LABELS = ["英字氏名", "紹介医", "Study ID", "シリーズ / 画像"];
   const infoOf = (html: string) => {
     const start = html.lastIndexOf("<dl", html.indexOf('data-testid="detail-info"'));
     return html.slice(start, html.indexOf("</dl>", start));
@@ -124,11 +125,11 @@ describe("見出し（患者バナー）と「検査の情報」", () => {
     const withInfo = render(true, full);
     expect(withInfo).not.toContain('role="tablist"');
     const info = infoOf(withInfo);
-    // 3 列（2 列目は中身の幅）。期待の変更：旧 "grid-cols-3" → 新 "grid-cols-[1fr_auto_1fr]"（列の数は同じ 3）
-    expect(info).toContain("grid-cols-[1fr_auto_1fr]");
+    // 3 列。期待の変更：和暦つきの生年月日の升を外したので、2 列目を中身の幅にする "grid-cols-[1fr_auto_1fr]" をやめ、等分の "grid-cols-3" に戻した
+    expect(info).toContain("grid-cols-3");
     expect([...info.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map((m) => m[1])).toEqual(INFO_LABELS);
+    expect(info).not.toContain("生年月日");
     expect(info).toContain("試験 医師");
-    expect(info).toContain("1960/07/15（昭和35年）");
     expect(info).toContain("1 / 4");
     const at = (s: string) => withInfo.indexOf(s);
     expect(at('aria-label="患者"')).toBeLessThan(at('data-testid="detail-info"'));
