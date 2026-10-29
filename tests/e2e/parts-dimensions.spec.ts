@@ -133,9 +133,21 @@ test.describe("部品の寸法", () => {
 
   test("上の帯と左のナビの写し（1280 幅）を撮る", async ({ page }, info) => {
     await asAdmin(page);
+    // 回している途中の絵を撮らない
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.waitForTimeout(500);
     const dir = process.env.KIT120_SHOTS;
     if (!dir) info.skip(true, "KIT120_SHOTS が無いので撮らない");
     await page.screenshot({ path: `${dir}/tsunagi-1280.png`, clip: { x: 0, y: 0, width: 1280, height: 420 } });
+    await page.getByTestId("conn-button").click();
+    await expect(page.getByTestId("conn-popover")).toBeVisible();
+    await page.screenshot({ path: `${dir}/tsunagi-1280-conn-open.png`, clip: { x: 0, y: 0, width: 1280, height: 420 } });
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.setViewportSize({ width: 500, height: 720 });
+    await page.screenshot({ path: `${dir}/tsunagi-500.png`, clip: { x: 0, y: 0, width: 500, height: 200 } });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.evaluate(() => (document.documentElement.dataset.theme = "dark"));
+    await page.screenshot({ path: `${dir}/tsunagi-1280-dark.png`, clip: { x: 0, y: 0, width: 1280, height: 420 } });
   });
 });
