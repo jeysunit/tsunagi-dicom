@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ConnStatus, OverallBadge, type Overall } from "@/components/layout/conn-status";
+import { checkSummary, ConnStatus, OverallBadge, type Overall } from "@/components/layout/conn-status";
 import { NavToggle } from "@/components/layout/nav-toggle";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -114,6 +114,18 @@ describe("接続の状態（ConnStatus）", () => {
     expect(without).not.toContain("接続確認</button>");
   });
 
+  it("接続確認の結果の文は parts.md の 3 つの型だけ", () => {
+    const ok = { ok: true, data: { connected: true } };
+    const ng = { ok: true, data: { connected: false } };
+    const unreadable = { ok: false, data: { error: "権限がありません" } };
+    expect(checkSummary([ok, ok, ok])).toBe("3 件すべてに接続できました。");
+    expect(checkSummary([ok, ng, unreadable])).toBe("3 件のうち 2 件に接続できませんでした。");
+    expect(checkSummary([ng, ng])).toBe("2 件のうち 2 件に接続できませんでした。");
+    // 全部が読めなかった（要求が届かない・権限・期限切れ）ときと、確かめる相手が無いときは「確かめられなかった」
+    expect(checkSummary([unreadable, unreadable])).toBe("接続を確かめられませんでした。");
+    expect(checkSummary([])).toBe("接続を確かめられませんでした。");
+  });
+
   it("全体の状態の語は 5 つだけで、data-k は parts.md の表のとおり", () => {
     const words: [Overall, string, string][] = [
       ["loading", "確認中", "check"],
@@ -131,7 +143,7 @@ describe("接続の状態（ConnStatus）", () => {
 
 });
 
-// 部品集の値（ui-kit 1.2.0 の .btn・.empty・.notice）。クラスの名前で見る
+// 部品集の値（ui-kit 1.2.2 の .btn・.empty・.notice）。クラスの名前で見る
 const classesOf = (html: string) => new Set(/class="([^"]*)"/.exec(html)![1]!.split(/\s+/));
 
 describe("ボタン（Button）", () => {

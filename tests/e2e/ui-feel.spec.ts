@@ -420,6 +420,8 @@ const contrastOf = (a: string, b: string) => {
 
 test("入力欄・選択欄・枠のボタンの枠は、まわりの地との対比が 3:1 以上（WCAG 2.2 の 1.4.11）。明るい地と暗い地", async ({ page }) => {
   await asAdmin(page);
+  // 色の遷移（100ms）の途中の色を読まない（枠なしのボタンは絵・字の色が遷移する）
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(rows(page)).toHaveCount(8);
   /**
    * 見えている部品ごとに、枠の色と、部品の外側の地を読む。地は親をたどって透けていない地まで重ね（透ける地は上に重ねる）、
@@ -443,16 +445,11 @@ test("入力欄・選択欄・枠のボタンの枠は、まわりの地との�
             return { rgb: `rgb(${d[0]}, ${d[1]}, ${d[2]})`, alpha: d[3]! };
           };
           return els
-            // 見えていて、枠を持つもの（枠の無いボタンは外す。枠なし .btn-ghost は透明の枠 1px を持つので、それも外す）。
-            // 押せない物は対象外（WCAG 2.2 の 1.4.11 は無効の部品を除く。部品集の無効は枠 border・地 surface・字 label）
+            // 見えていて、押せるもの。押せない物は対象外（WCAG 2.2 の 1.4.11 は無効の部品を除く。部品集の無効は枠 border・地 surface・字 label）。
+            // 枠なし .btn-ghost は透明の枠 1px を持つ。枠では示せないので、枠の代わりに絵・字の色（currentColor）を地と比べる
             .filter((el) => {
               const s = getComputedStyle(el);
-              return (
-                (el as HTMLElement).offsetParent !== null &&
-                !(el as HTMLButtonElement).disabled &&
-                s.borderTopWidth !== "0px" &&
-                s.borderTopColor !== "rgba(0, 0, 0, 0)"
-              );
+              return (el as HTMLElement).offsetParent !== null && !(el as HTMLButtonElement).disabled && s.borderTopWidth !== "0px";
             })
             .map((el) => {
               const layers: string[] = [];
@@ -464,9 +461,11 @@ test("入力欄・選択欄・枠のボタンの枠は、まわりの地との�
                 if (alpha === 255) break;
               }
               const bg = paint(["rgb(255, 255, 255)", ...layers]).rgb;
-              const border = paint([bg, getComputedStyle(el).borderTopColor]).rgb;
+              const s = getComputedStyle(el);
+              const ghost = s.borderTopColor === "rgba(0, 0, 0, 0)";
+              const border = paint([bg, ghost ? s.color : s.borderTopColor]).rgb;
               const id = el.getAttribute("data-testid") ?? el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 12) ?? "";
-              return { name: `${label} ${el.tagName.toLowerCase()} ${id}`, border, bg };
+              return { name: `${label} ${ghost ? "枠なし " : ""}${el.tagName.toLowerCase()} ${id}`, border, bg };
             });
         },
         where,
@@ -474,7 +473,7 @@ test("入力欄・選択欄・枠のボタンの枠は、まわりの地との�
   const check = async (where: string) => {
     const found = await measure(where);
     expect(found.length, where).toBeGreaterThan(0);
-    for (const f of found) expect(contrastOf(f.border, f.bg), `${f.name}：枠 ${f.border}・地 ${f.bg}`).toBeGreaterThanOrEqual(3);
+    for (const f of found) expect(contrastOf(f.border, f.bg), `${f.name}：枠（枠なしは絵・字）${f.border}・地 ${f.bg}`).toBeGreaterThanOrEqual(3);
   };
   for (const theme of ["light", "dark"] as const) {
     await page.goto("/");

@@ -270,7 +270,7 @@ test("接続先：確認中は札を出し、その行のボタンを押せな�
   });
   await page.goto("/modalities");
   const row = page.locator('[data-modality="dtg"]');
-  await expect(row.getByTestId("echo-cell")).toHaveText("—");
+  await expect(row.getByTestId("echo-cell")).toContainText("未確認");
   await row.getByTestId("echo").dblclick();
   await expect(row.getByTestId("echo-result")).toContainText("確認中");
   await expect(row.getByTestId("echo")).toBeDisabled();

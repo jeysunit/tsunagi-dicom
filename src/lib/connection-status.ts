@@ -2,7 +2,7 @@ import type { Backend } from "@/lib/backend/types";
 import type { Db } from "@/lib/db";
 import type { FieldAllowlist } from "@/lib/fields";
 
-// 上の帯の「接続の状態」の材料（docs/spec.md の 3.3）。読むだけで、相手に何も送らない。
+// 上の帯の「接続の状態」の材料（docs/spec.md の 3.3）。この読み取りは、相手に何も送らない（手で押す「接続確認」の C-ECHO は別の要求）。
 // - 画像サーバー（Orthanc）：機器の一覧（/modalities）を読めたか。読めなければ「失敗」
 // - HL7 の受け口：HL7_RECEIVER_TOKEN_FILE を渡してあれば「待ち受け中」（受け口はこのアプリの中の道なので、このアプリが答えていれば待っている）
 // - 接続先：直近の接続確認（監査の記録の echo）の結果。確かめていない接続先は札を出さない

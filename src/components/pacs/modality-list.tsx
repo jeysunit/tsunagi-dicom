@@ -12,7 +12,7 @@ import { formatDateTimeIn } from "@/lib/format/japanese-date";
 import { cn } from "@/lib/utils";
 
 // 接続先の表と接続確認（docs/spec.md の 3.3。段 4）。1 件 1 行。「接続確認」で Orthanc から C-ECHO を送る。
-// 「最後の接続確認」の列は、未確認「—」・確認中（札。その行のボタンは押せない）・成功（札と時刻）・失敗（札と時刻と理由の 1 句）。
+// 「最後の接続確認」の列は、未確認（札。確かめられる相手でまだ確かめていない）・確認中（札。その行のボタンは押せない）・成功（札と時刻）・失敗（札と時刻と理由の 1 句）。
 // 画面の言葉は docs/spec.md の 2.2、文の型は docs/design-system/writing.md。
 
 interface EchoResult {
@@ -165,7 +165,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
                         </td>
                       )}
                       <td className="h-7 px-2 py-0" data-testid="echo-cell">
-                        {r === undefined && <span className="text-label">—</span>}
+                        {r === undefined && <StatusBadge kind="plan">未確認</StatusBadge>}
                         {r === "busy" && (
                           <span role="status" data-testid="echo-result" data-state="check">
                             <StatusBadge kind="check">確認中</StatusBadge>
