@@ -29,6 +29,7 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
   const [checking, setChecking] = useState(false);
   // 手で押した「接続確認」の結果の文。読み上げるのはこれだけ（1 分ごとに替わる札は読み上げない）
   const [report, setReport] = useState("");
+  const checkingRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -82,16 +83,19 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
 
   // 登録された接続先すべてに、つながるかの確かめ（C-ECHO）をかけ、終わったら状態を読み直す。接続先の頁の「全部を接続確認」と同じ要求
   async function checkAll() {
-    if (checking || targets.length === 0) return;
-    setChecking(true);
-    setReport("");
-    try {
-      const results = await Promise.all(targets.map((id) => postJson(`/api/modalities/${encodeURIComponent(id)}/echo`, {}, csrfToken)));
-      await load();
-      setReport(checkSummary(results));
-    } finally {
-      setChecking(false);
-    }
+    if (targets.length === 0) return;
+    // 再描画の前に素早く 2 回押されても 1 回だけ流す（state は描画まで替わらないので ref で塞ぐ）
+    await runExclusive(checkingRef, async () => {
+      setChecking(true);
+      setReport("");
+      try {
+        const results = await Promise.all(targets.map((id) => postJson(`/api/modalities/${encodeURIComponent(id)}/echo`, {}, csrfToken)));
+        await load();
+        setReport(checkSummary(results));
+      } finally {
+        setChecking(false);
+      }
+    });
   }
   // 読めなかった（401・423・通信の失敗）ときは、接続先が落ちているとは言えないので「一部が接続不可」にせず別の札にする。
   // 読めたが全体の状態が無い（この役割には全体の状態を返さない）ときは、確かめた結果を持たないので「未確認」
@@ -177,6 +181,17 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
       </div>
     </span>
   );
+}
+
+/** 前の処理が終わるまで次を始めない。lock が立っていれば何もしない（再描画を待たない重なりの抑え） */
+export async function runExclusive(lock: { current: boolean }, fn: () => Promise<void>): Promise<void> {
+  if (lock.current) return;
+  lock.current = true;
+  try {
+    await fn();
+  } finally {
+    lock.current = false;
+  }
 }
 
 /**

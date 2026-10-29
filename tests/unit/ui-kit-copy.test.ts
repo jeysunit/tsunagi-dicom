@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 // 部品集（ui-kit）の写しを守る検査（部品集 system/delivery.md の 4 の C1）。
 // 写しは製品の側で直さない。指紋（SHA256SUMS）と一致しなければ、写しが手で直されたか、写し直しが不完全。
 // tsunagi は components.css を読まないので、写さない（部品の値は docs/design-system/parts.md に合わせる）。
+// SHA256SUMS は部品集のものをそのまま写す（delivery.md の 4 の C1）。components.css の行が残るのは、そのため。
 
 const KIT = "docs/design-system/ui-kit";
 const COPIED = ["tokens.css", "icons.svg", "VERSION"] as const;

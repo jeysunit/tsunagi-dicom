@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { checkSummary, ConnStatus, OverallBadge, type Overall } from "@/components/layout/conn-status";
+import { checkSummary, ConnStatus, OverallBadge, runExclusive, type Overall } from "@/components/layout/conn-status";
 import { NavToggle } from "@/components/layout/nav-toggle";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -114,6 +115,27 @@ describe("接続の状態（ConnStatus）", () => {
     expect(without).not.toContain("接続確認</button>");
   });
 
+  it("「接続確認」は、再描画の前に 2 回押されても 1 回だけ流れる", async () => {
+    const lock = { current: false };
+    let runs = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const first = runExclusive(lock, async () => {
+      runs++;
+      await gate;
+    });
+    // 1 回目が終わる前の 2 回目は、何も流さない
+    await runExclusive(lock, async () => {
+      runs++;
+    });
+    expect(runs).toBe(1);
+    release();
+    await first;
+    // 終われば、また流せる。失敗しても lock は戻る
+    await expect(runExclusive(lock, async () => Promise.reject(new Error("x")))).rejects.toThrow("x");
+    expect(lock.current).toBe(false);
+  });
+
   it("接続確認の結果の文は parts.md の 3 つの型だけ", () => {
     const ok = { ok: true, data: { connected: true } };
     const ng = { ok: true, data: { connected: false } };
@@ -164,6 +186,63 @@ describe("ボタン（Button）", () => {
     expect(outline.has("font-bold")).toBe(false);
     for (const c of ["disabled:bg-surface", "disabled:text-label", "disabled:border-border", "disabled:font-normal"]) expect(primary.has(c), c).toBe(true);
     expect([...primary].some((c) => c.startsWith("disabled:opacity"))).toBe(false);
+  });
+});
+
+// 枠の無い（ghost の）ボタンは、枠以外で押せると分かる手当てを全部持つ（docs/design-system/parts.md の「ボタン」）。
+// 絵の色の 3:1 は tests/e2e/ui-feel.spec.ts が守る
+describe("枠の無いボタン（ghost）", () => {
+  it("hover で地が hover、押している間は pressed、フォーカスは ring-2。押せないときは変えない", () => {
+    const c = classesOf(renderToStaticMarkup(createElement(Button, { variant: "ghost" }, "x")));
+    for (const k of [
+      "border-transparent",
+      "bg-transparent",
+      "not-disabled:hover:bg-hover",
+      "not-disabled:active:bg-pressed",
+      "focus-visible:ring-2",
+      "focus-visible:ring-ring",
+    ]) {
+      expect(c.has(k), k).toBe(true);
+    }
+  });
+
+  // 絵だけのボタンなので、名前は aria-label だけが持つ。使う 6 か所の呼び出しの開始タグを、ソースから取り出して見る
+  const SITES = [
+    ["src/components/layout/nav-toggle.tsx", 1],
+    ["src/components/layout/theme-toggle.tsx", 1],
+    ["src/components/pacs/sent-list.tsx", 2],
+    ["src/components/studies/study-detail.tsx", 1],
+    ["src/components/studies/tag-grid.tsx", 1],
+  ] as const;
+
+  /** `<Button` から、波括弧の外の最初の `>` までを開始タグとして取り出す */
+  function openingTags(source: string): string[] {
+    const tags: string[] = [];
+    for (let at = source.indexOf("<Button"); at !== -1; at = source.indexOf("<Button", at + 1)) {
+      let depth = 0;
+      let i = at;
+      for (; i < source.length; i++) {
+        const ch = source[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        else if (ch === ">" && depth === 0 && source[i - 1] !== "=") break;
+      }
+      tags.push(source.slice(at, i + 1));
+    }
+    return tags;
+  }
+
+  it.each(SITES)("%s の ghost のボタンは、すべて aria-label を持つ（%i か所）", (file, count) => {
+    const ghosts = openingTags(readFileSync(file, "utf8")).filter((t) => t.includes('variant="ghost"'));
+    expect(ghosts.length).toBe(count);
+    for (const tag of ghosts) expect(tag, tag).toMatch(/\baria-label=/);
+  });
+
+  it("開始タグの取り出しは、aria-label の無い ghost を見逃さない", () => {
+    const bad = `<Button type="button" variant="ghost" onClick={() => go()}>\n  <X />\n</Button>`;
+    const [tag] = openingTags(bad);
+    expect(tag).toContain('variant="ghost"');
+    expect(tag).not.toMatch(/\baria-label=/);
   });
 });
 
