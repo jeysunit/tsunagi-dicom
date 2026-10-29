@@ -39,6 +39,7 @@
 
 - **画面（`src/app`・`src/components`）を触る前に、[`docs/design-system`](docs/design-system/README.md) を読む。** 画面は、そこにある部品・画面の型・メニューの決まりで組む。
 - **型に無い部品は、まず `docs/design-system` と部品の実装（`src/components/ui`）に足す PR を出してから使う。** 画面の PR の中で、文書に無い見た目の部品や値を作らない。
+- **部品は `docs/design-system/parts.md` の構造・絵・寸法どおりに作り、別の絵や語に替えない。** 絵は `docs/design-system/ui-kit/icons.svg` の表にあるもの（`lucide-react` の同じ名前）だけを使う。parts.md に値が無いときは、画面の PR の中で決めず、部品集を先に直す。
 - 色は `src/app/globals.css` のトークンで指定する。`#hex`・`rgb()`・Tailwind の色名は書かない（`tests/unit/design-system.test.ts` が落とす。例外は同じ試験の一覧に理由つきで載せる）。
 
 ## 設計の決まり
