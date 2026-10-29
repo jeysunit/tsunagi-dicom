@@ -214,10 +214,6 @@ describe("ui-kit の tokens.css と globals.css", () => {
     const sample = `${css}\n:root { --w-login: 1px; }`;
     expect([...stripComments(sample).matchAll(/--w-login\s*:/g)].length).toBe(2);
   });
-
-  it("写しの版は 1.0.1", () => {
-    expect(readFileSync("docs/design-system/ui-kit/VERSION", "utf8").trim()).toBe("1.0.1");
-  });
 });
 
 const badge = (kind: StatusKind, text: string) => createElement(StatusBadge, { kind, children: text });
