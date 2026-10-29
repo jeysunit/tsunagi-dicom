@@ -114,7 +114,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
       <PageHeader title="接続先" />
       <p className="text-xs text-label">Orthanc に登録された DICOM 接続先（登録・変更は Orthanc の設定で行います）</p>
       {notice && (
-        <NoticeBar kind={notice.kind} data-testid="echo-notice" data-kind={notice.kind}>
+        <NoticeBar kind={notice.kind} data-testid="echo-notice" data-k={notice.kind}>
           {notice.text}
         </NoticeBar>
       )}

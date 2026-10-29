@@ -148,7 +148,7 @@ test("押せる物：カーソルは指の形、押せないときは禁止の�
   expect(cursor).toBe("not-allowed");
 });
 
-test("押している間の手応え：ボタンは沈んで影が消え、絞り込みの並びは内側に影。枠のボタンは白い地と影で浮かせる", async ({ page }) => {
+test("押している間の手応え：ボタンは影を持たず 1px 沈み、絞り込みの並びは内側に影。枠のボタンは白い地", async ({ page }) => {
   await asAdmin(page);
   await expect(rows(page).first()).toBeVisible();
   const style = (testId: string) =>
@@ -160,14 +160,14 @@ test("押している間の手応え：ボタンは沈んで影が消え、絞�
   // 見える影があるか（Tailwind CSS v4 は、影の無い形も透明の影を並べて書く。色の透明度が 0 でない影を探す）
   const shadowVisible = (v: string) => v !== "none" && v.split(/,(?![^(]*\))/).some((part) => !/rgba\([^)]*,\s*0\)/.test(part));
 
-  // 「詳細条件」（枠のボタンの形）：押す前は影で浮き、押している間は 1px 沈んで影が消える。離すと戻る
+  // 「詳細条件」（枠のボタンの形）：影は持たない（部品集の .btn）。押している間は 1px 沈む。離すと戻る
   const before = await style("filter-more");
-  expect(shadowVisible(before.shadow)).toBe(true);
+  expect(shadowVisible(before.shadow)).toBe(false);
   expect(before.translate).toBe("none");
   await page.getByTestId("filter-more").hover();
   await page.mouse.down();
   await expect.poll(async () => (await style("filter-more")).translate).toBe("0px 1px");
-  await expect.poll(async () => shadowVisible((await style("filter-more")).shadow)).toBe(false);
+  expect(shadowVisible((await style("filter-more")).shadow)).toBe(false);
   await page.mouse.up();
   await expect.poll(async () => (await style("filter-more")).translate).toBe("none");
 
@@ -443,8 +443,17 @@ test("入力欄・選択欄・枠のボタンの枠は、まわりの地との�
             return { rgb: `rgb(${d[0]}, ${d[1]}, ${d[2]})`, alpha: d[3]! };
           };
           return els
-            // 見えていて、枠を持つもの（枠の無いボタンは外す）
-            .filter((el) => (el as HTMLElement).offsetParent !== null && getComputedStyle(el).borderTopWidth !== "0px")
+            // 見えていて、枠を持つもの（枠の無いボタンは外す。枠なし .btn-ghost は透明の枠 1px を持つので、それも外す）。
+            // 押せない物は対象外（WCAG 2.2 の 1.4.11 は無効の部品を除く。部品集の無効は枠 border・地 surface・字 label）
+            .filter((el) => {
+              const s = getComputedStyle(el);
+              return (
+                (el as HTMLElement).offsetParent !== null &&
+                !(el as HTMLButtonElement).disabled &&
+                s.borderTopWidth !== "0px" &&
+                s.borderTopColor !== "rgba(0, 0, 0, 0)"
+              );
+            })
             .map((el) => {
               const layers: string[] = [];
               for (let outer = el.parentElement; outer; outer = outer.parentElement) {
