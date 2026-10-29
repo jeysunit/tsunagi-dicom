@@ -166,7 +166,7 @@ test("受信一覧の上限とページ送り：期間の中が 1,000 件を超�
   await page.getByTestId("received-reload").click();
   const rows = page.getByTestId("received-row");
   await expect(page.getByTestId("received-over-limit")).toHaveText("受信が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。");
-  await expect(page.getByTestId("received-over-limit")).toHaveAttribute("data-kind", "warn");
+  await expect(page.getByTestId("received-over-limit")).toHaveAttribute("data-k", "warn");
   // 並び：検索の帯 → 上限の知らせ → 件数の行 → 表 → ページ送り
   const order = await page.evaluate(() =>
     ["received-filters", "received-over-limit", "received-count", "received-table", "received-pager"].map(
@@ -270,7 +270,7 @@ test("接続先：確認中は札を出し、その行のボタンを押せな�
   });
   await page.goto("/modalities");
   const row = page.locator('[data-modality="dtg"]');
-  await expect(row.getByTestId("echo-cell")).toHaveText("—");
+  await expect(row.getByTestId("echo-cell")).toContainText("未確認");
   await row.getByTestId("echo").dblclick();
   await expect(row.getByTestId("echo-result")).toContainText("確認中");
   await expect(row.getByTestId("echo")).toBeDisabled();

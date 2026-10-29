@@ -256,7 +256,7 @@ function FilterBar({
           data-testid="filter-more"
           onClick={() => setMore((v) => !v)}
           className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-md border border-border-input bg-background px-2 text-sm text-foreground shadow-xs hover:border-label hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "inline-flex h-7 items-center gap-1 rounded border border-border-input bg-background px-2 text-sm text-foreground hover:bg-hover active:bg-pressed focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             pressFeedback,
           )}
         >

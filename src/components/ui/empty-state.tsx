@@ -45,9 +45,17 @@ export function EmptyState(props: EmptyStateProps | DeniedStateProps) {
   );
 }
 
+// 部品集の `.empty`：中央寄せの点線の枠（枠 1px border-input・角 6px・内 32px 16px・間 8px・字 label）。権限の無い頁（denied）は実線
 function Box({ className, children, ...props }: React.ComponentProps<"div">) {
   return (
-    <div data-slot="empty-state" className={cn("flex flex-col items-start gap-2 p-8", className)} {...props}>
+    <div
+      data-slot="empty-state"
+      className={cn(
+        "flex flex-col items-center gap-2 rounded-md border border-dashed border-border-input px-4 py-8 text-center text-label data-[kind=denied]:border-solid",
+        className,
+      )}
+      {...props}
+    >
       {children}
     </div>
   );

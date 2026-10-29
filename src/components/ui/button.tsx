@@ -4,34 +4,36 @@ import type * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * 押している間の手応え（docs/spec.md の 2.3）：1px 沈み、浮きの影を消す。ボタンの形の部品はどれもこれを使う
+ * 押している間の手応え（docs/spec.md の 2.3。parts.md の「ボタン」）：1px 沈む。ボタンの形の部品はどれもこれを使う
  * （Button のほか、Button を使わない押せる物も）。動きを減らす設定のときは、地の色の変化だけにする
  */
 const pressFeedback =
-  "transition-[color,background-color,border-color,box-shadow,translate,filter] duration-100 motion-reduce:transition-none motion-safe:not-disabled:active:translate-y-px not-disabled:active:shadow-none";
+  "transition-[color,background-color,border-color,box-shadow,translate,filter] duration-100 motion-reduce:transition-none motion-safe:not-disabled:active:translate-y-px";
 
 /** 1つの並び（絞り込みの見出しなど）の中のボタンの手応え：並びを崩さないよう沈めずに、内側に影を付ける */
 const pressInset =
   "transition-[color,background-color,box-shadow] duration-100 motion-reduce:transition-none active:shadow-[inset_0_2px_4px_rgb(0_0_0/0.2)]";
 
 const buttonVariants = cva(
-  // 押せる物の手応え（docs/spec.md の 2.3）：カーソルは globals.css の1か所、hover・押している間・フォーカスはここ。
-  // 地のあるボタンと枠のボタンは、小さな影で浮かせて押せる物と分かる形にする（枠のボタンは地を白にする）。
-  // 押せないときは薄くし、hover と押している間の変化を出さない（カーソルは禁止の形）
-  `inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium ${pressFeedback} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:shadow-none [&_svg]:size-4 [&_svg]:shrink-0`,
+  // 押せる物の手応え（docs/spec.md の 2.3。docs/design-system/parts.md の「ボタン」）：カーソルは globals.css の1か所、hover・押している間・フォーカスはここ。
+  // 角 4px・影なし。主だけ太字。押せないときは地 surface・字 label・枠 border で、hover と押している間の変化を出さない（カーソルは禁止の形）
+  `inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded border text-sm ${pressFeedback} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:border-border disabled:bg-surface disabled:font-normal disabled:text-label [&_svg]:size-4 [&_svg]:shrink-0`,
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground shadow-sm not-disabled:hover:bg-primary-hover not-disabled:active:bg-primary-active",
-        outline:
-          "border border-border-input bg-background shadow-xs not-disabled:hover:border-label not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
-        ghost: "not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
-        // 取り消せない操作の実行のボタン（削除する）。hover と押している間は地を暗くする
-        danger: "bg-danger text-background shadow-sm not-disabled:hover:brightness-90 not-disabled:active:brightness-75",
+        // 主（.btn-primary）
+        default:
+          "border-primary bg-primary font-bold text-primary-foreground not-disabled:hover:border-primary-hover not-disabled:hover:bg-primary-hover not-disabled:active:border-primary-active not-disabled:active:bg-primary-active",
+        // 副（.btn）。白い地・枠 border-input
+        outline: "border-border-input bg-background text-foreground not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
+        // 枠なし（.btn-ghost）
+        ghost: "border-transparent bg-transparent text-foreground not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
+        // 取り消せない操作の実行のボタン（.btn-danger.fill。確認の窓の実行だけ）。hover と押している間は地を暗くする
+        danger: "border-danger bg-danger font-bold text-danger-foreground not-disabled:hover:brightness-90 not-disabled:active:brightness-75",
       },
       size: {
-        default: "h-8 px-3",
-        sm: "h-7 px-2 text-xs",
+        default: "h-8 min-w-16 px-3",
+        sm: "h-7 min-w-12 px-2",
         // 一覧の 1 行（28px）に収める大きさ。押せる大きさの下限（24px。WCAG 2.2 の 2.5.8）ちょうど
         xs: "h-6 px-2 text-xs",
       },

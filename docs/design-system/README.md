@@ -44,11 +44,11 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 | [glossary.md](glossary.md) | 画面の言葉の決まり。語の使い分けと、3 製品をまたいだ語の対照 |
 | [parts.md](parts.md) | 部品の HTML の構造・クラス・値。`src/components/ui` に同じ構造とクラスの名前で組む |
 | [writing.md](writing.md) | 文言（誤り・知らせ・空の状態・確認の窓）の書き方 |
-| [ui-kit/](ui-kit/) | 3 製品で同じ値の写し（`tokens.css`、版は `VERSION`） |
+| [ui-kit/](ui-kit/) | 3 製品で同じ値の写し（`tokens.css`・`icons.svg`、版は `VERSION`、指紋は `SHA256SUMS`）。`components.css` は読まないので写さない |
 | [scenarios.md](scenarios.md) | 検証のシナリオ。同じ 1 件の検査を 8 画面に通す |
 | [wireframes/](wireframes/) | 部品だけで組んだ画面の案（HTML。ブラウザで開く。データは架空） |
 
-ui-kit の写しは製品の側で直さない。`globals.css` の値はこの写しと同じにし、試験で確かめる。
+ui-kit の写しは製品の側で直さない。`globals.css` の値はこの写しと同じにし、写した 3 つの指紋が `SHA256SUMS` と合うことと合わせて、試験で確かめる（`tests/unit/design-system.test.ts`・`tests/unit/ui-kit-copy.test.ts`）。絵は `icons.svg` の表にあるものを、`lucide-react` の同じ名前でそのまま使う。
 
 ## 部品の実装の場所
 

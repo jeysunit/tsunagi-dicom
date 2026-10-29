@@ -28,15 +28,16 @@
 
 ```html
 <header class="topbar">
-  <button type="button" class="iconbtn" data-act="nav" aria-expanded="true" aria-label="ナビを開閉する">…</button>
+  <button type="button" class="iconbtn" data-act="nav" aria-expanded="true" aria-controls="sidenav" aria-label="ナビを開閉する" title="ナビを閉じる"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
   <span class="brand">tsunagi-dicom</span>
   <span class="sp"></span>
   <div class="qs">…直接の検索（tsunagi だけ）…</div>
   <span class="connwrap">
-    <button type="button" class="connbtn" popovertarget="conn-pop" aria-label="接続の状態を開く">接続の状態 <span class="st" data-k="ok">接続中</span></button>
+    <button type="button" class="connbtn" popovertarget="conn-pop"><span class="cl">接続の状態</span><span class="st" data-k="ok">接続中</span><svg class="ic chev" aria-hidden="true"><use href="#i-chevd"/></svg></button>
     <div id="conn-pop" popover class="pop" aria-label="接続の状態">
       <h3>接続の状態</h3>
       <dl class="kv"><dt>送信先</dt><dd><b>TSUNAGI</b> <span class="st" data-k="ok">成功</span> <span class="xs label">2026/10/25 23:20</span></dd>…</dl>
+      <p class="sr" role="status" aria-live="polite">…手で押した「接続確認」の結果だけをここに入れる…</p>
       <div class="ft"><button type="button" class="btn btn-sm">接続確認</button><a class="btn btn-sm" href="/modalities">接続先を開く</a></div>
     </div>
   </span>
@@ -49,7 +50,22 @@
 ```
 
 - 高さ 48px、地 `surface`、下に 1px `border`、間 12px。並びは上のとおりで、無い項目は詰める（dicom-test-generator と ris-emulator は `who`・画面ロック・ログアウトが無く、右端が表示）。
-- 接続の状態：閉じているときの札は全体の状態 1 つ（`ok`「接続中」／`ng`「一部が接続不可」。状態そのものを読めなかったとき（401・423・通信の失敗）は、接続先が落ちているとは言えないので「確認できません」）。popover は**標準の `popover` 属性**で開く（外を押す・Esc で閉じる。自前の開け閉めを書かない）。中身は相手ごとの 種類・名前・札・時刻と、「接続確認」と接続先の画面への道。接続先の画面の表と同じ相手・同じ札。幅が 640px に満たない画面では、上の帯が横にはみ出さないよう、札の前の「接続の状態」の文字を省く（ボタンの名前は `aria-label` が持つ）。
+- **ナビの開閉ボタン：** ハンバーガー（Lucide の `menu`。tsunagi は `lucide-react` の `Menu` をそのまま使う）に固定し、開閉で絵を替えない（状態は `aria-expanded` が持つ）。読み上げの名前は「ナビを開閉する」で固定し、`aria-expanded` と `aria-controls="sidenav"`（ナビの `id`）を付ける。大きさは 32px（`.iconbtn`）。ホバーの `title` だけ「ナビを閉じる」「ナビを開く」で替えてよい。
+- **接続の状態：** 枠つき 32px のボタン `.connbtn` の中に、「接続の状態」（`.cl`。本文の色）・全体の状態の札（`.st`）・シェブロン（`.chev`。下向き、開くと上向き）を左からこの順で置く。全体の語は次の 5 つだけで、色だけに頼らず文字と印を添える。
+
+  | 語 | `data-k` | いつ |
+  |---|---|---|
+  | 確認中 | `check` | 読み込み中 |
+  | 接続中 | `ok` | 確かめられる相手のすべてが成功 |
+  | 一部が接続不可 | `ng` | 1 つでも失敗 |
+  | 未確認 | `plan` | まだ 1 つも確かめていない（tsunagi は、この役割には全体の状態を返さないとき） |
+  | 確認できません | `unknown` | 状態を読めない（401・423・通信の失敗。接続先が落ちているとは言えない） |
+
+  popover は**標準の `popover` 属性**で開く（外を押す・Esc で閉じる。自前の開け閉めを書かない）。ボタンに `aria-label` を付けない（見える文字が名前になる）。640px 未満は `.cl`（「接続の状態」の文字）を視覚的に隠す（読み上げの名前は残る）。
+- 接続の状態の読み上げ：1 分ごとに読み直して替わる札は読み上げない（`aria-live` を付けない）。手で押した「接続確認」の結果だけを、popover の中の `<p class="sr" role="status" aria-live="polite">` に文で入れて読み上げる（閉じると読まれない）。
+  - 結果の文は次の 3 つの型の 1 文だけ。全部できた：「N 件すべてに接続できました。」／一部できなかった：「N 件のうち M 件に接続できませんでした。」（M は失敗の件数、N は確かめた件数）／確かめられなかった：「接続を確かめられませんでした。」（状態を読めない・通信の失敗）。N には状態を持たない相手を数えない。結果を入れる前に `<p>` の中身を空にして、同じ文が続いても読み直されるようにする。
+- 状態を持たない相手（確かめる手段が無い相手）には札を出さず、素の「—」（補助の色 `label`）を置く。「未確認」の札にしない。全体の札の語の判定には数えない。「確かめられる相手」が 0 件なら「未確認」。確かめられる相手でまだ確かめていないときは札「未確認」（`plan`）。接続先の表の結果欄も同じ。tsunagi の接続先はどれも C-ECHO で確かめられるので、素の「—」にする相手は無い。
+- 接続の状態の中身：相手ごとの 種類・名前・札・時刻と、「接続確認」と接続先の画面への道。接続先の名前は太字（`<b>`）、状態の札、時刻（`.xs.label`）の順で `dd` に並べる。接続先の画面の表と同じ相手・同じ札。
 - ris-emulator の MWL の待ち受けは popover の中に「待ち受け MWL（RIS_EMU）`listen`「待ち受け中」」。帯に住所や緑の塗りの札を出さない。tsunagi の「バックエンド：モック」も popover へ。
 - 表示：絵の押しボタン 1 つ。押すたびに `html[data-theme]` を `light`・`dark` で替え、覚える（tsunagi はサーバーの利用者の設定、ris-emulator と dicom-test-generator は `localStorage`）。
 - 状態：押せる物は hover で `hover` の地、押している間 `pressed`、フォーカスは 2px の `ring`。
@@ -128,16 +144,16 @@
 
 | data-k | 印・色 | 語 |
 |---|---|---|
-| plan | ○ 灰 | 予定・送信待ち・確認待ち |
+| plan | ○ 灰 | 予定・送信待ち・確認待ち・未確認 |
 | run | ◐ warning | 実施中 |
-| wait / check | ◔ warning | 送信中・受信中・確認中 |
+| wait / check | ◔ warning | 送信中・受信中・確認中（読み込み中） |
 | done | ● success | 完了（ris-emulator の予約・MPPS） |
 | ok | ✓ success | 送信完了・受信完了・確認済・成功・接続中 |
 | listen | ● success | 待ち受け中 |
 | cancel | — 灰（取り消し線なし） | 取消 |
 | stop | ■ danger | 中止 |
 | ng | ✕ danger | 送信失敗・確認失敗・失敗・一部が接続不可・停止 |
-| unknown | ？ danger の破線 | 結果不明 |
+| unknown | ？ danger の破線 | 結果不明・確認できません（接続の状態を読めない） |
 | note | ◇ 灰 | 知らせ（撮影済み・別の装置・照合済み・未照合） |
 
 - HL7 の送信の状態は 送信待ち（前の通が受理されるまで送らない）・送信中・送信完了・送信失敗。MPPS は 実施中・完了・中止。英語（IN PROGRESS など）を出さない。「確認済・失敗」だけの語（送信の結果に使っていたもの）はやめ、上の語にする。
@@ -146,6 +162,8 @@
 
 - 高さ 32px（`.btn-sm` 28px、表の行の中 24px）・角 4px・内 0 12px。主 `.btn-primary`（地 `primary`・白い字・太字）、副 `.btn`（白い地・枠 `border-input`）、枠なし `.btn-ghost`、危険 `.btn-danger`（枠と字 `danger`。確認の窓の実行だけ `.btn-danger.fill`）。
 - 状態：hover `hover`（主は `primary-hover`）／押している間 `pressed`（主は `primary-active`）で 1px 沈む／無効 `disabled`（地 `surface`・字 `label`、理由を近くに 1 行）／待ち `aria-busy="true"`（左に回る印、押せない。押した場所の横に札「送信中」）。フォーカス 2px `ring`。
+- 最小幅：`.btn` は 64px、`.btn-sm` は 48px（「開く」「閉じる」のように字数の少ない名前でも、押す的を狭くしないため）。tsunagi の Button は `min-w-16`（標準）・`min-w-12`（小）で同じ値を持つ。
+- `hidden` 属性：部品集の `components.css` は `[hidden]{display:none!important}` を持つ。tsunagi は React で、隠す部品は描かないか Tailwind の `hidden` で隠し、`display` を持つ部品に `hidden` 属性を付けない。
 - 名前は体言（glossary の使い分け 2）。「撮影して送る」「撮影して送信」は「撮影して送信」に 1 つ（用語集の「送信」）。
 
 ## 入力欄（`.field`・`.input`・`.select`）
@@ -189,6 +207,7 @@
 ```
 
 - 形は 2 つだけ（中身で替えない）：`.r2` は幅 900px 未満の区画（tsunagi の右の詳細・ris-emulator の右の区画）で使う 2 行の格子（1 行目 氏名・患者ID・生年月日と性別、2 行目 札・受付番号・検査日時・モダリティと検査名。行 40px）。`.r1` はそれ以外のすべて（詳細だけの画面・入力フォーム・一覧の下の詳細・dicom-test-generator の緊急撮影の写し）で使う 1 行。地 `surface`・枠 1px・角 6px。
+- 狭い区画の形 `.fb.r2.narrow`（ui-kit 1.2.2。入れ物の内側が 400px 未満のとき、`class="fb r2 narrow"`）：tsunagi の右の詳細は最小 440px（内側 414px 以上）で、1000〜1440px の幅で実測してもバナーの値は切れない（和暦などは「検査の情報」に置く）。400px 未満の区画に `r2` を置く画面が出たら、そこで `narrow` を足す。
 - 値の無い項目は `.v.none` で「—」。かなとモダリティ・検査名は 1 行で切り `title` に全文。患者ID・受付番号は `.keep` で切らない（収まらないときだけその行が高くなる）。
 - 置き場：見出しの行の下。詳細の区画では、区画の上に固定する（区画の中をスクロールしても残る。`position:sticky; top:0`）。
 - 使う画面：tsunagi の検査の詳細（右の区画 `.r2`・詳細の画面 `.r1`）、ris-emulator の予約の右の区画（`.r2`）・予約の詳細と照合（`.r1`）、dicom-test-generator のワークリストの詳細と撮影（`.r1`）。dicom-test-generator の緊急撮影は、入力した値の写しを `.r1` で操作の行の真上に置き、入力のたびに替える。ris-emulator の右の区画の 患者・患者ID・生年月日・性別 の縦の並びは、この部品に替える。

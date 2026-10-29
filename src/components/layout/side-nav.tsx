@@ -36,6 +36,7 @@ export function SideNav({ groups }: { groups: readonly NavGroup[] }) {
   const pathname = usePathname() ?? "";
   return (
     <nav
+      id="sidenav"
       aria-label="ページ"
       data-testid="site-nav"
       className="min-h-0 w-52 shrink-0 overflow-x-hidden overflow-y-auto border-r border-border bg-surface px-2 py-3 group-data-[nav=collapsed]/body:w-14 group-data-[nav=collapsed]/body:px-1"

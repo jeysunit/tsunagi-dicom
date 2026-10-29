@@ -87,7 +87,7 @@ export function ViewerDefaults({
             <dd className="flex items-center gap-2">
               {/* 札の場所は欄の左に取っておき、出入りで欄を動かさない */}
               <span className="inline-flex min-w-[6.5rem] justify-end" aria-live="polite">
-                {saved === m && <StatusBadge kind="confirmed">保存しました</StatusBadge>}
+                {saved === m && <StatusBadge kind="ok">保存しました</StatusBadge>}
               </span>
               <Select
                 aria-label={`${m} の標準のビューア`}

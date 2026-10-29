@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeft, PanelLeftClose } from "lucide-react";
+import { Menu } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -15,7 +15,9 @@ function apply(collapsed: boolean) {
 /** 本文の幅が足りない画面（768px 未満。390px の電話など）。ナビを閉じた形で始め、ここでの開閉は覚えない */
 const NARROW = "(max-width: 767px)";
 
-// 上の帯の左端のボタン。閉じた状態はこのブラウザに覚える（使えないブラウザでは覚えず、開いた状態で始める）。
+// 上の帯の左端のボタン（docs/design-system/parts.md の「上の帯」）。絵は Menu で固定し、開閉で替えない（状態は aria-expanded が持つ）。
+// 読み上げの名前は「ナビを開閉する」で固定。title だけ「ナビを閉じる／開く」で替える。
+// 閉じた状態はこのブラウザに覚える。閉じた状態はこのブラウザに覚える（使えないブラウザでは覚えず、開いた状態で始める）。
 // 狭い画面では、覚えた状態にかかわらず閉じた形で始める（開いたナビ 208px が本文の幅を取り、一覧が 120px ほどになるため）。
 export function NavToggle() {
   const [open, setOpen] = useState(true);
@@ -53,14 +55,16 @@ export function NavToggle() {
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="default"
+      className="min-w-8 px-1.5"
       aria-expanded={open}
-      aria-label={open ? "ナビを閉じる" : "ナビを開く"}
+      aria-controls="sidenav"
+      aria-label="ナビを開閉する"
       title={open ? "ナビを閉じる" : "ナビを開く"}
       onClick={toggle}
       data-testid="nav-toggle"
     >
-      {open ? <PanelLeftClose aria-hidden /> : <PanelLeft aria-hidden />}
+      <Menu aria-hidden />
     </Button>
   );
 }

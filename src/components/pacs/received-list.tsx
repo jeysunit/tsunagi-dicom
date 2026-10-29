@@ -488,9 +488,9 @@ export function ReceivedList({
                   <td className={cn(CELL, "text-right tabular-nums")}>{r.receivedInstances ?? ""}</td>
                   <td className={CELL} data-testid="received-state">
                     {r.receiveState === "receiving" ? (
-                      <StatusBadge kind="sending">受信中</StatusBadge>
+                      <StatusBadge kind="wait">受信中</StatusBadge>
                     ) : r.receiveState === "received" ? (
-                      <StatusBadge kind="confirmed">受信完了</StatusBadge>
+                      <StatusBadge kind="ok">受信完了</StatusBadge>
                     ) : (
                       <span className="text-label">—</span>
                     )}

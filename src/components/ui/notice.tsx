@@ -8,7 +8,7 @@ const KINDS = {
   ok: { Icon: CheckCircle2, bar: "border-l-success", tone: "text-success" },
   warn: { Icon: AlertTriangle, bar: "border-l-warning", tone: "text-warning" },
   err: { Icon: XCircle, bar: "border-l-danger", tone: "text-danger" },
-  info: { Icon: Info, bar: "border-l-ring", tone: "text-ring" },
+  info: { Icon: Info, bar: "border-l-border-input", tone: "text-label" },
 } as const;
 
 export type NoticeKind = keyof typeof KINDS;
@@ -29,12 +29,12 @@ export function Notice({
   return (
     <div
       data-slot="notice"
-      data-kind={kind}
+      data-k={kind}
       role={alert && kind === "err" ? "alert" : "status"}
-      className={cn("flex items-start gap-2 border-l-4 bg-surface px-3 py-2 text-sm text-foreground", bar, className)}
+      className={cn("flex items-start gap-2 rounded border border-l-4 border-border bg-surface px-3 py-2 text-sm text-foreground", bar, className)}
       {...props}
     >
-      <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", tone)} />
+      <Icon aria-hidden className={cn("mt-[3px] size-4 shrink-0", tone)} />
       <div className="min-w-0">{children}</div>
     </div>
   );
