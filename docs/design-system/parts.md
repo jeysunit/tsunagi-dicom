@@ -28,15 +28,16 @@
 
 ```html
 <header class="topbar">
-  <button type="button" class="iconbtn" data-act="nav" aria-expanded="true" aria-label="ナビを開閉する">…</button>
+  <button type="button" class="iconbtn" data-act="nav" aria-expanded="true" aria-controls="sidenav" aria-label="ナビを開閉する" title="ナビを閉じる"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
   <span class="brand">tsunagi-dicom</span>
   <span class="sp"></span>
   <div class="qs">…直接の検索（tsunagi だけ）…</div>
   <span class="connwrap">
-    <button type="button" class="connbtn" popovertarget="conn-pop" aria-label="接続の状態を開く">接続の状態 <span class="st" data-k="ok">接続中</span></button>
+    <button type="button" class="connbtn" popovertarget="conn-pop"><span class="cl">接続の状態</span><span class="st" data-k="ok">接続中</span><svg class="ic chev" aria-hidden="true"><use href="#i-chevd"/></svg></button>
     <div id="conn-pop" popover class="pop" aria-label="接続の状態">
       <h3>接続の状態</h3>
       <dl class="kv"><dt>送信先</dt><dd><b>TSUNAGI</b> <span class="st" data-k="ok">成功</span> <span class="xs label">2026/10/25 23:20</span></dd>…</dl>
+      <p class="sr" role="status" aria-live="polite">…手で押した「接続確認」の結果だけをここに入れる…</p>
       <div class="ft"><button type="button" class="btn btn-sm">接続確認</button><a class="btn btn-sm" href="/modalities">接続先を開く</a></div>
     </div>
   </span>
@@ -49,7 +50,20 @@
 ```
 
 - 高さ 48px、地 `surface`、下に 1px `border`、間 12px。並びは上のとおりで、無い項目は詰める（dicom-test-generator と ris-emulator は `who`・画面ロック・ログアウトが無く、右端が表示）。
-- 接続の状態：閉じているときの札は全体の状態 1 つ（`ok`「接続中」／`ng`「一部が接続不可」。状態そのものを読めなかったとき（401・423・通信の失敗）は、接続先が落ちているとは言えないので「確認できません」）。popover は**標準の `popover` 属性**で開く（外を押す・Esc で閉じる。自前の開け閉めを書かない）。中身は相手ごとの 種類・名前・札・時刻と、「接続確認」と接続先の画面への道。接続先の画面の表と同じ相手・同じ札。幅が 640px に満たない画面では、上の帯が横にはみ出さないよう、札の前の「接続の状態」の文字を省く（ボタンの名前は `aria-label` が持つ）。
+- **ナビの開閉ボタン：** ハンバーガー（Lucide の `menu`。tsunagi は `lucide-react` の `Menu` をそのまま使う）に固定し、開閉で絵を替えない（状態は `aria-expanded` が持つ）。読み上げの名前は「ナビを開閉する」で固定し、`aria-expanded` と `aria-controls="sidenav"`（ナビの `id`）を付ける。大きさは 32px（`.iconbtn`）。ホバーの `title` だけ「ナビを閉じる」「ナビを開く」で替えてよい。
+- **接続の状態：** 枠つき 32px のボタン `.connbtn` の中に、「接続の状態」（`.cl`。本文の色）・全体の状態の札（`.st`）・シェブロン（`.chev`。下向き、開くと上向き）を左からこの順で置く。全体の語は次の 5 つだけで、色だけに頼らず文字と印を添える。
+
+  | 語 | `data-k` | いつ |
+  |---|---|---|
+  | 確認中 | `check` | 読み込み中 |
+  | 接続中 | `ok` | すべて成功 |
+  | 一部が接続不可 | `ng` | 1 つでも失敗 |
+  | 未確認 | `plan` | まだ 1 つも確かめていない（tsunagi は、この役割には全体の状態を返さないとき） |
+  | 確認できません | `unknown` | 状態を読めない（401・423・通信の失敗。接続先が落ちているとは言えない） |
+
+  popover は**標準の `popover` 属性**で開く（外を押す・Esc で閉じる。自前の開け閉めを書かない）。ボタンに `aria-label` を付けない（見える文字が名前になる）。640px 未満は `.cl`（「接続の状態」の文字）を視覚的に隠す（読み上げの名前は残る）。
+- 接続の状態の読み上げ：1 分ごとに読み直して替わる札は読み上げない（`aria-live` を付けない）。手で押した「接続確認」の結果だけを、popover の中の `<p class="sr" role="status" aria-live="polite">` に文で入れて読み上げる。
+- 接続の状態の中身：相手ごとの 種類・名前・札・時刻と、「接続確認」と接続先の画面への道。接続先の名前は太字（`<b>`）、状態の札、時刻（`.xs.label`）の順で `dd` に並べる。接続先の画面の表と同じ相手・同じ札。
 - ris-emulator の MWL の待ち受けは popover の中に「待ち受け MWL（RIS_EMU）`listen`「待ち受け中」」。帯に住所や緑の塗りの札を出さない。tsunagi の「バックエンド：モック」も popover へ。
 - 表示：絵の押しボタン 1 つ。押すたびに `html[data-theme]` を `light`・`dark` で替え、覚える（tsunagi はサーバーの利用者の設定、ris-emulator と dicom-test-generator は `localStorage`）。
 - 状態：押せる物は hover で `hover` の地、押している間 `pressed`、フォーカスは 2px の `ring`。
@@ -128,16 +142,16 @@
 
 | data-k | 印・色 | 語 |
 |---|---|---|
-| plan | ○ 灰 | 予定・送信待ち・確認待ち |
+| plan | ○ 灰 | 予定・送信待ち・確認待ち・未確認 |
 | run | ◐ warning | 実施中 |
-| wait / check | ◔ warning | 送信中・受信中・確認中 |
+| wait / check | ◔ warning | 送信中・受信中・確認中（読み込み中） |
 | done | ● success | 完了（ris-emulator の予約・MPPS） |
 | ok | ✓ success | 送信完了・受信完了・確認済・成功・接続中 |
 | listen | ● success | 待ち受け中 |
 | cancel | — 灰（取り消し線なし） | 取消 |
 | stop | ■ danger | 中止 |
 | ng | ✕ danger | 送信失敗・確認失敗・失敗・一部が接続不可・停止 |
-| unknown | ？ danger の破線 | 結果不明 |
+| unknown | ？ danger の破線 | 結果不明・確認できません（接続の状態を読めない） |
 | note | ◇ 灰 | 知らせ（撮影済み・別の装置・照合済み・未照合） |
 
 - HL7 の送信の状態は 送信待ち（前の通が受理されるまで送らない）・送信中・送信完了・送信失敗。MPPS は 実施中・完了・中止。英語（IN PROGRESS など）を出さない。「確認済・失敗」だけの語（送信の結果に使っていたもの）はやめ、上の語にする。
