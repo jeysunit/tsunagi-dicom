@@ -27,7 +27,7 @@ export function SiteHeader({
   /** 地の色の切り替え（ログインしているときだけ） */
   theme?: { current: Theme; csrfToken?: string };
   /** 接続の状態（見てよい役割にだけ。時刻はこの時間帯で出す） */
-  connection?: { timeZone: string };
+  connection?: { timeZone: string; csrfToken?: string; canCheck?: boolean };
 }) {
   return (
     <header className="flex h-12 items-center gap-3 border-b border-border bg-surface px-4" data-testid="site-header">
@@ -36,7 +36,7 @@ export function SiteHeader({
         tsunagi-dicom
       </Link>
       <span className="flex-1" aria-hidden="true" />
-      {connection && <ConnStatus timeZone={connection.timeZone} />}
+      {connection && <ConnStatus timeZone={connection.timeZone} csrfToken={connection.csrfToken} canCheck={connection.canCheck} />}
       {theme && <ThemeToggle initial={theme.current} csrfToken={theme.csrfToken} />}
       {user && <HeaderAccount user={user} />}
       {!user && pendingCsrfToken && <LogoutButton csrfToken={pendingCsrfToken} />}

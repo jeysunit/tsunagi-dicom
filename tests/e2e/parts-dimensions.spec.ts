@@ -65,6 +65,20 @@ test.describe("部品の寸法", () => {
     await page.keyboard.press("Escape");
   });
 
+  test("接続の状態の「接続確認」：押した結果だけを role=status に文で入れる", async ({ page }) => {
+    await asAdmin(page);
+    const conn = page.getByTestId("conn-button");
+    await conn.click();
+    const report = page.getByTestId("conn-report");
+    await expect(report).toHaveText("");
+    await page.getByTestId("conn-check").click();
+    await expect(report).toHaveText(/^\d+ 件(すべてに接続できました。|のうち \d+ 件に接続できませんでした。)$/);
+    await expect(page.getByTestId("conn-popover")).toBeVisible();
+    // 札は読み上げない：ボタンにも popover の他の場所にも aria-live を持たせない
+    expect(await page.getByTestId("conn-popover").locator("[aria-live]").count()).toBe(1);
+    await expect(conn.locator("[aria-live]")).toHaveCount(0);
+  });
+
   test("ボタン：表の上の操作は 28px・角 4px・影なし。副の地は白", async ({ page }) => {
     await asAdmin(page);
     await page.goto("/modalities");

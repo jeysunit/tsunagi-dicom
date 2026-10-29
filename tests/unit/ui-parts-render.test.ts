@@ -104,6 +104,16 @@ describe("接続の状態（ConnStatus）", () => {
     expect(inner).toMatch(/<svg[^>]*aria-hidden="true"/);
   });
 
+  it("popover に「接続確認」のボタンと、結果だけを読み上げる領域（role=status・aria-live=polite）を置く。権限が無ければボタンは出さない", () => {
+    const withCheck = renderToStaticMarkup(createElement(ConnStatus, { timeZone: "Asia/Tokyo", canCheck: true }));
+    expect(withCheck).toMatch(/<button[^>]*data-testid="conn-check"[^>]*>接続確認<\/button>/);
+    expect(withCheck).toMatch(/<p class="sr-only" role="status" aria-live="polite"[^>]*><\/p>/);
+    // 札のあるボタンの側には aria-live を付けない（1 分ごとに替わる札は読み上げない）
+    expect(/<button\b[^>]*popovertarget[^>]*>/i.exec(withCheck)![0]).not.toContain("aria-live");
+    const without = renderToStaticMarkup(createElement(ConnStatus, { timeZone: "Asia/Tokyo" }));
+    expect(without).not.toContain("接続確認</button>");
+  });
+
   it("全体の状態の語は 5 つだけで、data-k は parts.md の表のとおり", () => {
     const words: [Overall, string, string][] = [
       ["loading", "確認中", "check"],

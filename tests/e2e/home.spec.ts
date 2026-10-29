@@ -82,6 +82,8 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(pop).toContainText("HL7");
     await expect(pop.getByTestId("backend-mock")).toHaveText("バックエンド：モック");
     await page.keyboard.press("Tab");
+    await expect(pop.getByRole("button", { name: "接続確認" })).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(pop.getByRole("link", { name: "接続先を開く" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(pop).toBeHidden();

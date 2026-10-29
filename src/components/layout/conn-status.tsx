@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { postJson } from "@/lib/client/post-json";
 import type { ConnectionView } from "@/lib/connection-status";
 import { formatDateTimeIn } from "@/lib/format/japanese-date";
 import { cn } from "@/lib/utils";
@@ -22,9 +23,12 @@ const POPOVER_ID = "conn-pop";
 
 type State = { kind: "loading" } | { kind: "error" } | { kind: "ready"; view: ConnectionView };
 
-export function ConnStatus({ timeZone }: { timeZone: string }) {
+export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone: string; csrfToken?: string; canCheck?: boolean }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [open, setOpen] = useState(false);
+  const [checking, setChecking] = useState(false);
+  // 手で押した「接続確認」の結果の文。読み上げるのはこれだけ（1 分ごとに替わる札は読み上げない）
+  const [report, setReport] = useState("");
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -74,6 +78,22 @@ export function ConnStatus({ timeZone }: { timeZone: string }) {
   }, [load]);
 
   const view = state.kind === "ready" ? state.view : undefined;
+  const targets = view?.modalities?.map((m) => m.id) ?? [];
+
+  // 登録された接続先すべてに、つながるかの確かめ（C-ECHO）をかけ、終わったら状態を読み直す。接続先の頁の「全部を接続確認」と同じ要求
+  async function checkAll() {
+    if (checking || targets.length === 0) return;
+    setChecking(true);
+    setReport("");
+    try {
+      const results = await Promise.all(targets.map((id) => postJson(`/api/modalities/${encodeURIComponent(id)}/echo`, {}, csrfToken)));
+      await load();
+      const failed = results.filter((r) => !(r.ok && r.data.connected === true)).length;
+      setReport(failed === 0 ? `${results.length} 件すべてに接続できました。` : `${results.length} 件のうち ${failed} 件に接続できませんでした。`);
+    } finally {
+      setChecking(false);
+    }
+  }
   // 読めなかった（401・423・通信の失敗）ときは、接続先が落ちているとは言えないので「一部が接続不可」にせず別の札にする。
   // 読めたが全体の状態が無い（この役割には全体の状態を返さない）ときは、確かめた結果を持たないので「未確認」
   const overall = state.kind === "error" ? "unknown" : state.kind === "loading" ? "loading" : (view?.overall ?? "unchecked");
@@ -132,7 +152,23 @@ export function ConnStatus({ timeZone }: { timeZone: string }) {
             バックエンド：モック
           </p>
         )}
+        <p className="sr-only" role="status" aria-live="polite" data-testid="conn-report">
+          {report}
+        </p>
         <div className="flex justify-end gap-2">
+          {canCheck && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={targets.length === 0}
+              aria-busy={checking || undefined}
+              onClick={() => void checkAll()}
+              data-testid="conn-check"
+            >
+              接続確認
+            </Button>
+          )}
           <Button asChild variant="outline" size="sm">
             <Link href="/modalities" onClick={() => popoverRef.current?.hidePopover()}>
               接続先を開く
