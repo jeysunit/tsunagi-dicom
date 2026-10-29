@@ -30,8 +30,8 @@ describe("ui-kit の写し", () => {
     expect(digest).toBe(sums.get(name));
   });
 
-  it("写しの版は 1.2.0", () => {
-    expect(readFileSync(`${KIT}/VERSION`, "utf8").trim()).toBe("1.2.0");
+  it("写しの版は 1.2.2", () => {
+    expect(readFileSync(`${KIT}/VERSION`, "utf8").trim()).toBe("1.2.2");
   });
 
   // 上の帯で使う絵（ナビの開閉・接続の状態のシェブロン）は、lucide-react の同じ名前の絵をそのまま使う。

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-// 部品の主な寸法を、部品集（docs/design-system/parts.md。ui-kit 1.2.0 の components.css）の値と比べる（部品集 delivery.md の C4）。
+// 部品の主な寸法を、部品集（docs/design-system/parts.md。ui-kit 1.2.2 の components.css）の値と比べる（部品集 delivery.md の C4）。
 // 上の帯の写し（1280 幅の上の帯と左のナビ）は、撮るだけで比べない。検証モード（AUTH_MODE=dev）とモックに対して流す。
 
 async function asAdmin(page: Page) {

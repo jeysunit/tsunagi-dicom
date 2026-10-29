@@ -81,7 +81,7 @@
 | 画面の中身 | 左右 24px・上 12px・区画の間 12px | 表は幅いっぱい、入力の画面は最大 900px |
 | 本文の幅 | 一覧の型は幅いっぱい・詳細だけの画面 1200px・入力フォーム 900px・設定 560px・ログイン 384px | 型ごとに 1 つ。すべて左寄せ（ログインだけ中央）（[screen-types.md](screen-types.md) の「本文の幅と寄せ方」） |
 
-この頁の値は [ui-kit/tokens.css](ui-kit/tokens.css)（ui-kit 1.0.0）と同じにする。部品の HTML の構造とクラスは [parts.md](parts.md)。字の大きさは「2. 文字」の表のとおりで、h1 は 3 製品とも 20px。
+この頁の値は [ui-kit/tokens.css](ui-kit/tokens.css)（ui-kit 1.2.2）と同じにする。部品の HTML の構造とクラスは [parts.md](parts.md)。字の大きさは「2. 文字」の表のとおりで、h1 は 3 製品とも 20px。
 
 ## 4. 角・影・枠線
 
