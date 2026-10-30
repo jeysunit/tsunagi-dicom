@@ -4,6 +4,7 @@ import { ArrowRight, ChevronLeft, ChevronRight, RotateCw, Search } from "lucide-
 import Link from "next/link";
 import type * as React from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { Input } from "@/components/ui/input";
@@ -461,18 +462,18 @@ export function ReceivedList({
                 >
                   <td className={CELL} data-testid="received-at">
                     {fresh && (
-                      <span className="mr-1.5 rounded bg-primary px-1 text-xs text-primary-foreground" data-testid="received-new">
+                      <Badge className="mr-1.5" data-testid="received-new">
                         新着
-                      </span>
+                      </Badge>
                     )}
                     {r.receivedAt ? formatDateTimeIn(r.receivedAt, timeZone, { seconds: true }) : ""}
                   </td>
                   <td className={cn(CELL, "font-mono")} title={r.remoteAet ?? origin}>
                     {r.remoteAet}
                     {origin && (
-                      <span className={cn("rounded border border-border px-1 font-sans text-xs text-label", r.remoteAet && "ml-1.5")} data-testid="received-origin">
+                      <Badge className={cn("font-sans", r.remoteAet && "ml-1.5")} data-testid="received-origin">
                         {origin}
-                      </span>
+                      </Badge>
                     )}
                     {!r.remoteAet && !origin && <span className="text-label">—</span>}
                   </td>

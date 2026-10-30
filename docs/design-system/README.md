@@ -63,6 +63,7 @@ ui-kit の写しは製品の側で直さない。`globals.css` の値はこの�
 | 一覧の表 | `src/components/ui/table.tsx` | あり。選んだ行の見た目は検査一覧（`study-browser.tsx`）と受信一覧（`received-list.tsx`）が同じ形で持つ |
 | タグの表 | `src/components/studies/tag-grid.tsx` | あり。行の複数選択と「タグとタグ値をコピー」（計算は `src/lib/client/row-selection.ts`・`tag-copy.ts`） |
 | 状態の札 | `src/components/ui/status-badge.tsx` | あり。上の帯の接続の状態（`conn-status.tsx`）が使う。表の状態の列は、その列を足す PR から |
+| 小さな印 | `src/components/ui/badge.tsx` | あり。状態でない印（新着・インポート）。状態は状態の札 |
 | 選択欄 | `src/components/ui/select.tsx` | あり。高さは `default` 32px・`sm` 28px、枠は `border-input`。標準の select をそのまま使う |
 | 知らせ | `src/components/ui/notice.tsx` | あり。`kind` は ok・warn・err・info。`role="alert"` は `alert` を付けた err（画面の上の誤り）だけで、ほかは `role="status"` |
 | 見出しの行 | `src/components/ui/page-header.tsx` | あり。h1（20px・行 28px・太字）に頁の名前だけ。補足は `note`（small）、右に `actions` |
