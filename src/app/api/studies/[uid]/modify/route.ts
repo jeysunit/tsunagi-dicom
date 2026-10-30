@@ -13,7 +13,7 @@ import { getDb } from "@/lib/db";
 import { enqueue, history, QueueFull, reconcile, unresolved, writeAudit, type AuditRow } from "@/lib/keep-uid-write";
 import { assertWriteAllowed, isRequestId, isUnresolved, openModifyConfirm, requestOutcome, rowsOfRequest, type RequestRow } from "@/lib/pacs-ops";
 import { todayIn } from "@/lib/study-filter";
-import { applyAttributeCorrection,checkContent, CorrectionRefused, newStudyUid, readSnapshot, reassignMemory, waitJob, type CorrectionSnapshot } from "@/lib/study-correction";
+import { applyAttributeCorrection, checkContent, CorrectionRefused, newStudyUid, readSnapshot, reassignMemory, waitJob, type CorrectionSnapshot } from "@/lib/study-correction";
 import { visible } from "../../../../../../hl7-receiver/visible";
 import { assertReauth, contentGroup, contentUnresolved, Kind, OrthancId, pendingAttribute, pendingContent, refuse, refusedBy, requestDetail, UNRESOLVED, Values } from "./shared";
 
@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: Context) {
     const body = await readJson(request, Body, 16_384);
     const { requestId, kind, confirmToken } = body;
     const posted = body.values as CorrectionValues;
-    const denied ={ action: "modify" as const, studyInstanceUid: uid, detail: { requestId, kind } };
+    const denied = { action: "modify" as const, studyInstanceUid: uid, detail: { requestId, kind } };
     await requirePermission(session, "study.modify", denied);
     await assertWriteAllowed(session, denied);
     const reason = (body.reason ?? "").trim();

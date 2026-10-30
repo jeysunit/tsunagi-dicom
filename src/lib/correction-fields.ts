@@ -10,7 +10,7 @@
 
 import { BIRTH_FORMAT_ERROR, parseBirthInput, type SimpleDate } from "@/lib/format/japanese-date";
 
-export const ATTRIBUTE_FIELDS =["PatientID", "PatientName", "PatientBirthDate", "PatientSex", "AccessionNumber"] as const;
+export const ATTRIBUTE_FIELDS = ["PatientID", "PatientName", "PatientBirthDate", "PatientSex", "AccessionNumber"] as const;
 export const CONTENT_FIELDS = ["StudyDate", "StudyDescription"] as const;
 export const CORRECTION_FIELDS = [...ATTRIBUTE_FIELDS, ...CONTENT_FIELDS] as const;
 export type AttributeField = (typeof ATTRIBUTE_FIELDS)[number];
