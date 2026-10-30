@@ -1,5 +1,6 @@
 // 日付・和暦・年齢・性別の整形（docs/spec.md の 3.1）。
-// 生年月日は `1975/05/10（昭和50年・51歳・男）` の形にする。年齢は検査日の時点で数える。
+// 生年月日は西暦の後ろの括弧に、元号の漢字 1 字（一覧の表は英字 1 字）と年・満年齢を並べる：`1975/05/14（昭50・51歳）`。
+// 年齢は検査日の時点で数える。DICOM・HL7・CSV・API の値は西暦のままで、和暦は画面の表示だけに使う。
 // DICOM の DA（YYYYMMDD）を読む。読めない値は例外にせず、出せる部分だけを出す。
 
 export interface SimpleDate {
@@ -40,28 +41,29 @@ export function formatDicomTime(value: unknown): string {
   return `${m[1]}:${m[2] ?? "--"}`;
 }
 
-/** 年号と、その始まりの日（改元の日。グレゴリオ暦） */
+/** 元号の漢字 1 字・英字 1 字と、その始まりの日（改元の日。グレゴリオ暦）。新しい元号から先に並べる */
 export const ERAS = [
-  { name: "令和", start: { year: 2019, month: 5, day: 1 } },
-  { name: "平成", start: { year: 1989, month: 1, day: 8 } },
-  { name: "昭和", start: { year: 1926, month: 12, day: 25 } },
-  { name: "大正", start: { year: 1912, month: 7, day: 30 } },
-  { name: "明治", start: { year: 1868, month: 10, day: 23 } },
+  { kanji: "令", letter: "R", start: { year: 2019, month: 5, day: 1 } },
+  { kanji: "平", letter: "H", start: { year: 1989, month: 1, day: 8 } },
+  { kanji: "昭", letter: "S", start: { year: 1926, month: 12, day: 25 } },
+  { kanji: "大", letter: "T", start: { year: 1912, month: 7, day: 30 } },
+  { kanji: "明", letter: "M", start: { year: 1868, month: 10, day: 23 } },
 ] as const;
 
 function compare(a: SimpleDate, b: SimpleDate): number {
   return a.year - b.year || a.month - b.month || a.day - b.day;
 }
 
-/** 和暦（`昭和50年`。1年は `令和元年`）。明治より前は空 */
-export function toWareki(date: SimpleDate): string {
+/**
+ * 元号と年：`昭50`（letter なら `S50`）。元年は短い表示では数字の 1（`平1`）。
+ * 年 ＝ 西暦の年 − 元号の始まりの年 ＋ 1。明治より前（1868/10/22 以前）は空
+ */
+export function eraYear(date: SimpleDate, { letter = false }: { letter?: boolean } = {}): string {
   const era = ERAS.find((e) => compare(date, e.start) >= 0);
-  if (!era) return "";
-  const year = date.year - era.start.year + 1;
-  return `${era.name}${year === 1 ? "元" : year}年`;
+  return era ? `${letter ? era.letter : era.kanji}${date.year - era.start.year + 1}` : "";
 }
 
-/** `at` の日の時点の満年齢。誕生日の前日までは前の歳（2月29日生まれは、平年は3月1日に歳を取る）。生まれる前なら null */
+/** `at` の日の時点の満年齢。誕生日の当日に上がる。2月29日生まれは、平年は3月1日に上がる。生まれる前なら null */
 export function ageAt(birth: SimpleDate, at: SimpleDate): number | null {
   if (compare(at, birth) < 0) return null;
   let age = at.year - birth.year;
@@ -76,41 +78,36 @@ export function sexLabel(value: unknown): string {
   return typeof value === "string" ? (SEX_LABELS[value.trim().toUpperCase()] ?? "") : "";
 }
 
-/**
- * 生年月日・和暦・年齢・性別を1行にする：`1975/05/10（昭和50年・51歳・男）`。
- * 年齢は検査日の時点（検査日が読めなければ出さない）。出せない部分は飛ばし、何も無ければ空。
- */
-export function formatBirthLine(birthDate: unknown, sex: unknown, studyDate: unknown): string {
-  const birth = parseDicomDate(birthDate);
-  const at = parseDicomDate(studyDate);
-  const parts: string[] = [];
-  if (birth) {
-    const wareki = toWareki(birth);
-    if (wareki) parts.push(wareki);
-    const age = at ? ageAt(birth, at) : null;
-    if (age !== null) parts.push(`${age}歳`);
-  }
-  const sexText = sexLabel(sex);
-  if (sexText) parts.push(sexText);
-  const head = birth ? formatSlashDate(birthDate) : "";
-  if (parts.length === 0) return head;
-  return `${head}（${parts.join("・")}）`;
-}
-
-/** 検査日の時点の満年齢：`51歳`。生年月日か検査日が読めない・生まれる前なら空（一覧の年齢の列。docs/spec.md の 3.1） */
-export function formatAge(birthDate: unknown, studyDate: unknown): string {
-  const birth = parseDicomDate(birthDate);
-  const at = parseDicomDate(studyDate);
-  const age = birth && at ? ageAt(birth, at) : null;
-  return age === null ? "" : `${age}歳`;
-}
-
-/** 生年月日と和暦：`1975/05/10（昭和50年）`。和暦が無ければ日付だけ、読めなければ空 */
-export function formatBirthWareki(birthDate: unknown): string {
+/** 生年月日の括弧の中身：`昭50・51歳`。年齢は検査日（studyDate）の時点で、検査日が読めない・生まれる前なら出さない。何も無ければ空 */
+function birthInside(birthDate: unknown, studyDate: unknown, letter: boolean): string {
   const birth = parseDicomDate(birthDate);
   if (!birth) return "";
-  const wareki = toWareki(birth);
-  return wareki ? `${formatSlashDate(birthDate)}（${wareki}）` : formatSlashDate(birthDate);
+  const at = parseDicomDate(studyDate);
+  const age = at ? ageAt(birth, at) : null;
+  return [eraYear(birth, { letter }), age === null ? "" : `${age}歳`].filter(Boolean).join("・");
+}
+
+/**
+ * 患者の帯と確かめの欄の生年月日：西暦と、全角の括弧から後ろ（`.unit` で包むため分けて返す）。
+ * `{ date: "1975/05/14", note: "（昭50・51歳）" }`。括弧の中が空なら note も空。生年月日が読めなければどちらも空
+ */
+export function birthParts(birthDate: unknown, studyDate: unknown): { date: string; note: string } {
+  const date = formatSlashDate(birthDate);
+  const inside = birthInside(birthDate, studyDate, false);
+  return { date, note: inside ? `（${inside}）` : "" };
+}
+
+/** 帯の生年月日・性別を 1 つの文字にする：`1975/05/14（昭50・51歳）男`。出せない部分は飛ばし、何も無ければ空（title・確かめの欄の要約に使う） */
+export function formatBirthLine(birthDate: unknown, sex: unknown, studyDate: unknown): string {
+  const { date, note } = birthParts(birthDate, studyDate);
+  return `${date}${note}${sexLabel(sex)}`;
+}
+
+/** 一覧の表の生年月日の列：`1975/05/14 (S50・51歳)`（英字 1 字。括弧は半角で、前に半角の空白を 1 つ置く）。読めなければ空 */
+export function formatBirthCell(birthDate: unknown, studyDate: unknown): string {
+  const date = formatSlashDate(birthDate);
+  const inside = birthInside(birthDate, studyDate, true);
+  return inside ? `${date} (${inside})` : date;
 }
 
 /**

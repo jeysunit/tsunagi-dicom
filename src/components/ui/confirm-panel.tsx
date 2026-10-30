@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 export interface ConfirmSummary {
   name: string;
   patientId: string;
-  /** 生年月日と性別を 1 つにした文字列（例：1975/05/10（昭和50年・51歳・男））。無ければ「—」 */
+  /** 生年月日と性別を 1 つにした文字列（例：1975/05/10（昭50・51歳）男）。無ければ「—」 */
   birthLine: string;
 }
 

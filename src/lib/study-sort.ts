@@ -1,12 +1,11 @@
 import type { StudyView } from "@/lib/fields";
-import { formatAge } from "@/lib/format/japanese-date";
 import { normalizeForSearch } from "@/lib/study-filter";
 
 // 検査の一覧の列見出しでの並べ替え（docs/spec.md の 3.1）。
 // 並べ替えるのは、画像サーバーから読んだ検査（上限 1000 件。STUDY_LIMIT）の中だけ。画像サーバーへは並びを求めない。
 // 値の無い行（許可の一覧に載っていない項目を含む）は、昇順でも降順でも最後に置く。同じ値の行は、読んだ順（検査日の新しい順）のまま。
 
-export const SORT_KEYS = ["date", "id", "accession", "name", "kana", "birth", "age", "sex", "desc"] as const;
+export const SORT_KEYS = ["date", "id", "accession", "name", "kana", "birth", "sex", "desc"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDir = "asc" | "desc";
 export interface StudySort {
@@ -29,7 +28,7 @@ const collator = new Intl.Collator("ja", { numeric: true });
 
 /**
  * 並べ替えの値。文字は全角半角・大文字小文字・かなをそろえる。氏名は、かなの氏名があればそれ（五十音順）、無ければ氏名。
- * 年齢は、列に出している検査日の時点の満年齢（formatAge）。読めない値は空（最後に置く）
+ * 年齢の並べ替えは持たない（年齢は生年月日の列の中にある）。生年月日の列の逆向きが年齢の並びになる（昇順は年齢の降順）。読めない値は空（最後に置く）
  */
 function sortValue(view: StudyView, key: SortKey): string {
   switch (key) {
@@ -45,10 +44,6 @@ function sortValue(view: StudyView, key: SortKey): string {
       return normalizeForSearch(view.patientKana ?? "");
     case "birth":
       return view.patientBirthDate ?? "";
-    case "age": {
-      const age = Number.parseInt(formatAge(view.patientBirthDate, view.studyDate), 10);
-      return Number.isNaN(age) ? "" : String(age).padStart(3, "0");
-    }
     case "sex":
       return normalizeForSearch(view.patientSex ?? "");
     case "desc":

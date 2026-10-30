@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // 画面の振る舞いの決まり（docs/spec.md の 2.3・3.1。2026-10-20 の画面の見直し）：
 // 今いる頁の印と頁ごとのタブの題名、押せる物の手応え（カーソル・hover・押している間）、選んだ行の見分け、
-// 一覧の列（患者 ID・生年月日・年齢・性別を切らない）。検証モード（AUTH_MODE=dev）とモックに対して流す。
+// 一覧の列（患者 ID・生年月日・性別を切らない）。検証モード（AUTH_MODE=dev）とモックに対して流す。
 
 test.describe.configure({ mode: "serial" });
 
@@ -388,12 +388,12 @@ test("画面の言葉：用語集で外した言葉が、検証モードのど�
   expect(seen).toEqual([]);
 });
 
-test("一覧の列：患者 ID・生年月日・年齢・性別は切らない（1280px と 1024px）", async ({ page }) => {
+test("一覧の列：患者 ID・生年月日・性別は切らない（1280px と 1024px）", async ({ page }) => {
   for (const width of [1280, 1024]) {
     await page.setViewportSize({ width, height: 720 });
     await asAdmin(page);
     await expect(rows(page)).toHaveCount(8);
-    for (const id of ["patient-id", "patient-birth", "patient-age", "patient-sex"]) {
+    for (const id of ["patient-id", "patient-birth", "patient-sex"]) {
       const cells = page.getByTestId(id);
       const cut = await cells.evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent));
       expect(cut, `${id} (${width}px)`).toEqual([]);
@@ -401,6 +401,53 @@ test("一覧の列：患者 ID・生年月日・年齢・性別は切らない�
     // ID は「…」で切らない
     expect(await page.getByTestId("patient-id").first().evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis");
   }
+});
+
+test("1280px の一覧：横にスクロールせず、モダリティの札が列の中に収まる。右に詳細を開いても検査日時は数字の途中で折れない", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await asAdmin(page);
+  await expect(rows(page)).toHaveCount(8);
+  const box = page.getByTestId("study-list-scroll");
+  const [client, scroll] = await box.evaluate((el) => [el.clientWidth, el.scrollWidth]);
+  expect(scroll).toBeLessThanOrEqual(client);
+  // 操作の列（右端に固定）に重ならず、行の中に見えるモダリティの札
+  const mark = rows(page).first().locator("td").nth(7).locator("span").first();
+  const [markBox, actionsBox] = await Promise.all([
+    mark.boundingBox(),
+    rows(page).first().getByTestId("study-actions").boundingBox(),
+  ]);
+  expect(markBox!.x + markBox!.width).toBeLessThanOrEqual(actionsBox!.x);
+  // 生年月日は 12px の 2 行（西暦／括弧から後ろ）で、行の高さ（28px）を変えず、切れない
+  const birth = rows(page).first().getByTestId("patient-birth");
+  expect((await birth.boundingBox())!.height).toBeLessThanOrEqual(29);
+  expect(await birth.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  await rows(page).first().click();
+  const dt = page.getByTestId("banner-datetime").locator(".v");
+  await expect(dt).toBeVisible();
+  // 時刻（`.unit`）は 1 行に収まる（数字の途中で折れない）
+  const unit = dt.locator(".unit");
+  await expect(unit).toHaveText(/^\d{2}:\d{2}$/);
+  const lines = await unit.evaluate((el) => el.getClientRects().length);
+  expect(lines).toBe(1);
+  expect(await unit.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(25);
+
+  // 帯の生年月日：折れるのは西暦と括弧の間だけ。西暦の数字の途中でも、括弧の中でも折れない
+  const birthV = page.getByTestId("banner-birth").locator(".v");
+  await expect(birthV).toBeVisible();
+  const birthUnit = birthV.locator(".unit");
+  await expect(birthUnit).toHaveText(/^（.+・\d+歳）/);
+  expect(await birthUnit.evaluate((el) => el.getClientRects().length)).toBe(1);
+  const dateLines = await birthV.evaluate((el) => {
+    const text = el.firstChild;
+    if (!text || text.nodeType !== Node.TEXT_NODE) return -1;
+    const range = document.createRange();
+    const len = (text.textContent ?? "").trim().length;
+    range.setStart(text, 0);
+    range.setEnd(text, len);
+    return new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size;
+  });
+  expect(dateLines).toBe(1);
 });
 
 /** 計算した色（`rgb(r, g, b)`）の相対輝度（WCAG 2.2） */

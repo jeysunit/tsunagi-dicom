@@ -170,15 +170,16 @@ test("0 件の案内は、狭い画面でも見えている幅の中に出る（
 
 // 期待の変更（1 件）：一覧の行のサムネイル（写しのある検査は画像・無い検査は印）の確かめを外した。
 // 1 行 28px の一覧ではサムネイルの列を外したため（docs/spec.md の 3.1）。サムネイルは詳細のシリーズの横 1 列で確かめる（下の試験）。
-test("一覧の行：氏名（漢字・かな）・和暦と年齢・シリーズ数と画像数", async ({ page }) => {
+test("一覧の行：氏名（漢字・かな）・生年月日の和暦と年齢・シリーズ数と画像数", async ({ page }) => {
   await asRole(page, "一般");
   const r = row(page);
   await expect(r).toContainText("試験 髙子");
   await expect(r).toContainText("しけん たかこ");
-  // 生年月日・年齢・性別は3つの列（2026-10-20 に1つの列から分けた。docs/spec.md の 3.1）
-  await expect(r.getByTestId("patient-birth")).toHaveText("1960/07/15");
-  await expect(r.getByTestId("patient-birth")).toHaveAttribute("title", "1960/07/15（昭和35年）");
-  await expect(r.getByTestId("patient-age")).toHaveText("65歳");
+  // 期待の変更：年齢の列を外し、年齢は生年月日の列の括弧の中に入れた（検査日の時点の満年齢。docs/spec.md の 3.1）
+  await expect(r.getByTestId("patient-birth")).toHaveText("1960/07/15 (S35・65歳)");
+  // title は帯と同じ形（元号は漢字 1 字。性別は別の列なので含めない）
+  await expect(r.getByTestId("patient-birth")).toHaveAttribute("title", "1960/07/15（昭35・65歳）");
+  await expect(r.getByTestId("patient-age")).toHaveCount(0);
   await expect(r.getByTestId("patient-sex")).toHaveText("女");
   await expect(r).toContainText("1 / 4");
   // 一覧の行にはサムネイルを出さない
@@ -257,11 +258,12 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   await expect(banner).toContainText("試験 髙子");
   await expect(banner).toContainText("しけん たかこ");
   await expect(banner).toContainText("JP-TEST-0004");
-  await expect(banner).toContainText("1960/07/15（65歳） 女");
+  await expect(banner).toContainText("1960/07/15（昭35・65歳）女");
   await expect(banner).toContainText("2026/04/10");
   await expect(banner).toContainText("CT");
   await expect(banner).not.toContainText("試験 医師");
   await expect(banner).not.toContainText("昭和35年");
+  await expect(banner.getByTestId("banner-birth").locator("dd")).toHaveAttribute("title", "1960/07/15（昭35・65歳）女");
   // バナーの項目は、見出しの並び（氏名・患者ID・生年月日・受付番号・検査日時・モダリティ）のとおり
   const labels = await banner.locator("dt").allTextContents();
   expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
@@ -310,7 +312,7 @@ test("左右に分ける：何も選ばなければ一覧が全幅。行を選�
   await expect(page.getByTestId("split-handle")).toHaveCount(0);
   const fullWidth = (await page.getByTestId("study-list-scroll").boundingBox())!.width;
   const columns = () => page.getByTestId("study-table").locator("colgroup col").evaluateAll((els) => els.map((el) => el.getAttribute("data-col")));
-  expect(await columns()).toEqual(["date", "id", "accession", "name", "kana", "birth", "age", "sex", "desc", "count", "viewer"]);
+  expect(await columns()).toEqual(["date", "id", "accession", "name", "kana", "birth", "sex", "desc", "count", "viewer"]);
 
   const noPageScroll = () =>
     page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight);
@@ -320,7 +322,7 @@ test("左右に分ける：何も選ばなければ一覧が全幅。行を選�
   const secondUid = (await second.getAttribute("data-study-uid"))!;
   await rows(page).first().click();
   await expectDetail(page, (await rows(page).first().getAttribute("data-study-uid"))!);
-  // 詳細は一覧の右に開く（同じ高さの帯）。一覧は幅が縮み、列は詰めた形（検査日時・患者ID・氏名・年齢・性別・モダリティ／検査名）に替わる
+  // 詳細は一覧の右に開く（同じ高さの帯）。一覧は幅が縮み、列は詰めた形（検査日時・患者ID・氏名・性別・モダリティ／検査名）に替わる
   const listBox = (await page.getByTestId("study-list-scroll").boundingBox())!;
   const paneBox = (await page.getByTestId("detail-pane").boundingBox())!;
   expect(paneBox.x).toBeGreaterThanOrEqual(listBox.x + listBox.width);
@@ -328,7 +330,7 @@ test("左右に分ける：何も選ばなければ一覧が全幅。行を選�
   expect(listBox.width).toBeLessThan(fullWidth);
   expect(listBox.width).toBeGreaterThanOrEqual(440);
   expect(paneBox.width).toBeGreaterThanOrEqual(400);
-  expect(await columns()).toEqual(["date", "id", "name", "agesex", "desc"]);
+  expect(await columns()).toEqual(["date", "id", "name", "sexc", "desc"]);
   // 初期設定の位置では、詰めた形の一覧が、1280px の画面で横にスクロールせずに収まる
   expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const before = await rows(page).nth(1).boundingBox();
@@ -337,12 +339,12 @@ test("左右に分ける：何も選ばなければ一覧が全幅。行を選�
   // 行の位置は動かない（詳細は行の下に開かない。一覧は選んだだけではスクロールしない。行を替えても列は動かない）
   const after = await rows(page).nth(1).boundingBox();
   expect(after).toEqual(before);
-  expect(await columns()).toEqual(["date", "id", "name", "agesex", "desc"]);
+  expect(await columns()).toEqual(["date", "id", "name", "sexc", "desc"]);
   expect(await page.getByTestId("study-list-scroll").evaluate((el) => el.scrollTop)).toBe(0);
   // 閉じる（×）と、一覧は全幅・全部の列に戻る
   await page.getByRole("button", { name: "詳細を閉じる" }).click();
   await expect(page.getByTestId("detail-pane")).toHaveCount(0);
-  expect(await columns()).toHaveLength(11);
+  expect(await columns()).toHaveLength(10);
   expect((await page.getByTestId("study-list-scroll").boundingBox())!.width).toBeGreaterThanOrEqual(fullWidth - 1);
   await rows(page).nth(1).click();
   await expectDetail(page, secondUid);
@@ -841,7 +843,9 @@ test("1 行の一覧：行の高さは 28px（14px の文字）、氏名の漢�
     expect(h).toBeGreaterThanOrEqual(28);
     expect(h).toBeLessThanOrEqual(30);
   }
-  await expect(page.getByTestId("study-table").locator("tbody td").first()).toHaveCSS("font-size", "14px");
+  // 本文は 14px。検査日時と生年月日の列だけは 12px の 2 行（docs/spec.md の 3.1）なので、患者 ID の列で見る
+  await expect(page.getByTestId("patient-id").first()).toHaveCSS("font-size", "14px");
+  await expect(page.getByTestId("study-datetime").first()).toHaveCSS("font-size", "12px");
   const r = row(page);
   const name = r.getByTestId("patient-name");
   const kana = r.getByTestId("patient-kana");
@@ -901,8 +905,8 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
   await page.getByTestId("date-all").click(); // 押し直しでは読み直さない
   await page.getByTestId("modality-CT").click();
   await expect(rows(page).first()).toBeVisible();
-  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-20 に生年月日を3つの列に分け、2026-10-21 に受付番号の列を足したので 9 番目）
-  const cell = rows(page).first().locator("td").nth(8);
+  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-21 に受付番号の列を足し、年齢の列を外したので 8 番目）
+  const cell = rows(page).first().locator("td").nth(7);
   await expect(cell).toHaveAttribute("title", new RegExp(long));
   expect(await cell.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
   expect(await cell.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
@@ -1058,7 +1062,7 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
   await expect(page).toHaveURL(/birth=1975-05-10/);
   for (const id of await rows(page).getByTestId("patient-id").allTextContents()) expect(id).toBe("JP-TEST-0001");
   // 絞った生年月日は、一覧の生年月日の列に見える
-  for (const b of await rows(page).getByTestId("patient-birth").allTextContents()) expect(b).toBe("1975/05/10");
+  for (const b of await rows(page).getByTestId("patient-birth").allTextContents()) expect(b).toMatch(/^1975\/05\/10 \(S50・\d+歳\)$/);
   await expect(page.getByTestId("filter-more-count")).toHaveText("（1）");
 
   // 性別を足す（どちらも当てる）
@@ -1177,9 +1181,9 @@ test("詳細の「検査のタグ」：画像の一覧が読めなくても、�
   await page.unroute("**/series/*/instances");
 });
 
-// 期待の変更（患者バナー）：英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数は、見出し（バナー）に足さず「検査の情報」のタブに置く。
+// 期待の変更（患者バナー）：英字氏名・紹介医・Study ID・シリーズ数と画像数は、見出し（バナー）に足さず「検査の情報」のタブに置く。
 // 受付番号はバナーに常に出る（UX のレビューの H8 のうち、毎回見る値）
-test("詳細：受付番号はバナーに常に出し、英字氏名・和暦・紹介医・Study ID・シリーズ数と画像数は「検査の情報」のタブに置く", async ({ page }) => {
+test("詳細：受付番号はバナーに常に出し、英字氏名・紹介医・Study ID・シリーズ数と画像数は「検査の情報」のタブに置く", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
   const detail = page.getByTestId("study-detail");
@@ -1197,7 +1201,8 @@ test("詳細：受付番号はバナーに常に出し、英字氏名・和暦�
   await expect(detail.getByTestId("series-strip")).toBeVisible();
   await expect(info.getByTestId("detail-referring")).toHaveText(/紹介医\s*試験 医師/);
   await expect(info.getByTestId("detail-alphabetic")).toContainText("Shiken Takako");
-  await expect(info).toContainText("1960/07/15（昭和35年）");
+  // 和暦は患者バナーの生年月日に並べるので、「検査の情報」には置かない
+  await expect(info).not.toContainText("1960/07/15");
   await expect(info.getByTestId("detail-counts")).toHaveText(/シリーズ \/ 画像\s*1 \/ 4/);
   // 「検査の情報」は、右の残りの幅で折り返しても 3 段（80px）以内。見出し全体は、バナー（3 段で 150px）・UID（60px）・検査の情報（80px）の合計に収まる
   expect((await info.boundingBox())!.height).toBeLessThanOrEqual(80);

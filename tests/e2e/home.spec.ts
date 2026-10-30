@@ -20,11 +20,10 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(table).toContainText("山田 太郎");
     await expect(table).toContainText("やまだ たろう");
     await expect(table).not.toContainText("Yamada^Taro");
-    // 生年月日・検査日の時点の年齢・性別は3つの列（和暦は生年月日の title。docs/spec.md の 3.1）
+    // 生年月日の列は 西暦＋(英字 1 字の元号と年・検査日の時点の満年齢)。性別は別の列。年齢だけの列は無い（docs/spec.md の 3.1）
     const yamada = table.locator("tbody tr", { hasText: "JP-TEST-0001" }).first();
-    await expect(yamada.getByTestId("patient-birth")).toHaveText("1975/05/10");
-    await expect(yamada.getByTestId("patient-birth")).toHaveAttribute("title", "1975/05/10（昭和50年）");
-    await expect(yamada.getByTestId("patient-age")).toHaveText("51歳");
+    await expect(yamada.getByTestId("patient-birth")).toHaveText("1975/05/10 (S50・51歳)");
+    await expect(yamada.getByTestId("patient-age")).toHaveCount(0);
     await expect(yamada.getByTestId("patient-sex")).toHaveText("男");
 
     const body = page.locator("body");
