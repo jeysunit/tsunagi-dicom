@@ -386,11 +386,13 @@ function textWidth(text: string | undefined): number {
 /** 列の左右の余白（px-2）と罫線 */
 const CELL_PAD = 18;
 /** モダリティ・検査の記述の列の最小の幅。一覧がこれより狭いときは、一覧の中で横にスクロールする */
-const DESC_MIN = 160;
+const DESC_MIN = 120;
 /** 詰めた形（詳細を開いている間）の、同じ列の最小の幅 */
 const DESC_MIN_COMPACT = 64;
-/** 詰めた形の日時の列（12px の「2026/10/25」が切れない幅） */
-const COMPACT_DATE = 84;
+/** 日時の列（12px の「2026/10/25」が切れない幅。日付／時刻の 2 行） */
+const DATE_WIDTH = 84;
+/** 生年月日の列（12px の「1975/05/14」と、括弧から後ろ「(S50・51歳)」が 2 行に入る幅。百歳を超えても括弧の中は折れない） */
+const BIRTH_WIDTH = 104;
 
 /**
  * 一覧の列（px。docs/spec.md の 3.1）。患者 ID・生年月日・性別は切らない（患者 ID の列は、出している行のいちばん長い値に合わせる）。
@@ -402,7 +404,7 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
   const fit = (pick: (s: StudyView) => string | undefined, min: number, max: number) =>
     Math.min(max, Math.max(min, widest(pick) + CELL_PAD));
   const all: readonly { readonly key: string; readonly width: number | undefined }[] = [
-    { key: "date", width: 148 },
+    { key: "date", width: DATE_WIDTH },
     // 患者 ID は DICOM の LO（64 字まで）。上限を置かずに値に合わせる（切らない）
     { key: "id", width: Math.max(80, widest((s) => s.patientId) + CELL_PAD) },
     // 受付番号（2026-10-21。詳細条件で絞れる項目を列に見せる）。SH（16 字まで）なので値に合わせ、上限を超える値だけを切る。
@@ -410,12 +412,14 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
     ...(showAccession ? [{ key: "accession", width: fit((s) => s.accessionNumber, 88, 160) }] : []),
     { key: "name", width: fit((s) => s.patientName, 104, 240) },
     { key: "kana", width: fit((s) => s.patientKana, 96, 200) },
-    // 西暦と英字 1 字の元号と年齢（`1987/03/14 (S62・39歳)`）。Yu Gothic の実測で内側 160px 前後なので余白を足す
-    { key: "birth", width: 184 },
+    // 西暦と、括弧の中の英字 1 字の元号と年齢（`1987/03/14 (S62・39歳)`）。12px の 2 行（西暦／括弧から後ろ）にして、列を 104px に収める
+    { key: "birth", width: BIRTH_WIDTH },
     { key: "sex", width: 64 },
     { key: "desc", width: undefined },
-    { key: "count", width: 100 },
-    { key: "viewer", width: 142 },
+    // シリーズ数／画像数（`2 / 6`）。見出し「Se/Im」が入る下限から、値に合わせる
+    { key: "count", width: fit((s) => `${s.seriesCount ?? "—"} / ${s.instanceCount ?? "—"}`, 64, 120) },
+    // 「開く」と「▼」を並べた分け押しのボタン（83px）に左右の余白。1280px の画面（左のナビあり・詳細を閉じた）で、モダリティの札と検査名が入る幅を残す
+    { key: "viewer", width: 120 },
   ];
   // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・性別・モダリティと検査名。
   // 省く値（受付番号・カナ・生年月日・Se/Im・開く）は、詳細の見出し・検査の情報・操作の行で見る。
@@ -425,7 +429,7 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
   // 詰めた形の日時は 2 行（日付／時刻。12px の 2 行を 28px の行に収める）にして切らない（docs/design-system/parts.md の「一覧＋右に詳細の幅」）
   // 既定の位置（一覧 45%）の 1280px の画面で、横にスクロールせずに収まる幅にする（氏名は詰めた形だけ下限を 88px に）
   return [
-    { key: "date", width: COMPACT_DATE },
+    { key: "date", width: DATE_WIDTH },
     ...keep("id"),
     { key: "name", width: fit((s) => s.patientName, 88, 200) },
     { key: "sexc", width: 56 },
@@ -471,6 +475,17 @@ function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: r
 const CELL = "h-7 px-2 py-0";
 /** 値が 1 行に収まらないときは `…` で切る（全文は title）。一覧の行だけ。詳細のパネルでは切らない */
 const CUT = "overflow-hidden text-ellipsis whitespace-nowrap";
+
+/** 生年月日の列の値（`1975/05/14 (S50・51歳)`）。括弧から後ろを `.unit` で包む（読めない値・括弧の無い値はそのまま） */
+function BirthCell({ value }: { value: string }) {
+  const parts = value.match(/^(\S+) (\(.+\))$/);
+  if (!parts) return <>{value}</>;
+  return (
+    <>
+      {parts[1]} <span className="unit inline-block">{parts[2]}</span>
+    </>
+  );
+}
 
 /**
  * 並べ替えの列見出し（docs/spec.md の 3.1。docs/design-system/components.md の「一覧の表」）。
@@ -664,18 +679,11 @@ function StudyRows({
                     }
                   }}
                 >
-                  {compact ? (
-                    // 詰めた形は 2 行（日付／時刻）にして切らない。12px の 2 行で 28px の行に収める（行の高さを変えない）
-                    <TableCell className="text-xs leading-3.5 whitespace-nowrap tabular-nums" title={dateTime} data-testid="study-datetime">
-                      <span className="block">{formatSlashDate(s.studyDate)}</span>
-                      <span className="block text-label">{formatDicomTime(s.studyTime)}</span>
-                    </TableCell>
-                  ) : (
-                    <TableCell className={cn(CUT, "tabular-nums")} title={dateTime} data-testid="study-datetime">
-                      {formatSlashDate(s.studyDate)}
-                      <span className="ml-1.5 text-label">{formatDicomTime(s.studyTime)}</span>
-                    </TableCell>
-                  )}
+                  {/* 日時は 2 行（日付／時刻）にして切らない。12px の 2 行で 28px の行に収める（行の高さを変えない） */}
+                  <TableCell className="text-xs leading-3.5 whitespace-nowrap tabular-nums" title={dateTime} data-testid="study-datetime">
+                    <span className="block">{formatSlashDate(s.studyDate)}</span>
+                    <span className="block text-label">{formatDicomTime(s.studyTime)}</span>
+                  </TableCell>
                   <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
                     {s.patientId}
                   </td>
@@ -697,8 +705,9 @@ function StudyRows({
                     </td>
                   )}
                   {has("birth") && (
-                    <td className={cn(CELL, "whitespace-nowrap tabular-nums")} data-testid="patient-birth">
-                      {formatBirthCell(s.patientBirthDate, s.studyDate)}
+                    // 西暦と括弧から後ろの間でだけ折れる（後ろは `.unit`＝inline-block で、括弧の中では折れない）。12px の 2 行で行の高さを変えない
+                    <td className={cn(CELL, "text-xs leading-3.5 tabular-nums")} data-testid="patient-birth">
+                      <BirthCell value={formatBirthCell(s.patientBirthDate, s.studyDate)} />
                     </td>
                   )}
                   {has("sex") && (

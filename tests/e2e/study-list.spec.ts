@@ -841,7 +841,9 @@ test("1 行の一覧：行の高さは 28px（14px の文字）、氏名の漢�
     expect(h).toBeGreaterThanOrEqual(28);
     expect(h).toBeLessThanOrEqual(30);
   }
-  await expect(page.getByTestId("study-table").locator("tbody td").first()).toHaveCSS("font-size", "14px");
+  // 本文は 14px。検査日時と生年月日の列だけは 12px の 2 行（docs/spec.md の 3.1）なので、患者 ID の列で見る
+  await expect(page.getByTestId("patient-id").first()).toHaveCSS("font-size", "14px");
+  await expect(page.getByTestId("study-datetime").first()).toHaveCSS("font-size", "12px");
   const r = row(page);
   const name = r.getByTestId("patient-name");
   const kana = r.getByTestId("patient-kana");

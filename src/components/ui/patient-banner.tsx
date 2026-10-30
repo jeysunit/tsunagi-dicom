@@ -124,7 +124,24 @@ export function PatientBanner({
     />
   );
   const acc = <Field label="受付番号" value={accessionNumber} mono testId="detail-accession" />;
-  const dt = <Field label="検査日時" value={studyDateTime} testId="banner-datetime" />;
+  // 日時は日付と時刻の間（空白）でだけ折れる。時刻を `.unit`（inline-block）で包み、数字の途中では折らない
+  const dtParts = studyDateTime?.match(/^(\S+) (\S+)$/);
+  const dt = (
+    <Field
+      label="検査日時"
+      title={studyDateTime}
+      testId="banner-datetime"
+      value={
+        dtParts ? (
+          <>
+            {dtParts[1]} <span className="unit inline-block">{dtParts[2]}</span>
+          </>
+        ) : (
+          studyDateTime
+        )
+      }
+    />
+  );
   const md = (
     <Field
       label="モダリティ・検査名"

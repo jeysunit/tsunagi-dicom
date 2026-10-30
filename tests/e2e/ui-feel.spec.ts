@@ -403,6 +403,36 @@ test("一覧の列：患者 ID・生年月日・性別は切らない（1280px �
   }
 });
 
+test("1280px の一覧：横にスクロールせず、モダリティの札が列の中に収まる。右に詳細を開いても検査日時は数字の途中で折れない", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await asAdmin(page);
+  await expect(rows(page)).toHaveCount(8);
+  const box = page.getByTestId("study-list-scroll");
+  const [client, scroll] = await box.evaluate((el) => [el.clientWidth, el.scrollWidth]);
+  expect(scroll).toBeLessThanOrEqual(client);
+  // 操作の列（右端に固定）に重ならず、行の中に見えるモダリティの札
+  const mark = rows(page).first().locator("td").nth(7).locator("span").first();
+  const [markBox, actionsBox] = await Promise.all([
+    mark.boundingBox(),
+    rows(page).first().getByTestId("study-actions").boundingBox(),
+  ]);
+  expect(markBox!.x + markBox!.width).toBeLessThanOrEqual(actionsBox!.x);
+  // 生年月日は 12px の 2 行（西暦／括弧から後ろ）で、行の高さ（28px）を変えず、切れない
+  const birth = rows(page).first().getByTestId("patient-birth");
+  expect((await birth.boundingBox())!.height).toBeLessThanOrEqual(29);
+  expect(await birth.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  await rows(page).first().click();
+  const dt = page.getByTestId("banner-datetime").locator(".v");
+  await expect(dt).toBeVisible();
+  // 時刻（`.unit`）は 1 行に収まる（数字の途中で折れない）
+  const unit = dt.locator(".unit");
+  await expect(unit).toHaveText(/^\d{2}:\d{2}$/);
+  const lines = await unit.evaluate((el) => el.getClientRects().length);
+  expect(lines).toBe(1);
+  expect(await unit.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(25);
+});
+
 /** 計算した色（`rgb(r, g, b)`）の相対輝度（WCAG 2.2） */
 function luminance(rgb: string): number {
   const m = rgb.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
