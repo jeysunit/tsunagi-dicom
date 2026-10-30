@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { checkSummary, ConnStatus, OverallBadge, runExclusive, type Overall } from "@/components/layout/conn-status";
 import { NavToggle } from "@/components/layout/nav-toggle";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Notice } from "@/components/ui/notice";
@@ -30,6 +31,17 @@ describe("知らせ（Notice）", () => {
     expect(html).toContain("<svg");
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain("試験 太郎（P000101）を送信しました。");
+  });
+});
+
+describe("小さな印（Badge）", () => {
+  it("12px・高さ 20px・角 3px・枠 1px・字 label。印の形も色も持たない", () => {
+    const html = renderToStaticMarkup(createElement(Badge, { children: "新着" }));
+    for (const c of ["h-5", "rounded-[3px]", "border", "border-border", "px-1.5", "text-xs", "text-label"]) expect(html).toContain(c);
+    expect(html).toContain(">新着</span>");
+    // 状態の印（札の形）と主の色は使わない
+    expect(html).not.toContain("data-k");
+    expect(html).not.toContain("bg-primary");
   });
 });
 
