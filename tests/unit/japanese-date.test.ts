@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   ageAt,
+  BIRTH_FORMAT_ERROR,
+  BIRTH_FUTURE_ERROR,
+  birthInputHint,
   birthParts,
   eraYear,
   formatBirthCell,
@@ -8,6 +11,8 @@ import {
   formatDateTimeIn,
   formatDicomTime,
   formatSlashDate,
+  localToday,
+  parseBirthInput,
   parseDicomDate,
   sexLabel,
 } from "@/lib/format/japanese-date";
@@ -185,5 +190,140 @@ describe("画面の日時の書式（docs/spec.md の 2.2）", () => {
     expect(formatDateTimeIn("", "Asia/Tokyo")).toBe("");
     expect(formatDateTimeIn(undefined, "Asia/Tokyo")).toBe("");
     expect(formatDateTimeIn("2026-13-40T00:00:00Z", "Asia/Tokyo")).toBe("");
+  });
+});
+
+// 生年月日の入力の読み取り（docs/spec.md の 3.1「生年月日の入力」）。3 製品で同じ組。開いた日（今日）を 2026/10/29 とし、
+// 年齢も開いた日で数える
+const OPENED = { year: 2026, month: 10, day: 29 };
+const SAME_1975 = "1975/05/14（昭50・51歳）";
+const SAME_1989 = "1989/01/08（平1・37歳）";
+const SAME_2019 = "2019/05/01（令1・7歳）";
+const SAME_2000 = "2000/02/29（平12・26歳）";
+const BIRTH_ACCEPTED = [
+  ["1975/05/14", "19750514", SAME_1975],
+  ["1975/5/14", "19750514", SAME_1975],
+  [" 1975/05/14 ", "19750514", SAME_1975],
+  ["S50/05/14", "19750514", SAME_1975],
+  ["s50/5/14", "19750514", SAME_1975],
+  ["Ｓ50/05/14", "19750514", SAME_1975],
+  ["昭50/05/14", "19750514", SAME_1975],
+  ["昭和50年5月14日", "19750514", SAME_1975],
+  ["H1/01/08", "19890108", SAME_1989],
+  ["H元/01/08", "19890108", SAME_1989],
+  ["平成元年1月8日", "19890108", SAME_1989],
+  ["R1/05/01", "20190501", SAME_2019],
+  ["令元/05/01", "20190501", SAME_2019],
+  ["S64/01/07", "19890107", "1989/01/07（昭64・37歳）"],
+  ["H31/04/30", "20190430", "2019/04/30（平31・7歳）"],
+  ["M1/10/23", "18681023", "1868/10/23（明1・158歳）"],
+  ["M45/07/29", "19120729", "1912/07/29（明45・114歳）"],
+  ["T1/07/30", "19120730", "1912/07/30（大1・114歳）"],
+  ["T15/12/24", "19261224", "1926/12/24（大15・99歳）"],
+  ["S1/12/25", "19261225", "1926/12/25（昭1・99歳）"],
+  ["1868/10/22", "18681022", "1868/10/22（158歳）"],
+  ["2000/02/29", "20000229", SAME_2000],
+  ["H12/02/29", "20000229", SAME_2000],
+  ["2026/10/29", "20261029", "2026/10/29（令8・0歳）"],
+] as const;
+
+const SHOWA_AFTER = "生年月日が昭和の範囲にありません。昭和は 1989/01/07 までです。平成1年は 1989/01/08 からです。";
+const HEISEI_AFTER = "生年月日が平成の範囲にありません。平成は 2019/04/30 までです。令和1年は 2019/05/01 からです。";
+const HEISEI_BEFORE = "生年月日が平成の範囲にありません。平成は 1989/01/08 からです。昭和64年は 1989/01/07 までです。";
+const REIWA_BEFORE = "生年月日が令和の範囲にありません。令和は 2019/05/01 からです。平成31年は 2019/04/30 までです。";
+const MEIJI_BEFORE = "生年月日が明治の範囲にありません。明治は 1868/10/23 からです。";
+const BIRTH_REFUSED = [
+  ["1975-05-14", BIRTH_FORMAT_ERROR],
+  ["19750514", BIRTH_FORMAT_ERROR],
+  ["s50.5.14", BIRTH_FORMAT_ERROR],
+  ["S500514", BIRTH_FORMAT_ERROR],
+  ["75/05/14", BIRTH_FORMAT_ERROR],
+  ["1975/S50/05/14", BIRTH_FORMAT_ERROR],
+  ["S0/01/01", BIRTH_FORMAT_ERROR],
+  ["1975/13/01", BIRTH_FORMAT_ERROR],
+  ["1975/02/30", BIRTH_FORMAT_ERROR],
+  ["2001/02/29", BIRTH_FORMAT_ERROR],
+  ["X50/01/01", BIRTH_FORMAT_ERROR],
+  ["S64/01/08", SHOWA_AFTER],
+  ["S65/01/01", SHOWA_AFTER],
+  ["H31/05/01", HEISEI_AFTER],
+  ["H1/01/07", HEISEI_BEFORE],
+  ["R1/04/30", REIWA_BEFORE],
+  ["M1/10/22", MEIJI_BEFORE],
+  ["2026/10/30", BIRTH_FUTURE_ERROR],
+  ["R8/10/30", BIRTH_FUTURE_ERROR],
+] as const;
+
+describe("生年月日の入力の読み取り（受ける形）", () => {
+  it.each(BIRTH_ACCEPTED)("%s は %s・%s", (input, da, hint) => {
+    const read = parseBirthInput(input, OPENED);
+    expect(read).toMatchObject({ ok: true, da });
+    if (!read.ok) return;
+    expect(birthInputHint(read.date, OPENED)).toBe(hint);
+  });
+});
+
+describe("生年月日の入力の読み取り（誤り）", () => {
+  it.each(BIRTH_REFUSED)("%s は断る", (input, message) => {
+    expect(parseBirthInput(input, OPENED)).toEqual({ ok: false, message });
+  });
+
+  it("誤りの文は決めた文のまま", () => {
+    expect(BIRTH_FORMAT_ERROR).toBe("生年月日を読み取れません。1975/05/14 か S50/05/14 の形で入力してください。");
+    expect(BIRTH_FUTURE_ERROR).toBe("生年月日が今日より後です。日付を確かめてください。");
+  });
+
+  it("元号の終わりより後・始まりより前の文は、元号の正式名と範囲を入れる（大正・明治の例）", () => {
+    expect(parseBirthInput("大16/01/01", OPENED)).toEqual({
+      ok: false,
+      message: "生年月日が大正の範囲にありません。大正は 1926/12/24 までです。昭和1年は 1926/12/25 からです。",
+    });
+    expect(parseBirthInput("明治46年1月1日", OPENED)).toEqual({
+      ok: false,
+      message: "生年月日が明治の範囲にありません。明治は 1912/07/29 までです。大正1年は 1912/07/30 からです。",
+    });
+    expect(parseBirthInput("T1/07/29", OPENED)).toEqual({
+      ok: false,
+      message: "生年月日が大正の範囲にありません。大正は 1912/07/30 からです。明治45年は 1912/07/29 までです。",
+    });
+    expect(parseBirthInput("S1/12/24", OPENED)).toEqual({
+      ok: false,
+      message: "生年月日が昭和の範囲にありません。昭和は 1926/12/25 からです。大正15年は 1926/12/24 までです。",
+    });
+  });
+
+  it("全角の数字・全角の「／」・空・年が 0 の西暦は形が合わない", () => {
+    for (const input of ["１９７５/05/14", "1975／05／14", "S５０/05/14", "", "   ", "0000/01/01"]) {
+      expect(parseBirthInput(input, OPENED), input).toEqual({ ok: false, message: BIRTH_FORMAT_ERROR });
+    }
+  });
+
+  it("確かめる順は 形 → 元号の範囲 → 今日より後（範囲の外で今日より後なら、範囲の誤り）", () => {
+    expect(parseBirthInput("H40/01/01", OPENED)).toMatchObject({ ok: false, message: HEISEI_AFTER });
+    expect(parseBirthInput("R8/02/30", OPENED)).toEqual({ ok: false, message: BIRTH_FORMAT_ERROR });
+  });
+});
+
+describe("読み取り結果の年齢を数える日", () => {
+  const birth = { year: 1975, month: 5, day: 10 };
+  it.each([
+    [{ year: 2026, month: 4, day: 10 }, "1975/05/10（昭50・50歳）"],
+    [{ year: 2026, month: 5, day: 10 }, "1975/05/10（昭50・51歳）"],
+    [{ year: 2025, month: 5, day: 9 }, "1975/05/10（昭50・49歳）"],
+    [OPENED, "1975/05/10（昭50・51歳）"],
+  ])("%o の時点", (at, hint) => {
+    expect(birthInputHint(birth, at)).toBe(hint);
+  });
+
+  it("数える日より後の生年月日は年齢を出さない", () => {
+    expect(birthInputHint({ year: 2026, month: 12, day: 1 }, OPENED)).toBe("2026/12/01（令8）");
+  });
+
+  it("明治より前は元号なし", () => {
+    expect(birthInputHint({ year: 1860, month: 3, day: 3 }, OPENED)).toBe("1860/03/03（166歳）");
+  });
+
+  it("画面の今日は端末の時間帯の日付", () => {
+    expect(localToday(new Date(2026, 9, 29, 23, 59))).toEqual(OPENED);
   });
 });

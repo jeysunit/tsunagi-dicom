@@ -818,6 +818,37 @@ test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を�
   await expect(panel).toHaveCount(0);
   await expect(page.getByTestId("modify-open")).toBeFocused();
   await page.getByTestId("modify-open").click();
+
+  // 生年月日の欄は西暦と元号を受け、読み取り結果をその検査の検査日で数えて欄の下に出す（docs/spec.md の 3.1「生年月日の入力」）。
+  // 確かめの画面へは YYYYMMDD で送る。確かめた後に欄を元の値へ戻し、下の氏名の修正には混ぜない
+  const birth = panel.getByTestId("modify-PatientBirthDate");
+  await expect(birth).toHaveAttribute("type", "text");
+  await expect(birth).toHaveAttribute("inputmode", "text");
+  await expect(birth).toHaveAttribute("autocomplete", "off");
+  const originalBirth = await birth.inputValue();
+  const studyDate = /^(\d{4})\/(\d{2})\/(\d{2})/.exec((await page.locator(`tr[data-study-uid="${uid}"]`).getByTestId("study-datetime").getAttribute("title")) ?? "")!;
+  const [sy, sm, sd] = [Number(studyDate[1]), Number(studyDate[2]), Number(studyDate[3])];
+  const ageAtStudy = sy - 1975 - (sm < 5 || (sm === 5 && sd < 14) ? 1 : 0);
+  await birth.fill("H31/05/01");
+  await expect(panel.getByTestId("modify-PatientBirthDate-msg")).toHaveText("生年月日が平成の範囲にありません。平成は 2019/04/30 までです。令和1年は 2019/05/01 からです。");
+  await expect(panel.getByTestId("modify-PatientBirthDate-hint")).toHaveCount(0);
+  await expect(birth).toHaveAttribute("aria-invalid", "true");
+  // 読めない入力のまま確認を押しても、要求を送らず欄へフォーカスを戻す
+  await panel.getByTestId("modify-attribute-check").click();
+  await expect(birth).toBeFocused();
+  await expect(panel.getByTestId("modify-confirm")).toHaveCount(0);
+  await birth.fill("S50/05/14");
+  await expect(panel.getByTestId("modify-PatientBirthDate-hint")).toHaveText(`1975/05/14（昭50・${ageAtStudy}歳）`);
+  await expect(panel.getByTestId("modify-PatientBirthDate-msg")).toHaveCount(0);
+  await expect(birth).not.toHaveAttribute("aria-invalid");
+  await expect(birth).toHaveAttribute("aria-describedby", (await panel.getByTestId("modify-PatientBirthDate-hint").getAttribute("id"))!);
+  const previewSent = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/modify/preview"));
+  await panel.getByTestId("modify-attribute-check").click();
+  expect((await previewSent).postDataJSON().values).toEqual({ PatientBirthDate: "19750514" });
+  await expect(panel.getByTestId("modify-confirm").getByTestId("modify-row-PatientBirthDate")).toContainText("1975/05/14");
+  await birth.fill(originalBirth);
+  await expect(panel.getByTestId("modify-confirm")).toHaveCount(0);
+
   await panel.getByTestId("modify-PatientName-1").fill("試験^三郎");
   await panel.getByTestId("modify-attribute-check").click();
   const confirm = panel.getByTestId("modify-confirm");

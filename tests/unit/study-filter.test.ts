@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { StudyView } from "@/lib/fields";
 import { DETAIL_GROUPS, LIST_GROUPS, MODALITY_GROUPS, toggleGroup } from "@/lib/modalities";
 import {
+  advancedQuery,
+  birthFieldText,
   dateQuery,
   filterToSearchParams,
   attachSearchNames,
   matchesFilter,
   normalizeForSearch,
   parseFilter,
+  readBirthField,
   todayIn,
 } from "@/lib/study-filter";
 
@@ -220,5 +223,32 @@ describe("モダリティ・横断の検索", () => {
   it("検索の字のそろえ方", () => {
     expect(normalizeForSearch("ヤマダ　タロウ")).toBe("やまだたろう");
     expect(normalizeForSearch("ＡＢＣ")).toBe("abc");
+  });
+});
+
+describe("詳細条件の生年月日の欄（西暦と元号を受ける。docs/spec.md の 3.1「生年月日の入力」）", () => {
+  const OPENED = { year: 2026, month: 10, day: 29 };
+  it("読めた入力は、URL の値（YYYY-MM-DD）と、開いた日で数えた読み取り結果になる。QIDO-RS へは YYYYMMDD で渡す", () => {
+    for (const input of ["S50/05/14", "昭和50年5月14日", "1975/5/14"]) {
+      const read = readBirthField(input, OPENED);
+      expect(read, input).toEqual({ birth: "1975-05-14", hint: "1975/05/14（昭50・51歳）" });
+      expect(filterToSearchParams({ date: "all", birth: read.birth }).get("birth")).toBe("1975-05-14");
+      expect(advancedQuery({ date: "all", birth: read.birth }, ["patientBirthDate"])).toEqual({ patientBirthDate: "19750514" });
+    }
+  });
+
+  it("読めない入力は条件にせず、誤りの文だけを返す。空は何も返さない", () => {
+    expect(readBirthField("H31/05/01", OPENED)).toEqual({
+      message: "生年月日が平成の範囲にありません。平成は 2019/04/30 までです。令和1年は 2019/05/01 からです。",
+    });
+    expect(readBirthField("1975-05-14", OPENED)).toEqual({ message: "生年月日を読み取れません。1975/05/14 か S50/05/14 の形で入力してください。" });
+    expect(readBirthField("2026/10/30", OPENED)).toEqual({ message: "生年月日が今日より後です。日付を確かめてください。" });
+    expect(readBirthField("  ", OPENED)).toEqual({});
+  });
+
+  it("URL の値（YYYY-MM-DD）を欄に入れる形は 1975/05/14", () => {
+    expect(birthFieldText("1975-05-14")).toBe("1975/05/14");
+    expect(birthFieldText(undefined)).toBe("");
+    expect(readBirthField(birthFieldText(parseFilter({ birth: "1975-05-14" }).birth), OPENED).birth).toBe("1975-05-14");
   });
 });

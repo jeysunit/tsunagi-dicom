@@ -8,10 +8,11 @@ import { audit, auditIf, requirePermission, requireSession, type Session } from 
 import { getBackend } from "@/lib/backend";
 import { BackendUnknownError, type Backend } from "@/lib/backend/types";
 import { getConfig } from "@/lib/config";
-import { checkCorrectionValues, correctionScope, type CorrectionValues } from "@/lib/correction-fields";
+import { checkCorrectionValues, correctionScope, normalizeCorrectionValues, type CorrectionValues } from "@/lib/correction-fields";
 import { getDb } from "@/lib/db";
 import { enqueue, history, QueueFull, reconcile, unresolved, writeAudit, type AuditRow } from "@/lib/keep-uid-write";
 import { assertWriteAllowed, isRequestId, isUnresolved, openModifyConfirm, requestOutcome, rowsOfRequest, type RequestRow } from "@/lib/pacs-ops";
+import { todayIn } from "@/lib/study-filter";
 import { applyAttributeCorrection, checkContent, CorrectionRefused, newStudyUid, readSnapshot, reassignMemory, waitJob, type CorrectionSnapshot } from "@/lib/study-correction";
 import { visible } from "../../../../../../hl7-receiver/visible";
 import { assertReauth, contentGroup, contentUnresolved, Kind, OrthancId, pendingAttribute, pendingContent, refuse, refusedBy, requestDetail, UNRESOLVED, Values } from "./shared";
@@ -51,7 +52,7 @@ export async function POST(request: Request, { params }: Context) {
     const uid = studyUidParam((await params).uid);
     const body = await readJson(request, Body, 16_384);
     const { requestId, kind, confirmToken } = body;
-    const values = body.values as CorrectionValues;
+    const posted = body.values as CorrectionValues;
     const denied = { action: "modify" as const, studyInstanceUid: uid, detail: { requestId, kind } };
     await requirePermission(session, "study.modify", denied);
     await assertWriteAllowed(session, denied);
@@ -61,6 +62,12 @@ export async function POST(request: Request, { params }: Context) {
     if (body.deleteSource) {
       return refuse(session, uid, requestId, 400, "delete_source", "元の検査は残します。元の検査を消すときは、削除の操作を使ってください");
     }
+    // 生年月日は画面と同じ読み取りで YYYYMMDD にそろえる（和暦の入力も受ける。今日はサーバーの時間帯の今日）
+    const normalized = normalizeCorrectionValues(posted, todayIn(getConfig().timeZone));
+    if ("problem" in normalized) {
+      return refuse(session, uid, requestId, 400, "invalid", normalized.problem.message, { field: normalized.problem.field });
+    }
+    const { values } = normalized;
     const problem = checkCorrectionValues(values);
     if (problem) return refuse(session, uid, requestId, 400, "invalid", problem.message, { field: problem.field });
     const decided = correctionScope(kind, values);

@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, Inbox, RefreshCw, Search, X } from "lucide-r
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
-import { Input } from "@/components/ui/input";
+import { FieldNote, Input } from "@/components/ui/input";
 import { ModalityMark } from "@/components/ui/modality-mark";
 import { CellMain, isRowControl, PINNED_CELL, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
@@ -27,10 +27,11 @@ import {
 } from "@/lib/client/split-position";
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
-import { formatBirthCell, formatBirthLine, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
+import { formatBirthCell, formatBirthLine, formatDicomTime, formatSlashDate, localToday, sexLabel } from "@/lib/format/japanese-date";
 import { DETAIL_GROUPS, LIST_GROUPS, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
+  birthFieldText,
   DATE_LABELS,
   DEFAULT_FILTER,
   FACET_DATES,
@@ -39,6 +40,7 @@ import {
   MAX_FIELD_LENGTH,
   MAX_QUERY_LENGTH,
   PATIENT_SEX,
+  readBirthField,
   type PatientSex,
   type StudyFacets,
   type StudyFilter,
@@ -203,17 +205,26 @@ function FilterBar({
     accession: filter.accession ?? "",
     desc: filter.desc ?? "",
   });
+  // 生年月日の欄は西暦と元号を受け、読み取った結果を欄の下に出す（docs/spec.md の 3.1「生年月日の入力」）。
+  // 検査を選ぶ前の一覧の条件なので、年齢は画面を開いた日で数える。読めない入力は条件にしない
+  const [today] = useState(localToday);
+  const [birthText, setBirthText] = useState(() => birthFieldText(filter.birth));
+  const birthRead = readBirthField(birthText, today);
+  const birthHintId = useId();
+  const birthMsgId = useId();
   // 打つたびに要求を送らない（横断の検索と詳細条件の文字の欄の、どれかを打ち止めてから 300 ミリ秒。待ちは1本にまとめる）
+  const birth = birthRead.birth;
   useEffect(() => {
     const t = window.setTimeout(() => {
       const next = {
         q: text.trim() || undefined,
+        birth,
         ...(Object.fromEntries(TEXT_FIELDS.map((k) => [k, fieldValue(fields[k])])) as Record<TextField, string | undefined>),
       };
-      if ((["q", ...TEXT_FIELDS] as const).some((k) => next[k] !== filter[k])) onChange({ ...filter, ...next });
+      if ((["q", "birth", ...TEXT_FIELDS] as const).some((k) => next[k] !== filter[k])) onChange({ ...filter, ...next });
     }, 300);
     return () => window.clearTimeout(t);
-  }, [text, fields, filter, onChange]);
+  }, [text, birth, fields, filter, onChange]);
   const fieldText = (key: TextField, label: string, className: string) => (
     <FieldText
       label={label}
@@ -321,18 +332,25 @@ function FilterBar({
           )}
           </span>
           {/* 生年月日・性別・受付番号・検査名は Orthanc の検索（QIDO-RS）の条件にする（docs/spec.md の 3.1）。どれも一覧の列に見える */}
-          <span className="flex items-center gap-1.5">
-            <label htmlFor={birthId} className="shrink-0 text-xs text-label">
-              生年月日
-            </label>
-            <Input
-              id={birthId}
-              type="date"
-              value={filter.birth ?? ""}
-              onChange={(e) => onChange({ ...filter, birth: e.target.value || undefined })}
-              className="h-7 w-40"
-              data-testid="filter-birth"
-            />
+          <span className="flex flex-col gap-0.5">
+            <span className="flex items-center gap-1.5">
+              <label htmlFor={birthId} className="shrink-0 text-xs text-label">
+                生年月日
+              </label>
+              <Input
+                id={birthId}
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                value={birthText}
+                onChange={(e) => setBirthText(e.target.value)}
+                aria-invalid={birthRead.message ? true : undefined}
+                aria-describedby={birthRead.message ? birthMsgId : birthRead.hint ? birthHintId : undefined}
+                className="h-7 w-40"
+                data-testid="filter-birth"
+              />
+            </span>
+            <FieldNote hint={birthRead.hint} hintId={birthHintId} msg={birthRead.message} msgId={birthMsgId} testId="filter-birth" />
           </span>
           <label className="flex items-center gap-1.5">
             <span className="shrink-0 text-xs text-label">性別</span>

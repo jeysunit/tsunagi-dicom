@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ConfirmActions, ConfirmPanel } from "@/components/ui/confirm-panel";
@@ -15,7 +15,7 @@ import { decideModify, decideStatus, type ModifyDecision, type StatusBody } from
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 import { checkFieldValue, FIELD_LABELS, type CorrectionField, type CorrectionKind, type CorrectionValues } from "@/lib/correction-fields";
 import type { StudyView } from "@/lib/fields";
-import { formatBirthLine, formatSlashDate } from "@/lib/format/japanese-date";
+import { birthInputHint, formatBirthLine, formatSlashDate, localToday, parseBirthInput, parseDicomDate } from "@/lib/format/japanese-date";
 
 // 患者・検査の値の修正（docs/spec.md の 3.5。段 6）。一般と管理者。窓は2つに分ける。
 // - 患者情報修正：患者ID・氏名・生年月日・性別・受付番号。UID を保つ。氏名・生年月日・性別は同じ患者ID の全部の検査に、
@@ -292,6 +292,26 @@ function CorrectionForm({
     if (reauthing) revealAndFocus(reauthRef.current, "input");
   }, [reauthing]);
 
+  // 生年月日の欄は西暦と元号を受け、読み取った結果を欄の下に出す（docs/spec.md の 3.1「生年月日の入力」）。
+  // 送る値は読み取った YYYYMMDD。年齢は、この検査の検査日で数える（読めなければ画面を開いた日）
+  const [today] = useState(localToday);
+  const initialBirthText = formatSlashDate(current.values.PatientBirthDate) || (current.values.PatientBirthDate ?? "");
+  const [birthText, setBirthText] = useState(initialBirthText);
+  const [birthServerMsg, setBirthServerMsg] = useState<string | null>(null);
+  const birthRef = useRef<HTMLInputElement>(null);
+  const birthHintId = useId();
+  const birthMsgId = useId();
+  const birthRead = birthText.trim() === "" ? null : parseBirthInput(birthText, today);
+  const birthMsg = (birthRead && !birthRead.ok ? birthRead.message : null) ?? birthServerMsg;
+  const birthHint = birthRead?.ok ? birthInputHint(birthRead.date, parseDicomDate(current.values.StudyDate) ?? today) : undefined;
+  function setBirth(text: string) {
+    setBirthText(text);
+    setBirthServerMsg(null);
+    const read = text.trim() === "" ? null : parseBirthInput(text, today);
+    // 読めない入力は送らない（欄の下に誤りを出し、確認のときに止める）
+    set("PatientBirthDate", read === null ? "" : read.ok ? read.da : (current.values.PatientBirthDate ?? ""));
+  }
+
   /** 変えた項目だけ（変えていない項目は送らない。BFF は、要求に無い項目を変えない） */
   const changed = (): CorrectionValues => Object.fromEntries(fields.filter((f) => values[f] !== (current.values[f] ?? "")).map((f) => [f, values[f]!]));
   const nameParts = (values.PatientName ?? "").split("=");
@@ -310,6 +330,10 @@ function CorrectionForm({
 
   async function check(event: React.FormEvent) {
     event.preventDefault();
+    if (birthRead && !birthRead.ok && birthText !== initialBirthText) {
+      birthRef.current?.focus();
+      return;
+    }
     const proposed = changed();
     if (Object.keys(proposed).length === 0) {
       setProblem({ field: null, text: "変更された項目がありません" });
@@ -327,6 +351,12 @@ function CorrectionForm({
     setChecking(false);
     if (!res.ok) {
       handleAuthStatus(res.status);
+      // サーバーで見つけた生年月日の誤りは、欄の下に返す（docs/design-system/parts.md の「入力欄」）
+      if (res.data.field === "PatientBirthDate") {
+        setBirthServerMsg(errorText(res));
+        birthRef.current?.focus();
+        return;
+      }
       setProblem({ field: typeof res.data.field === "string" ? res.data.field : null, text: errorText(res) });
       return;
     }
@@ -436,8 +466,18 @@ function CorrectionForm({
                   <Input value={nameParts[index] ?? ""} onChange={(e) => setNamePart(index, e.target.value)} data-testid={`modify-PatientName-${index}`} />
                 </Field>
               ))}
-              <Field label="生年月日" hint="YYYYMMDD">
-                <Input value={values.PatientBirthDate ?? ""} onChange={(e) => set("PatientBirthDate", e.target.value)} inputMode="numeric" data-testid="modify-PatientBirthDate" />
+              <Field label="生年月日" hint={birthHint} hintId={birthHintId} msg={birthMsg} msgId={birthMsgId} testId="modify-PatientBirthDate">
+                <Input
+                  ref={birthRef}
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  value={birthText}
+                  onChange={(e) => setBirth(e.target.value)}
+                  aria-invalid={birthMsg ? true : undefined}
+                  aria-describedby={birthMsg ? birthMsgId : birthHint ? birthHintId : undefined}
+                  data-testid="modify-PatientBirthDate"
+                />
               </Field>
               <Field label="性別">
                 <Select className="w-full" value={values.PatientSex ?? ""} onChange={(e) => set("PatientSex", e.target.value)} data-testid="modify-PatientSex">
