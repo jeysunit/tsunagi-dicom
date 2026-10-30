@@ -1056,8 +1056,8 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
   await more.click();
   const panel = page.getByTestId("filter-more-panel");
 
-  // 生年月日（一致）
-  await panel.getByLabel("生年月日").fill("1975-05-10");
+  // 生年月日（一致）。欄は西暦と元号を受ける文字の欄（docs/spec.md の 3.1「生年月日の入力」）。URL の引数は YYYY-MM-DD のまま
+  await panel.getByLabel("生年月日").fill("S50/05/10");
   await expect(page.getByTestId("study-count")).toHaveText("2");
   await expect(page).toHaveURL(/birth=1975-05-10/);
   for (const id of await rows(page).getByTestId("patient-id").allTextContents()) expect(id).toBe("JP-TEST-0001");

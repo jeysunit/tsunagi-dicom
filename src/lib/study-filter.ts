@@ -1,7 +1,7 @@
 import type { StudyQuery } from "@/lib/backend/types";
 import type { StudyView } from "@/lib/fields";
 import type { SimpleDate } from "@/lib/format/japanese-date";
-import { parseDicomDate } from "@/lib/format/japanese-date";
+import { birthInputHint, parseBirthInput, parseDicomDate } from "@/lib/format/japanese-date";
 import { parsePatientNameForSearch, type ParsedPatientName } from "@/lib/format/patient-name";
 import { orderGroups, parseGroups, studyInGroup, type ModalityGroup } from "@/lib/modalities";
 
@@ -107,6 +107,24 @@ const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 function isoDate(value: string | undefined): string | undefined {
   const m = value ? ISO_DATE.exec(value) : null;
   return m && parseDicomDate(`${m[1]}${m[2]}${m[3]}`) ? value : undefined;
+}
+
+/** URL の生年月日（`YYYY-MM-DD`）を、詳細条件の生年月日の欄に入れる文字にする（`1975/05/14`）。無ければ空 */
+export function birthFieldText(birth: string | undefined): string {
+  return birth ? birth.replaceAll("-", "/") : "";
+}
+
+/**
+ * 詳細条件の生年月日の欄を読む（docs/spec.md の 3.1「生年月日の入力」）。読めたら URL の値（`YYYY-MM-DD`）と、
+ * 欄の下の読み取り結果（年齢は today で数える。検査を選ぶ前の一覧なので、画面を開いた日）を返す。
+ * 読めなければ誤りの文だけを返し、条件にしない。空なら何も返さない
+ */
+export function readBirthField(text: string, today: SimpleDate): { birth?: string; hint?: string; message?: string } {
+  if (text.trim() === "") return {};
+  const read = parseBirthInput(text, today);
+  if (!read.ok) return { message: read.message };
+  const { da } = read;
+  return { birth: `${da.slice(0, 4)}-${da.slice(4, 6)}-${da.slice(6, 8)}`, hint: birthInputHint(read.date, today) };
 }
 
 /** URL の値を読む。読めない値は使わない（既定にする） */

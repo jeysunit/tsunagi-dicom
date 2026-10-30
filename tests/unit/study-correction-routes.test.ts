@@ -268,6 +268,37 @@ describe("属性の訂正（患者情報修正）", () => {
     expect(after.every((i) => i.PatientBirthDate === "")).toBe(true);
   });
 
+  it("生年月日は画面と同じ読み取りで和暦も受け、YYYYMMDD で書き換える（docs/spec.md の 3.1「生年月日の入力」）", async () => {
+    const p = await preview("attribute", { PatientBirthDate: "S50/05/14" });
+    expect(p.status).toBe(200);
+    const shown = await p.json();
+    expect(shown.fields.PatientBirthDate.after).toBe("19750514");
+    const res = await modify({ kind: "attribute", values: { PatientBirthDate: "昭和50年5月14日" }, confirmToken: shown.confirmToken });
+    expect(res.status).toBe(200);
+    expect((await instancesOf(STUDY)).every((i) => i.PatientBirthDate === "19750514")).toBe(true);
+  });
+
+  it("読めない生年月日は、画面と同じ文で断り、項目を返す。断ったことを記録し、Orthanc を呼ばない", async () => {
+    const b = await backend();
+    const spy = vi.spyOn(b, "modifyStudyKeepingUids");
+    for (const [value, message] of [
+      ["H31/05/01", "生年月日が平成の範囲にありません。平成は 2019/04/30 までです。令和1年は 2019/05/01 からです。"],
+      ["1975-05-14", "生年月日を読み取れません。1975/05/14 か S50/05/14 の形で入力してください。"],
+      ["20991231", "生年月日が今日より後です。日付を確かめてください。"],
+      ["2099/12/31", "生年月日が今日より後です。日付を確かめてください。"],
+    ] as const) {
+      const p = await preview("attribute", { PatientBirthDate: value });
+      expect(p.status, value).toBe(400);
+      expect(await p.json()).toEqual({ error: message, field: "PatientBirthDate" });
+      const requestId = crypto.randomUUID();
+      const res = await modify({ requestId, kind: "attribute", values: { PatientBirthDate: value }, confirmToken: "m1.x.x.x" });
+      expect(res.status, value).toBe(400);
+      expect(await res.json()).toMatchObject({ error: message, field: "PatientBirthDate" });
+      expect(detailOf((await rowsOf(requestId))[0])).toMatchObject({ reason: "invalid" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("受付番号の訂正は選んだ1検査だけに当たる", async () => {
     const sibling = await instancesOf(SIBLING);
     const p = await (await preview("attribute", { AccessionNumber: "ACC-NEW-1" })).json();

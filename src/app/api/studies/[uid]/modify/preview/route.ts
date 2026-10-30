@@ -5,7 +5,8 @@ import { studyUidParam } from "@/lib/api/study-param";
 import { audit, requirePermission, requireSession } from "@/lib/auth/session";
 import { getBackend } from "@/lib/backend";
 import { getConfig } from "@/lib/config";
-import { checkCorrectionValues, correctionScope, type CorrectionValues } from "@/lib/correction-fields";
+import { checkCorrectionValues, correctionScope, normalizeCorrectionValues, type CorrectionValues } from "@/lib/correction-fields";
+import { todayIn } from "@/lib/study-filter";
 import { getDb } from "@/lib/db";
 import { history, unresolved } from "@/lib/keep-uid-write";
 import { signModifyConfirm } from "@/lib/pacs-ops";
@@ -56,8 +57,11 @@ export async function POST(request: Request, { params }: Context) {
     const session = await checkedScreenWrite(request);
     const uid = studyUidParam((await params).uid);
     const body = await readJson(request, Body, 16_384);
-    const values = body.values as CorrectionValues;
     await requirePermission(session, "study.modify", { action: "modify", studyInstanceUid: uid, detail: { via: "preview", kind: body.kind } });
+    // 生年月日は画面と同じ読み取りで YYYYMMDD にそろえる（実行の ../route.ts と同じ。token にはそろえた値を結ぶ）
+    const normalized = normalizeCorrectionValues(body.values as CorrectionValues, todayIn(getConfig().timeZone));
+    if ("problem" in normalized) return Response.json({ error: normalized.problem.message, field: normalized.problem.field }, { status: 400 });
+    const { values } = normalized;
     const problem = checkCorrectionValues(values);
     if (problem) return Response.json({ error: problem.message, field: problem.field }, { status: 400 });
     const decided = correctionScope(body.kind, values);

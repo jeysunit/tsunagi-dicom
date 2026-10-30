@@ -8,7 +8,9 @@
 // 1つの要求に2種類を混ぜない。属性の訂正の中でも、範囲の違う項目を混ぜない（直す範囲を1つに決めるため）。
 // 画面の呼び名は、属性の訂正が「患者情報修正」、中身の訂正が「検査情報修正」（docs/spec.md の 2.2）。
 
-export const ATTRIBUTE_FIELDS = ["PatientID", "PatientName", "PatientBirthDate", "PatientSex", "AccessionNumber"] as const;
+import { BIRTH_FORMAT_ERROR, parseBirthInput, type SimpleDate } from "@/lib/format/japanese-date";
+
+export const ATTRIBUTE_FIELDS =["PatientID", "PatientName", "PatientBirthDate", "PatientSex", "AccessionNumber"] as const;
 export const CONTENT_FIELDS = ["StudyDate", "StudyDescription"] as const;
 export const CORRECTION_FIELDS = [...ATTRIBUTE_FIELDS, ...CONTENT_FIELDS] as const;
 export type AttributeField = (typeof ATTRIBUTE_FIELDS)[number];
@@ -85,6 +87,8 @@ export function checkFieldValue(field: CorrectionField, value: string): string |
       return null;
     }
     case "PatientBirthDate":
+      // 和暦などの入力は、先に readBirthValue で YYYYMMDD にしてから確かめる
+      return value === "" || isDicomDate(value) ? null : BIRTH_FORMAT_ERROR;
     case "StudyDate":
       return value === "" || isDicomDate(value) ? null : `${label}は YYYYMMDD の8桁の日付で入力してください`;
     case "PatientSex":
@@ -117,6 +121,27 @@ export function correctionScope(kind: CorrectionKind, values: CorrectionValues):
   }
   if (attrs.includes("PatientID")) return { scope: "reassign" };
   return attrs.every((f) => PATIENT_FIELDS.includes(f)) ? { scope: "patient" } : { problem: { field: null, message: "修正できない項目があります" } };
+}
+
+/**
+ * 生年月日の値を読み取り、DICOM の DA（YYYYMMDD）にする（docs/spec.md の 3.1「生年月日の入力」）。空は「値を空にする」でそのまま。
+ * API の値は YYYYMMDD で、画面の入力と同じ形（`S50/05/14`・`昭和50年5月14日` など）も受ける。どちらも画面と同じ読み取り
+ * （形 → 元号の範囲 → 今日より後）で確かめ、同じ文で断る。today はサーバーの時間帯（TZ）の今日
+ */
+export function readBirthValue(value: string, today: SimpleDate): { ok: true; da: string } | { ok: false; message: string } {
+  if (value === "") return { ok: true, da: "" };
+  const da = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
+  const read = parseBirthInput(da ? `${da[1]}/${da[2]}/${da[3]}` : value, today);
+  return read.ok ? { ok: true, da: read.da } : read;
+}
+
+/** 直す値のうち生年月日を YYYYMMDD にそろえる（確かめの画面と実行の両方で、形を確かめる前に通す）。読めなければ問題を返す */
+export function normalizeCorrectionValues(values: CorrectionValues, today: SimpleDate): { values: CorrectionValues } | { problem: FieldProblem } {
+  const birth = values.PatientBirthDate;
+  if (typeof birth !== "string") return { values };
+  const read = readBirthValue(birth, today);
+  if (!read.ok) return { problem: { field: "PatientBirthDate", message: read.message } };
+  return { values: { ...values, PatientBirthDate: read.da } };
 }
 
 /** 全部の項目の値の形を確かめる。最初の問題を返す */

@@ -1,7 +1,8 @@
 // 日付・和暦・年齢・性別の整形（docs/spec.md の 3.1）。
 // 生年月日は西暦の後ろの括弧に、元号の漢字 1 字（一覧の表は英字 1 字）と年・満年齢を並べる：`1975/05/14（昭50・51歳）`。
-// 年齢は検査日の時点で数える。DICOM・HL7・CSV・API の値は西暦のままで、和暦は画面の表示だけに使う。
+// 年齢は検査日の時点で数える。DICOM・HL7・CSV・API の値は西暦のままで、和暦は画面の表示と入力の読み取りだけに使う。
 // DICOM の DA（YYYYMMDD）を読む。読めない値は例外にせず、出せる部分だけを出す。
+// 生年月日の入力（西暦と元号）を読み取る parseBirthInput も、ここに置く（画面と BFF の両方で使う）。
 
 export interface SimpleDate {
   year: number;
@@ -41,13 +42,13 @@ export function formatDicomTime(value: unknown): string {
   return `${m[1]}:${m[2] ?? "--"}`;
 }
 
-/** 元号の漢字 1 字・英字 1 字と、その始まりの日（改元の日。グレゴリオ暦）。新しい元号から先に並べる */
+/** 元号の正式名・漢字 1 字・英字 1 字と、その始まりの日（改元の日。グレゴリオ暦）。新しい元号から先に並べる */
 export const ERAS = [
-  { kanji: "令", letter: "R", start: { year: 2019, month: 5, day: 1 } },
-  { kanji: "平", letter: "H", start: { year: 1989, month: 1, day: 8 } },
-  { kanji: "昭", letter: "S", start: { year: 1926, month: 12, day: 25 } },
-  { kanji: "大", letter: "T", start: { year: 1912, month: 7, day: 30 } },
-  { kanji: "明", letter: "M", start: { year: 1868, month: 10, day: 23 } },
+  { name: "令和", kanji: "令", letter: "R", start: { year: 2019, month: 5, day: 1 } },
+  { name: "平成", kanji: "平", letter: "H", start: { year: 1989, month: 1, day: 8 } },
+  { name: "昭和", kanji: "昭", letter: "S", start: { year: 1926, month: 12, day: 25 } },
+  { name: "大正", kanji: "大", letter: "T", start: { year: 1912, month: 7, day: 30 } },
+  { name: "明治", kanji: "明", letter: "M", start: { year: 1868, month: 10, day: 23 } },
 ] as const;
 
 function compare(a: SimpleDate, b: SimpleDate): number {
@@ -108,6 +109,115 @@ export function formatBirthCell(birthDate: unknown, studyDate: unknown): string 
   const date = formatSlashDate(birthDate);
   const inside = birthInside(birthDate, studyDate, true);
   return inside ? `${date} (${inside})` : date;
+}
+
+// ── 生年月日の入力の読み取り（docs/spec.md の 3.1「生年月日の入力」） ──
+
+/** 形が合わないときの誤りの文 */
+export const BIRTH_FORMAT_ERROR = "生年月日を読み取れません。1975/05/14 か S50/05/14 の形で入力してください。";
+/** 今日より後のときの誤りの文 */
+export const BIRTH_FUTURE_ERROR = "生年月日が今日より後です。日付を確かめてください。";
+
+type Era = (typeof ERAS)[number];
+
+/** 西暦 `1975/05/14`。年は 4 桁、月日の 0 は省いてよい */
+const WESTERN_INPUT = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/;
+/** 英字 1 字（半角・全角、大文字・小文字）か漢字 1 字＋年 `/M/D`：`S50/05/14`・`昭50/05/14`・`H元/01/08` */
+const SHORT_ERA_INPUT = /^([A-Za-zＡ-Ｚａ-ｚ]|[明大昭平令])(\d{1,2}|元)\/(\d{1,2})\/(\d{1,2})$/;
+/** 正式名＋年＋月＋日：`昭和50年5月14日`・`平成元年1月8日` */
+const FORMAL_INPUT = /^(明治|大正|昭和|平成|令和)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日$/;
+
+const isLeapYear = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** 暦にある日か（年は 1 以上）。`Date` は 0〜99 年を 1900 年代に読み替えるので使わない */
+function isCalendarDate({ year, month, day }: SimpleDate): boolean {
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const last = month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1]!;
+  return day <= last;
+}
+
+const slashDate = (d: SimpleDate) => `${d.year}/${pad(d.month)}/${pad(d.day)}`;
+const dicomDate = (d: SimpleDate) => `${String(d.year).padStart(4, "0")}${pad(d.month)}${pad(d.day)}`;
+
+/** 元号の終わりの日（次の元号の始まりの前日）と、その日の元号の年 */
+function eraEnd(era: Era, next: Era): { date: SimpleDate; year: number } {
+  const { year, month, day } = next.start;
+  const date = day > 1 ? { year, month, day: day - 1 } : month > 1
+    ? { year, month: month - 1, day: month - 1 === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 2]! }
+    : { year: year - 1, month: 12, day: 31 };
+  return { date, year: date.year - era.start.year + 1 };
+}
+
+/** 全角の英字を半角の大文字にする（`ｓ` → `S`） */
+function eraLetter(c: string): string {
+  const code = c.charCodeAt(0);
+  return (code >= 0xff21 && code <= 0xff5a ? String.fromCharCode(code - 0xfee0) : c).toUpperCase();
+}
+
+/** 元号の範囲を確かめる。範囲の外なら誤りの文（元号の名前と範囲を入れる） */
+function eraRangeError(index: number, date: SimpleDate): string | null {
+  const era = ERAS[index]!;
+  const next = index > 0 ? ERAS[index - 1] : undefined;
+  const prev = ERAS[index + 1];
+  if (next && compare(date, next.start) >= 0) {
+    const end = eraEnd(era, next);
+    return `生年月日が${era.name}の範囲にありません。${era.name}は ${slashDate(end.date)} までです。${next.name}1年は ${slashDate(next.start)} からです。`;
+  }
+  if (compare(date, era.start) < 0) {
+    const head = `生年月日が${era.name}の範囲にありません。${era.name}は ${slashDate(era.start)} からです。`;
+    if (!prev) return head;
+    const end = eraEnd(prev, era);
+    return `${head}${prev.name}${end.year}年は ${slashDate(end.date)} までです。`;
+  }
+  return null;
+}
+
+/**
+ * 生年月日の入力を読み取る。受ける形は西暦 `1975/05/14`、英字 1 字の `S50/05/14`、漢字 1 字の `昭50/05/14`、
+ * 正式名の `昭和50年5月14日`（年の 1 は `元` でもよい。前後の空白は捨てる）。
+ * 確かめる順は、形（暦に無い日を含む）→ 元号の範囲 → 今日より後。today は呼ぶ側が決める（画面は画面の今日、BFF はサーバーの今日）。
+ * 読めたら日付と DICOM の DA（`YYYYMMDD`）を返す。空の入力は形が合わない扱い（空を許すかは呼ぶ側が決める）
+ */
+export function parseBirthInput(value: string, today: SimpleDate): { ok: true; date: SimpleDate; da: string } | { ok: false; message: string } {
+  const text = value.trim();
+  let date: SimpleDate;
+  let eraIndex = -1;
+  const western = WESTERN_INPUT.exec(text);
+  if (western) {
+    date = { year: Number(western[1]), month: Number(western[2]), day: Number(western[3]) };
+  } else {
+    const short = SHORT_ERA_INPUT.exec(text);
+    const formal = short ? null : FORMAL_INPUT.exec(text);
+    const m = short ?? formal;
+    if (!m) return { ok: false, message: BIRTH_FORMAT_ERROR };
+    const mark = m[1]!;
+    eraIndex = ERAS.findIndex((e) => (formal ? e.name === mark : e.kanji === mark || e.letter === eraLetter(mark)));
+    const year = m[2] === "元" ? 1 : Number(m[2]);
+    if (eraIndex < 0 || year < 1) return { ok: false, message: BIRTH_FORMAT_ERROR };
+    date = { year: ERAS[eraIndex]!.start.year + year - 1, month: Number(m[3]), day: Number(m[4]) };
+  }
+  if (!isCalendarDate(date)) return { ok: false, message: BIRTH_FORMAT_ERROR };
+  if (eraIndex >= 0) {
+    const rangeError = eraRangeError(eraIndex, date);
+    if (rangeError) return { ok: false, message: rangeError };
+  }
+  if (compare(date, today) > 0) return { ok: false, message: BIRTH_FUTURE_ERROR };
+  return { ok: true, date, da: dicomDate(date) };
+}
+
+/**
+ * 入力欄の下の読み取り結果：`1975/05/14（昭50・51歳）`（帯と同じ漢字 1 字の形。性別は付けない）。
+ * 年齢は at の日（検査に結び付く画面は検査日、結び付かない画面は開いた日）で数え、at より後の生年月日は年齢を出さない
+ */
+export function birthInputHint(date: SimpleDate, at: SimpleDate): string {
+  const { date: shown, note } = birthParts(dicomDate(date), dicomDate(at));
+  return `${shown}${note}`;
+}
+
+/** 端末の時間帯での今日（画面の今日。画面を開いた日にも使う） */
+export function localToday(now = new Date()): SimpleDate {
+  return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
 }
 
 /**
