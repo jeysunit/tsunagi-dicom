@@ -27,7 +27,7 @@ import {
 } from "@/lib/client/split-position";
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
-import { formatBirthCell, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
+import { formatBirthCell, formatBirthLine, formatDicomTime, formatSlashDate, sexLabel } from "@/lib/format/japanese-date";
 import { DETAIL_GROUPS, LIST_GROUPS, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
@@ -706,7 +706,12 @@ function StudyRows({
                   )}
                   {has("birth") && (
                     // 西暦と括弧から後ろの間でだけ折れる（後ろは `.unit`＝inline-block で、括弧の中では折れない）。12px の 2 行で行の高さを変えない
-                    <td className={cn(CELL, "text-xs leading-3.5 tabular-nums")} data-testid="patient-birth">
+                    // title は帯と同じ形（元号は漢字 1 字）。列で英字 1 字にした元号も、ここで読める
+                    <td
+                      className={cn(CELL, "text-xs leading-3.5 tabular-nums")}
+                      title={formatBirthLine(s.patientBirthDate, undefined, s.studyDate) || undefined}
+                      data-testid="patient-birth"
+                    >
                       <BirthCell value={formatBirthCell(s.patientBirthDate, s.studyDate)} />
                     </td>
                   )}

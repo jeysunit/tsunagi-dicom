@@ -177,6 +177,8 @@ test("一覧の行：氏名（漢字・かな）・生年月日の和暦と年�
   await expect(r).toContainText("しけん たかこ");
   // 期待の変更：年齢の列を外し、年齢は生年月日の列の括弧の中に入れた（検査日の時点の満年齢。docs/spec.md の 3.1）
   await expect(r.getByTestId("patient-birth")).toHaveText("1960/07/15 (S35・65歳)");
+  // title は帯と同じ形（元号は漢字 1 字。性別は別の列なので含めない）
+  await expect(r.getByTestId("patient-birth")).toHaveAttribute("title", "1960/07/15（昭35・65歳）");
   await expect(r.getByTestId("patient-age")).toHaveCount(0);
   await expect(r.getByTestId("patient-sex")).toHaveText("女");
   await expect(r).toContainText("1 / 4");

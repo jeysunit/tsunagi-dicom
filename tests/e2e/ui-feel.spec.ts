@@ -431,6 +431,23 @@ test("1280px の一覧：横にスクロールせず、モダリティの札が�
   const lines = await unit.evaluate((el) => el.getClientRects().length);
   expect(lines).toBe(1);
   expect(await unit.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(25);
+
+  // 帯の生年月日：折れるのは西暦と括弧の間だけ。西暦の数字の途中でも、括弧の中でも折れない
+  const birthV = page.getByTestId("banner-birth").locator(".v");
+  await expect(birthV).toBeVisible();
+  const birthUnit = birthV.locator(".unit");
+  await expect(birthUnit).toHaveText(/^（.+・\d+歳）/);
+  expect(await birthUnit.evaluate((el) => el.getClientRects().length)).toBe(1);
+  const dateLines = await birthV.evaluate((el) => {
+    const text = el.firstChild;
+    if (!text || text.nodeType !== Node.TEXT_NODE) return -1;
+    const range = document.createRange();
+    const len = (text.textContent ?? "").trim().length;
+    range.setStart(text, 0);
+    range.setEnd(text, len);
+    return new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size;
+  });
+  expect(dateLines).toBe(1);
 });
 
 /** 計算した色（`rgb(r, g, b)`）の相対輝度（WCAG 2.2） */
