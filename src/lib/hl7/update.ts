@@ -121,11 +121,17 @@ export function extractUpdate(msg: Message, issuer = "RIS_EMU"): UpdateResult {
     const birth = birthDate(value(field(msg, "PID", 7)));
     if (birth !== undefined) attributes.PatientBirthDate = birth;
     const sex = value(field(msg, "PID", 8));
-    if (sex && sex !== "U" && sex !== '""') {
-      if (!["M", "F", "O"].includes(sex)) {
+    if (sex) {
+      if (!["M", "F", "O", "U"].includes(sex)) {
         throw new Error("性別が正しくない");
       }
-      attributes.PatientSex = sex;
+      // A08 の U（表 0001 の Unknown）は「不明」への更新で、DICOM の列挙値に U が無いので空にする。
+      // A40 の U は、替え先の患者と食い違いを生まないよう、これまでどおり変えない（docs/spec.md 3.5）
+      if (sex !== "U") {
+        attributes.PatientSex = sex;
+      } else if (trigger === "A08") {
+        attributes.PatientSex = "";
+      }
     }
     if (type === "ORM") {
       const uid = value(field(msg, "ZDS", 1));
