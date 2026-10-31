@@ -221,25 +221,77 @@ describe("インポート", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("同じ組でも、別の利用者が先に入れた検査には続けて入れられない", async () => {
-    // 別の利用者（actorId が違う）が、同じ組の ID でこの検査に入れた成功の行
+  // 同じ組の続きの例外は、同じ利用者が、開いている組で、この検査を新しく作った（createdStudy・Orthanc の答えが Success）
+  // 新しい行だけに当てる。もうある見本の検査（STUDY）に、作った行を記録に足して確かめる
+  it.each([
+    ["例外に当たる行（対照）", {}, {}, 200],
+    ["別の利用者の行", { actorId: "someone-else" }, {}, 409],
+    ["検査を新しく作った印の無い行", {}, { createdStudy: undefined }, 409],
+    ["Orthanc の答えが AlreadyStored の行", {}, { status: "AlreadyStored" }, 409],
+    ["閉じた組（何番目 = ファイルの数）の行", {}, { batch: { index: 2, total: 2 } }, 409],
+    ["ファイルの数の違う組の行", {}, { batch: { index: 1, total: 3 } }, 409],
+    // 結果・照らし合わせの行が新しくても、元の要求の「求めた」が窓の外なら当てない（遅れた照らし合わせで窓を開け直さない）
+    ["「求めた」が時間の窓の外の古い要求の行", { occurredAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }, {}, 409],
+    ["照らし合わせの行（例外に当たる）", {}, { phase: "reconcile", status: undefined }, 200],
+  ])("同じ組の続きの例外：%s", async (_, row: Record<string, unknown>, change: Record<string, unknown>, expected) => {
     const batch = crypto.randomUUID();
     const orthancStudyId = (await (await backend()).lookupStudy(STUDY))!;
+    const detail: Record<string, unknown> = {
+      requestId: crypto.randomUUID(),
+      phase: "result",
+      status: "Success",
+      createdStudy: true,
+      orthancStudyId,
+      ...change,
+      batch: { id: batch, index: 1, total: 2, ...(change.batch as object | undefined) },
+    };
+    if (detail.createdStudy === undefined) delete detail.createdStudy;
     const { appendAudit } = await import("@/lib/audit");
+    const common = { actorId: "dev", actorRole: "general", authMode: "dev", action: "import" as const, outcome: "success" as const, patientId: PATIENT, studyInstanceUid: STUDY };
+    // 「求めた」の行（時間の窓はこの時刻で測る）と、結果の行（いまの時刻）
+    const { occurredAt, ...who } = row as { occurredAt?: Date };
     await appendAudit(await db(), {
-      actorId: "someone-else",
-      actorRole: "general",
-      authMode: "local",
-      action: "import",
-      outcome: "success",
-      patientId: PATIENT,
-      studyInstanceUid: STUDY,
-      detail: { requestId: crypto.randomUUID(), batch: { id: batch, index: 1, total: 2 }, phase: "result", status: "Success", orthancStudyId },
+      ...common,
+      ...who,
+      ...(occurredAt ? { occurredAt } : {}),
+      detail: { requestId: detail.requestId, batch: detail.batch, sopInstanceUid: nextSop(), newStudy: true, phase: "request" },
     });
-    const call = vi.spyOn(await backend(), "importInstance");
+    await appendAudit(await db(), { ...common, ...who, detail });
     const res = await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 2, 2));
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(expected);
+  });
+
+  it("新しく作った検査の結果の行には createdStudy が、続きの画像の行には無い", async () => {
+    await removeStudy(STUDY);
+    const batch = crypto.randomUUID();
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), first, ORIGIN, batchHeaders(batch, 1, 2))).status).toBe(200);
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), second, ORIGIN, batchHeaders(batch, 2, 2))).status).toBe(200);
+    expect(detailOf((await rowsOf(first))[0])).toMatchObject({ newStudy: true });
+    expect(detailOf((await rowsOf(first)).at(-1))).toMatchObject({ phase: "result", createdStudy: true });
+    expect(detailOf((await rowsOf(second))[0]).newStudy).toBeUndefined();
+    expect(detailOf((await rowsOf(second)).at(-1)).createdStudy).toBeUndefined();
+  });
+
+  it("終わった組に、使った番目を使い回して画像を足せない（失敗と決まった番目だけは送り直せる）", async () => {
+    await removeStudy(STUDY);
+    const batch = crypto.randomUUID();
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 1, 3))).status).toBe(200);
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 2, 3))).status).toBe(200);
+    const call = vi.spyOn(await backend(), "importInstance");
+    const reusedId = crypto.randomUUID();
+    const reused = await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), reusedId, ORIGIN, batchHeaders(batch, 2, 3));
+    expect(reused.status).toBe(409);
     expect(call).not.toHaveBeenCalled();
+    expect(detailOf((await rowsOf(reusedId))[0])).toMatchObject({ reason: "batch_index_used" });
+    call.mockRestore();
+    // 3 番目が Orthanc に断られて失敗と決まれば、同じ番目で送り直せる
+    const { simulateMockImport } = await import("@/lib/backend/mock");
+    simulateMockImport({ refuse: true });
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 3, 3))).status).toBeGreaterThanOrEqual(400);
+    simulateMockImport({});
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 3, 3))).status).toBe(200);
   });
 
   it("Orthanc が保存した患者 ID がファイルの値と違えば、入れた画像を消して 409 で断り、消す前と消した結果を記録する", async () => {

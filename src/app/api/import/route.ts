@@ -100,8 +100,11 @@ export async function POST(request: Request) {
     const backend = getBackend();
     // 引き当てる前の記録の末尾。引き当ての後に始まった、同じ画像・検査のほかの取り込みを、記録の並びの中で見つける
     const checkedAt = (await db.auditLog.findFirst({ orderBy: { seq: "desc" }, select: { seq: true } }))?.seq ?? 0;
-    const exists = await existingTarget(backend, db, session, dicom, base.batch?.id);
-    if (exists) return refuse(409, exists.reason, REIMPORT, exists.orthancStudyId ? { orthancStudyId: exists.orthancStudyId } : {});
+    const target = await existingTarget(backend, db, session, dicom, base.batch);
+    if ("reason" in target) return refuse(409, target.reason, REIMPORT, target.orthancStudyId ? { orthancStudyId: target.orthancStudyId } : {});
+    // 引き当てで検査が無かった（この取り込みで検査を新しく作る）ことを「求めた」の行に残す。同じ組の続きの画像の例外は、
+    // 新しく作った検査（結果の行の createdStudy）にだけ当てる
+    const created = target.newStudy ? { newStudy: true } : {};
 
     // 呼ぶ前に「求めた」を記録する。同じ要求の ID が並んで届いたときは、先の1つだけを通す。記録の並びの中で、
     // 引き当ての後に同じ画像・検査のほかの取り込みが始まっていないか（並んで届いた別の要求の ID の取り込み）と、
@@ -113,6 +116,12 @@ export async function POST(request: Request) {
       | { kind: "raced"; reason: "instance_exists" | "study_exists" };
     const begin = await auditIf<Begin>(session, async (tx) => {
       if (requestOutcome(await rowsOfRequest(tx, "import", requestId, uid)).phase !== "none") return { value: { kind: "repeated" }, fields: null };
+      if (base.batch && (await batchIndexUsed(tx, session, base.batch, requestId))) {
+        return {
+          value: { kind: "raced", reason: "study_exists" },
+          fields: { action: "import", outcome: "denied", patientId, studyInstanceUid: uid, detail: { ...detail, reason: "batch_index_used" } },
+        };
+      }
       const raced = await startedSince(tx, session, checkedAt, requestId, dicom, base.batch?.id);
       if (raced) {
         return {
@@ -129,7 +138,7 @@ export async function POST(request: Request) {
       }
       return {
         value: { kind: "first" },
-        fields: { action: "import", outcome: "success", patientId, studyInstanceUid: uid, detail: { ...detail, phase: "request" } },
+        fields: { action: "import", outcome: "success", patientId, studyInstanceUid: uid, detail: { ...detail, ...created, phase: "request" } },
       };
     });
     if (begin.kind === "repeated") return priorResponse(session, requestId, uid, await rowsOfRequest(db, "import", requestId, uid), same);
@@ -173,7 +182,14 @@ export async function POST(request: Request) {
     // 画像は入っているので成功とし、付けられなかったことを記録に残す
     const labeled = stored.status === "Success" ? await label(backend, stored.orthancStudyId) : false;
     try {
-      await result("success", { status: stored.status, orthancStudyId: stored.orthancStudyId, orthancInstanceId: stored.instanceId, labeled });
+      await result("success", {
+        status: stored.status,
+        orthancStudyId: stored.orthancStudyId,
+        orthancInstanceId: stored.instanceId,
+        labeled,
+        // この要求が検査を新しく作った（引き当てで検査が無く、Orthanc が新しく入れた）
+        ...(target.newStudy && stored.status === "Success" ? { createdStudy: true } : {}),
+      });
     } catch {
       // Orthanc は受けたが、結果を記録できなかった。照らせるように結果不明として返す
       logRecordFailure(requestId);
@@ -248,7 +264,15 @@ export async function GET(request: Request) {
             outcome: "success",
             patientId: file.patientId,
             studyInstanceUid: uid,
-            detail: { ...reconcileDetail, phase: "reconcile", orthancStudyId: found.orthancStudyId, orthancInstanceId: found.instanceId, labeled },
+            detail: {
+              ...reconcileDetail,
+              phase: "reconcile",
+              orthancStudyId: found.orthancStudyId,
+              orthancInstanceId: found.instanceId,
+              labeled,
+              // 「求めた」の行で検査が無かった（この要求が検査を新しく作った）
+              ...(file.newStudy ? { createdStudy: true } : {}),
+            },
           });
           return Response.json({ requestId, outcome: "stored", studyInstanceUid: uid, reconciled: true, labeled });
         }
@@ -260,18 +284,20 @@ export async function GET(request: Request) {
   }
 }
 
+type Batch = { id: string; index: number; total: number };
+
 /**
- * Orthanc にもうある画像・検査（取り込みを断る理由）。無ければ null。
- * 同じ StudyInstanceUID の検査は、同じ利用者が同じ組で先に入れた検査（Orthanc の ID が1つで、記録の成功の行のものと同じ）に、
- * 同じ患者 ID の画像を続けて入れるときだけ通す
+ * Orthanc にもうある画像・検査（取り込みを断る理由）か、取り込んでよい（newStudy：検査がまだ無く、この取り込みで作る）か。
+ * 同じ StudyInstanceUID の検査は、同じ利用者が同じ組で新しく作った検査（batchStudies）に、同じ患者 ID の画像を続けて
+ * 入れるときだけ通す
  */
 async function existingTarget(
   backend: Backend,
   db: Db,
   session: Session,
   dicom: DicomFileHeader,
-  batchId: string | undefined,
-): Promise<{ reason: "instance_exists" | "study_exists"; orthancStudyId?: string } | null> {
+  batch: Batch | undefined,
+): Promise<{ reason: "instance_exists" | "study_exists"; orthancStudyId?: string } | { newStudy: boolean }> {
   try {
     const instance = await backend.findInstanceStudy(dicom.sopInstanceUid);
     if (instance) return { reason: "instance_exists", orthancStudyId: instance.orthancStudyId };
@@ -281,11 +307,11 @@ async function existingTarget(
     throw error;
   }
   const ids = await backend.lookupStudyIds(dicom.studyInstanceUid);
-  if (ids.length === 0) return null;
-  if (batchId && ids.length === 1) {
-    const ours = await batchStudies(db, session, batchId, dicom.studyInstanceUid);
+  if (ids.length === 0) return { newStudy: true };
+  if (batch && ids.length === 1) {
+    const ours = await batchStudies(db, session, batch, dicom.studyInstanceUid);
     const info = ours.has(ids[0]!) ? await backend.studyInfo(ids[0]!) : null;
-    if (info && info.studyInstanceUid === dicom.studyInstanceUid && samePatientId(info.patientId, dicom.patientId)) return null;
+    if (info && info.studyInstanceUid === dicom.studyInstanceUid && samePatientId(info.patientId, dicom.patientId)) return { newStudy: false };
   }
   return { reason: "study_exists", ...(ids.length === 1 ? { orthancStudyId: ids[0]! } : {}) };
 }
@@ -337,18 +363,72 @@ async function startedSince(
   return study ? "study_exists" : null;
 }
 
-/** 同じ利用者が同じ組で、この検査に入れた（成功の結果・照らし合わせの行のある）Orthanc の検査の ID */
-async function batchStudies(db: Db, session: Session, batchId: string, uid: string): Promise<Set<string>> {
+/** 同じ組の続きの画像を受ける時間の窓（組の中で検査を新しく作った行からの時間） */
+const BATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 同じ利用者が同じ組（開いている組）で、この検査を新しく作った Orthanc の検査の ID。数えるのは、成功の行のうち、
+ * - 検査を新しく作った印（createdStudy）のあるもの（結果の行は Orthanc の答えが Success のものだけ）
+ * - 組の続きがまだある（作った行の何番目 < ファイルの数）、いまの要求が同じ組の後ろの番目（ファイルの数も同じ）のもの
+ * - 時間の窓（BATCH_WINDOW_MS）の中のもの
+ */
+async function batchStudies(db: Db, session: Session, batch: Batch, uid: string, now = Date.now()): Promise<Set<string>> {
   const rows = await db.auditLog.findMany({
-    where: { action: "import", studyInstanceUid: uid, actorId: session.actorId, outcome: "success", detail: { contains: `"batch":{"id":"${batchId}"` } },
+    where: {
+      action: "import",
+      studyInstanceUid: uid,
+      actorId: session.actorId,
+      outcome: "success",
+      detail: { contains: `"batch":{"id":"${batch.id}"` },
+    },
     select: { detail: true },
   });
   const ids = new Set<string>();
   for (const row of rows) {
     const d = parse(row.detail);
-    if ((d.phase === "result" || d.phase === "reconcile") && typeof d.orthancStudyId === "string") ids.add(d.orthancStudyId);
+    const made = d.batch as Partial<Batch> | undefined;
+    const createdHere =
+      d.createdStudy === true && ((d.phase === "result" && d.status === "Success") || d.phase === "reconcile") && typeof d.orthancStudyId === "string";
+    const open =
+      made?.id === batch.id &&
+      typeof made.index === "number" &&
+      made.total === batch.total &&
+      made.index < made.total &&
+      batch.index > made.index;
+    if (!createdHere || !open || !isRequestId(d.requestId)) continue;
+    // 時間の窓は、元の要求の「求めた」の時刻で測る（遅れた照らし合わせの行の時刻で窓を開け直さない）
+    const requested = await db.auditLog.findFirst({
+      where: { action: "import", studyInstanceUid: uid, actorId: session.actorId, detail: { contains: `"requestId":"${d.requestId}"` } },
+      orderBy: { seq: "asc" },
+      select: { occurredAt: true, detail: true },
+    });
+    if (requested && parse(requested.detail).phase === "request" && requested.occurredAt.getTime() >= now - BATCH_WINDOW_MS) {
+      ids.add(d.orthancStudyId as string);
+    }
   }
   return ids;
+}
+
+/**
+ * 同じ利用者の同じ組で、同じ何番目のファイルを、ほかの要求がもう使ったか（入った・結果が分からない。失敗と決まった要求は
+ * 除く）。終わった組に番目を使い回して画像を足させない。並んで届いた同じ番目も見つける（記録の並びの中で確かめる）
+ */
+async function batchIndexUsed(tx: Tx, session: Session, batch: Batch, requestId: string): Promise<boolean> {
+  const rows = await tx.auditLog.findMany({
+    where: { action: "import", actorId: session.actorId, outcome: { not: "denied" }, detail: { contains: `"batch":{"id":"${batch.id}"` } },
+    select: { studyInstanceUid: true, detail: true },
+  });
+  const others = new Map<string, string>();
+  for (const row of rows) {
+    const d = parse(row.detail);
+    if (d.phase !== "request" || !isRequestId(d.requestId) || d.requestId === requestId) continue;
+    if ((d.batch as Partial<Batch> | undefined)?.index === batch.index) others.set(d.requestId, row.studyInstanceUid ?? "");
+  }
+  for (const [id, study] of others) {
+    const o = requestOutcome(await rowsOfRequest(tx, "import", id, study));
+    if (!(o.phase === "result" || o.phase === "done") || o.outcome !== "failed") return true;
+  }
+  return false;
 }
 
 /**
@@ -549,11 +629,17 @@ function parse(detail: string | null): Record<string, unknown> {
 /** 「求めた」の行に残したファイル（SOP Instance UID・SHA-256・患者 ID・組）。無ければ null */
 function requestFile(
   rows: readonly (RequestRow & { patientId?: string | null })[],
-): { sopInstanceUid: string; sha256: string; patientId: string; batch?: unknown } | null {
+): { sopInstanceUid: string; sha256: string; patientId: string; batch?: unknown; newStudy: boolean } | null {
   for (const row of rows) {
     const d = parse(row.detail);
     if (d.phase === "request" && typeof d.sopInstanceUid === "string" && typeof d.sha256 === "string") {
-      return { sopInstanceUid: d.sopInstanceUid, sha256: d.sha256, patientId: row.patientId ?? "", ...(d.batch ? { batch: d.batch } : {}) };
+      return {
+        sopInstanceUid: d.sopInstanceUid,
+        sha256: d.sha256,
+        patientId: row.patientId ?? "",
+        ...(d.batch ? { batch: d.batch } : {}),
+        newStudy: d.newStudy === true,
+      };
     }
   }
   return null;
