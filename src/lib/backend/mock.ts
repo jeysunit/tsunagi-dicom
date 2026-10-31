@@ -781,6 +781,14 @@ export function createMockBackend(): Backend {
       const studyId = sop ? mockImported.instances.get(sop) : undefined;
       return studyId !== undefined && (await restStudies()).some((s) => s.ID === studyId);
     },
+
+    // モックの検査は、入れた画像だけでできている。消していない見本の検査は、見本の画像（合成の UID）を持つ形にする
+    async studyInstanceSopUids(orthancStudyId: string) {
+      const study = (await restStudies()).find((s) => s.ID === orthancStudyId);
+      if (!study) return [];
+      const imported = [...mockImported.instances].filter(([, id]) => id === orthancStudyId).map(([sop]) => sop);
+      return imported.length > 0 ? imported : [syntheticUid(orthancStudyId)];
+    },
   };
 }
 

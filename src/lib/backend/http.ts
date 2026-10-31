@@ -931,5 +931,17 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!isOrthancId(instanceId)) throw new BackendError("画像の ID が正しくありません", 400);
       return (await restJsonOrNull(`instances/${instanceId}`)) !== null;
     },
+
+    async studyInstanceSopUids(orthancStudyId: string) {
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
+      const json = await restJsonOrNull(`studies/${orthancStudyId}/instances`);
+      if (json === null) return [];
+      if (!Array.isArray(json)) throw new BackendError("画像サーバーの画像の一覧を読めません");
+      return json.map((i) => {
+        const sop = (i as { MainDicomTags?: { SOPInstanceUID?: unknown } } | null)?.MainDicomTags?.SOPInstanceUID;
+        if (typeof sop !== "string" || !sop) throw new BackendError("画像サーバーの画像の一覧を読めません");
+        return sop;
+      });
+    },
   };
 }

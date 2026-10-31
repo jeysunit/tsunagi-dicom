@@ -56,6 +56,10 @@ beforeAll(async () => {
     }
     if (req.method === "GET" && url === `/instances/${INSTANCE_ID}/study`) return json(200, { ID: STUDY_ID });
     if (req.method === "GET" && url === `/instances/${INSTANCE_ID}`) return json(200, { ID: INSTANCE_ID, ParentSeries: "s" });
+    if (req.method === "GET" && url === `/studies/${STUDY_ID}/instances`) {
+      return json(200, [{ ID: INSTANCE_ID, MainDicomTags: { SOPInstanceUID: "1.2.826.0.1.3680043.8.498.1" } }, { ID: "x", MainDicomTags: { SOPInstanceUID: "1.2.826.0.1.3680043.8.498.4" } }]);
+    }
+    if (req.method === "GET" && url === `/studies/${INSTANCE_ID}/instances`) return json(200, [{ ID: "x", MainDicomTags: {} }]);
     if (req.method === "DELETE" && url === `/instances/${INSTANCE_ID}`) {
       if (typeof deleteMode === "number") return json(deleteMode, { Message: "error" });
       return json(200, {});
@@ -138,6 +142,13 @@ describe("実の Orthanc の REST（段 6：インポート）", () => {
     deleteMode = 503;
     await expect(backend().deleteImportedInstance(INSTANCE_ID)).rejects.toThrow(BackendUnknownError);
     await expect(backend().deleteImportedInstance("../x")).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("検査の画像の SOP Instance UID の全部を GET /studies/{id}/instances で読む。無い検査は空、読めない画像があれば投げる", async () => {
+    expect(await backend().studyInstanceSopUids(STUDY_ID)).toEqual(["1.2.826.0.1.3680043.8.498.1", "1.2.826.0.1.3680043.8.498.4"]);
+    expect(seen.at(-1)).toMatchObject({ method: "GET", url: `/studies/${STUDY_ID}/instances`, authorization: basic("reader", "read-secret") });
+    expect(await backend().studyInstanceSopUids("00000000-00000000-00000000-00000000-00000000")).toEqual([]);
+    await expect(backend().studyInstanceSopUids(INSTANCE_ID)).rejects.toThrow(BackendError);
   });
 
   it("画像があるかは GET /instances/{id} を読む資格情報で読み、404 なら無い", async () => {

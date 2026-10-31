@@ -231,6 +231,11 @@ export interface Backend {
   deleteImportedInstance(instanceId: string): Promise<void>;
   /** Orthanc の中の ID の画像があるか（GET /instances/{id}。404 なら false）。読めなければ BackendError */
   instanceExists(instanceId: string): Promise<boolean>;
+  /**
+   * 検査の画像の SOP Instance UID の全部（GET /studies/{id}/instances）。同じ組の続きの画像を受ける前に、検査の画像が全部
+   * その組で入れたものかを確かめる。検査が無ければ空。SOP Instance UID の読めない画像があれば BackendError
+   */
+  studyInstanceSopUids(orthancStudyId: string): Promise<string[]>;
 }
 
 /** インポートの印に使う Orthanc のラベル（Orthanc 1.12.0 から。字は英数字・`_`・`-`） */

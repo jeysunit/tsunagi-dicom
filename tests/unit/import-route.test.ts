@@ -221,57 +221,82 @@ describe("インポート", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  // 同じ組の続きの例外は、同じ利用者が、開いている組で、この検査を新しく作った（createdStudy・Orthanc の答えが Success）
-  // 新しい行だけに当てる。もうある見本の検査（STUDY）に、作った行を記録に足して確かめる
+  // 同じ組の続きの例外は、Orthanc のその検査の画像が全部、同じ利用者の同じ組の成功の結果の行（Orthanc の答えが Success）の
+  // 画像のときだけ。もうある見本の検査（STUDY。組の知らない見本の画像を持つ）に、見本の画像の行を記録に足して確かめる
   it.each([
     ["例外に当たる行（対照）", {}, {}, 200],
     ["別の利用者の行", { actorId: "someone-else" }, {}, 409],
-    ["検査を新しく作った印の無い行", {}, { createdStudy: undefined }, 409],
     ["Orthanc の答えが AlreadyStored の行", {}, { status: "AlreadyStored" }, 409],
-    ["閉じた組（何番目 = ファイルの数）の行", {}, { batch: { index: 2, total: 2 } }, 409],
-    ["ファイルの数の違う組の行", {}, { batch: { index: 1, total: 3 } }, 409],
-    // 結果・照らし合わせの行が新しくても、元の要求の「求めた」が窓の外なら当てない（遅れた照らし合わせで窓を開け直さない）
-    ["「求めた」が時間の窓の外の古い要求の行", { occurredAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }, {}, 409],
-    ["照らし合わせの行（例外に当たる）", {}, { phase: "reconcile", status: undefined }, 200],
+    ["照らし合わせの行", {}, { phase: "reconcile", status: undefined }, 409],
+    ["別の組の行", {}, { batch: { id: "6f1c1b7e-9a43-4a7e-8f55-3b1d2c4e5f61", index: 1, total: 2 } }, 409],
+    ["24 時間より前に始まった組の行", { occurredAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }, {}, 409],
   ])("同じ組の続きの例外：%s", async (_, row: Record<string, unknown>, change: Record<string, unknown>, expected) => {
     const batch = crypto.randomUUID();
-    const orthancStudyId = (await (await backend()).lookupStudy(STUDY))!;
+    const b = await backend();
+    const orthancStudyId = (await b.lookupStudy(STUDY))!;
+    const [sampleSop] = await b.studyInstanceSopUids(orthancStudyId);
     const detail: Record<string, unknown> = {
       requestId: crypto.randomUUID(),
+      sopInstanceUid: sampleSop,
+      batch: { id: batch, index: 1, total: 2 },
       phase: "result",
       status: "Success",
-      createdStudy: true,
       orthancStudyId,
       ...change,
-      batch: { id: batch, index: 1, total: 2, ...(change.batch as object | undefined) },
     };
-    if (detail.createdStudy === undefined) delete detail.createdStudy;
     const { appendAudit } = await import("@/lib/audit");
-    const common = { actorId: "dev", actorRole: "general", authMode: "dev", action: "import" as const, outcome: "success" as const, patientId: PATIENT, studyInstanceUid: STUDY };
-    // 「求めた」の行（時間の窓はこの時刻で測る）と、結果の行（いまの時刻）
-    const { occurredAt, ...who } = row as { occurredAt?: Date };
     await appendAudit(await db(), {
-      ...common,
-      ...who,
-      ...(occurredAt ? { occurredAt } : {}),
-      detail: { requestId: detail.requestId, batch: detail.batch, sopInstanceUid: nextSop(), newStudy: true, phase: "request" },
+      actorId: "dev",
+      actorRole: "general",
+      authMode: "dev",
+      action: "import",
+      outcome: "success",
+      patientId: PATIENT,
+      studyInstanceUid: STUDY,
+      detail,
+      ...row,
     });
-    await appendAudit(await db(), { ...common, ...who, detail });
     const res = await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 2, 2));
     expect(res.status).toBe(expected);
   });
 
-  it("新しく作った検査の結果の行には createdStudy が、続きの画像の行には無い", async () => {
+  it("同じ組で入れた検査に、組の知らない画像（装置から届いた・ほかの人が入れた）が1つでもあれば、続きの画像を断る", async () => {
     await removeStudy(STUDY);
     const batch = crypto.randomUUID();
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 1, 3))).status).toBe(200);
+    const b = await backend();
+    const real = b.studyInstanceSopUids.bind(b);
+    vi.spyOn(b, "studyInstanceSopUids").mockImplementation(async (id) => [...(await real(id)), "1.2.826.0.1.3680043.8.498.558"]);
+    const call = vi.spyOn(b, "importInstance");
+    const res = await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 2, 3));
+    expect(res.status).toBe(409);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["終わった組（1/1 の後に 2/2）", [1, 1], [2, 2]],
+    ["ファイルの数を変えた要求（1/3 の後に 2/2）", [1, 3], [2, 2]],
+  ])("同じ組でも、%s には続きの画像を入れられない", async (_, [i1, t1], [i2, t2]) => {
+    await removeStudy(STUDY);
+    const batch = crypto.randomUUID();
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, i1!, t1!))).status).toBe(200);
+    const call = vi.spyOn(await backend(), "importInstance");
+    const res = await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, i2!, t2!));
+    expect(res.status).toBe(409);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("結果不明を照らし合わせで成功にした画像は、同じ組の続きの根拠にしない（続きの画像は断る）", async () => {
+    await removeStudy(STUDY);
+    const batch = crypto.randomUUID();
+    const { simulateMockImport } = await import("@/lib/backend/mock");
+    simulateMockImport({ unknown: true });
     const first = crypto.randomUUID();
-    const second = crypto.randomUUID();
-    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), first, ORIGIN, batchHeaders(batch, 1, 2))).status).toBe(200);
-    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), second, ORIGIN, batchHeaders(batch, 2, 2))).status).toBe(200);
-    expect(detailOf((await rowsOf(first))[0])).toMatchObject({ newStudy: true });
-    expect(detailOf((await rowsOf(first)).at(-1))).toMatchObject({ phase: "result", createdStudy: true });
-    expect(detailOf((await rowsOf(second))[0]).newStudy).toBeUndefined();
-    expect(detailOf((await rowsOf(second)).at(-1)).createdStudy).toBeUndefined();
+    expect((await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), first, ORIGIN, batchHeaders(batch, 1, 2))).status).toBe(202);
+    simulateMockImport({});
+    expect(await (await status(first)).json()).toMatchObject({ outcome: "stored", reconciled: true });
+    const res = await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), undefined, ORIGIN, batchHeaders(batch, 2, 2));
+    expect(res.status).toBe(409);
   });
 
   it("終わった組に、使った番目を使い回して画像を足せない（失敗と決まった番目だけは送り直せる）", async () => {
