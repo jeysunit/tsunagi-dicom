@@ -174,7 +174,12 @@ BFF は ADT^A40 を受けたら、MRG-1 の旧い患者 ID の検査を全部、
 
 ### Requirement: A08 で患者の属性を書き換え、患者 ID は変えない
 
-BFF は ADT^A08 を受けたら、PID-3 の患者 ID の検査の、氏名・生年月日・性別を書き換えなければならない（SHALL）。PID の空の欄は変えない（SHALL NOT）。患者 ID と UID は変えない（SHALL NOT）。
+BFF は ADT^A08 を受けたら、PID-3 の患者 ID の検査の、氏名・生年月日・性別を書き換えなければならない（SHALL）。PID の空の欄は変えない（SHALL NOT）。PID-8 が `U`（不明）のときは、DICOM の性別を空に書き換えなければならない（SHALL。docs/spec.md 3.5 の「HL7 による患者情報の更新」）。患者 ID と UID は変えない（SHALL NOT）。
+
+#### Scenario: 性別を不明にする
+
+- **WHEN** 性別が `M` の患者 ID `P000001` の検査があり、PID-8 が `U` の A08 を受ける
+- **THEN** AA の ACK が返り、検査の性別が空になり、患者 ID・UID は変わらない
 
 #### Scenario: 氏名だけを直す
 

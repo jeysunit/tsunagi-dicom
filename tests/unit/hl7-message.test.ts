@@ -128,6 +128,18 @@ describe("HL7 の解析と反映の中身", () => {
     expect(update(text)).toMatchObject({ ok: false, code: "AE" });
   });
   it.each(["X", "m"])("性別を断る %s", (sex) => expect(update(changed("PID", 8, sex))).toMatchObject({ ok: false, code: "AE" }));
+  it("A08 の性別 U は空に書き換える（HL7 v2.3.1 表 0001。DICOM に U は無い）", () => {
+    const result = update(changed("PID", 8, "U", "a08"));
+    expect(result).toMatchObject({ ok: true, command: { kind: "A08", attributes: { PatientSex: "" } } });
+  });
+  it.each([
+    ["A08 の性別の欄が空", "", "a08"],
+    ["A40 の性別 U", "U", "a40"]
+  ])("%s は性別を変えない", (_, sex, name) => {
+    const result = update(changed("PID", 8, sex, name));
+    expect(result.ok).toBe(true);
+    expect(result.ok && Object.keys(result.command.attributes)).not.toContain("PatientSex");
+  });
   it.each(["ADT^A03", "OMI^O23"])(
     "扱わない種類 %s",
     (type) => expect(update(changed("MSH", 8, type))).toMatchObject({ ok: false, code: "AR" })

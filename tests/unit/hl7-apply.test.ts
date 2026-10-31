@@ -100,8 +100,15 @@ describe("HL7 の反映と監査", () => {
     const study = await first();
     const id = (await backend.lookupStudyIds(study.studyInstanceUid))[0]!;
     const before = await backend.studyPatient(id);
-    expect(await send(a08.replace("P000001", study.patientId).replace("19980312", "").replace("|M\r", "|U\r"))).toContain("MSA|AA|");
+    expect(await send(a08.replace("P000001", study.patientId).replace("19980312", "").replace("|M\r", "|\r"))).toContain("MSA|AA|");
     expect(await backend.studyPatient(id)).toEqual({ ...before, PatientName: "TANAKA^HIROSHI=田中^博=タナカ^ヒロシ" });
+  });
+  it("A08 の性別 U は、DICOM の性別を空にする（Q-2026-10-31-08）", async () => {
+    const study = (await backend.searchStudies()).studies.find((s) => s.patientSex)!;
+    const id = (await backend.lookupStudyIds(study.studyInstanceUid))[0]!;
+    const before = await backend.studyPatient(id);
+    expect(await send(a08.replace("P000001", study.patientId).replace("19980312", "").replace("|M\r", "|U\r"))).toContain("MSA|AA|");
+    expect(await backend.studyPatient(id)).toEqual({ ...before, PatientName: "TANAKA^HIROSHI=田中^博=タナカ^ヒロシ", PatientSex: "" });
   });
   it("ORM は受付番号を入れ、同じ番号の再送は書き換えない", async () => {
     const study = await first();
