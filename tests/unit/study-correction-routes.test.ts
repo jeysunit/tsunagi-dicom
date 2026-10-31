@@ -184,6 +184,14 @@ describe("値の修正の分け方と値の形", () => {
     expect((await modify({ kind: "content", values: { StudyDescription: "x".repeat(65) }, confirmToken: "m1.x.x.x" })).status).toBe(400);
   });
 
+  it("性別 U（不明）は DICOM に空で書く（Patient's Sex の列挙値は M・F・O だけ。部品集 1.2.5）", async () => {
+    expect((await instancesOf(STUDY)).every((i) => i.PatientSex !== "")).toBe(true);
+    expect((await modify({ kind: "attribute", values: { PatientSex: "U" } })).status).toBe(200);
+    const after = await instancesOf(STUDY);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((i) => i.PatientSex === "")).toBe(true);
+  });
+
   it("理由が無い・空白だけ・長すぎる要求は 400 で断り、断ったことを記録する", async () => {
     for (const reason of [undefined, "", "   ", "x".repeat(501)]) {
       const requestId = crypto.randomUUID();

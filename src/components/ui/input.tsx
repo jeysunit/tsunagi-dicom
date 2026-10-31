@@ -1,4 +1,4 @@
-import { XCircle } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 
@@ -22,9 +22,9 @@ function Input({ className, ...props }: React.ComponentProps<"input">) {
 function FieldNote({ hint, hintId, msg, msgId, testId }: { hint?: string; hintId?: string; msg?: string | null; msgId?: string; testId?: string }) {
   if (msg) {
     return (
-      <span id={msgId} className="msg flex items-start gap-1 text-xs text-danger" data-testid={testId && `${testId}-msg`}>
-        {/* 文が 2 行に折れても、印は 1 行目の高さに置く */}
-        <XCircle aria-hidden className="mt-px size-3.5 shrink-0" />
+      <span id={msgId} className="msg flex items-start gap-1 text-xs text-foreground" data-testid={testId && `${testId}-msg`}>
+        {/* 印は i-alert（danger）、文は地の色。文が 2 行に折れても、印は 1 行目の高さに置く（部品集 1.2.5） */}
+        <TriangleAlert aria-hidden className="mt-px size-3.5 shrink-0 text-danger" />
         {msg}
       </span>
     );

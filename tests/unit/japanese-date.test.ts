@@ -14,6 +14,7 @@ import {
   localToday,
   parseBirthInput,
   parseDicomDate,
+  readSex,
   sexLabel,
 } from "@/lib/format/japanese-date";
 
@@ -95,25 +96,30 @@ describe("患者の帯の生年月日（漢字 1 字。全角の括弧）", () =
   });
 
   it("年齢は検査日の時点で数える（今日では数えない）", () => {
-    expect(formatBirthLine("19750510", "", "20250509")).toBe("1975/05/10（昭50・49歳）");
-    expect(formatBirthLine("19750510", "", "20260410")).toBe("1975/05/10（昭50・50歳）");
-    expect(formatBirthLine("19750510", "", "20260510")).toBe("1975/05/10（昭50・51歳）");
+    expect(formatBirthLine("19750510", "M", "20250509")).toBe("1975/05/10（昭50・49歳）男");
+    expect(formatBirthLine("19750510", "M", "20260410")).toBe("1975/05/10（昭50・50歳）男");
+    expect(formatBirthLine("19750510", "M", "20260510")).toBe("1975/05/10（昭50・51歳）男");
   });
 
   it("明治より前は元号を出さず、年齢だけを括弧に入れる", () => {
-    expect(formatBirthLine("18681022", "", "20261029")).toBe("1868/10/22（158歳）");
+    expect(formatBirthLine("18681022", "M", "20261029")).toBe("1868/10/22（158歳）男");
   });
 
   it("検査日が読めなければ年齢を出さない。生まれる前の検査日も出さない", () => {
     expect(formatBirthLine("19750510", "M", "")).toBe("1975/05/10（昭50）男");
-    expect(formatBirthLine("20270101", "", "20261017")).toBe("2027/01/01（令9）");
+    expect(formatBirthLine("20270101", "M", "20261017")).toBe("2027/01/01（令9）男");
+  });
+
+  it("性別が空・規格外でも「不明」を出す（部品集 1.2.5）", () => {
+    expect(formatBirthLine("19750510", "", "20260510")).toBe("1975/05/10（昭50・51歳）不明");
+    expect(formatBirthLine("19750510", "X", "20260510")).toBe("1975/05/10（昭50・51歳）不明");
   });
 
   it("出せない部分は飛ばし、例外にしない", () => {
     expect(formatBirthLine("", "F", "20261017")).toBe("女");
-    expect(formatBirthLine("", "", "")).toBe("");
-    expect(formatBirthLine("19750230", "X", "20261017")).toBe("");
-    expect(formatBirthLine(undefined, null, 3)).toBe("");
+    expect(formatBirthLine("", "", "")).toBe("不明");
+    expect(formatBirthLine("19750230", "X", "20261017")).toBe("不明");
+    expect(formatBirthLine(undefined, null, 3)).toBe("不明");
   });
 });
 
@@ -146,15 +152,21 @@ describe("日付・時刻・性別の読み取り", () => {
     expect(formatDicomTime("093000.1234567")).toBe("");
   });
 
-  it("性別", () => {
-    expect([sexLabel("M"), sexLabel("F"), sexLabel("O"), sexLabel("m "), sexLabel(""), sexLabel("U")]).toEqual([
+  it("性別は M・F・O・U。空と規格外の値も不明（部品集 1.2.5）", () => {
+    expect([sexLabel("M"), sexLabel("F"), sexLabel("O"), sexLabel("m "), sexLabel(""), sexLabel("U"), sexLabel("X"), sexLabel(undefined)]).toEqual([
       "男",
       "女",
       "その他",
       "男",
-      "",
-      "",
+      "不明",
+      "不明",
+      "不明",
+      "不明",
     ]);
+  });
+
+  it("DICOM から読むとき、空と M・F・O 以外は U", () => {
+    expect(["M", "F", "O", " f", "", " ", "U", "X", null].map((v) => readSex(v))).toEqual(["M", "F", "O", "F", "U", "U", "U", "U", "U"]);
   });
 });
 

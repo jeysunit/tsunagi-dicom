@@ -27,7 +27,7 @@ import {
 } from "@/lib/client/split-position";
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
 import type { StudyView } from "@/lib/fields";
-import { formatBirthCell, formatBirthLine, formatDicomTime, formatSlashDate, localToday, sexLabel } from "@/lib/format/japanese-date";
+import { birthParts, formatBirthCell, formatDicomTime, formatSlashDate, localToday, sexLabel } from "@/lib/format/japanese-date";
 import { DETAIL_GROUPS, LIST_GROUPS, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
@@ -491,6 +491,12 @@ function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: r
 
 /** 一覧の 1 行の高さ（28px）。14px の文字（行の高さ 20px）に上下 4px */
 const CELL = "h-7 px-2 py-0";
+/** 生年月日の列の title：帯と同じ形（元号は漢字 1 字）。性別は別の列なので含めない。読めなければ無し */
+function birthTitle(birthDate: unknown, studyDate: unknown): string | undefined {
+  const { date, note } = birthParts(birthDate, studyDate);
+  return `${date}${note}` || undefined;
+}
+
 /** 値が 1 行に収まらないときは `…` で切る（全文は title）。一覧の行だけ。詳細のパネルでは切らない */
 const CUT = "overflow-hidden text-ellipsis whitespace-nowrap";
 
@@ -727,7 +733,7 @@ function StudyRows({
                     // title は帯と同じ形（元号は漢字 1 字）。列で英字 1 字にした元号も、ここで読める
                     <td
                       className={cn(CELL, "text-xs leading-3.5 tabular-nums")}
-                      title={formatBirthLine(s.patientBirthDate, undefined, s.studyDate) || undefined}
+                      title={birthTitle(s.patientBirthDate, s.studyDate)}
                       data-testid="patient-birth"
                     >
                       <BirthCell value={formatBirthCell(s.patientBirthDate, s.studyDate)} />

@@ -92,7 +92,8 @@ export function checkFieldValue(field: CorrectionField, value: string): string |
     case "StudyDate":
       return value === "" || isDicomDate(value) ? null : `${label}は YYYYMMDD の8桁の日付で入力してください`;
     case "PatientSex":
-      return ["", "M", "F", "O"].includes(value) ? null : "性別は M・F・O のどれかです";
+      // U は画面と製品の中の値で、DICOM に書くときは空になる（normalizeCorrectionValues）。Patient's Sex の列挙値は M・F・O だけ（PS3.3 C.7.1.1）
+      return ["", "M", "F", "O", "U"].includes(value) ? null : "性別は M・F・O・U のどれかです";
     case "AccessionNumber":
       return chars(value) > 16 ? "受付番号は16文字までです" : null;
     case "StudyDescription":
@@ -135,13 +136,18 @@ export function readBirthValue(value: string, today: SimpleDate): { ok: true; da
   return read.ok ? { ok: true, da: read.da } : read;
 }
 
-/** 直す値のうち生年月日を YYYYMMDD にそろえる（確かめの画面と実行の両方で、形を確かめる前に通す）。読めなければ問題を返す */
+/**
+ * 直す値を DICOM に書く形にそろえる（確かめの画面と実行の両方で、形を確かめる前に通す）。
+ * 生年月日は YYYYMMDD にし、読めなければ問題を返す。性別の U（不明）は空にする（Patient's Sex の列挙値は M・F・O だけ）
+ */
 export function normalizeCorrectionValues(values: CorrectionValues, today: SimpleDate): { values: CorrectionValues } | { problem: FieldProblem } {
+  let out = values;
+  if (values.PatientSex === "U") out = { ...out, PatientSex: "" };
   const birth = values.PatientBirthDate;
-  if (typeof birth !== "string") return { values };
+  if (typeof birth !== "string") return { values: out };
   const read = readBirthValue(birth, today);
   if (!read.ok) return { problem: { field: "PatientBirthDate", message: read.message } };
-  return { values: { ...values, PatientBirthDate: read.da } };
+  return { values: { ...out, PatientBirthDate: read.da } };
 }
 
 /** 全部の項目の値の形を確かめる。最初の問題を返す */

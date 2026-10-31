@@ -72,11 +72,20 @@ export function ageAt(birth: SimpleDate, at: SimpleDate): number | null {
   return age;
 }
 
-const SEX_LABELS: Record<string, string> = { M: "男", F: "女", O: "その他" };
+/** 性別の値は M・F・O・U の 4 つ（部品集 1.2.5。医療システム共通）。画面と製品の中は U を使い、DICOM に書くときだけ空にする */
+export type SexValue = "M" | "F" | "O" | "U";
 
-/** DICOM の PatientSex（M・F・O）を `男`・`女`・`その他` にする。ほかは空 */
+const SEX_LABELS: Record<SexValue, string> = { M: "男", F: "女", O: "その他", U: "不明" };
+
+/** DICOM の PatientSex から読む：M・F・O はそのまま、空と M・F・O 以外（規格に無い値）は U。画面と製品の中の値にする */
+export function readSex(value: unknown): SexValue {
+  const v = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return v === "M" || v === "F" || v === "O" ? v : "U";
+}
+
+/** 性別を `男`・`女`・`その他`・`不明` にする。空と M・F・O・U 以外の値も `不明` */
 export function sexLabel(value: unknown): string {
-  return typeof value === "string" ? (SEX_LABELS[value.trim().toUpperCase()] ?? "") : "";
+  return SEX_LABELS[readSex(value)];
 }
 
 /** 生年月日の括弧の中身：`昭50・51歳`。年齢は検査日（studyDate）の時点で、検査日が読めない・生まれる前なら出さない。何も無ければ空 */
@@ -98,7 +107,7 @@ export function birthParts(birthDate: unknown, studyDate: unknown): { date: stri
   return { date, note: inside ? `（${inside}）` : "" };
 }
 
-/** 帯の生年月日・性別を 1 つの文字にする：`1975/05/14（昭50・51歳）男`。出せない部分は飛ばし、何も無ければ空（title・確かめの欄の要約に使う） */
+/** 帯の生年月日・性別を 1 つの文字にする：`1975/05/14（昭50・51歳）男`。生年月日が出せなければ飛ばす。性別は空でも「不明」を付ける（title・確かめの欄の要約に使う） */
 export function formatBirthLine(birthDate: unknown, sex: unknown, studyDate: unknown): string {
   const { date, note } = birthParts(birthDate, studyDate);
   return `${date}${note}${sexLabel(sex)}`;
