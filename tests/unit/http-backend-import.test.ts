@@ -14,6 +14,7 @@ let server: Server;
 let baseUrl: string;
 const seen: { method: string; url: string; authorization?: string; bytes: number; type?: string }[] = [];
 let storeMode: "ok" | "already" | "filtered" | "odd" | "drop" | 400 | 503 = "ok";
+let deleteMode: "ok" | 500 | 503 = "ok";
 
 function bytesOf(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve) => {
@@ -47,10 +48,18 @@ beforeAll(async () => {
       return json(200, [{ ID: STUDY_ID, MainDicomTags: { StudyInstanceUID: "1.2.3.4" }, Labels: [IMPORT_LABEL] }]);
     }
     if (req.method === "POST" && url === "/tools/lookup") {
-      const found = body.toString() === "1.2.826.0.1.3680043.8.498.1";
-      return json(200, found ? [{ ID: INSTANCE_ID, Path: `/instances/${INSTANCE_ID}`, Type: "Instance" }] : []);
+      const one = { ID: INSTANCE_ID, Path: `/instances/${INSTANCE_ID}`, Type: "Instance" };
+      if (body.toString() === "1.2.826.0.1.3680043.8.498.1") return json(200, [one]);
+      // 患者違いで同じ SOP Instance UID の画像が2つある
+      if (body.toString() === "1.2.826.0.1.3680043.8.498.3") return json(200, [one, { ...one, ID: STUDY_ID }]);
+      return json(200, []);
     }
     if (req.method === "GET" && url === `/instances/${INSTANCE_ID}/study`) return json(200, { ID: STUDY_ID });
+    if (req.method === "GET" && url === `/instances/${INSTANCE_ID}`) return json(200, { ID: INSTANCE_ID, ParentSeries: "s" });
+    if (req.method === "DELETE" && url === `/instances/${INSTANCE_ID}`) {
+      if (typeof deleteMode === "number") return json(deleteMode, { Message: "error" });
+      return json(200, {});
+    }
     json(404, {});
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -62,6 +71,7 @@ afterAll(async () => {
 beforeEach(() => {
   seen.length = 0;
   storeMode = "ok";
+  deleteMode = "ok";
 });
 
 const basic = (u: string, p: string) => `Basic ${Buffer.from(`${u}:${p}`).toString("base64")}`;
@@ -80,10 +90,10 @@ const backend = () =>
 describe("実の Orthanc の REST（段 6：インポート）", () => {
   it("ファイルを本文のまま POST /instances へ書く資格情報で送り、新しく入った・もうあったを読む", async () => {
     const file = dicomFile();
-    expect(await backend().importInstance(file)).toEqual({ status: "Success", orthancStudyId: STUDY_ID });
+    expect(await backend().importInstance(file)).toEqual({ status: "Success", instanceId: INSTANCE_ID, orthancStudyId: STUDY_ID });
     expect(seen.at(-1)).toMatchObject({ method: "POST", url: "/instances", authorization: basic("writer", "write-secret"), bytes: file.byteLength, type: "application/dicom" });
     storeMode = "already";
-    expect(await backend().importInstance(file)).toEqual({ status: "AlreadyStored", orthancStudyId: STUDY_ID });
+    expect(await backend().importInstance(file)).toEqual({ status: "AlreadyStored", instanceId: INSTANCE_ID, orthancStudyId: STUDY_ID });
   });
 
   it("Orthanc が受けなかった（FilteredOut・400）は失敗、答えが来ない・503・読めない 2xx の答えは結果不明", async () => {
@@ -108,7 +118,32 @@ describe("実の Orthanc の REST（段 6：インポート）", () => {
   });
 
   it("結果不明を照らす：SOP Instance UID を引き当て、画像の親の検査を返す。無ければ null", async () => {
-    expect(await backend().findInstanceStudy("1.2.826.0.1.3680043.8.498.1")).toBe(STUDY_ID);
+    expect(await backend().findInstanceStudy("1.2.826.0.1.3680043.8.498.1")).toEqual({ instanceId: INSTANCE_ID, orthancStudyId: STUDY_ID });
+    expect(seen.at(-1)).toMatchObject({ authorization: basic("reader", "read-secret") });
     expect(await backend().findInstanceStudy("1.2.826.0.1.3680043.8.498.2")).toBeNull();
+  });
+
+  it("同じ SOP Instance UID の画像が2つ以上あれば、どれかを選ばずに 409", async () => {
+    await expect(backend().findInstanceStudy("1.2.826.0.1.3680043.8.498.3")).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("取り込んだ画像を消すときは DELETE /instances/{id} を書く資格情報で送り、無い・失敗・結果不明を分ける", async () => {
+    await backend().deleteImportedInstance(INSTANCE_ID);
+    expect(seen.at(-1)).toMatchObject({ method: "DELETE", url: `/instances/${INSTANCE_ID}`, authorization: basic("writer", "write-secret") });
+    await expect(backend().deleteImportedInstance(STUDY_ID)).rejects.toMatchObject({ status: 404 });
+    deleteMode = 500;
+    const failed = await backend().deleteImportedInstance(INSTANCE_ID).catch((e: unknown) => e);
+    expect(failed).toBeInstanceOf(BackendError);
+    expect(failed).not.toBeInstanceOf(BackendUnknownError);
+    deleteMode = 503;
+    await expect(backend().deleteImportedInstance(INSTANCE_ID)).rejects.toThrow(BackendUnknownError);
+    await expect(backend().deleteImportedInstance("../x")).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("画像があるかは GET /instances/{id} を読む資格情報で読み、404 なら無い", async () => {
+    expect(await backend().instanceExists(INSTANCE_ID)).toBe(true);
+    expect(seen.at(-1)).toMatchObject({ method: "GET", url: `/instances/${INSTANCE_ID}`, authorization: basic("reader", "read-secret") });
+    expect(await backend().instanceExists(STUDY_ID)).toBe(false);
+    await expect(backend().instanceExists("../x")).rejects.toMatchObject({ status: 400 });
   });
 });

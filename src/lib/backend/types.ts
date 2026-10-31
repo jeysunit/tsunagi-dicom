@@ -218,8 +218,19 @@ export interface Backend {
   labelImported(orthancStudyId: string): Promise<void>;
   /** インポートの印のある検査の StudyInstanceUID の全部（検査一覧の「インポート」の印に使う） */
   importedStudyUids(): Promise<Set<string>>;
-  /** SOP Instance UID の画像が Orthanc にあれば、その検査の Orthanc の ID（結果不明のインポートを照らす）。無ければ null */
-  findInstanceStudy(sopInstanceUid: string): Promise<string | null>;
+  /**
+   * SOP Instance UID の画像が Orthanc にあれば、その画像と親の検査の Orthanc の ID（取り込む前に、もうあるかを確かめる・
+   * 結果不明のインポートを照らす）。無ければ null。同じ SOP Instance UID の画像が2つ以上ある（患者違いなど）ときは、
+   * どれか1つを選ばずに BackendError(409)
+   */
+  findInstanceStudy(sopInstanceUid: string): Promise<{ instanceId: string; orthancStudyId: string } | null>;
+  /**
+   * インポートで入れた画像 1 枚を消す（DELETE /instances/{id}）。書き込みの操作。取り込んだ後に、Orthanc が保存した値が
+   * ファイルから読んだ値と違ったときだけ使う。無ければ BackendError(404)。答えが分からなければ BackendUnknownError
+   */
+  deleteImportedInstance(instanceId: string): Promise<void>;
+  /** Orthanc の中の ID の画像があるか（GET /instances/{id}。404 なら false）。読めなければ BackendError */
+  instanceExists(instanceId: string): Promise<boolean>;
 }
 
 /** インポートの印に使う Orthanc のラベル（Orthanc 1.12.0 から。字は英数字・`_`・`-`） */
@@ -229,6 +240,9 @@ export const IMPORT_LABEL = "tsunagi-import";
 export interface ImportedInstance {
   /** Success：新しく入った。AlreadyStored：同じ画像がもうあった */
   status: "Success" | "AlreadyStored";
+  /** 画像の Orthanc の ID（POST /instances の答えの ID） */
+  instanceId: string;
+  /** 画像の親の検査の Orthanc の ID（答えの ParentStudy） */
   orthancStudyId: string;
 }
 

@@ -875,7 +875,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if ((json as { Status?: unknown } | null)?.Status === "FilteredOut") throw new BackendError("画像サーバーがファイルを受け付けませんでした");
       const imported = importedFromRest(json);
       if (!imported) throw new BackendUnknownError();
-      return { status: imported.status, orthancStudyId: imported.orthancStudyId };
+      return { status: imported.status, instanceId: imported.instanceId, orthancStudyId: imported.orthancStudyId };
     },
 
     async labelImported(orthancStudyId: string) {
@@ -910,9 +910,26 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       }
       const ids = instanceIdsFromLookup(await res.json());
       if (ids.length === 0) return null;
+      // 同じ SOP Instance UID の画像が患者違いなどで2つ以上あれば、どれかを選ばない（取り違えて照らさない・消さない）
+      if (ids.length > 1) throw new BackendError("同じ SOP Instance UID の画像が複数あります", 409);
       // 画像の親の検査（/instances/{id}/study）
       const study = (await restJsonOrNull(`instances/${ids[0]}/study`)) as { ID?: unknown } | null;
-      return study && isOrthancId(study.ID) ? study.ID : null;
+      return study && isOrthancId(study.ID) ? { instanceId: ids[0]!, orthancStudyId: study.ID } : null;
+    },
+
+    async deleteImportedInstance(instanceId: string) {
+      if (!isOrthancId(instanceId)) throw new BackendError("画像の ID が正しくありません", 400);
+      const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
+      await res.body?.cancel();
+      if (res.status === 404) throw new BackendError("画像が見つかりません", 404);
+      // 受けなかったと確かめられない答えは結果不明（deleteStudy と同じ）
+      if (!res.ok && isUncertainStatus(res.status)) throw new BackendUnknownError();
+      if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+    },
+
+    async instanceExists(instanceId: string) {
+      if (!isOrthancId(instanceId)) throw new BackendError("画像の ID が正しくありません", 400);
+      return (await restJsonOrNull(`instances/${instanceId}`)) !== null;
     },
   };
 }

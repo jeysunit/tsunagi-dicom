@@ -67,6 +67,14 @@ export interface DicomFileOptions {
   /** Specific Character Set (0008,0005)。あれば入れ、患者 ID のバイトは patientIdBytes で渡す */
   charset?: string;
   patientIdBytes?: Buffer;
+  /** データセットの後ろに足す要素（タグの並びを崩したファイルを作る） */
+  append?: { tag: number; vr: string; value: string }[];
+  /** File Meta の後ろ（データセットの前）に足す group 0002 の要素（Group Length の範囲の外に置く） */
+  outsideMeta?: { tag: number; vr: string; value: string }[];
+  /** File Meta Information Group Length の値に足す数（範囲を崩す）。null なら Group Length を入れない */
+  groupLengthDelta?: number | null;
+  /** ファイルの最後に足すバイト */
+  trailing?: Buffer;
 }
 
 export function dicomFile(o: DicomFileOptions = {}): Uint8Array {
@@ -79,9 +87,10 @@ export function dicomFile(o: DicomFileOptions = {}): Uint8Array {
     explicit(0x00020010, "UI", ts),
   ]);
   const groupLength = Buffer.concat([tagBytes(0x00020000), Buffer.from("UL", "latin1"), Buffer.from([4, 0]), Buffer.alloc(4)]);
-  groupLength.writeUInt32LE(metaBody.length, 8);
+  groupLength.writeUInt32LE(metaBody.length + (o.groupLengthDelta ?? 0), 8);
   const el = (tag: number, vr: string, value: string | Buffer) =>
     implicit ? implicitElement(tag, value, vr === "UI" ? "\0" : " ") : explicit(tag, vr, value);
+  const outsideMeta = (o.outsideMeta ?? []).map((e) => explicit(e.tag, e.vr, e.value));
   const dataset = Buffer.concat([
     ...(o.charset ? [el(0x00080005, "CS", o.charset)] : []),
     el(0x00080018, "UI", o.datasetSopInstanceUid ?? sop),
@@ -90,8 +99,17 @@ export function dicomFile(o: DicomFileOptions = {}): Uint8Array {
     el(0x00100020, "LO", o.patientIdBytes ?? o.patientId ?? "IMP0001"),
     el(0x0020000d, "UI", o.studyInstanceUid ?? "1.2.826.0.1.3680043.8.498.2"),
     el(0x0020000e, "UI", "1.2.826.0.1.3680043.8.498.3"),
+    ...(o.append ?? []).map((e) => el(e.tag, e.vr, e.value)),
   ]);
   return new Uint8Array(
-    Buffer.concat([Buffer.alloc(128), Buffer.from(o.noMagic ? "XXXX" : "DICM", "latin1"), groupLength, metaBody, dataset]),
+    Buffer.concat([
+      Buffer.alloc(128),
+      Buffer.from(o.noMagic ? "XXXX" : "DICM", "latin1"),
+      ...(o.groupLengthDelta === null ? [] : [groupLength]),
+      metaBody,
+      ...outsideMeta,
+      dataset,
+      o.trailing ?? Buffer.alloc(0),
+    ]),
   );
 }

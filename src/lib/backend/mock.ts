@@ -741,7 +741,11 @@ export function createMockBackend(): Backend {
       mockDeleted.delete(header.studyInstanceUid);
       mockImported.instances.set(header.sopInstanceUid, study.ID);
       if (mockImport.unknown) throw new BackendUnknownError();
-      return { status: known ? ("AlreadyStored" as const) : ("Success" as const), orthancStudyId: study.ID };
+      return {
+        status: known ? ("AlreadyStored" as const) : ("Success" as const),
+        instanceId: mockInstanceId(header.sopInstanceUid),
+        orthancStudyId: study.ID,
+      };
     },
 
     async labelImported(orthancStudyId: string) {
@@ -758,7 +762,24 @@ export function createMockBackend(): Backend {
     async findInstanceStudy(sopInstanceUid: string) {
       const id = mockImported.instances.get(sopInstanceUid);
       if (!id) return null;
-      return (await restStudies()).some((s) => s.ID === id) ? id : null;
+      return (await restStudies()).some((s) => s.ID === id) ? { instanceId: mockInstanceId(sopInstanceUid), orthancStudyId: id } : null;
+    },
+
+    // 入れた画像を消す。検査の入れた画像が無くなれば、検査を消した形に戻す（モックの検査は、入れた画像だけでできている）
+    async deleteImportedInstance(instanceId: string) {
+      const sop = [...mockImported.instances.keys()].find((uid) => mockInstanceId(uid) === instanceId);
+      const studyId = sop ? mockImported.instances.get(sop) : undefined;
+      const study = studyId ? (await restStudies()).find((s) => s.ID === studyId) : undefined;
+      if (!sop || !study) throw new BackendError("画像が見つかりません", 404);
+      if (mockImport.deleteUnknown) throw new BackendUnknownError();
+      mockImported.instances.delete(sop);
+      if (![...mockImported.instances.values()].includes(study.ID)) mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
+    },
+
+    async instanceExists(instanceId: string) {
+      const sop = [...mockImported.instances.keys()].find((uid) => mockInstanceId(uid) === instanceId);
+      const studyId = sop ? mockImported.instances.get(sop) : undefined;
+      return studyId !== undefined && (await restStudies()).some((s) => s.ID === studyId);
     },
   };
 }
@@ -769,8 +790,11 @@ const importedHolder = globalThis as typeof globalThis & {
   [IMPORTED_KEY]?: { instances: Map<string, string>; labels: Set<string> };
 };
 const mockImported = (importedHolder[IMPORTED_KEY] ??= { instances: new Map(), labels: new Set() });
-let mockImport: { unknown?: boolean; refuse?: boolean } = {};
-/** 試験のため：次からのインポートを、入れた後に答えが分からない形・Orthanc が受けない形にする（空で戻す） */
+let mockImport: { unknown?: boolean; refuse?: boolean; deleteUnknown?: boolean } = {};
+/**
+ * 試験のため：次からのインポートを、入れた後に答えが分からない形・Orthanc が受けない形にする。deleteUnknown は、入れた画像を
+ * 消す答えが分からない形（空で戻す）
+ */
 export function simulateMockImport(options: typeof mockImport): void {
   mockImport = { ...options };
 }
