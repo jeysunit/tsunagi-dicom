@@ -29,6 +29,7 @@ import {
   type DicomJsonDataset,
 } from "@/lib/backend/dicom-json";
 import { isAcceptableImageAccept, wadoRsTarget } from "@/lib/backend/relay-path";
+import { readDicomFileHeader } from "@/lib/dicom-file";
 import {
   BackendError,
   BackendUnknownError,
@@ -54,6 +55,8 @@ import {
 //   機器 offline は C-ECHO に答えない。
 // - 段 5：書き出しは、画像の本体を入れない小さな ZIP を返す。削除は、このプロセスの記憶の中で検査を隠す（見本のファイルは変えない。
 //   消した検査は、検索・詳細・受け取りの記録・引き当て・中継のどれにも出さない）。
+// - 段 6：インポートは、見本の検査（消した検査を含む）の StudyInstanceUID のファイルだけを受け、その検査を出し直して印を付ける
+//   （このプロセスの記憶の中だけ。画像の本体は持たない）。
 // - 画像単位の DICOM タグ（2026-10-21）：シリーズの中の画像は REST の写しの Instances の並びから作る。画像の写しが1枚しか無いので、
 //   ほかの画像の SOPInstanceUID と値は、Orthanc の ID から決まる合成の値にする（instanceDatasetOf）。
 
@@ -111,6 +114,9 @@ export function restoreMockStudies(): void {
   hl7Locks.clear();
   hl7LockLog.length = 0;
   hl7Simulation = {};
+  mockImported.instances.clear();
+  mockImported.labels.clear();
+  mockImport = {};
   mockTest.revision = 0;
   mockTest.extraIds.clear();
   mockTest.versions.clear();
@@ -724,7 +730,81 @@ export function createMockBackend(): Backend {
       if (!study) throw new BackendError("検査が見つかりません", 404);
       mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
     },
+
+    // 段 6：インポート。モックは画像の本体を持たないので、見本の検査（消した検査を含む）の StudyInstanceUID のファイルだけを受け、
+    // その検査を出し直す（消した検査を入れ直す形）。ほかの検査のファイルは、Orthanc が受けなかった形（BackendError）にする
+    async importInstance(file: Uint8Array) {
+      const header = readDicomFileHeader(file);
+      const study = (await readAll<RestStudy>("studies")).find((s) => s.MainDicomTags.StudyInstanceUID === header.studyInstanceUid);
+      if (!study || mockImport.refuse) throw new BackendError("画像サーバーがファイルを受け付けませんでした");
+      const known = mockImported.instances.has(header.sopInstanceUid) && !mockDeleted.has(header.studyInstanceUid);
+      mockDeleted.delete(header.studyInstanceUid);
+      mockImported.instances.set(header.sopInstanceUid, study.ID);
+      if (mockImport.unknown) throw new BackendUnknownError();
+      return {
+        status: known ? ("AlreadyStored" as const) : ("Success" as const),
+        instanceId: mockInstanceId(header.sopInstanceUid),
+        orthancStudyId: study.ID,
+      };
+    },
+
+    async labelImported(orthancStudyId: string) {
+      const study = (await restStudies()).find((s) => s.ID === orthancStudyId);
+      if (!study) throw new BackendError("検査が見つかりません", 404);
+      mockImported.labels.add(study.MainDicomTags.StudyInstanceUID ?? "");
+    },
+
+    async importedStudyUids() {
+      const present = new Set((await restStudies()).map((s) => s.MainDicomTags.StudyInstanceUID ?? ""));
+      return new Set([...mockImported.labels].filter((uid) => present.has(uid)));
+    },
+
+    async findInstanceStudy(sopInstanceUid: string) {
+      const id = mockImported.instances.get(sopInstanceUid);
+      if (!id) return null;
+      return (await restStudies()).some((s) => s.ID === id) ? { instanceId: mockInstanceId(sopInstanceUid), orthancStudyId: id } : null;
+    },
+
+    // 入れた画像を消す。検査の入れた画像が無くなれば、検査を消した形に戻す（モックの検査は、入れた画像だけでできている）
+    async deleteImportedInstance(instanceId: string) {
+      const sop = [...mockImported.instances.keys()].find((uid) => mockInstanceId(uid) === instanceId);
+      const studyId = sop ? mockImported.instances.get(sop) : undefined;
+      const study = studyId ? (await restStudies()).find((s) => s.ID === studyId) : undefined;
+      if (!sop || !study) throw new BackendError("画像が見つかりません", 404);
+      if (mockImport.deleteUnknown) throw new BackendUnknownError();
+      mockImported.instances.delete(sop);
+      if (![...mockImported.instances.values()].includes(study.ID)) mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
+    },
+
+    async instanceExists(instanceId: string) {
+      const sop = [...mockImported.instances.keys()].find((uid) => mockInstanceId(uid) === instanceId);
+      const studyId = sop ? mockImported.instances.get(sop) : undefined;
+      return studyId !== undefined && (await restStudies()).some((s) => s.ID === studyId);
+    },
+
+    // モックの検査は、入れた画像だけでできている。消していない見本の検査は、見本の画像（合成の UID）を持つ形にする
+    async studyInstanceSopUids(orthancStudyId: string) {
+      const study = (await restStudies()).find((s) => s.ID === orthancStudyId);
+      if (!study) return [];
+      const imported = [...mockImported.instances].filter(([, id]) => id === orthancStudyId).map(([sop]) => sop);
+      return imported.length > 0 ? imported : [syntheticUid(orthancStudyId)];
+    },
   };
+}
+
+/** モックのインポート：入れた画像（SOP Instance UID → 検査の ID）と、印（ラベル）を付けた検査の StudyInstanceUID */
+const IMPORTED_KEY = Symbol.for("tsunagi-dicom.mock-imported");
+const importedHolder = globalThis as typeof globalThis & {
+  [IMPORTED_KEY]?: { instances: Map<string, string>; labels: Set<string> };
+};
+const mockImported = (importedHolder[IMPORTED_KEY] ??= { instances: new Map(), labels: new Set() });
+let mockImport: { unknown?: boolean; refuse?: boolean; deleteUnknown?: boolean } = {};
+/**
+ * 試験のため：次からのインポートを、入れた後に答えが分からない形・Orthanc が受けない形にする。deleteUnknown は、入れた画像を
+ * 消す答えが分からない形（空で戻す）
+ */
+export function simulateMockImport(options: typeof mockImport): void {
+  mockImport = { ...options };
 }
 
 // テストから仕事の終了・失敗・時間切れを再現する。画像ごとの応答も差し替えられる。

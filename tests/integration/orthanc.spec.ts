@@ -1433,3 +1433,93 @@ test("25 検査情報修正（検査日・検査名）：新しい StudyInstance
     await s.context.close();
   }
 });
+
+test("26 インポート：DICOM のファイルを BFF から Orthanc へ入れ、検査にラベルの印が付き、検査一覧で「インポート」と分かる（2026-10-31）", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const study = syntheticStudy("import", 73, 2);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [id] = await waitFor("インポートの元の検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  // 元のファイルを Orthanc から取り出し、検査を消してから、BFF のインポートで入れ直す
+  const instances = await orthancJson<{ ID: string }[]>(`studies/${id}/instances`);
+  const files = await Promise.all(instances.map(async (i) => Buffer.from(await (await orthanc(`instances/${i.ID}/file`)).arrayBuffer())));
+  expect((await orthanc(`studies/${id}`, { method: "DELETE" })).status).toBe(200);
+  expect(await lookupStudy(study.studyInstanceUid)).toEqual([]);
+
+  const fresh = await newContext(browser);
+  try {
+    const user = adminUser();
+    await submitLogin(fresh.page, user.username, user.changed);
+    await expect(fresh.page).toHaveURL(`${bffUrl}/`);
+    const batch = crypto.randomUUID();
+    const upload = (data: Buffer, requestId = crypto.randomUUID(), index?: number) =>
+      fresh.page.request.post("/api/import", {
+        headers: {
+          origin: bffUrl,
+          "x-csrf-token": latestCsrfToken(),
+          "x-request-id": requestId,
+          "content-type": "application/dicom",
+          // まとめて選んだ組（画面が付ける）。同じ組で先に入れた検査にだけ、続きの画像を入れられる
+          ...(index ? { "x-import-batch": batch, "x-import-index": String(index), "x-import-total": String(files.length) } : {}),
+        },
+        data,
+      });
+    const answers: { requestId: string; outcome: string; studyInstanceUid: string; labeled: boolean }[] = [];
+    for (const [i, file] of files.entries()) {
+      // 2 枚目からは、組を付けずに送ると、もうある検査として断る（取り込み直しで中身を置き換えない）
+      if (i > 0) {
+        const lone = await upload(file);
+        expect(lone.status(), await lone.text()).toBe(409);
+      }
+      const res = await upload(file, crypto.randomUUID(), i + 1);
+      expect(res.status(), await res.text()).toBe(200);
+      answers.push(await res.json());
+    }
+    expect(answers.map((a) => [a.outcome, a.studyInstanceUid, a.labeled])).toEqual(files.map(() => ["stored", study.studyInstanceUid, true]));
+    const [newId] = await lookupStudy(study.studyInstanceUid);
+    expect(await orthancJson<string[]>(`studies/${newId}/labels`)).toEqual(["tsunagi-import"]);
+    expect(await orthancJson<unknown[]>(`studies/${newId}/instances`)).toHaveLength(files.length);
+    const before = await orthancJson<{ LastUpdate: string }>(`studies/${newId}`);
+    // 同じファイルをもう一度入れると、Orthanc へ渡さずに断る（試験の Orthanc は OverwriteInstances: true なので、渡すと置き換わる）。
+    // 同じ組の続きとして送っても断る
+    const againId = crypto.randomUUID();
+    const again = await upload(files[0]!, againId, 1);
+    expect(again.status(), await again.text()).toBe(409);
+    // もうある、インポートしていない検査（A）の画像も断る
+    const [aId] = await lookupStudy(A.studyInstanceUid);
+    const [aInstance] = await orthancJson<{ ID: string }[]>(`studies/${aId}/instances`);
+    const aFile = Buffer.from(await (await orthanc(`instances/${aInstance!.ID}/file`)).arrayBuffer());
+    expect((await upload(aFile)).status()).toBe(409);
+    // タグの並びの崩れたファイル（後ろに患者 ID をもう一度置く）・File Meta Information Group Length の合わないファイルは、
+    // Orthanc へ渡さずに断る（Orthanc が保存する値と、BFF が読んで記録する値が食い違いうる）
+    const duplicateId = crypto.randomUUID();
+    const duplicate = Buffer.concat([files[1]!, Buffer.from([0x10, 0x00, 0x20, 0x00]), Buffer.from("LO", "latin1"), Buffer.from([6, 0]), Buffer.from("OTHER1", "latin1")]);
+    expect((await upload(duplicate, duplicateId, 2)).status()).toBe(400);
+    const badMeta = Buffer.from(files[1]!);
+    badMeta.writeUInt32LE(badMeta.readUInt32LE(140) + 2, 140);
+    expect((await upload(badMeta, crypto.randomUUID(), 2)).status()).toBe(400);
+    expect(await orthancJson<unknown[]>(`studies/${newId}/instances`)).toHaveLength(files.length);
+    expect((await orthancJson<{ LastUpdate: string }>(`studies/${newId}`)).LastUpdate).toBe(before.LastUpdate);
+    const refused = readAudit().filter((r) => r.action === "import" && (r.detail.requestId === againId || r.detail.requestId === duplicateId));
+    expect(refused.map((r) => [r.outcome, r.detail.reason])).toEqual([
+      ["denied", "instance_exists"],
+      ["denied", "malformed"],
+    ]);
+    // DICOM でないファイルは Orthanc へ渡さずに断る
+    expect((await upload(Buffer.from("PK\u0003\u0004 not a dicom file".padEnd(200, "x")))).status()).toBe(400);
+    // 検査一覧の画面の API で「インポート」と分かる。インポートしていない検査（A）は印が無い
+    const listed = (await (await fresh.page.request.get("/api/studies?date=all")).json()) as {
+      studies: { studyInstanceUid: string; imported?: boolean }[];
+    };
+    expect(listed.studies.find((s) => s.studyInstanceUid === study.studyInstanceUid)).toMatchObject({ imported: true });
+    expect(listed.studies.find((s) => s.studyInstanceUid === A.studyInstanceUid)).toMatchObject({ imported: false });
+    const rows = readAudit().filter((r) => r.action === "import" && r.detail.requestId === answers[0]!.requestId);
+    expect(rows.map((r) => `${r.detail.phase}:${r.outcome}`)).toEqual(["request:success", "result:success"]);
+    expect(rows[0]).toMatchObject({ studyInstanceUid: study.studyInstanceUid });
+    expect(rows[0]!.detail).toMatchObject({ sopInstanceUid: expect.any(String), bytes: files[0]!.length });
+    // 結果の行には、Orthanc が保存した値と照らした後の、画像と検査の Orthanc の ID が残る
+    expect(rows[1]!.detail).toMatchObject({ status: "Success", orthancStudyId: newId, orthancInstanceId: expect.any(String), labeled: true });
+  } finally {
+    await fresh.context.close();
+  }
+});

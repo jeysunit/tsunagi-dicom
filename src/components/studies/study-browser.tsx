@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Inbox, RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { FieldNote, Input } from "@/components/ui/input";
@@ -753,6 +754,11 @@ function StudyRows({
                     <span className="mr-2 inline-flex gap-1 align-middle">
                       {s.modalities?.map((m) => <ModalityMark key={m} modality={m} />)}
                     </span>
+                    {s.imported && (
+                      <StatusBadge kind="note" className="mr-1.5" data-testid="study-imported">
+                        インポート
+                      </StatusBadge>
+                    )}
                     {s.studyDescription && <span className="text-label">{s.studyDescription}</span>}
                   </td>
                   {has("count") && (

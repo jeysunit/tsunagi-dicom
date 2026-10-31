@@ -268,6 +268,39 @@ export function studyIdsFromLookup(json: unknown): string[] {
   });
 }
 
+/** /tools/lookup の答えのうち、画像（Type が Instance）の ID の全部。形の違う答えは studyIdsFromLookup と同じく投げる */
+export function instanceIdsFromLookup(json: unknown): string[] {
+  const unreadable = () => new BackendError("画像サーバーの引き当ての答えを読めません");
+  if (!Array.isArray(json)) throw unreadable();
+  return json.flatMap((r) => {
+    if (typeof r !== "object" || r === null || Array.isArray(r)) throw unreadable();
+    const x = r as Record<string, unknown>;
+    if (typeof x.Type !== "string" || !LOOKUP_TYPES.has(x.Type)) throw unreadable();
+    if (x.Type !== "Instance") return [];
+    if (!isOrthancId(x.ID)) throw unreadable();
+    return [x.ID];
+  });
+}
+
+/**
+ * インポートの POST /instances の答え（Orthanc Book の REST API の「Sending DICOM files」）。Status が Success（新しく入った）か
+ * AlreadyStored（もうあった）で、画像と検査の ID が読めるときだけ返す。FilteredOut（Orthanc の受信の決まりで断った）などは null
+ */
+export function importedFromRest(json: unknown): { status: "Success" | "AlreadyStored"; instanceId: string; orthancStudyId: string } | null {
+  const x = obj(json);
+  if ((x.Status !== "Success" && x.Status !== "AlreadyStored") || !isOrthancId(x.ID) || !isOrthancId(x.ParentStudy)) return null;
+  return { status: x.Status, instanceId: x.ID, orthancStudyId: x.ParentStudy };
+}
+
+/** /tools/find（Level が Study、Expand）の答えから、StudyInstanceUID の全部。形の違う答えは投げる */
+export function studyUidsFromFind(json: unknown): string[] {
+  if (!Array.isArray(json)) throw new BackendError("画像サーバーの検索の答えを読めません");
+  return json.flatMap((r) => {
+    const uid = str(obj(obj(r).MainDicomTags).StudyInstanceUID);
+    return uid ? [uid] : [];
+  });
+}
+
 /** 引き当ての答えがちょうど1件ならその ID、無ければ null、2件以上なら選ばずに 409（取り違えて書かない） */
 export function singleStudyId(ids: readonly string[]): string | null {
   if (ids.length === 0) return null;

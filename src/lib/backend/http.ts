@@ -18,6 +18,8 @@ import {
   checkedPatientId,
   studyPatientFromRest,
   firstInstanceId,
+  importedFromRest,
+  instanceIdsFromLookup,
   isJobId,
   isModalityName,
   isOrthancId,
@@ -30,6 +32,7 @@ import {
   stableFromRest,
   studyIdsFromLookup,
   studyInfoFromRest,
+  studyUidsFromFind,
   receptionFromMetadata,
   studyFromRest,
 } from "@/lib/backend/orthanc-rest";
@@ -39,6 +42,7 @@ import {
   BackendError,
   BackendUnknownError,
   clampStudyLimit,
+  IMPORT_LABEL,
   LOCK_CLOCK_TOLERANCE_MS,
   STUDY_LIMIT,
   type Backend,
@@ -62,6 +66,8 @@ const TIMEOUT_MS = 15_000;
 const POST_TIMEOUT_MS = 30_000;
 /** 書き出し（ZIP）の答えが始まるまでを待つ時間（Orthanc は ZIP を作ってから答えを始めることがある） */
 const EXPORT_TIMEOUT_MS = 10 * 60_000;
+/** インポートの答えを待つ時間。大きなファイル（IMPORT_MAX_MB まで）を送り終えて Orthanc が書くまでを待つ。過ぎたら結果不明 */
+const IMPORT_TIMEOUT_MS = 5 * 60_000;
 /** 書き出しの本文を流す間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
 const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
@@ -113,7 +119,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     init: {
       method?: "GET" | "HEAD" | "POST" | "PUT" | "DELETE";
       headers?: Record<string, string>;
-      body?: string;
+      body?: string | Uint8Array;
       timeoutMs?: number;
       /** 書き込みの操作：送った後に答えが来なければ、届いたかが分からない（結果不明） */
       write?: boolean;
@@ -840,6 +846,102 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       // 受けなかったと確かめられない答えは結果不明（照らせば、消えたかが分かる）
       if (!res.ok && isUncertainStatus(res.status)) throw new BackendUnknownError();
       if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+    },
+
+    async importInstance(file: Uint8Array) {
+      const res = await call(orthancUrl, "instances", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/dicom" },
+        body: file,
+        write: true,
+        timeoutMs: IMPORT_TIMEOUT_MS,
+      });
+      // 受けなかったと確かめられない答えは結果不明（照らせば、入ったかが SOP Instance UID で分かる）
+      if (!res.ok && isUncertainStatus(res.status)) {
+        await res.body?.cancel();
+        throw new BackendUnknownError();
+      }
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new BackendError(`画像サーバーがファイルを受け付けませんでした（${res.status}）`);
+      }
+      let json: unknown;
+      try {
+        json = await res.json();
+      } catch {
+        throw new BackendUnknownError();
+      }
+      // 受けなかったと読めるのは FilteredOut（Orthanc の受信の決まりで断った）だけ。ほかの読めない答えは、入ったかもしれないので結果不明
+      if ((json as { Status?: unknown } | null)?.Status === "FilteredOut") throw new BackendError("画像サーバーがファイルを受け付けませんでした");
+      const imported = importedFromRest(json);
+      if (!imported) throw new BackendUnknownError();
+      return { status: imported.status, instanceId: imported.instanceId, orthancStudyId: imported.orthancStudyId };
+    },
+
+    async labelImported(orthancStudyId: string) {
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
+      const res = await call(orthancUrl, `studies/${orthancStudyId}/labels/${IMPORT_LABEL}`, {
+        method: "PUT",
+        write: true,
+        timeoutMs: POST_TIMEOUT_MS,
+      });
+      await res.body?.cancel();
+      if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+    },
+
+    async importedStudyUids() {
+      const res = await restPost(
+        "tools/find",
+        JSON.stringify({ Level: "Study", Query: {}, Labels: [IMPORT_LABEL], LabelsConstraint: "All", Expand: true }),
+        { credential: "read" },
+      );
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+      }
+      return new Set(studyUidsFromFind(await res.json()));
+    },
+
+    async findInstanceStudy(sopInstanceUid: string) {
+      const res = await restPost("tools/lookup", checkedUid(sopInstanceUid), { contentType: "text/plain", credential: "read" });
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+      }
+      const ids = instanceIdsFromLookup(await res.json());
+      if (ids.length === 0) return null;
+      // 同じ SOP Instance UID の画像が患者違いなどで2つ以上あれば、どれかを選ばない（取り違えて照らさない・消さない）
+      if (ids.length > 1) throw new BackendError("同じ SOP Instance UID の画像が複数あります", 409);
+      // 画像の親の検査（/instances/{id}/study）
+      const study = (await restJsonOrNull(`instances/${ids[0]}/study`)) as { ID?: unknown } | null;
+      return study && isOrthancId(study.ID) ? { instanceId: ids[0]!, orthancStudyId: study.ID } : null;
+    },
+
+    async deleteImportedInstance(instanceId: string) {
+      if (!isOrthancId(instanceId)) throw new BackendError("画像の ID が正しくありません", 400);
+      const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
+      await res.body?.cancel();
+      if (res.status === 404) throw new BackendError("画像が見つかりません", 404);
+      // 受けなかったと確かめられない答えは結果不明（deleteStudy と同じ）
+      if (!res.ok && isUncertainStatus(res.status)) throw new BackendUnknownError();
+      if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
+    },
+
+    async instanceExists(instanceId: string) {
+      if (!isOrthancId(instanceId)) throw new BackendError("画像の ID が正しくありません", 400);
+      return (await restJsonOrNull(`instances/${instanceId}`)) !== null;
+    },
+
+    async studyInstanceSopUids(orthancStudyId: string) {
+      if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
+      const json = await restJsonOrNull(`studies/${orthancStudyId}/instances`);
+      if (json === null) return [];
+      if (!Array.isArray(json)) throw new BackendError("画像サーバーの画像の一覧を読めません");
+      return json.map((i) => {
+        const sop = (i as { MainDicomTags?: { SOPInstanceUID?: unknown } } | null)?.MainDicomTags?.SOPInstanceUID;
+        if (typeof sop !== "string" || !sop) throw new BackendError("画像サーバーの画像の一覧を読めません");
+        return sop;
+      });
     },
   };
 }

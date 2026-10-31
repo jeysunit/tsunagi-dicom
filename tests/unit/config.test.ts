@@ -116,12 +116,20 @@ describe("設定の読み込み", () => {
   });
 
   it("検査の一覧の自動更新の間隔（既定 30 秒。0 で止める。1〜4 秒と 3600 秒より長い値・数でない値は起動しない）", () => {
-    expect(loadConfig(base).screen).toEqual({ studyListRefreshSeconds: 30, instanceTags: [...DEFAULT_INSTANCE_TAGS] });
+    expect(loadConfig(base).screen).toEqual({ studyListRefreshSeconds: 30, instanceTags: [...DEFAULT_INSTANCE_TAGS], importMaxMb: 256 });
     expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "0" }).screen.studyListRefreshSeconds).toBe(0);
     expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "5" }).screen.studyListRefreshSeconds).toBe(5);
     expect(loadConfig({ ...base, STUDY_LIST_REFRESH_SECONDS: "3600" }).screen.studyListRefreshSeconds).toBe(3600);
     for (const bad of ["1", "4", "3601", "-1", "30s", "1.5"]) {
       expect(variablesOf({ ...base, STUDY_LIST_REFRESH_SECONDS: bad })).toEqual(["STUDY_LIST_REFRESH_SECONDS"]);
+    }
+  });
+
+  it("インポートの 1 つのファイルの上限（IMPORT_MAX_MB。既定 256。1〜1024 の外と数でない値は起動しない）", () => {
+    expect(loadConfig({ ...base, IMPORT_MAX_MB: "1" }).screen.importMaxMb).toBe(1);
+    expect(loadConfig({ ...base, IMPORT_MAX_MB: "1024" }).screen.importMaxMb).toBe(1024);
+    for (const bad of ["0", "1025", "-1", "256MB", "1.5"]) {
+      expect(variablesOf({ ...base, IMPORT_MAX_MB: bad })).toEqual(["IMPORT_MAX_MB"]);
     }
   });
 

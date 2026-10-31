@@ -54,6 +54,8 @@ export const PERMISSIONS = [
   "study.delete",
   // 段 6：患者・検査の値の修正（一般と管理者。理由を必須・再認証の後。docs/spec.md の 3.5）
   "study.modify",
+  // 段 6：インポート（DICOM のファイルを Orthanc へ入れる。一般と管理者。docs/spec.md の 3.5）
+  "study.import",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -74,6 +76,7 @@ const GENERAL: readonly Permission[] = [
   "study.send",
   "study.export",
   "study.modify",
+  "study.import",
 ];
 
 export const ROLE_PERMISSIONS: PermissionMap = {

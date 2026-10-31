@@ -206,6 +206,49 @@ export interface Backend {
   exportStudy(orthancStudyId: string): Promise<Response>;
   /** 検査を消す（DELETE /studies/{id}）。書き込みの操作。無ければ BackendError(404)。答えが分からなければ BackendUnknownError */
   deleteStudy(orthancStudyId: string): Promise<void>;
+
+  // ── 段 6：インポート（docs/spec.md の 3.5 の「取り込み」） ──
+
+  /**
+   * DICOM のファイル 1 つを Orthanc へ入れる（POST /instances）。書き込みの操作。答えが分からなければ BackendUnknownError。
+   * Orthanc が受けなかった（FilteredOut・400 など）ときは BackendError
+   */
+  importInstance(file: Uint8Array): Promise<ImportedInstance>;
+  /** インポートした検査に印（Orthanc のラベル IMPORT_LABEL）を付ける。付けてあれば何もしない */
+  labelImported(orthancStudyId: string): Promise<void>;
+  /** インポートの印のある検査の StudyInstanceUID の全部（検査一覧の「インポート」の印に使う） */
+  importedStudyUids(): Promise<Set<string>>;
+  /**
+   * SOP Instance UID の画像が Orthanc にあれば、その画像と親の検査の Orthanc の ID（取り込む前に、もうあるかを確かめる・
+   * 結果不明のインポートを照らす）。無ければ null。同じ SOP Instance UID の画像が2つ以上ある（患者違いなど）ときは、
+   * どれか1つを選ばずに BackendError(409)
+   */
+  findInstanceStudy(sopInstanceUid: string): Promise<{ instanceId: string; orthancStudyId: string } | null>;
+  /**
+   * インポートで入れた画像 1 枚を消す（DELETE /instances/{id}）。書き込みの操作。取り込んだ後に、Orthanc が保存した値が
+   * ファイルから読んだ値と違ったときだけ使う。無ければ BackendError(404)。答えが分からなければ BackendUnknownError
+   */
+  deleteImportedInstance(instanceId: string): Promise<void>;
+  /** Orthanc の中の ID の画像があるか（GET /instances/{id}。404 なら false）。読めなければ BackendError */
+  instanceExists(instanceId: string): Promise<boolean>;
+  /**
+   * 検査の画像の SOP Instance UID の全部（GET /studies/{id}/instances）。同じ組の続きの画像を受ける前に、検査の画像が全部
+   * その組で入れたものかを確かめる。検査が無ければ空。SOP Instance UID の読めない画像があれば BackendError
+   */
+  studyInstanceSopUids(orthancStudyId: string): Promise<string[]>;
+}
+
+/** インポートの印に使う Orthanc のラベル（Orthanc 1.12.0 から。字は英数字・`_`・`-`） */
+export const IMPORT_LABEL = "tsunagi-import";
+
+/** インポートで Orthanc が答えた画像 */
+export interface ImportedInstance {
+  /** Success：新しく入った。AlreadyStored：同じ画像がもうあった */
+  status: "Success" | "AlreadyStored";
+  /** 画像の Orthanc の ID（POST /instances の答えの ID） */
+  instanceId: string;
+  /** 画像の親の検査の Orthanc の ID（答えの ParentStudy） */
+  orthancStudyId: string;
 }
 
 /** 消す前の確かめに使う、Orthanc の中の検査の要点（docs/spec.md の 3.5 の削除） */

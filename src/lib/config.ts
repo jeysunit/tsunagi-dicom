@@ -68,6 +68,8 @@ export interface AppConfig {
     studyListRefreshSeconds: number;
     /** 画像ごとの「主なタグ」に出すタグ（8 桁の大文字の 16 進。設定の順。INSTANCE_TAGS。docs/spec.md の 3.1） */
     instanceTags: string[];
+    /** インポートで受ける 1 つのファイルの大きさの上限（MB。IMPORT_MAX_MB。docs/spec.md の 3.5） */
+    importMaxMb: number;
   };
   /** 監査の記録（docs/adr/0001-audit-chain-mac.md） */
   audit: {
@@ -175,6 +177,8 @@ const envSchema = z.object({
   STUDY_LIST_REFRESH_SECONDS: int(30, 0, 3600).refine((v) => v === 0 || v >= 5, "0（止める）か 5〜3600 の整数にする"),
   // 画像ごとの「主なタグ」に出すタグの番号（空白で区切る）。空なら既定の一覧（src/lib/instance-tags.ts）。誤りは loadConfig で出す
   INSTANCE_TAGS: z.string().optional(),
+  // インポートの 1 つのファイルの上限（MB。既定 256）。BFF はファイルを読み切ってから Orthanc へ渡すので、メモリに載る大きさにとどめる
+  IMPORT_MAX_MB: int(256, 1, 1024),
   OIDC_ISSUER: httpUrl.optional(),
   OIDC_CLIENT_ID: z.string().optional(),
   OIDC_CLIENT_SECRET: z.string().optional(),
@@ -415,7 +419,11 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
       devAllowWrite: e.DEV_ALLOW_WRITE,
     },
     // 誤りは上で problem にして投げている
-    screen: { studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS, instanceTags: instanceTags.ok ? instanceTags.tags : [] },
+    screen: {
+      studyListRefreshSeconds: e.STUDY_LIST_REFRESH_SECONDS,
+      instanceTags: instanceTags.ok ? instanceTags.tags : [],
+      importMaxMb: e.IMPORT_MAX_MB,
+    },
     audit: { anchorFile: e.AUDIT_ANCHOR_FILE, sessionSecretPrevious },
     hl7ReceiverToken,
     hl7PatientIdIssuer,

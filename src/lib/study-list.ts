@@ -34,7 +34,8 @@ import { resolveDefaultViewer, type ViewerInfo } from "@/lib/viewers";
 // 画像サーバーの応答と BFF のビューアの覚えを組み立て、役割の許可の一覧（src/lib/fields.ts）で絞った形にしてから返す。
 
 export interface ListDeps {
-  backend: Pick<Backend, "searchStudies">;
+  /** importedStudyUids が無ければ、インポートの印を出さない */
+  backend: Pick<Backend, "searchStudies"> & Partial<Pick<Backend, "importedStudyUids">>;
   /** ビューアの覚え（検査ごと・モダリティごと）を読む。無ければ覚えは空 */
   db?: Db;
   role: Role;
@@ -60,17 +61,32 @@ export interface StudyListResult {
   fetchedAt: number;
 }
 
+/**
+ * インポートの印のある検査（Orthanc のラベル。段 6）。読めなければ印を出さずに一覧を出す（印は補いの情報で、一覧を止めない）。
+ * 古い Orthanc（ラベルの無い 1.12.0 より前）でも同じ
+ */
+async function importedUids(deps: ListDeps): Promise<Set<string>> {
+  if (!deps.backend.importedStudyUids) return new Set();
+  try {
+    return await deps.backend.importedStudyUids();
+  } catch (error) {
+    console.error("インポートの印を読めなかった", error instanceof Error ? error.name : "unknown");
+    return new Set();
+  }
+}
+
 async function decorate(deps: ListDeps, studies: StudySummary[]) {
   const uids = studies.map((s) => s.studyInstanceUid);
   const [memory, defaults] = deps.db
     ? await Promise.all([readViewerMemory(deps.db, uids), modalityDefaults(deps.db)])
     : [new Map(), null];
   const allowlist = allowlistFor(deps.role, deps.allowlists);
+  const imported = allowlist.study.includes("imported") && studies.length > 0 ? await importedUids(deps) : new Set<string>();
   return studies.map((s) => {
     const remembered = memory.get(s.studyInstanceUid) ?? EMPTY_VIEWER_MEMORY;
     const group = primaryGroup(s.modalities);
     const viewer = resolveDefaultViewer(remembered.rememberedViewer, group && defaults ? defaults[group] : null, deps.viewers ?? []);
-    const view = projectStudy(studyRecord(s, remembered, viewer), allowlist);
+    const view = projectStudy(studyRecord(s, remembered, viewer, imported.has(s.studyInstanceUid)), allowlist);
     // 氏名の検索は第3〜5成分まで含める（画面に出す値は姓と名のまま。検索にだけ使うので、行の object に結びつけて持つ）
     attachSearchNames(view, s.patientName);
     return { summary: s, view };
