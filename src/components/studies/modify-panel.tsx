@@ -15,7 +15,7 @@ import { decideModify, decideStatus, type ModifyDecision, type StatusBody } from
 import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 import { checkFieldValue, FIELD_LABELS, type CorrectionField, type CorrectionKind, type CorrectionValues } from "@/lib/correction-fields";
 import type { StudyView } from "@/lib/fields";
-import { birthInputHint, formatBirthLine, formatSlashDate, localToday, parseBirthInput, parseDicomDate } from "@/lib/format/japanese-date";
+import { birthInputHint, formatBirthLine, formatSlashDate, localToday, parseBirthInput, parseDicomDate, readSex } from "@/lib/format/japanese-date";
 
 // 患者・検査の値の修正（docs/spec.md の 3.5。段 6）。一般と管理者。窓は2つに分ける。
 // - 患者情報修正：患者ID・氏名・生年月日・性別・受付番号。UID を保つ。氏名・生年月日・性別は同じ患者ID の全部の検査に、
@@ -66,13 +66,14 @@ type Phase =
   | { kind: "unknown"; requestId: string; partial?: boolean; note?: string; writeIds?: string[]; hl7?: boolean }
   | { kind: "error"; text: string };
 
-const SEX_LABELS: Record<string, string> = { "": "（なし）", M: "M（男性）", F: "F（女性）", O: "O（その他）" };
+// 性別の値は M・F・O・U（部品集 1.2.5）。U は DICOM に書くとき空になる（BFF の normalizeCorrectionValues）
+const SEX_LABELS: Record<string, string> = { M: "M（男性）", F: "F（女性）", O: "O（その他）", U: "U（不明）" };
 
-/** DICOM の値を画面に出す形（日付は yyyy/MM/dd、氏名は「=」の組を「／」で、空は「（なし）」） */
+/** DICOM の値を画面に出す形（日付は yyyy/MM/dd、氏名は「=」の組を「／」で、空は「（なし）」。性別の空は「不明」） */
 function shown(field: string, value: string): string {
+  if (field === "PatientSex") return SEX_LABELS[readSex(value)]!;
   if (value === "") return "（なし）";
   if (field === "PatientBirthDate" || field === "StudyDate") return formatSlashDate(value);
-  if (field === "PatientSex") return SEX_LABELS[value] ?? value;
   if (field === "PatientName") return value.split("=").filter(Boolean).join("／");
   return value;
 }
@@ -273,7 +274,9 @@ function CorrectionForm({
   const fields: readonly CorrectionField[] = kind === "attribute"
     ? ["PatientID", "PatientName", "PatientBirthDate", "PatientSex", "AccessionNumber"]
     : ["StudyDate", "StudyDescription"];
-  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f, current.values[f] ?? ""])));
+  // 性別は画面の値（M・F・O・U）で持つ。DICOM の空と規格外の値は U と読む
+  const initial = (f: CorrectionField) => (f === "PatientSex" ? readSex(current.values[f]) : (current.values[f] ?? ""));
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f, initial(f)])));
   const [preview, setPreview] = useState<Preview | null>(null);
   const [problem, setProblem] = useState<{ field: string | null; text: string } | null>(null);
   const [reason, setReason] = useState("");
@@ -313,7 +316,7 @@ function CorrectionForm({
   }
 
   /** 変えた項目だけ（変えていない項目は送らない。BFF は、要求に無い項目を変えない） */
-  const changed = (): CorrectionValues => Object.fromEntries(fields.filter((f) => values[f] !== (current.values[f] ?? "")).map((f) => [f, values[f]!]));
+  const changed = (): CorrectionValues => Object.fromEntries(fields.filter((f) => values[f] !== initial(f)).map((f) => [f, values[f]!]));
   const nameParts = (values.PatientName ?? "").split("=");
   const setNamePart = (index: number, part: string) => {
     const parts = [nameParts[0] ?? "", nameParts[1] ?? "", nameParts[2] ?? ""];

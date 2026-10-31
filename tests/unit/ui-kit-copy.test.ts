@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ChevronDown, Menu } from "lucide-react";
+import { ChevronDown, Menu, TriangleAlert } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
 // 部品集（ui-kit）の写しを守る検査（部品集 system/delivery.md の 4 の C1）。
@@ -31,8 +31,8 @@ describe("ui-kit の写し", () => {
     expect(digest).toBe(sums.get(name));
   });
 
-  it("写しの版は 1.2.4", () => {
-    expect(readFileSync(`${KIT}/VERSION`, "utf8").trim()).toBe("1.2.4");
+  it("写しの版は 1.2.5", () => {
+    expect(readFileSync(`${KIT}/VERSION`, "utf8").trim()).toBe("1.2.5");
   });
 
   // 上の帯で使う絵（ナビの開閉・接続の状態のシェブロン）は、lucide-react の同じ名前の絵をそのまま使う。
@@ -40,6 +40,7 @@ describe("ui-kit の写し", () => {
   it.each([
     ["i-menu", Menu],
     ["i-chevd", ChevronDown],
+    ["i-alert", TriangleAlert],
   ] as const)("%s の path は lucide-react の同じ名前の絵と同じ", (id, Icon) => {
     const svg = readFileSync(`${KIT}/icons.svg`, "utf8");
     const symbol = new RegExp(`<symbol id="${id}"[^>]*>(.*?)</symbol>`, "s").exec(svg)?.[1];
