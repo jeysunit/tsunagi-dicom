@@ -41,6 +41,8 @@ export const STUDY_FIELDS = [
   "defaultViewer",
   /** ビューアの覚えの版（変えるときに添え、ほかの利用者が先に変えていれば 409） */
   "viewerVersion",
+  /** インポートした検査か（Orthanc のインポートの印。段 6。docs/spec.md の 3.5） */
+  "imported",
 ] as const;
 export type StudyField = (typeof STUDY_FIELDS)[number];
 
@@ -78,6 +80,7 @@ export interface StudyRecord {
   rememberedViewer: string | null;
   defaultViewer: string | null;
   viewerVersion: number;
+  imported: boolean;
 }
 
 /** 画面の API が返す1行。役割に許された項目だけがある */
@@ -221,6 +224,7 @@ export function studyRecord(
   s: StudySummary,
   memory: ViewerMemoryView = EMPTY_VIEWER_MEMORY,
   defaultViewer: string | null = null,
+  imported = false,
 ): StudyRecord {
   const name = parsePatientName(s.patientName);
   return {
@@ -243,6 +247,7 @@ export function studyRecord(
     rememberedViewer: memory.rememberedViewer,
     defaultViewer,
     viewerVersion: memory.viewerVersion,
+    imported,
   };
 }
 

@@ -1433,3 +1433,56 @@ test("25 検査情報修正（検査日・検査名）：新しい StudyInstance
     await s.context.close();
   }
 });
+
+test("26 インポート：DICOM のファイルを BFF から Orthanc へ入れ、検査にラベルの印が付き、検査一覧で「インポート」と分かる（2026-10-31）", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const study = syntheticStudy("import", 73, 2);
+  writeDumps(study);
+  await storescuToOrthanc(study.batch);
+  const [id] = await waitFor("インポートの元の検査", () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
+  // 元のファイルを Orthanc から取り出し、検査を消してから、BFF のインポートで入れ直す
+  const instances = await orthancJson<{ ID: string }[]>(`studies/${id}/instances`);
+  const files = await Promise.all(instances.map(async (i) => Buffer.from(await (await orthanc(`instances/${i.ID}/file`)).arrayBuffer())));
+  expect((await orthanc(`studies/${id}`, { method: "DELETE" })).status).toBe(200);
+  expect(await lookupStudy(study.studyInstanceUid)).toEqual([]);
+
+  const fresh = await newContext(browser);
+  try {
+    const user = adminUser();
+    await submitLogin(fresh.page, user.username, user.changed);
+    await expect(fresh.page).toHaveURL(`${bffUrl}/`);
+    const upload = (data: Buffer, requestId = crypto.randomUUID()) =>
+      fresh.page.request.post("/api/import", {
+        headers: { origin: bffUrl, "x-csrf-token": latestCsrfToken(), "x-request-id": requestId, "content-type": "application/dicom" },
+        data,
+      });
+    const answers: { requestId: string; outcome: string; studyInstanceUid: string; labeled: boolean }[] = [];
+    for (const file of files) {
+      const res = await upload(file);
+      expect(res.status(), await res.text()).toBe(200);
+      answers.push(await res.json());
+    }
+    expect(answers.map((a) => [a.outcome, a.studyInstanceUid, a.labeled])).toEqual(files.map(() => ["stored", study.studyInstanceUid, true]));
+    const [newId] = await lookupStudy(study.studyInstanceUid);
+    expect(await orthancJson<string[]>(`studies/${newId}/labels`)).toEqual(["tsunagi-import"]);
+    expect(await orthancJson<unknown[]>(`studies/${newId}/instances`)).toHaveLength(files.length);
+    // 同じファイルをもう一度入れたときの Orthanc の答え（試験の Orthanc は OverwriteInstances: true。置き換えたら Success になるかを測る）
+    const again = await (await upload(files[0]!)).json();
+    observe("import.same-file-again", { outcome: again.outcome, labeled: again.labeled });
+    expect(["already", "stored"]).toContain(again.outcome);
+    // DICOM でないファイルは Orthanc へ渡さずに断る
+    expect((await upload(Buffer.from("PK\u0003\u0004 not a dicom file".padEnd(200, "x")))).status()).toBe(400);
+    // 検査一覧の画面の API で「インポート」と分かる。インポートしていない検査（A）は印が無い
+    const listed = (await (await fresh.page.request.get("/api/studies?date=all")).json()) as {
+      studies: { studyInstanceUid: string; imported?: boolean }[];
+    };
+    expect(listed.studies.find((s) => s.studyInstanceUid === study.studyInstanceUid)).toMatchObject({ imported: true });
+    expect(listed.studies.find((s) => s.studyInstanceUid === A.studyInstanceUid)).toMatchObject({ imported: false });
+    const rows = readAudit().filter((r) => r.action === "import" && r.detail.requestId === answers[0]!.requestId);
+    expect(rows.map((r) => `${r.detail.phase}:${r.outcome}`)).toEqual(["request:success", "result:success"]);
+    expect(rows[0]).toMatchObject({ studyInstanceUid: study.studyInstanceUid });
+    expect(rows[0]!.detail).toMatchObject({ sopInstanceUid: expect.any(String), bytes: files[0]!.length });
+  } finally {
+    await fresh.context.close();
+  }
+});

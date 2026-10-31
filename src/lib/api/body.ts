@@ -2,9 +2,15 @@
 // content-length が無い（chunked の）要求でも、読んだ量で止める。
 
 export async function readLimitedText(request: Request, maxBytes: number): Promise<string | null> {
+  const bytes = await readLimitedBytes(request, maxBytes);
+  return bytes === null ? null : new TextDecoder().decode(bytes);
+}
+
+/** 本文をバイトのまま読む（インポートの DICOM のファイル）。大きすぎれば null */
+export async function readLimitedBytes(request: Request, maxBytes: number): Promise<Uint8Array | null> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) return null;
-  if (!request.body) return "";
+  if (!request.body) return new Uint8Array();
 
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -19,5 +25,5 @@ export async function readLimitedText(request: Request, maxBytes: number): Promi
     }
     chunks.push(value);
   }
-  return new TextDecoder().decode(Buffer.concat(chunks));
+  return new Uint8Array(Buffer.concat(chunks));
 }

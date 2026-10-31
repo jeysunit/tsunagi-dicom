@@ -206,6 +206,30 @@ export interface Backend {
   exportStudy(orthancStudyId: string): Promise<Response>;
   /** 検査を消す（DELETE /studies/{id}）。書き込みの操作。無ければ BackendError(404)。答えが分からなければ BackendUnknownError */
   deleteStudy(orthancStudyId: string): Promise<void>;
+
+  // ── 段 6：インポート（docs/spec.md の 3.5 の「取り込み」） ──
+
+  /**
+   * DICOM のファイル 1 つを Orthanc へ入れる（POST /instances）。書き込みの操作。答えが分からなければ BackendUnknownError。
+   * Orthanc が受けなかった（FilteredOut・400 など）ときは BackendError
+   */
+  importInstance(file: Uint8Array): Promise<ImportedInstance>;
+  /** インポートした検査に印（Orthanc のラベル IMPORT_LABEL）を付ける。付けてあれば何もしない */
+  labelImported(orthancStudyId: string): Promise<void>;
+  /** インポートの印のある検査の StudyInstanceUID の全部（検査一覧の「インポート」の印に使う） */
+  importedStudyUids(): Promise<Set<string>>;
+  /** SOP Instance UID の画像が Orthanc にあれば、その検査の Orthanc の ID（結果不明のインポートを照らす）。無ければ null */
+  findInstanceStudy(sopInstanceUid: string): Promise<string | null>;
+}
+
+/** インポートの印に使う Orthanc のラベル（Orthanc 1.12.0 から。字は英数字・`_`・`-`） */
+export const IMPORT_LABEL = "tsunagi-import";
+
+/** インポートで Orthanc が答えた画像 */
+export interface ImportedInstance {
+  /** Success：新しく入った。AlreadyStored：同じ画像がもうあった */
+  status: "Success" | "AlreadyStored";
+  orthancStudyId: string;
 }
 
 /** 消す前の確かめに使う、Orthanc の中の検査の要点（docs/spec.md の 3.5 の削除） */
