@@ -551,6 +551,28 @@ test("11 詳細条件：生年月日・性別・受付番号・検査名が、�
     // BFF は Orthanc が合うとした検査を落とさない
     expect.soft(v.bff, key).toEqual(v.orthanc);
   }
+
+  // 性別が空の検査：QIDO-RS の `PatientSex=`（空）は「条件なし」で、空の検査だけを引けない。
+  // 詳細条件の性別に「不明」を足さない理由（仕様の 3.1。2026-11-01 に Orthanc 26.9.1 で測った）
+  const U = syntheticStudy("adv-u", 24, 1, { patientSex: "" });
+  writeDumps(U);
+  await storescuToOrthanc(U.batch);
+  await waitFor(`Orthanc に ${U.batch} が入る`, () => lookupStudy(U.studyInstanceUid), (ids) => ids.length === 1);
+  const rawSex = async (query: Record<string, string>) => {
+    const rows = await orthancJson<Record<string, { Value?: unknown[] }>[]>(`dicom-web/studies?${new URLSearchParams(query)}`);
+    return [D, E, U].filter((s) => rows.some((r) => r["0020000D"]?.Value?.[0] === s.studyInstanceUid)).map((s) => s.batch);
+  };
+  const sexCheck = {
+    m: await rawSex({ PatientSex: "M" }),
+    empty: await rawSex({ PatientSex: "" }),
+    star: await rawSex({ PatientSex: "*" }),
+  };
+  observe("qido.patientSexEmpty", sexCheck);
+  expect.soft(sexCheck.m, "PatientSex=M が男の検査だけを返さない").toEqual(["adv-e"]);
+  // 空の値は条件にならず、D・E・U のすべてを返す（空の検査だけではない）。ここが変われば「不明」で絞れる道を探し直す
+  expect.soft(sexCheck.empty, "Orthanc の QIDO-RS が PatientSex= で空の検査だけを返すようになった").toEqual(["adv-d", "adv-e", "adv-u"]);
+  // `*` は性別の欄がある検査（空を含む）に合うので、空の検査だけは選べない（欄そのものが無い検査にだけ合わない）
+  expect.soft(sexCheck.star, "PatientSex=* の合い方が変わった").toEqual(["adv-d", "adv-e", "adv-u"]);
 });
 
 test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像の並びを引き、WADO-RS の metadata で 1 枚の値を読む（2026-10-21）", async () => {
