@@ -17,7 +17,7 @@ modality:
   default_template: "ct_generic"
   default_profile: null
   default_hospital: null
-  default_pixel_mode: "ct_realistic"
+  default_pixel_mode: "phantom"   # ビューアで胸部の図形が見える画素（ct_realistic は白黒の帯になる）
   worklist:                       # ris-emulator の MWL。予約が無いときは緊急の患者で撮る
     ae_title: "RIS_EMU"
     host: "ris"
@@ -30,7 +30,7 @@ modality:
       ae_title: "ORTHANC"
       host: "orthanc"
       port: 4242
-      storage_commitment: false
+      storage_commitment: true        # 送信のあとに保管の確認を要求する（結果は上の listen で受ける）
       timeout_seconds: 30
   default_destination: "ORTHANC"
   retry:
