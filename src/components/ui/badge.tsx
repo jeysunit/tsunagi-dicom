@@ -2,7 +2,7 @@ import type * as React from "react";
 import { cn } from "@/lib/utils";
 
 // 小さな印（docs/design-system/parts.md の「小さな印」。部品集の `.badge`）。12px・高さ 20px・角 3px・枠 1px・字 label。
-// 状態ではない印（新着・インポート）だけに使う。印の形も色も持たない。状態は StatusBadge、モダリティは ModalityMark。
+// 状態ではない印（標準・新着）だけに使う。印の形も色も持たない。状態は StatusBadge、モダリティは ModalityMark。
 export function Badge({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span

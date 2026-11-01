@@ -404,8 +404,11 @@ function textWidth(text: string | undefined): number {
 
 /** 列の左右の余白（px-2）と罫線 */
 const CELL_PAD = 18;
-/** モダリティ・検査の記述の列の最小の幅。一覧がこれより狭いときは、一覧の中で横にスクロールする */
-const DESC_MIN = 120;
+/**
+ * モダリティ・検査の記述の列の最小の幅。見出し「モダリティ／検査名」・モダリティの札（MR など）・「インポート」の札が `…` で切れない幅。
+ * 一覧がこれより狭いときは、一覧の中で横にスクロールする
+ */
+const DESC_MIN = 160;
 /** 詰めた形（詳細を開いている間）の、同じ列の最小の幅 */
 const DESC_MIN_COMPACT = 64;
 /** 日時の列（12px の「2026/10/25」が切れない幅。日付／時刻の 2 行） */
@@ -429,16 +432,18 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
     // 受付番号（2026-10-21。詳細条件で絞れる項目を列に見せる）。SH（16 字まで）なので値に合わせ、上限を超える値だけを切る。
     // 役割の許可の一覧に無い（行に項目が無い）ときは、列ごと出さない
     ...(showAccession ? [{ key: "accession", width: fit((s) => s.accessionNumber, 88, 160) }] : []),
-    { key: "name", width: fit((s) => s.patientName, 104, 240) },
+    // 氏名の下限は 88px（詰めた形と同じ）。浮いた幅はモダリティの列へ回す（下の desc）
+    { key: "name", width: fit((s) => s.patientName, 88, 240) },
     { key: "kana", width: fit((s) => s.patientKana, 96, 200) },
     // 西暦と、括弧の中の英字 1 字の元号と年齢（`1987/03/14 (S62・39歳)`）。12px の 2 行（西暦／括弧から後ろ）にして、列を 104px に収める
     { key: "birth", width: BIRTH_WIDTH },
     { key: "sex", width: 64 },
     { key: "desc", width: undefined },
     // シリーズ数／画像数（`2 / 6`）。見出し「Se/Im」が入る下限から、値に合わせる
-    { key: "count", width: fit((s) => `${s.seriesCount ?? "—"} / ${s.instanceCount ?? "—"}`, 64, 120) },
-    // 「開く」と「▼」を並べた分け押しのボタン（83px）に左右の余白。1280px の画面（左のナビあり・詳細を閉じた）で、モダリティの札と検査名が入る幅を残す
-    { key: "viewer", width: 120 },
+    { key: "count", width: fit((s) => `${s.seriesCount ?? "—"} / ${s.instanceCount ?? "—"}`, 56, 120) },
+    // 「開く」と「▼」を並べた分け押しのボタン（83px）に左右の余白。1280px の画面（左のナビあり・詳細を閉じた）で、
+    // モダリティの札・「インポート」の札と検査名の頭が入る幅（DESC_MIN）を残す
+    { key: "viewer", width: 104 },
   ];
   // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・性別・モダリティと検査名。
   // 省く値（受付番号・カナ・生年月日・Se/Im・開く）は、詳細の見出し・検査の情報・操作の行で見る。

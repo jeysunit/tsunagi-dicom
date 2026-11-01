@@ -43,7 +43,9 @@ test("受け取りの記録：一般は、受け取った検査を新しい順�
   await expect(rows.first().getByTestId("received-at")).toHaveText("2026/10/17 22:32:00");
   await expect(rows.first()).toContainText("DTG_SCU");
   await expect(rows.first()).toContainText("JP-TEST-0004");
-  await expect(page.getByTestId("received-origin")).toHaveText(["インポート"]);
+  // 「インポート」は状態ではない知らせなので、状態の札（知らせ ◇）。検査一覧の「インポート」と同じ形
+  await expect(page.getByTestId("received-origin")).toHaveText(["◇インポート"]);
+  await expect(page.getByTestId("received-origin")).toHaveAttribute("data-k", "note");
   // 1 行は 28px ほど
   expect((await rows.first().boundingBox())!.height).toBeLessThanOrEqual(30);
   // 行から検査の一覧へ移れる（患者 ID で絞る）
@@ -107,7 +109,7 @@ test("受信一覧の絞り込み：送信元 AE・検索で絞り、前に開�
   // 送信元 AE（読んだ行にあるものから選ぶ）と検索
   await page.getByTestId("received-source").selectOption("インポート");
   await expect(rows).toHaveCount(1);
-  await expect(rows.first().getByTestId("received-origin")).toHaveText("インポート");
+  await expect(rows.first().getByTestId("received-origin")).toHaveText("◇インポート");
   await page.getByTestId("received-source").selectOption("");
   await page.getByTestId("received-search").fill("JP-TEST-0004");
   await expect(rows).toHaveCount(2);

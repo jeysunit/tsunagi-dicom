@@ -471,9 +471,9 @@ export function ReceivedList({
                   <td className={cn(CELL, "font-mono")} title={r.remoteAet ?? origin}>
                     {r.remoteAet}
                     {origin && (
-                      <Badge className={cn("font-sans", r.remoteAet && "ml-1.5")} data-testid="received-origin">
+                      <StatusBadge kind="note" className={cn("font-sans", r.remoteAet && "ml-1.5")} data-testid="received-origin">
                         {origin}
-                      </Badge>
+                      </StatusBadge>
                     )}
                     {!r.remoteAet && !origin && <span className="text-label">—</span>}
                   </td>

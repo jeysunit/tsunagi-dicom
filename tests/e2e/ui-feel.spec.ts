@@ -410,6 +410,10 @@ test("1280px の一覧：横にスクロールせず、モダリティの札が�
   const box = page.getByTestId("study-list-scroll");
   const [client, scroll] = await box.evaluate((el) => [el.clientWidth, el.scrollWidth]);
   expect(scroll).toBeLessThanOrEqual(client);
+  // 見出し「モダリティ／検査名」は「…」で切らない（「インポート」の札が入る幅を、この列に残す）
+  const descHead = page.locator("thead th").nth(7).locator("button");
+  await expect(descHead).toContainText("モダリティ／検査名");
+  expect(await descHead.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   // 操作の列（右端に固定）に重ならず、行の中に見えるモダリティの札
   const mark = rows(page).first().locator("td").nth(7).locator("span").first();
   const [markBox, actionsBox] = await Promise.all([
