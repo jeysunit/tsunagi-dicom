@@ -1025,6 +1025,31 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(picker.getByTestId("import-formbar")).toHaveText("選択 1 件 → 成功 0・失敗 1");
   await expect(rows.first()).toContainText("同じ画像または検査がもう画像サーバーにあります");
 
+  // 結果不明の札の出し方（画面だけを見る。BFF の答えを、画像サーバーの答えが分からなかった形に置き換える。
+  // BFF の結果不明の扱いそのものは tests/unit/import-route.test.ts）：状態を 1 回確かめ、決まらなければ結果不明
+  let checks = 0;
+  await page.route("**/api/import*", async (route) => {
+    const unknown = { outcome: "unknown", error: "インポートの結果を確認できません。状態を確認してください" };
+    if (route.request().method() === "GET") checks++;
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(unknown) });
+  });
+  await picker.getByRole("button", { name: "続けて選択" }).click();
+  await page.getByTestId("import-files").setInputFiles([
+    { name: "IM0004", mimeType: "application/dicom", buffer: dicomBytes({ sop: `${IMPORT_UID}.3.1`, study: deleted, patientId: "JP-TEST-0003" }) },
+  ]);
+  await expect(picker.getByRole("button", { name: "インポート" })).toBeEnabled();
+  await picker.getByRole("button", { name: "インポート" }).click();
+  await expect(picker.getByTestId("import-formbar")).toHaveText("選択 1 件 → 成功 0・失敗 0・結果不明 1");
+  expect(checks).toBe(1);
+  await expect(rows.first()).toContainText("結果不明");
+  await expect(rows.first().locator("[data-k=unknown]")).toHaveCount(1);
+  await expect(rows.first()).toContainText("インポートの結果を確認できません");
+  await expect(result).toHaveText(
+    "選択 1 件のうち 0 件をインポートしました。1 件はインポートできたか分かりません。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。",
+  );
+  await page.screenshot({ path: testInfo.outputPath("import-1280-unknown.png"), fullPage: true });
+  await page.unroute("**/api/import*");
+
   // 入れた検査は、検査一覧に戻り、「インポート」の印で分かる
   await nav.getByRole("link", { name: "検査一覧" }).click();
   await expect(page).toHaveURL(/\/$/);

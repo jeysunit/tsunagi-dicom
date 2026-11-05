@@ -135,6 +135,21 @@ describe("1 件を送る", () => {
     await expect(importFile(new Blob([]), BATCH, "t", both.fetcher, () => REQ)).resolves.toEqual({ ok: false, reason: UNREACHABLE_REASON });
   });
 
+  it("答えの本文を読み切れない（途中で切れた・JSON でない）ときは失敗と決めず、状態を確かめる", async () => {
+    const calls: string[] = [];
+    const fetcher = (async (url: string) => {
+      calls.push(url);
+      return calls.length === 1
+        ? new Response("{\"outcome\":\"sto", { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ outcome: "stored" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await expect(importFile(new Blob([]), BATCH, "t", fetcher, () => REQ)).resolves.toEqual({ ok: true });
+    expect(calls).toEqual(["/api/import", `/api/import?requestId=${REQ}`]);
+    // 確かめの本文も読めなければ結果不明（成功とも失敗とも数えない）
+    const broken = (async () => new Response("<html>", { status: 200 })) as unknown as typeof fetch;
+    await expect(importFile(new Blob([]), BATCH, "t", broken, () => REQ)).resolves.toMatchObject({ ok: false, unknown: true });
+  });
+
   it("答えが届いた後に確かめが切れたら結果不明", async () => {
     const { fetcher } = fakeFetch([{ status: 202, body: { outcome: "unknown" } }, null]);
     await expect(importFile(new Blob([]), BATCH, "t", fetcher, () => REQ)).resolves.toMatchObject({ ok: false, unknown: true });

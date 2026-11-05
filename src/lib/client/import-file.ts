@@ -65,9 +65,14 @@ export function checkedOutcomeOf(answer: Answer | null, sent: "reached" | "unrea
   return unknown(error);
 }
 
-async function read(res: Response): Promise<Answer> {
-  const data = (await res.json().catch(() => ({}))) as Answer["data"];
-  return { status: res.status, data: data && typeof data === "object" ? data : {} };
+/** 答えを読む。本文を読み切れない（途中で切れた・JSON でない）ときは null（答えが分からない） */
+async function read(res: Response): Promise<Answer | null> {
+  try {
+    const data: unknown = await res.json();
+    return { status: res.status, data: data && typeof data === "object" ? (data as Answer["data"]) : {} };
+  } catch {
+    return null;
+  }
 }
 
 /** 1 件を送る。答えが分からなければ、同じ要求の ID で状態を 1 回確かめる */
@@ -95,10 +100,11 @@ export async function importFile(
       body: file,
       credentials: "same-origin",
     });
+    // 頭が届いても本文を読み切れなければ、画像サーバーに入ったかが分からない。失敗と決めずに状態を確かめる
     const answer = await read(res);
-    const outcome = outcomeOf(answer);
+    const outcome = answer ? outcomeOf(answer) : null;
     if (outcome) return outcome;
-    firstError = answer.data.error;
+    firstError = answer?.data.error;
   } catch {
     // 送っている間に切れた：BFF に届いたかが分からない。記録が無ければ届かなかったとして失敗にする
     sent = "unreachable";
