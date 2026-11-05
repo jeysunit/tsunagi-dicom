@@ -65,10 +65,10 @@ describe("答えを結果に写す", () => {
       unknown: true,
       reason: "インポートの結果を確認できません",
     });
-    // 確かめも読めない：届いたなら結果不明、届かなかったなら失敗
+    // 確かめも読めない：送った要求が届いたかも分からないので、どちらも結果不明（失敗と言い切らない）
     expect(checkedOutcomeOf(null, "reached")).toEqual({ ok: false, unknown: true, reason: UNKNOWN_REASON });
     expect(checkedOutcomeOf({ status: 500, data: {} }, "reached")).toEqual({ ok: false, unknown: true, reason: UNKNOWN_REASON });
-    expect(checkedOutcomeOf(null, "unreachable")).toEqual({ ok: false, reason: UNREACHABLE_REASON });
+    expect(checkedOutcomeOf(null, "unreachable")).toEqual({ ok: false, unknown: true, reason: UNREACHABLE_REASON });
   });
 
   it("理由の 1 句：最初の「。」まで。文でなければ代わりの句", () => {
@@ -124,7 +124,7 @@ describe("1 件を送る", () => {
     });
   });
 
-  it("送っている間に切れた：記録が無ければ失敗、記録があれば確かめの答え、確かめも切れたら失敗", async () => {
+  it("送っている間に切れた：記録が無ければ失敗、記録があれば確かめの答え、確かめも切れたら結果不明", async () => {
     const none = fakeFetch([null, { status: 200, body: { requestId: REQ, outcome: "none" } }]);
     await expect(importFile(new Blob([]), BATCH, "t", none.fetcher, () => REQ)).resolves.toEqual({ ok: false, reason: UNREACHABLE_REASON });
     const stored = fakeFetch([null, { status: 200, body: { outcome: "stored" } }]);
@@ -132,7 +132,7 @@ describe("1 件を送る", () => {
     const unknown = fakeFetch([null, { status: 202, body: { outcome: "unknown" } }]);
     await expect(importFile(new Blob([]), BATCH, "t", unknown.fetcher, () => REQ)).resolves.toMatchObject({ ok: false, unknown: true });
     const both = fakeFetch([null, null]);
-    await expect(importFile(new Blob([]), BATCH, "t", both.fetcher, () => REQ)).resolves.toEqual({ ok: false, reason: UNREACHABLE_REASON });
+    await expect(importFile(new Blob([]), BATCH, "t", both.fetcher, () => REQ)).resolves.toEqual({ ok: false, unknown: true, reason: UNREACHABLE_REASON });
   });
 
   it("答えの本文を読み切れない（途中で切れた・JSON でない）ときは失敗と決めず、状態を確かめる", async () => {

@@ -57,7 +57,10 @@ export function checkedOutcomeOf(answer: Answer | null, sent: "reached" | "unrea
     unknown: true,
     reason: reasonOf(error, reasonOf(firstError, UNKNOWN_REASON)),
   });
-  if (!answer || answer.status < 200 || answer.status >= 300) return sent === "unreachable" ? { ok: false, reason: UNREACHABLE_REASON } : unknown();
+  // 確かめも読めない：送った要求が届いたかも分からないので、通信が切れたときも結果不明にする（失敗と言い切らない）
+  if (!answer || answer.status < 200 || answer.status >= 300) return unknown(sent === "unreachable" ? UNREACHABLE_REASON : undefined);
+  // 記録が無い（none）：送っている間に切れたときだけ失敗にする。BFF は送り直された同じ画像を断るので、選び直して
+  // 入れ直しても中身は置き換わらない（記録の前にまだ本文を読んでいる要求と行き違うことは残る。docs/spec.md の 3.5）
   const { outcome, error } = answer.data;
   if (outcome === "stored") return { ok: true };
   if (outcome === "failed") return { ok: false, reason: reasonOf(error, FAILED_REASON) };
