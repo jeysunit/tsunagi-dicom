@@ -202,7 +202,7 @@ function items(spec: Array<Partial<PickItem<{ name: string }>> & { name: string 
   return spec.map((s, i) => ({ id: i + 1, key: s.name, file: file(s.name), dir: "", size: 1024, state: "wait", reason: "", off: false, tags: null, ...s }));
 }
 
-describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 ＝ 成功 ＋ 失敗 ＋ 中止）", () => {
+describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 ＝ 成功 ＋ 失敗 ＋ 結果不明 ＋ 中止）", () => {
   it("続けて選ぶと足す。同じファイル（場所・大きさ・更新時刻）は足さず、数を返す。場所は名前と分ける", () => {
     const first = addFiles([], [{ file: file("a"), path: "CD/CT/IM0001", size: 10, lastModified: 1 }], 1);
     expect(first.fresh[0]).toMatchObject({ name: "IM0001", dir: "CD/CT/", state: "check" });
@@ -257,12 +257,45 @@ describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 
     expect(resultNotice(countItems(items([{ name: "a", state: "ok" }, { name: "b", state: "ng" }])))).toMatchObject({
       kind: "err",
       alert: true,
-      text: "選択 2 件のうち 1 件をインポートしました。1 件は失敗しました（理由は各行の状態）。失敗したファイルを選び直して、もう一度インポートしてください。",
+      // 期待の変更：「失敗したファイルを選び直して、もう一度インポートしてください。」を外した（理由が「もう画像サーバーにある」の
+      // ときは、選び直しても入らない。UX のレビューの指摘。docs/design-system/parts.md の「tsunagi で決めたこと」）
+      text: "選択 2 件のうち 1 件をインポートしました。1 件は失敗しました（理由は各行の状態）。",
     });
     expect(resultNotice(countItems(items([{ name: "a", state: "ok" }, { name: "b", state: "cx" }])))).toEqual({
       kind: "warn",
       text: "1 件をインポートしました。残り 1 件は中止したためインポートしていません。",
       alert: false,
+    });
+  });
+
+  it("結果不明（tsunagi で足した状態）：成功とも失敗とも数えず、札は unknown、並びは失敗と同じ、知らせは err で確かめる人と止まることを書く", () => {
+    const list = items([{ name: "a", state: "ok" }, { name: "b", state: "uk", reason: "画像サーバーの答えが分かりません" }, { name: "c", state: "ng" }, { name: "d", state: "ex" }, { name: "e", off: true }]);
+    const c = countItems(list);
+    // 選択 ＝ 成功 ＋ 失敗 ＋ 結果不明 ＋ 中止
+    expect(c).toMatchObject({ total: 5, selected: 3, ok: 1, ng: 1, unknown: 1, cancelled: 0 });
+    expect(c.selected).toBe(c.ok + c.ng + c.unknown + c.cancelled);
+    expect(formbarText("done", c)).toBe("選択 3 件 → 成功 1・失敗 1・結果不明 1");
+    // 結果不明が 0 件のときは語を出さない（前の形のまま）
+    expect(formbarText("done", countItems(items([{ name: "a", state: "ok" }])))).toBe("選択 1 件 → 成功 1・失敗 0");
+    expect(badgeOf(list[1]!)).toEqual({ kind: "unknown", label: "結果不明" });
+    expect(sortForList(list).map((i) => i.name)).toEqual(["b", "c", "d", "a", "e"]);
+    expect(resultNotice(countItems(items([{ name: "a", state: "ok" }, { name: "b", state: "uk" }])))).toEqual({
+      kind: "err",
+      alert: true,
+      text: "選択 2 件のうち 1 件をインポートしました。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。",
+    });
+    expect(resultNotice(c).text).toBe(
+      "選択 3 件のうち 1 件をインポートしました。1 件は失敗しました（理由は各行の状態）。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。",
+    );
+    // 管理者には、管理者に頼む文を添えない（呼ぶ側が空を渡す）
+    expect(resultNotice(countItems(items([{ name: "a", state: "uk" }])), "").text).toBe(
+      "選択 1 件のうち 0 件をインポートしました。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。",
+    );
+    // 中止と重なっても、結果不明は err（alert）にする
+    expect(resultNotice(countItems(items([{ name: "a", state: "uk" }, { name: "b", state: "cx" }])))).toEqual({
+      kind: "err",
+      alert: true,
+      text: "0 件をインポートしました。残り 1 件は中止したためインポートしていません。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。",
     });
   });
 
