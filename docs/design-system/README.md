@@ -72,3 +72,4 @@ ui-kit の写しは製品の側で直さない。`globals.css` の値はこの�
 | 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトと、ユーザー管理（役割の変更・無効にする・二要素認証のリセット）が使う |
 | 入力欄 | `src/components/ui/input.tsx` | あり |
 | 待ちの印 | `src/components/ui/pending.tsx` | あり |
+| ファイルを選ぶ部品 | `src/components/ui/file-picker.tsx`（数え方と文言は `src/lib/import/picker-model.ts`、頭の読み取りは `src/lib/import/dicom-preview.ts`） | 部品はある（ui-kit 1.2.6）。使う画面（段 6 のインポート）は次の PR から |

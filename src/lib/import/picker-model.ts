@@ -1,0 +1,201 @@
+// ファイルを選ぶ部品（docs/design-system/parts.md の「ファイルを選ぶ部品」）の数え方・並び・文言。画面の部品
+// （src/components/ui/file-picker.tsx）から呼ぶ、DOM を持たない関数だけを置く（Vitest で確かめる）。
+// 数え方は 1 つ：件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 ＝ 成功 ＋ 失敗 ＋ 中止（インポート中は待ち・実行中も入る）。
+
+import { formatCount, formatSize, type PreviewTags } from "@/lib/import/dicom-preview";
+
+/**
+ * 行の状態。check＝確認中・wait＝インポート待ち・run＝インポート中・ok＝成功・ng＝失敗・ex＝対象外・cx＝中止。
+ * 除外は状態でなく off（利用者が外した印）で持つ（戻すと元の状態に戻る）
+ */
+export type PickState = "check" | "wait" | "run" | "ok" | "ng" | "ex" | "cx";
+
+export interface PickItem<F = File> {
+  id: number;
+  /** 同じファイルを見分ける鍵（場所つきの名前・大きさ・更新時刻） */
+  key: string;
+  file: F;
+  name: string;
+  /** フォルダの中なら、最後の / までの場所。無ければ空 */
+  dir: string;
+  size: number;
+  state: PickState;
+  /** 対象外・失敗・中止の理由の 1 句 */
+  reason: string;
+  /** 除外（利用者が外した） */
+  off: boolean;
+  tags: PreviewTags | null;
+}
+
+export type PickPhase = "idle" | "busy" | "done";
+
+/** 足すファイル。path は場所つきの名前（フォルダの中なら webkitRelativePath・ドロップの fullPath、無ければ名前） */
+export interface PickInput<F = File> {
+  file: F;
+  path: string;
+  size: number;
+  lastModified: number;
+}
+
+/** 続けて選んだファイルを足す（置き換えない）。同じファイルは 1 件のまま、足さなかった数を返す */
+export function addFiles<F>(items: readonly PickItem<F>[], inputs: readonly PickInput<F>[], nextId: number): { items: PickItem<F>[]; fresh: PickItem<F>[]; duplicates: number } {
+  const seen = new Set(items.map((i) => i.key));
+  const fresh: PickItem<F>[] = [];
+  let duplicates = 0;
+  let id = nextId;
+  for (const input of inputs) {
+    const path = input.path.replace(/^\/+/, "");
+    const key = `${path}|${input.size}|${input.lastModified}`;
+    if (seen.has(key)) {
+      duplicates++;
+      continue;
+    }
+    seen.add(key);
+    const cut = path.lastIndexOf("/");
+    fresh.push({
+      id: id++,
+      key,
+      file: input.file,
+      name: cut < 0 ? path : path.slice(cut + 1),
+      dir: cut < 0 ? "" : path.slice(0, cut + 1),
+      size: input.size,
+      state: "check",
+      reason: "",
+      off: false,
+      tags: null,
+    });
+  }
+  return { items: [...items, ...fresh], fresh, duplicates };
+}
+
+/** インポートに回す行（選択） */
+export const isSelected = (i: PickItem<unknown>) => !i.off && i.state !== "ex";
+
+export interface PickCounts {
+  /** 件（置いたもの全部） */
+  total: number;
+  excluded: number;
+  removed: number;
+  selected: number;
+  selectedBytes: number;
+  ok: number;
+  ng: number;
+  cancelled: number;
+  checking: number;
+}
+
+export function countItems(items: readonly PickItem<unknown>[]): PickCounts {
+  const selected = items.filter(isSelected);
+  return {
+    total: items.length,
+    excluded: items.filter((i) => !i.off && i.state === "ex").length,
+    removed: items.filter((i) => i.off).length,
+    selected: selected.length,
+    selectedBytes: selected.reduce((s, i) => s + i.size, 0),
+    ok: selected.filter((i) => i.state === "ok").length,
+    ng: selected.filter((i) => i.state === "ng").length,
+    cancelled: selected.filter((i) => i.state === "cx").length,
+    checking: items.filter((i) => i.state === "check").length,
+  };
+}
+
+/** 一覧の並び：失敗→対象外→それ以外。同じ並びの中は選んだ順。除外した行は元の場所に残す（除外する前の状態で並べる） */
+export function sortForList<T extends PickItem<unknown>>(items: readonly T[]): T[] {
+  const rank = (i: PickItem<unknown>) => (i.state === "ng" ? 0 : i.state === "ex" ? 1 : 2);
+  return [...items].sort((a, b) => rank(a) - rank(b) || a.id - b.id);
+}
+
+/** 件数の行の括弧の中（対象外・除外。0 のものは出さない。両方 0 なら空） */
+export function skippedNote(c: PickCounts): string {
+  const parts = [c.excluded ? `対象外 ${formatCount(c.excluded)}` : "", c.removed ? `除外 ${formatCount(c.removed)}` : ""].filter(Boolean);
+  return parts.length ? `（${parts.join("・")}）` : "";
+}
+
+/** 操作の行の左の 1 行 */
+export function formbarText(phase: PickPhase, c: PickCounts): string {
+  if (c.total === 0) return "ファイルを選択してください。";
+  if (phase === "done") {
+    return `選択 ${formatCount(c.selected)} 件 → 成功 ${formatCount(c.ok)}・失敗 ${formatCount(c.ng)}${c.cancelled ? `・中止 ${formatCount(c.cancelled)}` : ""}`;
+  }
+  if (c.selected === 0) return "インポートできるファイルがありません。";
+  return `選択 ${formatCount(c.selected)} 件・${formatSize(c.selectedBytes)}`;
+}
+
+/** 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗があるとき */
+export function resultNotice(c: PickCounts): { kind: "ok" | "warn" | "err"; text: string; alert: boolean } {
+  if (c.cancelled) {
+    return {
+      kind: c.ng ? "err" : "warn",
+      text: `${formatCount(c.ok)} 件をインポートしました。残り ${formatCount(c.cancelled)} 件は中止したためインポートしていません。${c.ng ? `${formatCount(c.ng)} 件は失敗しました。` : ""}`,
+      alert: c.ng > 0,
+    };
+  }
+  if (c.ng) {
+    return {
+      kind: "err",
+      text: `選択 ${formatCount(c.selected)} 件のうち ${formatCount(c.ok)} 件をインポートしました。${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。失敗したファイルを選び直して、もう一度インポートしてください。`,
+      alert: true,
+    };
+  }
+  return { kind: "ok", text: `${formatCount(c.ok)} 件（${formatSize(c.selectedBytes)}）をインポートしました。`, alert: false };
+}
+
+/** 中止の確認の窓の本文（済んだ数と残りの数。窓を開いている間は数を動かさない） */
+export function abortBody(items: readonly PickItem<unknown>[]): string {
+  const c = countItems(items);
+  const running = items.filter((i) => isSelected(i) && i.state === "run").length;
+  const waiting = items.filter((i) => isSelected(i) && i.state === "wait").length;
+  const head = `インポート済みの ${formatCount(c.ok)} 件は保管に残ります。`;
+  return running
+    ? `${head}実行中の ${formatCount(running)} 件を終えたあと、残りの ${formatCount(waiting)} 件はインポートしません。`
+    : `${head}残りの ${formatCount(waiting)} 件はインポートしません。`;
+}
+
+/** 中止の後：待っていた行を「中止」にする */
+export function cancelWaiting<F>(items: readonly PickItem<F>[]): { items: PickItem<F>[]; cancelled: number } {
+  let cancelled = 0;
+  const next = items.map((i) => {
+    if (isSelected(i) && i.state === "wait") {
+      cancelled++;
+      return { ...i, state: "cx" as const, reason: "中止したためインポートしていません" };
+    }
+    return i;
+  });
+  return { items: next, cancelled };
+}
+
+/** 状態の札の種類と語（除外は off で決まる） */
+export function badgeOf(i: PickItem<unknown>): { kind: "plan" | "wait" | "ok" | "ng" | "skip" | "stop"; label: string } {
+  if (i.off) return { kind: "skip", label: "除外" };
+  switch (i.state) {
+    case "check":
+      return { kind: "wait", label: "確認中" };
+    case "wait":
+      return { kind: "plan", label: "インポート待ち" };
+    case "run":
+      return { kind: "wait", label: "インポート中" };
+    case "ok":
+      return { kind: "ok", label: "成功" };
+    case "ng":
+      return { kind: "ng", label: "失敗" };
+    case "ex":
+      return { kind: "skip", label: "対象外" };
+    case "cx":
+      return { kind: "stop", label: "中止" };
+  }
+}
+
+/** シリーズ／画像の列（S2 / I15。片方だけ読めないときは —、両方とも読めなければ空＝「—」） */
+export function seriesImageText(tags: PreviewTags | null): string {
+  if (!tags || (!tags.seriesNumber && !tags.instanceNumber)) return "";
+  return `S${tags.seriesNumber || "—"} / I${tags.instanceNumber || "—"}`;
+}
+
+/** 足したときの読み上げ */
+export function addedMessage(fresh: readonly PickItem<unknown>[], duplicates: number, all: readonly PickItem<unknown>[]): string {
+  const ex = fresh.filter((i) => i.state === "ex").length;
+  const dup = duplicates ? `同じ ${formatCount(duplicates)} 件は追加していません。` : "";
+  if (!fresh.length) return dup;
+  const total = all.reduce((s, i) => s + i.size, 0);
+  return `${formatCount(fresh.length)} 件を追加しました。${ex ? `対象外 ${formatCount(ex)} 件。` : ""}${dup}合計 ${formatCount(all.length)} 件・${formatSize(total)}。`;
+}

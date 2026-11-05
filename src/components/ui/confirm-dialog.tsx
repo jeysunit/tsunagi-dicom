@@ -18,6 +18,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   testId = "confirm-dialog",
+  danger = false,
 }: {
   open: boolean;
   /** 題（対象＋動詞） */
@@ -33,6 +34,8 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
   testId?: string;
+  /** 実行のボタンを危険の形（.btn-danger.fill）にする。取り消せない操作・止める操作の窓 */
+  danger?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -74,7 +77,7 @@ export function ConfirmDialog({
         <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>
           キャンセル
         </Button>
-        <ActionButton type="button" pending={pending} onClick={onConfirm}>
+        <ActionButton type="button" pending={pending} onClick={onConfirm} variant={danger ? "danger" : "default"}>
           {confirmLabel}
         </ActionButton>
       </div>

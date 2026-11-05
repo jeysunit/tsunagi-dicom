@@ -25,6 +25,7 @@
 ```
 
 - 格子：列 `208px` と残り、行 `48px` と残り。閉じると列は `56px`。`.main` は 左右 24px・上 12px・下 24px、区画の間 12px（`gap`）。
+- 縦のスクロールバーの場所を空けておく（ui-kit 1.2.7）：`html { scrollbar-gutter: stable }`。部品集では `components.css` が持つ。tsunagi は `components.css` を読まないので、`globals.css` に同じ 1 行を持つ（部品集の parts.md の「1.2.7 を写したら消す」は、`components.css` を読む製品に当たる）。
 - 本文の幅：`.main` の直下に型の包みを置く。一覧の型は包まない（幅いっぱい）。詳細だけの画面は `<div class="w-detail">`、入力フォームは `<div class="w-form">`、設定は `<div class="w-settings">`。どれも左寄せ（`margin` を付けない）で、中の区画の間は 12px。一覧＋右に区画・一覧＋右に詳細は `<div class="cq">` で包む（幅を問う包み。`.main` には付けない）。ログインは `.shell` を使わず、`<main class="login">` に幅 384px の枠を中央に置く。
 
 ## 上の帯（`.topbar`）
@@ -148,15 +149,16 @@
 
 | data-k | 印・色 | 語 |
 |---|---|---|
-| plan | ○ 灰 | 予定・送信待ち・確認待ち・未確認 |
+| plan | ○ 灰 | 予定・送信待ち・確認待ち・未確認・インポート待ち |
 | run | ◐ warning | 実施中 |
-| wait / check | ◔ warning | 送信中・受信中・確認中（読み込み中） |
+| wait / check | ◔ warning | 送信中・受信中・確認中（読み込み中）・インポート中 |
 | done | ● success | 完了（ris-emulator の予約・MPPS） |
 | ok | ✓ success | 送信完了・受信完了・確認済・成功・接続中 |
 | listen | ● success | 待ち受け中 |
 | cancel | — 灰（取り消し線なし） | 取消 |
 | stop | ■ danger | 中止 |
 | ng | ✕ danger | 送信失敗・確認失敗・失敗・一部が接続不可・停止 |
+| skip | — warning | 対象外・除外（インポートで送らない行。下の「ファイルを選ぶ部品」。失敗 ✕ とは印と色の両方で分ける） |
 | unknown | ？ danger の破線 | 結果不明・確認できません（接続の状態を読めない） |
 | note | ◇ 灰 | 知らせ（撮影済み・別の装置・照合済み・未照合・インポート） |
 
@@ -172,7 +174,7 @@
 
 ## ボタン（`.btn`）
 
-- 高さ 32px（`.btn-sm` 28px、表の行の中 24px）・角 4px・内 0 12px。主 `.btn-primary`（地 `primary`・白い字・太字）、副 `.btn`（白い地・枠 `border-input`）、枠なし `.btn-ghost`、危険 `.btn-danger`（枠と字 `danger`。確認の窓の実行だけ `.btn-danger.fill`）。
+- 高さ 32px（`.btn-sm` 28px、表の行の中 24px）・角 4px・内 0 12px。主 `.btn-primary`（地 `primary`・白い字・太字）、副 `.btn`（白い地・枠 `border-input`）、枠なし `.btn-ghost`、危険 `.btn-danger`（枠と字 `danger`。確認の窓の実行だけ `.btn-danger.fill`）。tsunagi の Button では `.btn-danger` が `variant="danger-outline"`、`.btn-danger.fill` が `variant="danger"`。
 - 状態：hover `hover`（主は `primary-hover`）／押している間 `pressed`（主は `primary-active`）で 1px 沈む／無効 `disabled`（地 `surface`・字 `label`、理由を近くに 1 行）／待ち `aria-busy="true"`（左に回る印、押せない。押した場所の横に札「送信中」）。フォーカス 2px `ring`。
 - 最小幅：`.btn` は 64px、`.btn-sm` は 48px（「開く」「閉じる」のように字数の少ない名前でも、押す的を狭くしないため）。tsunagi の Button は `min-w-16`（標準）・`min-w-12`（小）で同じ値を持つ。
 - `hidden` 属性：部品集の `components.css` は `[hidden]{display:none!important}` を持つ。tsunagi は React で、隠す部品は描かないか Tailwind の `hidden` で隠し、`display` を持つ部品に `hidden` 属性を付けない。
@@ -279,6 +281,34 @@
 - 上から `.sumrow` → `.searchband`（期間〔今日・昨日・過去7日・期間を指定〕・相手・患者ID と氏名）→ 上限の知らせ（`.notice[data-k=warn]`）→ `.listhead` → `.tbl` → `.pager`（50 件）。送る側は `.split-v` で下に詳細。
 - 列の順：日時・相手（送信先／送信元 AE）・患者ID・氏名・モダリティと検査名・画像数・状態・（送る側だけ）保管の確認・操作。
 - 期間の中の件数が 1,000 件を超えたら「受信が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。」（送る側は「送信ジョブが…」）。
+
+## ファイルを選ぶ部品（`.picker`。ui-kit 1.2.6）
+
+**DICOM のファイル・フォルダを取り込む画面は、この 1 つの区画で組む。選ぶ→件数・大きさ・患者と検査を確かめる→除外（戻せる）か中止で外す→インポート、の順を変えない。** 決まりの全文（並び・数え方・列の幅・状態の語・取り消しの 3 段・キーボードと読み上げ・焦点・理由）は、部品集 bcamp/design の `system/parts.md` の「ファイルを選ぶ部品」にあり、tsunagi はそのとおりに作る。ここには構造と、tsunagi の実装で決めたことを書く。実装は `src/components/ui/file-picker.tsx`、数え方と文言は `src/lib/import/picker-model.ts`、ブラウザでの頭の読み取りは `src/lib/import/dicom-preview.ts`。PACS の業務の画面（ログインした職員だけが開く画面）の中だけで使う（一覧に患者ID・氏名を出すため）。
+
+```html
+<section class="sec picker" aria-labelledby="pk-t" data-over="false" data-busy="false">
+  <h2 id="pk-t">インポート</h2>
+  <div class="in">
+    <div class="pk-drop compact"><span class="t">ここにファイルまたはフォルダをドロップ</span><span class="acts"><button class="btn">ファイルを選択</button><button class="btn">フォルダを選択</button></span></div>
+    <div class="listhead pk-sum"><span class="cnt"><b>43</b> 件（対象外 3・除外 1）　選択 <b>39</b> 件・19.5 MB</span><span class="acts"><button class="btn btn-ghost btn-sm">選択を解除</button></span></div>
+    <div class="tbl-wrap pk-list" role="region" aria-label="選んだファイル" tabindex="0"><table class="tbl tall">
+      <thead><tr><th>名前</th><th>患者ID</th><th>氏名</th><th>検査日</th><th>モダリティ</th><th>シリーズ／画像</th><th class="num">大きさ</th><th>状態</th><th><span class="sr">操作</span></th></tr></thead>
+      <tbody>…</tbody>
+    </table></div>
+  </div>
+  <div class="formbar"><span class="l label">選択 39 件・19.5 MB</span><button class="btn btn-primary">インポート</button></div>
+</section>
+```
+
+- **値：** 取り込み口は枠 2px の点線 `border-input`・地 `surface`・角 6px。何も選んでいないときは縦並び・内 24px 16px、選んだ後は `.compact`（横並び・内 8px 12px）。ドロップ中は区画に `data-over="true"`、枠は実線 `primary`・地 `selected`・文は「ドロップして追加」。一覧は `.tbl.tall`（40px）で高さ 320px まで。列の幅は 患者ID 96px（等幅 13px）・氏名 128px・検査日 88px・モダリティ 72px・シリーズ／画像 80px（等幅 13px）・大きさ 96px・状態 200px・操作 72px。長い値は検査日と大きさのほか、省略せずに折り返す（`overflow-wrap:anywhere`）。
+- **札：** 対象外・除外は `skip`（— `warning`）、失敗 `ng`・中止 `stop` は `danger`。この部品の中では、送らない行の札は囲み線に加えて札の字も同じ色にする（行の字は通常の色のまま）。進みは砂時計（DADS の静的インジケーター、24px、色は `primary-active`。暗い地は `link`、強制の色は `CanvasText`）と `インポート中　14 ／ 39 件`。横棒と回る輪は使わない。
+- **中止：** 操作の行の「中止」は `.btn-danger`（枠と字 `danger`）。確認の窓「インポートを中止しますか？」の実行は「中止する」（`.btn-danger.fill`）。窓を開いている間は進みを止め、数を動かさない。
+- **tsunagi で決めたこと：**
+  - 氏名の列は、一覧の表と同じく姓と名の 2 成分を出す（`parsePatientName`。漢字の組が無ければ英字）。第 3〜5 成分は出さない（docs/patient-name-test-cases.md の規則 8）。
+  - 1 件の大きさの上限は `IMPORT_MAX_MB`（BFF と同じ値）。合計の上限は持たない（BFF は 1 つの要求で 1 つのファイルを受け、読み切ってから Orthanc へ渡すため）。
+  - 送る中身（1 件ずつの `POST /api/import`）は部品の外（画面の側）が持ち、部品は選んだものの数え方・並び・状態・焦点・読み上げを持つ。「失敗だけをもう一度」は持たない。
+  - 「インポート」を押した後の確認の窓は挟まない。もうある画像・検査への取り込みは BFF が断る（docs/spec.md の 3.5「取り込み」）ので、取り込みで既存のデータは変わらない。
 
 ## 知らせ（`.notice`）・空の状態（`.empty`）・確認の窓（`dialog.dlg`）
 

@@ -25,6 +25,8 @@ const KINDS = {
   stop: { mark: "■", border: "border-danger", markTone: "text-danger" },
   /** ✕ danger：送信失敗・確認失敗・失敗・一部が接続不可・停止 */
   ng: { mark: "✕", border: "border-danger", markTone: "text-danger" },
+  /** — warning：対象外・除外（インポートで送らない行。ui-kit 1.2.6。語で分ける） */
+  skip: { mark: "—", border: "border-warning", markTone: "text-warning" },
   /** ？ danger の破線：結果不明・確認できません */
   unknown: { mark: "？", border: "border-danger border-dashed", markTone: "text-danger" },
   /** ◇ 灰：知らせ（良し悪しがない） */
