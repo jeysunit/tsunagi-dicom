@@ -33,7 +33,15 @@ import { cn } from "@/lib/utils";
 // 送る中身（1 件ずつの要求）は呼ぶ側の importFile が持つ。この部品は、選んだものの数え方・並び・状態・焦点・読み上げを持つ。
 // ファイル名とタグの値は外から来る値なので、React の文字として出す（HTML として入れない）。
 
-export type ImportOutcome = { ok: true } | { ok: false; reason: string };
+/**
+ * 1 件の結果。成功は ok（note は札の下の 1 句。例：もう保管にあった）、失敗は ok: false と理由の 1 句。
+ * 受け手の答えが分からないときは unknown: true（札「結果不明」。成功とも失敗とも数えない）
+ */
+export type ImportOutcome = { ok: true; note?: string } | { ok: false; reason: string; unknown?: boolean };
+
+/** 結果を行の状態に写す */
+const stateOf = (o: ImportOutcome): Pick<PickItem, "state" | "reason"> =>
+  o.ok ? { state: "ok", reason: o.note ?? "" } : { state: o.unknown ? "uk" : "ng", reason: o.reason };
 
 /** 隠した読み上げの領域に書く間（一度空にしてから書く） */
 const SAY_DELAY_MS = 30;
@@ -65,8 +73,8 @@ function Hourglass() {
 
 const none = <span className="label font-sans text-sm text-label">—</span>;
 
-/** 札の字の色：送らない行（対象外・除外）は warning、失敗・中止は danger（囲み線と同じ色。行の字は通常の色のまま） */
-const BADGE_TEXT: Partial<Record<string, string>> = { skip: "text-warning", ng: "text-danger", stop: "text-danger" };
+/** 札の字の色：送らない行（対象外・除外）は warning、失敗・結果不明・中止は danger（囲み線と同じ色。行の字は通常の色のまま） */
+const BADGE_TEXT: Partial<Record<string, string>> = { skip: "text-warning", ng: "text-danger", unknown: "text-danger", stop: "text-danger" };
 
 type FileWithPath = File & { tsunagiPath?: string };
 
@@ -300,9 +308,7 @@ export function FilePicker({
       // 中止の窓を開いている間は、実行中の 1 件の終わりも数に入れない（窓の本文の数を動かさない）
       await waitWhileDialog();
       if (!mounted.current) return;
-      setItems((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, state: outcome.ok ? "ok" : "ng", reason: outcome.ok ? "" : outcome.reason } : i)),
-      );
+      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...stateOf(outcome) } : i)));
     }
     if (!mounted.current) return;
     const { items: finished, cancelled } = cancelWaiting(itemsRef.current);
@@ -334,7 +340,7 @@ export function FilePicker({
   const idle = phase === "idle";
   const busy = phase === "busy";
   const c = countItems(items);
-  const done = c.ok + c.ng;
+  const done = c.ok + c.ng + c.unknown;
   const notice = phase === "done" ? resultNotice(c) : null;
   const showDrop = items.length === 0 || idle;
 

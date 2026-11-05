@@ -1,14 +1,16 @@
 // ファイルを選ぶ部品（docs/design-system/parts.md の「ファイルを選ぶ部品」）の数え方・並び・文言。画面の部品
 // （src/components/ui/file-picker.tsx）から呼ぶ、DOM を持たない関数だけを置く（Vitest で確かめる）。
-// 数え方は 1 つ：件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 ＝ 成功 ＋ 失敗 ＋ 中止（インポート中は待ち・実行中も入る）。
+// 数え方は 1 つ：件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 ＝ 成功 ＋ 失敗 ＋ 結果不明 ＋ 中止（インポート中は待ち・実行中も入る）。
+// 結果不明は tsunagi で足した状態（docs/design-system/parts.md の「tsunagi で決めたこと」）。受け手の答えが分からず、
+// 成功とも失敗とも言えない行（docs/spec.md の 3.5 の「結果不明」）。
 
 import { formatCount, formatSize, type PreviewTags } from "@/lib/import/dicom-preview";
 
 /**
- * 行の状態。check＝確認中・wait＝インポート待ち・run＝インポート中・ok＝成功・ng＝失敗・ex＝対象外・cx＝中止。
+ * 行の状態。check＝確認中・wait＝インポート待ち・run＝インポート中・ok＝成功・ng＝失敗・uk＝結果不明・ex＝対象外・cx＝中止。
  * 除外は状態でなく off（利用者が外した印）で持つ（戻すと元の状態に戻る）
  */
-export type PickState = "check" | "wait" | "run" | "ok" | "ng" | "ex" | "cx";
+export type PickState = "check" | "wait" | "run" | "ok" | "ng" | "uk" | "ex" | "cx";
 
 export interface PickItem<F = File> {
   id: number;
@@ -80,6 +82,8 @@ export interface PickCounts {
   selectedBytes: number;
   ok: number;
   ng: number;
+  /** 結果不明 */
+  unknown: number;
   cancelled: number;
   checking: number;
 }
@@ -94,14 +98,18 @@ export function countItems(items: readonly PickItem<unknown>[]): PickCounts {
     selectedBytes: selected.reduce((s, i) => s + i.size, 0),
     ok: selected.filter((i) => i.state === "ok").length,
     ng: selected.filter((i) => i.state === "ng").length,
+    unknown: selected.filter((i) => i.state === "uk").length,
     cancelled: selected.filter((i) => i.state === "cx").length,
     checking: items.filter((i) => i.state === "check").length,
   };
 }
 
-/** 一覧の並び：失敗→対象外→それ以外。同じ並びの中は選んだ順。除外した行は元の場所に残す（除外する前の状態で並べる） */
+/**
+ * 一覧の並び：失敗・結果不明→対象外→それ以外。同じ並びの中は選んだ順。除外した行は元の場所に残す（除外する前の状態で並べる）。
+ * 結果不明は、失敗と同じく確かめの要る行なので、失敗と同じ並びに置く
+ */
 export function sortForList<T extends PickItem<unknown>>(items: readonly T[]): T[] {
-  const rank = (i: PickItem<unknown>) => (i.state === "ng" ? 0 : i.state === "ex" ? 1 : 2);
+  const rank = (i: PickItem<unknown>) => (i.state === "ng" || i.state === "uk" ? 0 : i.state === "ex" ? 1 : 2);
   return [...items].sort((a, b) => rank(a) - rank(b) || a.id - b.id);
 }
 
@@ -115,25 +123,40 @@ export function skippedNote(c: PickCounts): string {
 export function formbarText(phase: PickPhase, c: PickCounts): string {
   if (c.total === 0) return "ファイルを選択してください。";
   if (phase === "done") {
-    return `選択 ${formatCount(c.selected)} 件 → 成功 ${formatCount(c.ok)}・失敗 ${formatCount(c.ng)}${c.cancelled ? `・中止 ${formatCount(c.cancelled)}` : ""}`;
+    const unknown = c.unknown ? `・結果不明 ${formatCount(c.unknown)}` : "";
+    return `選択 ${formatCount(c.selected)} 件 → 成功 ${formatCount(c.ok)}・失敗 ${formatCount(c.ng)}${unknown}${c.cancelled ? `・中止 ${formatCount(c.cancelled)}` : ""}`;
   }
   if (c.selected === 0) return "インポートできるファイルがありません。";
   return `選択 ${formatCount(c.selected)} 件・${formatSize(c.selectedBytes)}`;
 }
 
-/** 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗があるとき */
+/**
+ * 結果不明の行の文（docs/design-system/writing.md の「結果不明」：分からないこと＋確かめる人＋それまで何ができないか。
+ * 成功とも失敗とも書かない）。0 件なら空
+ */
+function unknownText(c: PickCounts): string {
+  return c.unknown
+    ? `${formatCount(c.unknown)} 件はインポートできたか分かりません。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。`
+    : "";
+}
+
+/** 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗か結果不明があるとき */
 export function resultNotice(c: PickCounts): { kind: "ok" | "warn" | "err"; text: string; alert: boolean } {
+  const trouble = c.ng > 0 || c.unknown > 0;
   if (c.cancelled) {
     return {
-      kind: c.ng ? "err" : "warn",
-      text: `${formatCount(c.ok)} 件をインポートしました。残り ${formatCount(c.cancelled)} 件は中止したためインポートしていません。${c.ng ? `${formatCount(c.ng)} 件は失敗しました。` : ""}`,
-      alert: c.ng > 0,
+      kind: trouble ? "err" : "warn",
+      text: `${formatCount(c.ok)} 件をインポートしました。残り ${formatCount(c.cancelled)} 件は中止したためインポートしていません。${c.ng ? `${formatCount(c.ng)} 件は失敗しました。` : ""}${unknownText(c)}`,
+      alert: trouble,
     };
   }
-  if (c.ng) {
+  if (trouble) {
+    const failed = c.ng
+      ? `${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。失敗したファイルを選び直して、もう一度インポートしてください。`
+      : "";
     return {
       kind: "err",
-      text: `選択 ${formatCount(c.selected)} 件のうち ${formatCount(c.ok)} 件をインポートしました。${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。失敗したファイルを選び直して、もう一度インポートしてください。`,
+      text: `選択 ${formatCount(c.selected)} 件のうち ${formatCount(c.ok)} 件をインポートしました。${failed}${unknownText(c)}`,
       alert: true,
     };
   }
@@ -165,7 +188,7 @@ export function cancelWaiting<F>(items: readonly PickItem<F>[]): { items: PickIt
 }
 
 /** 状態の札の種類と語（除外は off で決まる） */
-export function badgeOf(i: PickItem<unknown>): { kind: "plan" | "wait" | "ok" | "ng" | "skip" | "stop"; label: string } {
+export function badgeOf(i: PickItem<unknown>): { kind: "plan" | "wait" | "ok" | "ng" | "unknown" | "skip" | "stop"; label: string } {
   if (i.off) return { kind: "skip", label: "除外" };
   switch (i.state) {
     case "check":
@@ -178,6 +201,8 @@ export function badgeOf(i: PickItem<unknown>): { kind: "plan" | "wait" | "ok" | 
       return { kind: "ok", label: "成功" };
     case "ng":
       return { kind: "ng", label: "失敗" };
+    case "uk":
+      return { kind: "unknown", label: "結果不明" };
     case "ex":
       return { kind: "skip", label: "対象外" };
     case "cx":
