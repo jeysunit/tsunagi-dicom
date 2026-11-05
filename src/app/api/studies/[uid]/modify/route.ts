@@ -17,7 +17,7 @@ import { applyAttributeCorrection, checkContent, CorrectionRefused, newStudyUid,
 import { visible } from "../../../../../../hl7-receiver/visible";
 import { assertReauth, contentGroup, contentUnresolved, Kind, OrthancId, pendingAttribute, pendingContent, refuse, refusedBy, requestDetail, UNRESOLVED, Values } from "./shared";
 
-// 患者・検査の値の修正（docs/spec.md の 3.5。段 6。openspec/changes/add-study-value-correction）。一般と管理者（study.modify）、
+// 患者・検査の値の修正（docs/spec.md の 3.5。段 6。openspec/changes/archive/2026-11-05-add-study-value-correction）。一般と管理者（study.modify）、
 // 理由を必須、再認証の後（AUTH_MODE=local）。書き込みの操作の共通の決まり（3.5）を通す：CSRF・画面のロック・検証モードの止め・
 // 呼ぶ前の記録（記録できなければ呼ばない）・呼んだ後の記録・要求の ID で二度流さない・答えが分からなければ結果不明。
 // - 属性の訂正（kind attribute）：患者 ID・氏名・生年月日・性別・受付番号を、Study・Series・SOP Instance UID を保って直す。

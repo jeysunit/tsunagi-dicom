@@ -33,9 +33,9 @@
 ## 4. 確かめ
 
 - [x] 4.1 lint・型・Vitest が合格することを確かめる
-- [ ] 4.2 開発の一式で、照合の後の追加撮影（Case 6）と取消の ORM を通しの試験（`tests/flow/flow.spec.ts`）で確かめる（PIR の順 5 の 4。別の PR）
-- [ ] 4.3 CI が緑であることを確かめる
+- [x] 4.2 開発の一式で、照合の後の追加撮影（Case 6）と取消の ORM を通しの試験（`tests/flow/flow.spec.ts` の 6・7）で確かめる（PIR の順 5 の 4。別の PR。通しの試験は結合の試験の仕事（`.github/workflows/integration.yml`）で流れ、直近の PR（#155）で緑）
+- [x] 4.3 CI が緑であることを確かめる（main の #154 まで緑。#155 の main への CI は、この change の archive の時点で実行中だった）
 
 ## Workflow follow-up
 
-- PR のレビューの後に、この change を archive する
+- 2026-11-05 に archive した（`openspec/changes/archive/2026-11-05-add-pir-case6-procedure-update`。spec は `openspec/specs/hl7-patient-update` に反映）

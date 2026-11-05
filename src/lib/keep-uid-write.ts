@@ -8,7 +8,7 @@ import { getConfig } from "@/lib/config";
 import { BackendError, BackendUnknownError, LOCK_CLOCK_TOLERANCE_MS, type Backend, type PatientInstance, type SourceFiles } from "@/lib/backend/types";
 import { visible } from "../../hl7-receiver/visible";
 
-// UID を保つ書き換えの部品（openspec/changes/add-study-value-correction/design.md の 2）。HL7 による患者情報の更新
+// UID を保つ書き換えの部品（openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 2）。HL7 による患者情報の更新
 // （src/lib/hl7/apply.ts）から切り出したもの。Study・Series・SOP Instance UID を保ったまま、患者の属性と受付番号を
 // 書き換え、書き換えの後に全部の画像を確かめ、結果不明・部分反映を照らす。患者 ID の変わる書き換えは、付け替えの印を
 // 付けてから書き換え、書き換えた画像を確かめてから元の画像を名指しで消す。
@@ -29,7 +29,7 @@ export class HistoryTampered extends BackendUnknownError {
 }
 /**
  * 書き換えの経過を残す監査の記録の操作。HL7 による更新（hl7）と、画面の値の修正（modify）の両方を読み、どちらかの
- * 結果不明・部分反映が残るあいだは、両方の書き換えを止める（openspec/changes/add-study-value-correction/design.md の 2）
+ * 結果不明・部分反映が残るあいだは、両方の書き換えを止める（openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 2）
  */
 const WRITE_ACTIONS: readonly AuditAction[] = ["hl7", "modify"];
 /**

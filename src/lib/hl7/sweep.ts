@@ -43,7 +43,7 @@ export interface SweepResult {
  * 覚えを、受理した順に全部取り出す（HL7 の ack の行の AA と、画面の患者 ID の付け替えの成功の行）。期限はここでは切らない。
  * 統合の段と前後は全部の覚えで決めてから、最初の段の時刻で期限を見る（期限で古い A40 だけが落ちて、送り直しが新しい段に
  * 見えることを防ぐ）。画面の付け替えの覚えは、付け替えた検査の分だけの統合（kind alias・origin screen）として受ける
- * （openspec/changes/add-study-value-correction/design.md の 2）
+ * （openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 2）
  */
 export function memory(rows: HistoryRow[]): { aliases: Alias[]; orders: Order[] } {
   const remembered = rows
@@ -329,7 +329,7 @@ export async function sweepArrivals(
 
 /**
  * 画面の患者 ID の付け替えの後に、付け替えの前の患者 ID・同じ StudyInstanceUID で届いた画像を、その検査がいまある患者へ
- * まとめる（openspec/changes/add-study-value-correction/design.md の 2）。画面の付け替えは1つの検査だけを移し、元の患者は
+ * まとめる（openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 2）。画面の付け替えは1つの検査だけを移し、元の患者は
  * 別の患者のままなので、A40 の統合の続き（患者 ID ごとの段）にはまとめず、検査（StudyInstanceUID）ごとに扱う。
  * - 期限は、その検査の最後の付け替えの受理から 24 時間（ほかの検査の古い付け替えに引きずられない）
  * - 付け替えの前の患者 ID は、その検査の期限の中の付け替えの元の患者 ID の全部（装置は最初の患者 ID のまま送る）
