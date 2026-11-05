@@ -884,6 +884,155 @@ test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を�
   await fresh.context.close();
 });
 
+/** インポートの試験の SOP Instance UID の頭（合成。見本の検査の UID は 64 字あり、後ろに足すと UI の上限 64 字を超える。PS3.5 6.2） */
+const IMPORT_UID = "1.2.826.0.1.3680043.8.498.9905";
+
+/** 試験のための合成の DICOM のファイル（PS3.10 の形。画素は入れない。値は合成で、実の患者のデータではない） */
+function dicomBytes(o: { sop: string; study: string; patientId: string }): Buffer {
+  const el = (group: number, element: number, vr: string, value: string) => {
+    let v = Buffer.from(value, "latin1");
+    if (v.length % 2) v = Buffer.concat([v, Buffer.from(vr === "UI" ? "\0" : " ", "latin1")]);
+    const head = Buffer.alloc(8);
+    head.writeUInt16LE(group, 0);
+    head.writeUInt16LE(element, 2);
+    head.write(vr, 4, "latin1");
+    head.writeUInt16LE(v.length, 6);
+    return Buffer.concat([head, v]);
+  };
+  const meta = Buffer.concat([
+    el(0x0002, 0x0002, "UI", "1.2.840.10008.5.1.4.1.1.7"),
+    el(0x0002, 0x0003, "UI", o.sop),
+    el(0x0002, 0x0010, "UI", "1.2.840.10008.1.2.1"),
+  ]);
+  const groupLength = Buffer.alloc(12);
+  groupLength.writeUInt16LE(0x0002, 0);
+  groupLength.writeUInt16LE(0x0000, 2);
+  groupLength.write("UL", 4, "latin1");
+  groupLength.writeUInt16LE(4, 6);
+  groupLength.writeUInt32LE(meta.length, 8);
+  return Buffer.concat([
+    Buffer.alloc(128),
+    Buffer.from("DICM", "latin1"),
+    groupLength,
+    meta,
+    el(0x0008, 0x0018, "UI", o.sop),
+    el(0x0008, 0x0020, "DA", "20260410"),
+    el(0x0008, 0x0060, "CS", "CT"),
+    el(0x0010, 0x0010, "PN", "SHIKEN^IMPORT"),
+    el(0x0010, 0x0020, "LO", o.patientId),
+    el(0x0020, 0x000d, "UI", o.study),
+    el(0x0020, 0x000e, "UI", `${o.sop.slice(0, o.sop.lastIndexOf("."))}`),
+    el(0x0020, 0x0011, "IS", "1"),
+    el(0x0020, 0x0013, "IS", o.sop.endsWith(".1") ? "1" : "2"),
+  ]);
+}
+
+// 段 6（段 5 の後に置く。段 5 で消した検査のファイルを入れ直す。モックの Orthanc は、見本の検査のファイルだけを受ける）
+test("段 6：インポートは左のナビから開き、選んだファイルを 1 件ずつ送り、行の札に成功・失敗・対象外を出す。入れた検査は一覧で「インポート」と分かる", async ({ browser }, testInfo) => {
+  test.setTimeout(120_000);
+  const fresh = await newPage(browser);
+  const { page } = fresh;
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await submitLogin(page, E2E_ADMIN.username, ADMIN_PASSWORD);
+  await expect(page).toHaveURL(/\/login\/totp$/);
+  const totp = page.getByRole("form", { name: "認証" });
+  await totp.getByLabel(/認証コード/).fill(await nextCode(adminSecret));
+  await totp.getByRole("button", { name: "認証" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  // 段 5 で消した検査（JP-TEST-0003）。同じ組の 2 つのファイルで入れ直す
+  const deleted = "1.2.826.0.1.3680043.8.498.74370219478963110549339491256573063606";
+  await expect(page.locator(`tr[data-study-uid="${deleted}"]`)).toHaveCount(0);
+
+  // 左のナビの業務の群の最後
+  const nav = page.getByRole("navigation", { name: "ページ" });
+  await nav.getByRole("link", { name: "インポート" }).click();
+  await expect(page).toHaveURL(/\/import$/);
+  await expect(page).toHaveTitle("インポート - tsunagi-dicom");
+  await expect(nav.getByRole("link", { name: "インポート" })).toHaveAttribute("aria-current", "page");
+  const picker = page.getByTestId("import");
+  await expect(picker.getByTestId("import-formbar")).toHaveText("ファイルを選択してください。");
+  await expect(picker.getByRole("button", { name: "インポート" })).toBeDisabled();
+
+  await page.getByTestId("import-files").setInputFiles([
+    { name: "IM0001", mimeType: "application/dicom", buffer: dicomBytes({ sop: `${IMPORT_UID}.1.1`, study: deleted, patientId: "JP-TEST-0003" }) },
+    { name: "IM0002", mimeType: "application/dicom", buffer: dicomBytes({ sop: `${IMPORT_UID}.1.2`, study: deleted, patientId: "JP-TEST-0003" }) },
+    // もう画像サーバーにある検査（消していない見本の検査）のファイル：BFF が断る
+    { name: "IM0003", mimeType: "application/dicom", buffer: dicomBytes({ sop: `${IMPORT_UID}.2.1`, study: STUDY, patientId: "JP-TEST-0004" }) },
+    { name: "memo.txt", mimeType: "text/plain", buffer: Buffer.from("DICOM ではないファイル") },
+  ]);
+  const rows = picker.getByTestId("import-row");
+  await expect(rows).toHaveCount(4);
+  await expect(picker.getByTestId("import-sum")).toContainText("4 件（対象外 1）");
+  await expect(picker.getByTestId("import-sum")).toContainText("選択 3 件");
+  // 対象外は一覧の上に、理由と札で残す（除外のボタンは無い）
+  await expect(rows.first()).toContainText("memo.txt");
+  await expect(rows.first()).toContainText("対象外");
+  await expect(rows.first()).toContainText("DICOM ファイルではありません");
+  await expect(rows.first().getByRole("button")).toHaveCount(0);
+  // ブラウザで読んだ頭の値を列に出す
+  const first = rows.filter({ hasText: "IM0001" });
+  await expect(first).toContainText("JP-TEST-0003");
+  await expect(first).toContainText("2026/04/10");
+  await expect(first).toContainText("S1 / I1");
+
+  // 除外と戻す：行に残り、焦点は同じ行のボタンに保つ
+  const third = rows.filter({ hasText: "IM0003" });
+  await third.getByRole("button", { name: "IM0003 を選択から除外" }).click();
+  await expect(third).toContainText("除外");
+  await expect(picker.getByTestId("import-sum")).toContainText("4 件（対象外 1・除外 1）");
+  await expect(third.getByRole("button", { name: "IM0003 を選択に戻す" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(picker.getByTestId("import-sum")).toContainText("選択 3 件");
+  await expect(third.getByRole("button", { name: "IM0003 を選択から除外" })).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("import-1280-selected.png"), fullPage: true });
+
+  // インポート：選んだ順に 1 件ずつ送る。同じ組の ID・何番目か・件数を付ける
+  const posts: Array<{ index: string | null; total: string | null; batch: string | null }> = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && new URL(r.url()).pathname === "/api/import") {
+      posts.push({ index: r.headers()["x-import-index"] ?? null, total: r.headers()["x-import-total"] ?? null, batch: r.headers()["x-import-batch"] ?? null });
+    }
+  });
+  await picker.getByRole("button", { name: "インポート" }).click();
+  const result = picker.getByTestId("import-result");
+  await expect(result).toHaveText(
+    "選択 3 件のうち 2 件をインポートしました。1 件は失敗しました（理由は各行の状態）。失敗したファイルを選び直して、もう一度インポートしてください。",
+  );
+  await expect(result).toHaveAttribute("role", "alert");
+  await expect(picker.getByTestId("import-formbar")).toHaveText("選択 3 件 → 成功 2・失敗 1");
+  expect(posts.map((p) => [p.index, p.total])).toEqual([["1", "3"], ["2", "3"], ["3", "3"]]);
+  expect(new Set(posts.map((p) => p.batch)).size).toBe(1);
+  // 失敗が一覧の先頭。理由は BFF の誤りの最初の 1 文
+  await expect(rows.first()).toContainText("IM0003");
+  await expect(rows.first()).toContainText("失敗");
+  await expect(rows.first()).toContainText("同じ画像または検査がもう画像サーバーにあります");
+  await expect(rows.filter({ hasText: "IM0001" })).toContainText("成功");
+  await expect(rows.filter({ hasText: "IM0002" })).toContainText("成功");
+  // 終わった後は除外・戻すを出さず、「続けて選択」へ焦点を移す
+  await expect(picker.getByRole("button", { name: /を選択から除外$/ })).toHaveCount(0);
+  await expect(picker.getByRole("button", { name: "続けて選択" })).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("import-1280-done.png"), fullPage: true });
+
+  // 同じファイルを入れ直すと、BFF が断る（取り込み直しで中身を置き換えない）
+  await picker.getByRole("button", { name: "続けて選択" }).click();
+  await expect(picker.getByRole("button", { name: "ファイルを選択" })).toBeFocused();
+  await page.getByTestId("import-files").setInputFiles([
+    { name: "IM0001", mimeType: "application/dicom", buffer: dicomBytes({ sop: `${IMPORT_UID}.1.1`, study: deleted, patientId: "JP-TEST-0003" }) },
+  ]);
+  await expect(picker.getByRole("button", { name: "インポート" })).toBeEnabled();
+  await picker.getByRole("button", { name: "インポート" }).click();
+  await expect(picker.getByTestId("import-formbar")).toHaveText("選択 1 件 → 成功 0・失敗 1");
+  await expect(rows.first()).toContainText("同じ画像または検査がもう画像サーバーにあります");
+
+  // 入れた検査は、検査一覧に戻り、「インポート」の印で分かる
+  await nav.getByRole("link", { name: "検査一覧" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator(`tr[data-study-uid="${deleted}"]`).getByTestId("study-imported")).toHaveText(/インポート/);
+  expect((await (await page.request.get("/api/audit/verify")).json()).ok).toBe(true);
+  await fresh.context.close();
+});
+
 test("画面のロック：ロックの画面からログアウトでき、確認の窓を挟む。前の利用者の情報は画面に残らず、監査の記録の鎖は保たれる", async ({ browser }) => {
   test.setTimeout(120_000);
   const fresh = await newPage(browser);

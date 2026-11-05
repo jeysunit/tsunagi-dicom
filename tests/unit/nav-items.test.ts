@@ -48,6 +48,14 @@ describe("左のナビの項目", () => {
     expect(withSent[0]!.items.at(-1)).toMatchObject({ href: "/sent", icon: "sent" });
   });
 
+  it("インポート（段 6）：許されたときだけ、業務の群の最後に出る", () => {
+    const base = { canManageUsers: false, canEditViewerDefaults: false, account: false, canViewReceived: true, canViewSent: true };
+    const withImport = buildNavGroups({ ...base, canImport: true });
+    expect(labels(withImport)[0]).toEqual(["業務", ["検査一覧", "受信一覧", "送信一覧", "インポート"]]);
+    expect(withImport[0]!.items.at(-1)).toMatchObject({ href: "/import", icon: "import" });
+    expect(labels(buildNavGroups(base))[0]).toEqual(["業務", ["検査一覧", "受信一覧", "送信一覧"]]);
+  });
+
   it("今いる頁：検査一覧（/）は完全に一致したときだけ、ほかは下の道も含める", () => {
     expect(isCurrent("/", "/")).toBe(true);
     expect(isCurrent("/received", "/")).toBe(false);
