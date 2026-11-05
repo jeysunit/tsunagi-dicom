@@ -290,8 +290,8 @@ export async function GET(request: Request) {
           );
         }
         if (checked.kind === "ok") {
-          // 成功を足してから印を付ける（管理者が先に解いていれば、足さず、印も付けない）。照らし合わせの行には、印を付けたかを
-          // 入れない（付ける前に足すため。付けたかは答えで返す）
+          // 成功を足してから印を付ける（管理者が先に解いていれば、足さず、印も付けない）。付けたか（付けた・付けられなかった）は、
+          // 要求の結果を変えない別の行（phase が label）に残す。行が無ければ、付ける前に止まった
           const added = await settle({
             outcome: "success",
             patientId: file.patientId,
@@ -299,6 +299,13 @@ export async function GET(request: Request) {
           });
           if (!added) return settled();
           const labeled = await label(backend, found.orthancStudyId);
+          await audit(session, {
+            action: "import",
+            outcome: labeled ? "success" : "failed",
+            patientId: file.patientId,
+            studyInstanceUid: uid,
+            detail: { ...reconcileDetail, phase: "label", orthancStudyId: found.orthancStudyId, labeled },
+          }).catch(() => console.error(JSON.stringify({ event: "import_label_not_recorded", requestId })));
           return Response.json({ requestId, outcome: "stored", studyInstanceUid: uid, reconciled: true, labeled });
         }
       }

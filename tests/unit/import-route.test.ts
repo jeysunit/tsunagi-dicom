@@ -663,8 +663,25 @@ describe("インポート", () => {
       ["dispatch", "success"],
       ["result", "unknown"],
       ["reconcile", "success"],
+      // 成功を足した後に印を付け、付けたかを別の行に残す
+      ["label", "success"],
     ]);
     expect(await listed(STUDY)).toMatchObject({ imported: true });
+  });
+
+  it("結果不明を照らして成功を足した後に印を付けられなければ、付けられなかったことを別の行に残す（要求は成功のまま）", async () => {
+    await removeStudy(STUDY);
+    const { simulateMockImport } = await import("@/lib/backend/mock");
+    simulateMockImport({ unknown: true });
+    const requestId = crypto.randomUUID();
+    await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }), requestId);
+    simulateMockImport({});
+    vi.spyOn(await backend(), "labelImported").mockRejectedValueOnce(new Error("ラベルを付けられない（試験）"));
+    expect(await (await status(requestId)).json()).toMatchObject({ requestId, outcome: "stored", reconciled: true, labeled: false });
+    const last = (await rowsOf(requestId)).at(-1);
+    expect(last).toMatchObject({ outcome: "failed" });
+    expect(detailOf(last)).toMatchObject({ phase: "label", labeled: false, orthancStudyId: expect.any(String) });
+    expect(await (await status(requestId)).json()).toMatchObject({ outcome: "stored", repeated: true });
   });
 
   it("結果不明を照らして、Orthanc の値がファイルの値と違っても、見つけた画像は消さずに結果不明のまま残す", async () => {
