@@ -53,6 +53,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           canViewReceived: can(state.session.role, "receive.view"),
           canViewSent: can(state.session.role, "send.view"),
           canCheckModalities: can(state.session.role, "modality.check"),
+          // 書き込みを止めた検証モードでは、書き込みだけの頁の道を出さない（送信のボタンを出さないのと同じ）
+          canImport: can(state.session.role, "study.import") && (config.auth.mode !== "dev" || !!config.auth.devAllowWrite),
         })
       : undefined;
   // 本文は左寄せで幅いっぱい。幅を絞る型（設定・ログイン）は頁の側で包む（docs/design-system/parts.md の「外枠」）

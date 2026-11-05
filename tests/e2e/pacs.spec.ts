@@ -320,3 +320,17 @@ test("検証モードで書き込みを止めているときは、送るのボ�
   expect(res.status()).toBe(403);
   expect((await res.json()).error).toContain("検証モードでは書き込みが無効です");
 });
+
+test("検証モードで書き込みを止めているときは、インポートの道をナビに出さず、頁は部品を出さず、インポートの要求も断る", async ({ page }) => {
+  await asRole(page, "一般");
+  await expect(page.getByRole("navigation", { name: "ページ" }).getByRole("link", { name: "インポート" })).toHaveCount(0);
+  await page.goto("/import");
+  await expect(page.getByTestId("import-disabled")).toHaveText("書き込みが無効のため、インポートできません。");
+  await expect(page.getByTestId("import")).toHaveCount(0);
+  const res = await page.request.post("/api/import", {
+    data: Buffer.from("x"),
+    headers: { origin: "http://127.0.0.1:3100", "x-request-id": crypto.randomUUID(), "content-type": "application/dicom" },
+  });
+  expect(res.status()).toBe(403);
+  expect((await res.json()).error).toContain("検証モードでは書き込みが無効です");
+});
