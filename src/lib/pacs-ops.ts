@@ -78,6 +78,20 @@ export async function unresolvedRequests(
  */
 export const DELETE_DISPATCH_DEADLINE_MS = 2 * 60_000;
 
+/**
+ * 取り込み：「求めた」を記録してから Orthanc へ送るまでの上限の時間。送る直前の確かめ（「送る」の行 dispatch を足す）で、
+ * これを過ぎた要求は送らずに失敗（stale）とする（止まっていた処理が、後から送り出さない）
+ */
+export const IMPORT_DISPATCH_DEADLINE_MS = 2 * 60_000;
+
+/**
+ * 取り込み：「求めた」を記録してから、結果の行を書き終えるまでの上限の時間の見込み。Orthanc へ送る時間切れ（5 分。
+ * src/lib/backend/http.ts の IMPORT_TIMEOUT_MS）・保存した値の読み直し・違ったときに消す時間を足して余裕を見た値。
+ * 結果の行が無い要求は、これを過ぎるまで管理者も手で解かない（元の処理がまだ動いているかもしれない）。
+ * 送る前の要求は、これより前に IMPORT_DISPATCH_DEADLINE_MS を過ぎるので、解いた後に送り出すことはない
+ */
+export const IMPORT_SETTLE_MS = 10 * 60_000;
+
 export interface RequestRow {
   actorId: string;
   outcome: string;
