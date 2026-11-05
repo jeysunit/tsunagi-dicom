@@ -134,29 +134,33 @@ export function formbarText(phase: PickPhase, c: PickCounts): string {
  * 結果不明の行の文（docs/design-system/writing.md の「結果不明」：分からないこと＋確かめる人＋それまで何ができないか。
  * 成功とも失敗とも書かない）。0 件なら空
  */
-function unknownText(c: PickCounts): string {
+function unknownText(c: PickCounts, help: string): string {
   return c.unknown
-    ? `${formatCount(c.unknown)} 件はインポートできたか分かりません。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。`
+    ? `${formatCount(c.unknown)} 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。${help}`
     : "";
 }
 
-/** 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗か結果不明があるとき */
-export function resultNotice(c: PickCounts): { kind: "ok" | "warn" | "err"; text: string; alert: boolean } {
+/** 結果不明の文の最後に添える、確かめを頼む先（管理者でない利用者に出す。管理者には空を渡す） */
+export const UNKNOWN_HELP = "管理者に確かめを頼んでください。";
+
+/**
+ * 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗か結果不明があるとき。
+ * 失敗の文は「理由は各行の状態」で止める（理由が「もう画像サーバーにある」のときは、選び直しても入らないため）
+ */
+export function resultNotice(c: PickCounts, unknownHelp = UNKNOWN_HELP): { kind: "ok" | "warn" | "err"; text: string; alert: boolean } {
   const trouble = c.ng > 0 || c.unknown > 0;
   if (c.cancelled) {
     return {
       kind: trouble ? "err" : "warn",
-      text: `${formatCount(c.ok)} 件をインポートしました。残り ${formatCount(c.cancelled)} 件は中止したためインポートしていません。${c.ng ? `${formatCount(c.ng)} 件は失敗しました。` : ""}${unknownText(c)}`,
+      text: `${formatCount(c.ok)} 件をインポートしました。残り ${formatCount(c.cancelled)} 件は中止したためインポートしていません。${c.ng ? `${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。` : ""}${unknownText(c, unknownHelp)}`,
       alert: trouble,
     };
   }
   if (trouble) {
-    const failed = c.ng
-      ? `${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。失敗したファイルを選び直して、もう一度インポートしてください。`
-      : "";
+    const failed = c.ng ? `${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。` : "";
     return {
       kind: "err",
-      text: `選択 ${formatCount(c.selected)} 件のうち ${formatCount(c.ok)} 件をインポートしました。${failed}${unknownText(c)}`,
+      text: `選択 ${formatCount(c.selected)} 件のうち ${formatCount(c.ok)} 件をインポートしました。${failed}${unknownText(c, unknownHelp)}`,
       alert: true,
     };
   }

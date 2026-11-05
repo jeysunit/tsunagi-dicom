@@ -119,6 +119,7 @@ export function FilePicker({
   importFile,
   title = "インポート",
   testId = "file-picker",
+  unknownHelp,
 }: {
   /** 1 件の大きさの上限（バイト）。超えたものは対象外にする（受け手も確かめる） */
   limitBytes: number;
@@ -126,6 +127,8 @@ export function FilePicker({
   importFile: (file: File, at: { index: number; total: number }) => Promise<ImportOutcome>;
   title?: string;
   testId?: string;
+  /** 結果不明の知らせの最後の 1 文（確かめを頼む先）。初期値は「管理者に確かめを頼んでください。」。管理者には空を渡す */
+  unknownHelp?: string;
 }) {
   const titleId = useId();
   const progressId = useId();
@@ -341,7 +344,7 @@ export function FilePicker({
   const busy = phase === "busy";
   const c = countItems(items);
   const done = c.ok + c.ng + c.unknown;
-  const notice = phase === "done" ? resultNotice(c) : null;
+  const notice = phase === "done" ? resultNotice(c, unknownHelp) : null;
   const showDrop = items.length === 0 || idle;
 
   return (
@@ -488,7 +491,7 @@ export function FilePicker({
                           <StatusBadge kind={badge.kind} className={BADGE_TEXT[badge.kind]}>
                             {badge.label}
                           </StatusBadge>
-                          {item.reason && !item.off && <CellSub>{item.reason}</CellSub>}
+                          {item.reason && !item.off && <CellSub className="[word-break:auto-phrase]">{item.reason}</CellSub>}
                         </TableCell>
                         <TableCell className="op w-[72px] text-right">
                           {idle && item.state !== "ex" && (
