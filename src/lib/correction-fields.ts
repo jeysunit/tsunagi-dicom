@@ -1,5 +1,5 @@
 // 患者・検査の値の修正（docs/spec.md の 3.5。段 6）で直せる項目と、値の形の確かめ。画面と BFF の両方で使う。
-// 値の修正は2種類に分ける（openspec/changes/add-study-value-correction/design.md の 1）。
+// 値の修正は2種類に分ける（openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 1）。
 // - 属性の訂正（attribute）：患者 ID・氏名・生年月日・性別・受付番号。UID を保つ。直す範囲で3つに分ける。
 //   - patient：氏名・生年月日・性別。同じ患者 ID の全部の検査に当てる
 //   - reassign：患者 ID の付け替え。選んだ1つの検査だけ（氏名・生年月日・性別を添えてよい。替え先の患者があれば、その値にそろえる）

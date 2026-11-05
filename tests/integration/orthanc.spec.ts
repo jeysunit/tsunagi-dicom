@@ -1302,7 +1302,7 @@ test("21 HL7 A40：書き換えた画像が元を消す前に REST で同じ UID
   expect((await orthanc(`studies/${oldId}/metadata/TsunagiLock`)).status).toBe(404);
 });
 
-// ── 段 6：患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/add-study-value-correction） ──
+// ── 段 6：患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction） ──
 
 /** 管理者でログインし直し、再認証（パスワード）を済ませて、画面の書き込みの API を呼ぶ形を返す */
 async function correctionSession(browser: Browser) {

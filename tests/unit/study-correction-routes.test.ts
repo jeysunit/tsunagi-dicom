@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 6 の患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/add-study-value-correction）を、検証モード
+// 段 6 の患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction）を、検証モード
 // （AUTH_MODE=dev。モックの Orthanc）のセッションから通して確かめる。属性の訂正（患者情報修正）は UID を保ち、
 // 中身の訂正（検査情報修正）は新しい UID の検査を作る。混ぜた要求・値の形・役割・理由・確かめの token・監査の記録・
 // 結果不明と部分反映・HL7 の書き換えとの組み合わせを見る。再認証（AUTH_MODE=local）は tests/e2e で見る。

@@ -1,4 +1,4 @@
--- tsunagi-dicom：患者 ID の付け替えの最中の検査へ届く C-STORE を断る（openspec/changes/add-pir-case6-procedure-update/design.md §15.4）。
+-- tsunagi-dicom：患者 ID の付け替えの最中の検査へ届く C-STORE を断る（openspec/changes/archive/2026-11-05-add-pir-case6-procedure-update/design.md §15.4）。
 --
 -- tsunagi-dicom は付け替えの前に、元の検査へ利用者のメタデータ TsunagiLock（期限の UNIX 秒）を付け、終わったら外す。
 -- 届いた画像の StudyInstanceUID の検査のどれかに、期限の切れていない印があれば、C-STORE を 0xA700 で断る。

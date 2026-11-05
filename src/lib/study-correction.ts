@@ -14,7 +14,7 @@ import {
 } from "@/lib/keep-uid-write";
 import { visible } from "../../hl7-receiver/visible";
 
-// 患者・検査の値の修正（docs/spec.md の 3.5。段 6。openspec/changes/add-study-value-correction/design.md）の、
+// 患者・検査の値の修正（docs/spec.md の 3.5。段 6。openspec/changes/archive/2026-11-05-add-study-value-correction/design.md）の、
 // 直す検査を Orthanc から読む部分と、書き換えの段取りを作る部分。道（src/app/api/studies/[uid]/modify）が使う。
 // 確かめの画面（preview）と実行の両方が同じ読み方をし、見せた状態の印（state）で、確かめの後に検査が変わっていないかを照らす。
 

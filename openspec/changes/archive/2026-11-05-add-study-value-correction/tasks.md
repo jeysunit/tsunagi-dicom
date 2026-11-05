@@ -43,8 +43,8 @@
 
 ## 7. 後の PR に残したこと
 
-- [ ] 7.1 置き換えた画像の受信の記録（受信の日時・送信元 AE・`Origin`）が書き換えの時の値になる。受信一覧で前の受信を出し続けるか、インポートの印の判別を変えるかを決める（`docs/spec.md` の 3.5）
+- [x] 7.1 置き換えた画像の受信の記録（受信の日時・送信元 AE・`Origin`）が書き換えの時の値になる。受信一覧は書き換えの後の値をそのまま出し、直した検査に「インポート」の印が付く。この挙動を `docs/spec.md` の 3.5 に今の挙動として書いた。前の受信を出し続ける形、印の判別の変更は、仕様に含めていない
 
 ## Workflow follow-up
 
-- 実装の PR のレビューの後に、この change を archive する
+- 2026-11-05 に archive した（`openspec/changes/archive/2026-11-05-add-study-value-correction`。spec は `openspec/specs/study-value-correction` に反映）
