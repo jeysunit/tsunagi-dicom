@@ -11,6 +11,8 @@ import { testDatabases } from "./helpers/test-db";
 const state = vi.hoisted(() => ({
   role: undefined as string | undefined,
   config: undefined as AppConfig | undefined,
+  /** 記録を書く前（auditIf・audit が headers を読むとき）に呼ぶ。処理を途中で止める試験に使う */
+  beforeRecord: undefined as (() => Promise<void>) | undefined,
 }));
 
 vi.mock("next/headers", async () => {
@@ -23,7 +25,10 @@ vi.mock("next/headers", async () => {
           : undefined,
       set: () => undefined,
     }),
-    headers: async () => new Headers(),
+    headers: async () => {
+      await state.beforeRecord?.();
+      return new Headers();
+    },
   };
 });
 
@@ -61,6 +66,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   state.role = "general";
+  state.beforeRecord = undefined;
   state.config!.auth.devAllowWrite = true;
   vi.restoreAllMocks();
   const { restoreMockStudies, simulateMockImport } = await import("@/lib/backend/mock");
@@ -212,6 +218,84 @@ describe("インポートの結果不明を管理者が手で解く", () => {
     expect((await rowsOf(requestId)).at(-1)).toMatchObject({ outcome: "success" });
     // Orthanc には書き込みを求めない（印も付けない）
     expect(label).not.toHaveBeenCalled();
+  });
+
+  /** 「求めた」を記録した後、Orthanc へ送る前（「送る」の行を足す前）で、その要求の処理を止めておく */
+  async function pausedBeforeDispatch(file: Uint8Array) {
+    const requestId = crypto.randomUUID();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const atGate = new Promise<void>((r) => (reached = r));
+    let paused = false;
+    state.beforeRecord = async () => {
+      if (paused) return;
+      const phases = (await rowsOf(requestId)).map((r) => detailOf(r).phase);
+      if (phases.includes("request") && !phases.includes("dispatch")) {
+        paused = true;
+        reached();
+        await gate;
+      }
+    };
+    const answer = post(file, requestId);
+    await atGate;
+    return { requestId, answer, release };
+  }
+
+  it("並べて走らせる：送る前に止まっていた要求は、管理者が解いた後に動き出しても Orthanc へ送らない（後から入れた画像を置き換えない）", async () => {
+    await removeStudy(STUDY);
+    const sopUid = nextSop();
+    const file = dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: sopUid, patientId: PATIENT });
+    const send = vi.spyOn(await backend(), "importInstance");
+    const { requestId, answer, release } = await pausedBeforeDispatch(file);
+    state.role = "admin";
+    // 決めた時間の中は、処理中として解かない
+    expect((await resolve(STUDY, { requestId, outcome: "failed", note: "試験" })).status).toBe(409);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      expect(await (await resolve(STUDY, { requestId, outcome: "failed", note: "試験：止まった処理を片付ける" })).json()).toEqual({
+        requestId,
+        outcome: "failed",
+        instancePresent: false,
+      });
+      // 解いた後に、同じ画像を新しい要求で入れ直す
+      const again = await post(file);
+      expect(again.status).toBe(200);
+      expect(send).toHaveBeenCalledTimes(1);
+      // 止まっていた元の処理が動き出しても、送らずに断る
+      release();
+      const res = await answer;
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain("ほかで解除された");
+      expect(send).toHaveBeenCalledTimes(1);
+      expect((await rowsOf(requestId)).map((r) => detailOf(r).phase)).toEqual(["request", "reconcile"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("並べて走らせる：送る前に決めた時間を過ぎた要求は、Orthanc へ送らずに失敗（stale）とする", async () => {
+    const STUDY_STALE = "1.2.826.0.1.3680043.8.498.45255015335478509141706689498950755880";
+    await removeStudy(STUDY_STALE);
+    const send = vi.spyOn(await backend(), "importInstance");
+    const { requestId, answer, release } = await pausedBeforeDispatch(
+      dicomFile({ studyInstanceUid: STUDY_STALE, sopInstanceUid: nextSop(), patientId: "JP-TEST-0001" }),
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 3 * 60_000);
+      release();
+      const res = await answer;
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain("時間切れ");
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(send).not.toHaveBeenCalled();
+    const last = (await rowsOf(requestId)).at(-1);
+    expect(last).toMatchObject({ outcome: "failed" });
+    expect(detailOf(last)).toMatchObject({ phase: "result", refused: "stale" });
   });
 
   it("画像が Orthanc に無ければ「成功」として記録しない（「失敗」としては解ける）", async () => {

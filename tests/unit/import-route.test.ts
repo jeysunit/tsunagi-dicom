@@ -155,8 +155,10 @@ describe("インポート", () => {
     expect(await res.json()).toEqual({ requestId, outcome: "stored", studyInstanceUid: STUDY, labeled: true });
 
     const rows = await rowsOf(requestId);
+    // 送る直前に「送る」の行（dispatch）を足す（管理者が手で解いた後に送り出さないため）
     expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
+      ["dispatch", "success"],
       ["result", "success"],
     ]);
     expect(rows[0]).toMatchObject({ actorRole: "general", patientId: PATIENT, studyInstanceUid: STUDY });
@@ -166,7 +168,7 @@ describe("インポート", () => {
       transferSyntaxUid: "1.2.840.10008.1.2.1",
       batch: { id: batch, index: 1, total: 3 },
     });
-    expect(detailOf(rows[1])).toMatchObject({ status: "Success", labeled: true, orthancInstanceId: expect.any(String) });
+    expect(detailOf(rows[2])).toMatchObject({ status: "Success", labeled: true, orthancInstanceId: expect.any(String) });
     expect(await listed(STUDY)).toMatchObject({ imported: true });
     const studies = await listAll();
     expect(studies.filter((s) => s.imported).map((s) => s.studyInstanceUid)).toEqual([STUDY]);
@@ -338,16 +340,17 @@ describe("インポート", () => {
     // 消す前に「消す」の行（要求は解けていないまま）、消えたと読めてから失敗の結果
     expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
+      ["dispatch", "success"],
       ["cleanup_request", "unknown"],
       ["result", "failed"],
     ]);
-    expect(detailOf(rows[1])).toMatchObject({
+    expect(detailOf(rows[2])).toMatchObject({
       reason: "stored_mismatch",
       mismatched: ["patientId"],
       stored: { patientId: "JP-TEST-0099", studyInstanceUid: STUDY, studies: 1 },
       orthancInstanceId: expect.any(String),
     });
-    expect(detailOf(rows[2])).toMatchObject({ reason: "stored_mismatch", cleanup: "removed", orthancInstanceId: detailOf(rows[1]).orthancInstanceId });
+    expect(detailOf(rows[3])).toMatchObject({ reason: "stored_mismatch", cleanup: "removed", orthancInstanceId: detailOf(rows[2]).orthancInstanceId });
     // 入れた画像は消え、印も付けない
     expect(await b.findInstanceStudy(sopUid)).toBeNull();
     expect(await listed(STUDY)).toBeUndefined();
@@ -386,6 +389,7 @@ describe("インポート", () => {
     expect(await res.json()).toMatchObject({ outcome: "unknown", removed: false });
     expect((await rowsOf(requestId)).map((r) => [detailOf(r).phase, r.outcome, detailOf(r).cleanup])).toEqual([
       ["request", "success", undefined],
+      ["dispatch", "success", undefined],
       ["cleanup_request", "unknown", undefined],
       ["result", "unknown", "unknown"],
     ]);
@@ -622,6 +626,7 @@ describe("インポート", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect((await rowsOf(requestId)).map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
+      ["dispatch", "success"],
       ["result", "failed"],
     ]);
   });
@@ -655,6 +660,7 @@ describe("インポート", () => {
     expect(await checked.json()).toMatchObject({ requestId, outcome: "stored", reconciled: true, labeled: true });
     expect((await rowsOf(requestId)).map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
+      ["dispatch", "success"],
       ["result", "unknown"],
       ["reconcile", "success"],
     ]);
@@ -685,6 +691,7 @@ describe("インポート", () => {
     expect(label).not.toHaveBeenCalled();
     expect((await rowsOf(requestId)).map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
+      ["dispatch", "success"],
       ["result", "unknown"],
     ]);
     expect(await b.findInstanceStudy(sopUid)).not.toBeNull();

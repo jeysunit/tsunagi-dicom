@@ -9,7 +9,7 @@ import { BackendError, BackendUnknownError, type Backend } from "@/lib/backend/t
 import { getConfig } from "@/lib/config";
 import { getDb, type Db } from "@/lib/db";
 import { DicomFileError, readDicomFileHeader, type DicomFileHeader } from "@/lib/dicom-file";
-import { assertWriteAllowed, clip, isRequestId, isUnresolved, requestOutcome, rowsOfRequest, unresolvedRequests, type RequestRow } from "@/lib/pacs-ops";
+import { IMPORT_DISPATCH_DEADLINE_MS, assertWriteAllowed, clip, isRequestId, isUnresolved, requestOutcome, rowsOfRequest, unresolvedRequests, type RequestRow } from "@/lib/pacs-ops";
 import { can } from "@/lib/auth/roles";
 import { pendingAttribute, pendingContent } from "../studies/[uid]/modify/shared";
 import { cleanupTarget, parse, requestFile } from "./shared";
@@ -31,6 +31,7 @@ import { cleanupTarget, parse, requestFile } from "./shared";
 // （見つけた画像が、この要求の入れた画像とは言えないため）。結果不明のまま管理者の確かめに残す。照らすのは、求めた本人と
 // 照らし合わせの役割（管理者）。管理者は、Orthanc の側で確かめた結果を、/api/studies/{uid}/import/resolve で名指しして解く。
 // 引き当てと「求めた」の記録の間に、並んで届いた別の要求の ID の同じ画像・検査の取り込みは、記録の並びの中で見つけて断る。
+// Orthanc へ送る直前に「送る」の行（dispatch）を足す。管理者に解かれた要求・決めた時間を過ぎた要求は送らない。
 
 const header = (request: Request, name: string) => request.headers.get(name) ?? "";
 
@@ -147,6 +148,29 @@ export async function POST(request: Request) {
 
     const result = (outcome: "success" | "failed" | "unknown", extra: Record<string, unknown> = {}) =>
       audit(session, { action: "import", outcome, patientId, studyInstanceUid: uid, detail: { ...detail, phase: "result", ...extra } });
+
+    // Orthanc へ送る直前に、記録の並びの中で、自分の要求がまだ有効か（管理者に解かれていない・決めた時間の中）を確かめ、
+    // 「送る」の行（dispatch）を足す。止まっていた処理が、解かれた後や決めた時間の後に送り出して、後から入れた画像を
+    // 置き換えないため（削除と同じ。管理者が手で解けるのは、決めた時間を過ぎてから）
+    type Dispatch = "go" | "settled" | "stale";
+    const dispatch = await auditIf<Dispatch>(session, async (tx) => {
+      const o = requestOutcome(await rowsOfRequest(tx, "import", requestId, uid));
+      if (o.phase !== "requested" || o.dispatched) return { value: "settled", fields: null };
+      const age = o.requestedAt ? Date.now() - o.requestedAt.getTime() : Infinity;
+      if (age > IMPORT_DISPATCH_DEADLINE_MS) {
+        return {
+          value: "stale",
+          fields: { action: "import", outcome: "failed", patientId, studyInstanceUid: uid, detail: { ...detail, phase: "result", refused: "stale" } },
+        };
+      }
+      return { value: "go", fields: { action: "import", outcome: "success", patientId, studyInstanceUid: uid, detail: { ...detail, phase: "dispatch" } } };
+    });
+    if (dispatch === "settled") {
+      return Response.json({ requestId, error: "このインポートは送る前にほかで解除されたため、中止しました（管理者が解除したなど）" }, { status: 409 });
+    }
+    if (dispatch === "stale") {
+      return Response.json({ requestId, error: "時間切れのためインポートを中止しました。もう一度インポートしてください" }, { status: 409 });
+    }
 
     let stored: Awaited<ReturnType<typeof backend.importInstance>>;
     try {
