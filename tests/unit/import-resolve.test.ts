@@ -298,6 +298,42 @@ describe("インポートの結果不明を管理者が手で解く", () => {
     expect(detailOf(last)).toMatchObject({ phase: "result", refused: "stale" });
   });
 
+  it("並べて走らせる：状態の確認が照らしている間に管理者が解いたら、状態の確認は成功を足さず、印も付けない", async () => {
+    await removeStudy(STUDY_MISMATCH);
+    const { simulateMockImport } = await import("@/lib/backend/mock");
+    simulateMockImport({ unknown: true });
+    const requestId = crypto.randomUUID();
+    await post(dicomFile({ studyInstanceUid: STUDY_MISMATCH, sopInstanceUid: nextSop(), patientId: "JP-TEST-0001" }), requestId);
+    simulateMockImport({});
+    // 状態の確認を、Orthanc が保存した値を読むところで止める
+    const b = await backend();
+    const real = b.studyInfo.bind(b);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const atGate = new Promise<void>((r) => (reached = r));
+    vi.spyOn(b, "studyInfo").mockImplementationOnce(async (id) => {
+      reached();
+      await gate;
+      return real(id);
+    });
+    const label = vi.spyOn(b, "labelImported");
+    const checking = status(requestId);
+    await atGate;
+    state.role = "admin";
+    expect((await resolve(STUDY_MISMATCH, { requestId, outcome: "failed", note: "試験：ほかの道で届いた画像と確かめた" })).status).toBe(200);
+    release();
+    expect(await (await checking).json()).toMatchObject({ requestId, outcome: "failed", repeated: true });
+    expect(label).not.toHaveBeenCalled();
+    const rows = await rowsOf(requestId);
+    expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
+      ["request", "success"],
+      ["dispatch", "success"],
+      ["result", "unknown"],
+      ["reconcile", "failed"],
+    ]);
+  });
+
   it("画像が Orthanc に無ければ「成功」として記録しない（「失敗」としては解ける）", async () => {
     state.role = "admin";
     const requestId = await recordedImport(["request", "result"]);

@@ -1536,11 +1536,12 @@ test("26 インポート：DICOM のファイルを BFF から Orthanc へ入れ
     expect(listed.studies.find((s) => s.studyInstanceUid === study.studyInstanceUid)).toMatchObject({ imported: true });
     expect(listed.studies.find((s) => s.studyInstanceUid === A.studyInstanceUid)).toMatchObject({ imported: false });
     const rows = readAudit().filter((r) => r.action === "import" && r.detail.requestId === answers[0]!.requestId);
-    expect(rows.map((r) => `${r.detail.phase}:${r.outcome}`)).toEqual(["request:success", "result:success"]);
+    // 送る直前に「送る」の行（dispatch）を足す（管理者が手で解いた後に送り出さないため）
+    expect(rows.map((r) => `${r.detail.phase}:${r.outcome}`)).toEqual(["request:success", "dispatch:success", "result:success"]);
     expect(rows[0]).toMatchObject({ studyInstanceUid: study.studyInstanceUid });
     expect(rows[0]!.detail).toMatchObject({ sopInstanceUid: expect.any(String), bytes: files[0]!.length });
     // 結果の行には、Orthanc が保存した値と照らした後の、画像と検査の Orthanc の ID が残る
-    expect(rows[1]!.detail).toMatchObject({ status: "Success", orthancStudyId: newId, orthancInstanceId: expect.any(String), labeled: true });
+    expect(rows[2]!.detail).toMatchObject({ status: "Success", orthancStudyId: newId, orthancInstanceId: expect.any(String), labeled: true });
   } finally {
     await fresh.context.close();
   }

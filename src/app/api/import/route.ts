@@ -244,6 +244,14 @@ export async function GET(request: Request) {
       const file = requestFile(rows);
       const backend = getBackend();
       const reconcileDetail = file ? { requestId, ...(file.batch ? { batch: file.batch } : {}), sopInstanceUid: file.sopInstanceUid } : { requestId };
+      // 照らした結果は、記録の並びの中で、まだ解けていないことを確かめてから足す（照らしている間に管理者が手で解いた結果を
+      // 上書きしない）。解けていれば足さずに false
+      const settle = (fields: { outcome: "success" | "failed"; patientId: string | null; detail: Record<string, unknown> }) =>
+        auditIf<boolean>(session, async (tx) => {
+          if (!isUnresolved(requestOutcome(await rowsOfRequest(tx, "import", requestId, uid)))) return { value: false, fields: null };
+          return { value: true, fields: { action: "import", studyInstanceUid: uid, ...fields } };
+        });
+      const settled = async () => priorResponse(session, requestId, uid, await rowsOfRequest(db, "import", requestId, uid), undefined, true);
       // 保存した値が違って、入れた画像を消そうとした要求：消す画像（Orthanc の答えの画像の ID）を名指しで読み、もう無いと
       // 読めたときだけ失敗を足して解く（同じ SOP Instance UID のほかの画像には左右されない）。まだあれば（消せなかった・答えが
       // 分からない）、結果不明のまま管理者の確かめに残す（消し直さない）。読めなければ投げる（結果不明のまま）
@@ -255,13 +263,12 @@ export async function GET(request: Request) {
             { status: 202 },
           );
         }
-        await audit(session, {
-          action: "import",
+        const added = await settle({
           outcome: "failed",
           patientId: file?.patientId ?? null,
-          studyInstanceUid: uid,
           detail: { ...reconcileDetail, phase: "reconcile", reason: "stored_mismatch", cleanup: "removed", orthancInstanceId: cleanup },
         });
+        if (!added) return settled();
         return Response.json({ requestId, outcome: "failed", studyInstanceUid: uid, removed: true, reconciled: true });
       }
       const found = file ? await backend.findInstanceStudy(file.sopInstanceUid) : null;
@@ -283,20 +290,15 @@ export async function GET(request: Request) {
           );
         }
         if (checked.kind === "ok") {
-          const labeled = await label(backend, found.orthancStudyId);
-          await audit(session, {
-            action: "import",
+          // 成功を足してから印を付ける（管理者が先に解いていれば、足さず、印も付けない）。照らし合わせの行には、印を付けたかを
+          // 入れない（付ける前に足すため。付けたかは答えで返す）
+          const added = await settle({
             outcome: "success",
             patientId: file.patientId,
-            studyInstanceUid: uid,
-            detail: {
-              ...reconcileDetail,
-              phase: "reconcile",
-              orthancStudyId: found.orthancStudyId,
-              orthancInstanceId: found.instanceId,
-              labeled,
-            },
+            detail: { ...reconcileDetail, phase: "reconcile", orthancStudyId: found.orthancStudyId, orthancInstanceId: found.instanceId },
           });
+          if (!added) return settled();
+          const labeled = await label(backend, found.orthancStudyId);
           return Response.json({ requestId, outcome: "stored", studyInstanceUid: uid, reconciled: true, labeled });
         }
       }
