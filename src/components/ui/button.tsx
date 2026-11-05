@@ -30,6 +30,8 @@ const buttonVariants = cva(
         ghost: "border-transparent bg-transparent text-foreground not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
         // 取り消せない操作の実行のボタン（.btn-danger.fill。確認の窓の実行だけ）。hover と押している間は地を暗くする
         danger: "border-danger bg-danger font-bold text-danger-foreground not-disabled:hover:brightness-90 not-disabled:active:brightness-75",
+        // 危険（.btn-danger。枠と字 danger、地は塗らない）。インポート中の「中止」など、確認の窓を開くボタン
+        "danger-outline": "border-danger bg-background font-bold text-danger not-disabled:hover:bg-hover not-disabled:active:bg-pressed",
       },
       size: {
         default: "h-8 min-w-16 px-3",
