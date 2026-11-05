@@ -997,7 +997,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await picker.getByRole("button", { name: "インポート" }).click();
   const result = picker.getByTestId("import-result");
   await expect(result).toHaveText(
-    "選択 3 件のうち 2 件をインポートしました。1 件は失敗しました（理由は各行の状態）。失敗したファイルを選び直して、もう一度インポートしてください。",
+    "選択 3 件のうち 2 件をインポートしました。1 件は失敗しました（理由は各行の状態）。",
   );
   await expect(result).toHaveAttribute("role", "alert");
   await expect(picker.getByTestId("import-formbar")).toHaveText("選択 3 件 → 成功 2・失敗 1");
@@ -1043,9 +1043,10 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   expect(checks).toBe(1);
   await expect(rows.first()).toContainText("結果不明");
   await expect(rows.first().locator("[data-k=unknown]")).toHaveCount(1);
-  await expect(rows.first()).toContainText("インポートの結果を確認できません");
+  await expect(rows.first()).toContainText("画像サーバーに入ったか分かりません");
   await expect(result).toHaveText(
-    "選択 1 件のうち 0 件をインポートしました。1 件はインポートできたか分かりません。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。",
+    // 管理者（結果不明を照らせる役割）には「管理者に確かめを頼んでください。」を添えない
+    "選択 1 件のうち 0 件をインポートしました。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。",
   );
   await page.screenshot({ path: testInfo.outputPath("import-1280-unknown.png"), fullPage: true });
   await page.unroute("**/api/import*");

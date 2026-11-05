@@ -1,4 +1,5 @@
 import type { ImportOutcome } from "@/components/ui/file-picker";
+import { handleAuthStatus } from "@/lib/client/api";
 
 // インポートの画面（docs/spec.md の 3.5「取り込み」。段 6）が、選んだファイルを 1 件ずつ BFF へ送る。
 // 本文はファイルのバイトのまま（POST /api/import）。要求の ID は x-request-id、まとめて選んだ組は x-import-batch・
@@ -48,25 +49,24 @@ export function outcomeOf(answer: Answer): ImportOutcome | null {
 
 /**
  * 状態の確かめ（GET）の答えを結果に写す。stored は成功、failed は失敗、none（BFF に記録が無い）は、送った要求が
- * BFF に届かなかったときだけ失敗（届いたか分からないときは結果不明のまま）。ほかは結果不明（理由は確かめの答えの文、
- * 無ければ最初の答えの文）
+ * BFF に届かなかったときだけ失敗（届いたか分からないときは結果不明のまま）。ほかは結果不明。
+ * 結果不明の理由は、いつも同じ 1 句にする（行ごとに語を変えない。BFF の文は記録と状態の確かめの側に残る）
  */
-export function checkedOutcomeOf(answer: Answer | null, sent: "reached" | "unreachable", firstError?: unknown): ImportOutcome {
-  const unknown = (error?: unknown): ImportOutcome => ({
-    ok: false,
-    unknown: true,
-    reason: reasonOf(error, reasonOf(firstError, UNKNOWN_REASON)),
-  });
+export function checkedOutcomeOf(answer: Answer | null, sent: "reached" | "unreachable"): ImportOutcome {
+  const unknown: ImportOutcome = { ok: false, unknown: true, reason: UNKNOWN_REASON };
   // 確かめも読めない：送った要求が届いたかも分からないので、通信が切れたときも結果不明にする（失敗と言い切らない）
-  if (!answer || answer.status < 200 || answer.status >= 300) return unknown(sent === "unreachable" ? UNREACHABLE_REASON : undefined);
+  if (!answer || answer.status < 200 || answer.status >= 300) return unknown;
   // 記録が無い（none）：送っている間に切れたときだけ失敗にする。BFF は送り直された同じ画像を断るので、選び直して
   // 入れ直しても中身は置き換わらない（記録の前にまだ本文を読んでいる要求と行き違うことは残る。docs/spec.md の 3.5）
   const { outcome, error } = answer.data;
   if (outcome === "stored") return { ok: true };
   if (outcome === "failed") return { ok: false, reason: reasonOf(error, FAILED_REASON) };
-  if (outcome === "none") return sent === "unreachable" ? { ok: false, reason: UNREACHABLE_REASON } : unknown();
-  return unknown(error);
+  if (outcome === "none") return sent === "unreachable" ? { ok: false, reason: UNREACHABLE_REASON } : unknown;
+  return unknown;
 }
+
+/** ログインが切れた（401）・画面がロックされた（423）。ログインの頁へ移す・読み直してロックの画面にする */
+const AUTH_STATUSES = new Set([401, 423]);
 
 /** 答えを読む。本文を読み切れない（途中で切れた・JSON でない）ときは null（答えが分からない） */
 async function read(res: Response): Promise<Answer | null> {
@@ -78,17 +78,20 @@ async function read(res: Response): Promise<Answer | null> {
   }
 }
 
-/** 1 件を送る。答えが分からなければ、同じ要求の ID で状態を 1 回確かめる */
+/**
+ * 1 件を送る。答えが分からなければ、同じ要求の ID で状態を 1 回確かめる。ログインが切れた・画面がロックされたときは
+ * onAuth（初期値は検査一覧などと同じ扱い：401 はログインの頁へ、423 は読み直し）を呼ぶ。頁を離れると、部品は残りを送らない
+ */
 export async function importFile(
   file: Blob,
   batch: ImportBatch,
   csrfToken: string | undefined,
   fetcher: typeof fetch = fetch,
   newId: () => string = () => crypto.randomUUID(),
+  onAuth: (status: number) => void = handleAuthStatus,
 ): Promise<ImportOutcome> {
   const requestId = newId();
   let sent: "reached" | "unreachable" = "reached";
-  let firstError: unknown;
   try {
     const res = await fetcher("/api/import", {
       method: "POST",
@@ -104,18 +107,19 @@ export async function importFile(
       credentials: "same-origin",
     });
     // 頭が届いても本文を読み切れなければ、画像サーバーに入ったかが分からない。失敗と決めずに状態を確かめる
+    if (AUTH_STATUSES.has(res.status)) onAuth(res.status);
     const answer = await read(res);
     const outcome = answer ? outcomeOf(answer) : null;
     if (outcome) return outcome;
-    firstError = answer?.data.error;
   } catch {
     // 送っている間に切れた：BFF に届いたかが分からない。記録が無ければ届かなかったとして失敗にする
     sent = "unreachable";
   }
   try {
     const res = await fetcher(`/api/import?${new URLSearchParams({ requestId })}`, { credentials: "same-origin" });
-    return checkedOutcomeOf(await read(res), sent, firstError);
+    if (AUTH_STATUSES.has(res.status)) onAuth(res.status);
+    return checkedOutcomeOf(await read(res), sent);
   } catch {
-    return checkedOutcomeOf(null, sent, firstError);
+    return checkedOutcomeOf(null, sent);
   }
 }

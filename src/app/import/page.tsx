@@ -2,6 +2,7 @@ import { ImportScreen } from "@/components/pacs/import-screen";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { pageAccess } from "@/lib/auth/page-session";
+import { can } from "@/lib/auth/roles";
 import { getConfig } from "@/lib/config";
 
 // インポートの頁（docs/spec.md の 3.5「取り込み」。段 6）。DICOM のファイル・フォルダを選び、1 件ずつ BFF の
@@ -23,7 +24,12 @@ export default async function ImportPage() {
     <section className="space-y-3" data-testid="import-page">
       <PageHeader title="インポート" />
       {writes ? (
-        <ImportScreen limitBytes={config.screen.importMaxMb * 1024 * 1024} csrfToken={access.session.local?.row.csrfToken} />
+        <ImportScreen
+          limitBytes={config.screen.importMaxMb * 1024 * 1024}
+          csrfToken={access.session.local?.row.csrfToken}
+          // 結果不明を照らせる役割（管理者）には「管理者に確かめを頼んでください。」を出さない
+          unknownHelp={can(access.session.role, "pacs.reconcile") ? "" : undefined}
+        />
       ) : (
         <EmptyState fact="書き込みが無効のため、インポートできません。" data-testid="import-disabled" />
       )}
