@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ModalityMark } from "@/components/ui/modality-mark";
+import { Field, Input } from "@/components/ui/input";
 import { Notice } from "@/components/ui/notice";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CellMain, CellSub, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -17,7 +18,12 @@ import {
   cancelWaiting,
   countItems,
   formbarText,
+  isResolvable,
   isSelected,
+  nextResolvable,
+  NOTE_REQUIRED,
+  resolveItem,
+  resolvedMessage,
   resultNotice,
   seriesImageText,
   skippedNote,
@@ -25,6 +31,7 @@ import {
   type PickInput,
   type PickItem,
   type PickPhase,
+  type ResolveTarget,
 } from "@/lib/import/picker-model";
 import { cn } from "@/lib/utils";
 
@@ -37,11 +44,17 @@ import { cn } from "@/lib/utils";
  * 1 件の結果。成功は ok（note は札の下の 1 句。例：もう保管にあった）、失敗は ok: false と理由の 1 句。
  * 受け手の答えが分からないときは unknown: true（札「結果不明」。成功とも失敗とも数えない）
  */
-export type ImportOutcome = { ok: true; note?: string } | { ok: false; reason: string; unknown?: boolean };
+export type ImportOutcome = { ok: true; note?: string } | { ok: false; reason: string; unknown?: boolean; resolve?: ResolveTarget };
 
-/** 結果を行の状態に写す */
-const stateOf = (o: ImportOutcome): Pick<PickItem, "state" | "reason"> =>
-  o.ok ? { state: "ok", reason: o.note ?? "" } : { state: o.unknown ? "uk" : "ng", reason: o.reason };
+/**
+ * 結果不明の行を確認して記録した結果。記録できたら ok: true。できなかったら message（BFF の誤りの文。何が起きたか・なぜか・
+ * 次にすること）を欄の上に出す
+ */
+export type ResolveResult = { ok: true } | { ok: false; message: string };
+
+/** 結果を行の状態に写す。結果不明の行は、確認して記録するための名指しを持つ（届いたか分からない行には無い） */
+const stateOf = (o: ImportOutcome): Pick<PickItem, "state" | "reason" | "resolve"> =>
+  o.ok ? { state: "ok", reason: o.note ?? "", resolve: undefined } : { state: o.unknown ? "uk" : "ng", reason: o.reason, resolve: o.unknown ? o.resolve : undefined };
 
 /** 隠した読み上げの領域に書く間（一度空にしてから書く） */
 const SAY_DELAY_MS = 30;
@@ -120,6 +133,7 @@ export function FilePicker({
   title = "インポート",
   testId = "file-picker",
   unknownHelp,
+  resolveUnknown,
 }: {
   /** 1 件の大きさの上限（バイト）。超えたものは対象外にする（受け手も確かめる） */
   limitBytes: number;
@@ -129,9 +143,16 @@ export function FilePicker({
   testId?: string;
   /** 結果不明の知らせの最後の 1 文（確かめを頼む先）。初期値は「管理者に確かめを頼んでください。」。管理者には空を渡す */
   unknownHelp?: string;
+  /**
+   * 結果不明の行を確認して記録する（確認できる利用者＝管理者にだけ渡す）。渡すと、結果の後、名指し（要求の ID と検査の UID）を
+   * 持つ結果不明の行に「確認」を出し、押すと一覧の下に確認の欄を開く。渡さなければ「確認」は出さない
+   */
+  resolveUnknown?: (target: ResolveTarget, outcome: "success" | "failed", note: string) => Promise<ResolveResult>;
 }) {
   const titleId = useId();
   const progressId = useId();
+  const resolveTitleId = useId();
+  const noteMsgId = useId();
   const [items, setItemsState] = useState<PickItem[]>([]);
   const itemsRef = useRef<PickItem[]>([]);
   const [phase, setPhaseState] = useState<PickPhase>("idle");
@@ -152,7 +173,12 @@ export function FilePicker({
   const listRef = useRef<HTMLDivElement>(null);
   const abortButton = useRef<HTMLButtonElement>(null);
   const againButton = useRef<HTMLButtonElement>(null);
-  const [focusTarget, setFocusTarget] = useState<{ to: "files" | "abort" | "again" | "list" | "keep"; seq: number } | null>(null);
+  // 確認の欄（結果不明の行を確認して記録する）。開いているのは 1 行だけ。note は確認内容、error は記録できなかった文、
+  // problem は確認内容の欄の誤り（欄の下に出す）。busy は記録を送っている間
+  const [resolving, setResolving] = useState<{ id: number; note: string; error: string; problem: string; busy: boolean } | null>(null);
+  const resolveSection = useRef<HTMLElement>(null);
+  const noteInput = useRef<HTMLInputElement>(null);
+  const [focusTarget, setFocusTarget] = useState<{ to: "files" | "abort" | "again" | "list" | "keep" | "resolve"; seq: number; id?: number } | null>(null);
   const sayTimer = useRef<number | undefined>(undefined);
   // 最後に焦点のあった行のボタン（行が対象外になってボタンが消えると、焦点はどこにも無くなる。そのときの戻し先を決めるため）
   const lastRowFocus = useRef<string | undefined>(undefined);
@@ -172,7 +198,8 @@ export function FilePicker({
     window.clearTimeout(sayTimer.current);
     sayTimer.current = window.setTimeout(() => setMessage(text), SAY_DELAY_MS);
   }, []);
-  const focusSoon = (to: "files" | "abort" | "again" | "list" | "keep") => setFocusTarget((f) => ({ to, seq: (f?.seq ?? 0) + 1 }));
+  const focusSoon = (to: "files" | "abort" | "again" | "list" | "keep" | "resolve", id?: number) =>
+    setFocusTarget((f) => ({ to, seq: (f?.seq ?? 0) + 1, id }));
 
   // フォルダを選ぶ input は webkitdirectory（React の属性に無いので、描いた後に付ける）
   useEffect(() => {
@@ -200,9 +227,23 @@ export function FilePicker({
       if (button && document.activeElement !== button) button.focus();
       return;
     }
+    if (focusTarget.to === "resolve") {
+      // 行の「確認」へ（行の札が替わって「確認」が消えた・無いときは「続けて選択」へ）
+      const button = rootRef.current?.querySelector<HTMLElement>(`[data-resolve-id="${focusTarget.id}"]`);
+      (button ?? againButton.current)?.focus();
+      return;
+    }
     const target = { files: filesButton, abort: abortButton, again: againButton, list: listRef }[focusTarget.to];
     target.current?.focus();
   }, [focusTarget]);
+
+  // 確認の欄を開いたら、その欄へスクロールして「確認内容」へ焦点を置く（開く行を替えたときも同じ）
+  const resolvingId = resolving?.id;
+  useEffect(() => {
+    if (resolvingId === undefined) return;
+    resolveSection.current?.scrollIntoView?.({ block: "nearest" });
+    noteInput.current?.focus();
+  }, [resolvingId]);
 
   const add = useCallback(
     (files: FileWithPath[]) => {
@@ -333,8 +374,51 @@ export function FilePicker({
     focusSoon("abort");
   };
 
+  // 結果不明の行の「確認」：欄を開く（別の行の欄が開いていたら対象を替え、書きかけの確認内容は消す）
+  const openResolve = (id: number) => setResolving({ id, note: "", error: "", problem: "", busy: false });
+  const cancelResolve = () => {
+    const id = resolving?.id;
+    setResolving(null);
+    focusSoon("resolve", id);
+  };
+  const submitResolve = async (outcome: "success" | "failed") => {
+    if (!resolving || !resolveUnknown || resolving.busy) return;
+    const item = itemsRef.current.find((i) => i.id === resolving.id);
+    if (!item || !isResolvable(item)) return;
+    const note = resolving.note.trim();
+    if (!note) {
+      setResolving({ ...resolving, problem: NOTE_REQUIRED });
+      noteInput.current?.focus();
+      return;
+    }
+    setResolving({ ...resolving, error: "", problem: "", busy: true });
+    const gen = generation.current;
+    const next = nextResolvable(itemsRef.current, item.id);
+    let result: ResolveResult;
+    try {
+      result = await resolveUnknown(item.resolve, outcome, note);
+    } catch {
+      result = { ok: false, message: "サーバーに接続できませんでした" };
+    }
+    if (!mounted.current || gen !== generation.current) return;
+    if (!result.ok) {
+      // 欄は閉じず、入力は残す。行の札は替えない（結果不明のまま）
+      const message = result.message;
+      setResolving((r) => (r ? { ...r, error: message, busy: false } : r));
+      noteInput.current?.focus();
+      return;
+    }
+    const after = resolveItem(itemsRef.current, item.id, outcome);
+    setItems(after);
+    setResolving(null);
+    say(resolvedMessage(item.name, outcome, countItems(after).unknown));
+    // 焦点は次の結果不明の行の「確認」へ（無ければ「続けて選択」へ）
+    focusSoon("resolve", next?.id);
+  };
+
   const again = () => {
     generation.current++;
+    setResolving(null);
     setItems([]);
     setPhase("idle");
     focusSoon("files");
@@ -346,6 +430,11 @@ export function FilePicker({
   const done = c.ok + c.ng + c.unknown;
   const notice = phase === "done" ? resultNotice(c, unknownHelp) : null;
   const showDrop = items.length === 0 || idle;
+  // 開いている確認の欄の行（名指しを持つ結果不明の行だけ。ほかに変わっていたら欄は出さない）
+  const resolveItemNow = (() => {
+    const row = resolving ? items.find((i) => i.id === resolving.id) : undefined;
+    return row && isResolvable(row) ? row : undefined;
+  })();
 
   return (
     <>
@@ -494,6 +583,19 @@ export function FilePicker({
                           {item.reason && !item.off && <CellSub className="[word-break:auto-phrase]">{item.reason}</CellSub>}
                         </TableCell>
                         <TableCell className="op w-[72px] text-right">
+                          {phase === "done" && resolveUnknown && isResolvable(item) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              data-resolve-id={item.id}
+                              disabled={resolving?.busy}
+                              aria-label={`${item.name} の結果不明を確認`}
+                              onClick={() => openResolve(item.id)}
+                            >
+                              確認
+                            </Button>
+                          )}
                           {idle && item.state !== "ex" && (
                             <Button
                               type="button"
@@ -548,6 +650,61 @@ export function FilePicker({
           )}
         </div>
       </section>
+      {resolveItemNow && resolving && resolveUnknown && (
+        // 結果不明の確認の欄（parts.md の「結果不明を確認する」）。一覧の下の別の区画。主ボタンは置かない
+        <section
+          ref={resolveSection}
+          data-testid={`${testId}-resolve`}
+          className="sec mt-3 rounded-md border border-border bg-background"
+          aria-labelledby={resolveTitleId}
+        >
+          <h2 id={resolveTitleId} className="m-0 rounded-t-md border-b border-border bg-surface px-3 py-2 text-sm leading-5 font-bold text-value">
+            結果不明の確認
+          </h2>
+          <div className="in flex flex-col gap-3 px-4 py-3">
+            {resolving.error && (
+              <Notice kind="err" alert data-testid={`${testId}-resolve-error`}>
+                {resolving.error}
+              </Notice>
+            )}
+            <dl className="kv grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+              <dt className="text-xs leading-5 text-label">ファイル</dt>
+              <dd className="m-0 min-w-0 font-bold text-value [overflow-wrap:anywhere]">{resolveItemNow.name}</dd>
+              <dt className="text-xs leading-5 text-label">検査UID</dt>
+              <dd className="m-0 min-w-0 font-mono text-[13px] font-bold text-value [overflow-wrap:anywhere]">{resolveItemNow.resolve.studyInstanceUid}</dd>
+              <dt className="text-xs leading-5 text-label">要求ID</dt>
+              <dd className="m-0 min-w-0 font-mono text-[13px] font-bold text-value [overflow-wrap:anywhere]">{resolveItemNow.resolve.requestId}</dd>
+            </dl>
+            <Field label="確認内容" required msg={resolving.problem || null} msgId={noteMsgId} testId={`${testId}-resolve-note`}>
+              <Input
+                ref={noteInput}
+                type="text"
+                maxLength={500}
+                value={resolving.note}
+                readOnly={resolving.busy}
+                aria-invalid={resolving.problem ? true : undefined}
+                aria-describedby={resolving.problem ? noteMsgId : undefined}
+                data-testid={`${testId}-resolve-input`}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setResolving((r) => (r ? { ...r, note: value, problem: "" } : r));
+                }}
+              />
+            </Field>
+          </div>
+          <div className="formbar flex justify-end gap-2 rounded-b-md border-t border-border bg-surface px-4 py-3">
+            <Button type="button" variant="outline" disabled={resolving.busy} data-pk="resolve-cancel" onClick={cancelResolve}>
+              キャンセル
+            </Button>
+            <Button type="button" variant="outline" disabled={resolving.busy} data-pk="resolve-failed" onClick={() => void submitResolve("failed")}>
+              失敗として記録
+            </Button>
+            <Button type="button" variant="outline" disabled={resolving.busy} data-pk="resolve-success" onClick={() => void submitResolve("success")}>
+              成功として記録
+            </Button>
+          </div>
+        </section>
+      )}
       <input
         ref={filesInput}
         type="file"

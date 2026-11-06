@@ -5,6 +5,8 @@ import {
   importFile,
   outcomeOf,
   reasonOf,
+  RESOLVE_FAILED_MESSAGE,
+  resolveImport,
   UNKNOWN_REASON,
   UNREACHABLE_REASON,
 } from "@/lib/client/import-file";
@@ -170,5 +172,73 @@ describe("1 件を送る", () => {
   it("答えが届いた後に確かめが切れたら結果不明", async () => {
     const { fetcher } = fakeFetch([{ status: 202, body: { outcome: "unknown" } }, null]);
     await expect(importFile(new Blob([]), BATCH, "t", fetcher, () => REQ)).resolves.toMatchObject({ ok: false, unknown: true });
+  });
+});
+
+describe("結果不明の行の名指し（管理者が確認して記録するため）", () => {
+  const UID = "1.2.826.0.1.3680043.8.498.1";
+  const target = { requestId: REQ, studyInstanceUid: UID };
+
+  it("送った答えの検査の UID と要求の ID を、結果不明の行に持たせる", async () => {
+    const { fetcher } = fakeFetch([
+      { status: 202, body: { outcome: "unknown", studyInstanceUid: UID } },
+      { status: 202, body: { outcome: "unknown", repeated: true } },
+    ]);
+    await expect(importFile(new Blob([]), BATCH, "t", fetcher, () => REQ)).resolves.toEqual({ ok: false, unknown: true, reason: UNKNOWN_REASON, resolve: target });
+  });
+
+  it("状態の確かめの答えにある UID も使う。確かめが切れても、送った答えの UID で持たせる", async () => {
+    const checked = fakeFetch([{ status: 202, body: { outcome: "unknown" } }, { status: 202, body: { outcome: "unknown", studyInstanceUid: UID } }]);
+    await expect(importFile(new Blob([]), BATCH, "t", checked.fetcher, () => REQ)).resolves.toMatchObject({ unknown: true, resolve: target });
+    const cut = fakeFetch([{ status: 202, body: { outcome: "unknown", studyInstanceUid: UID } }, null]);
+    await expect(importFile(new Blob([]), BATCH, "t", cut.fetcher, () => REQ)).resolves.toMatchObject({ unknown: true, resolve: target });
+  });
+
+  it("UID が分からない結果不明（BFF に届いたか分からない）は名指しを持たない。成功にも持たせない", async () => {
+    const lost = fakeFetch([{ status: 202, body: { outcome: "unknown" } }, { status: 200, body: { outcome: "none" } }]);
+    expect(await importFile(new Blob([]), BATCH, "t", lost.fetcher, () => REQ)).not.toHaveProperty("resolve");
+    const stored = fakeFetch([{ status: 200, body: { outcome: "stored", studyInstanceUid: UID } }]);
+    expect(await importFile(new Blob([]), BATCH, "t", stored.fetcher, () => REQ)).toEqual({ ok: true });
+    // UID が文字列でなければ使わない
+    const odd = fakeFetch([{ status: 202, body: { outcome: "unknown", studyInstanceUid: 5 } }, { status: 202, body: { outcome: "unknown" } }]);
+    expect(await importFile(new Blob([]), BATCH, "t", odd.fetcher, () => REQ)).not.toHaveProperty("resolve");
+  });
+});
+
+describe("結果不明を確認して記録する（POST /api/studies/{uid}/import/resolve）", () => {
+  const target = { requestId: REQ, studyInstanceUid: "1.2.826.0.1.3680043.8.498.1" };
+
+  it("検査の UID を道に、要求の ID・結果・確認内容を本文に、CSRF の token を頭に付けて送る。成功したら ok", async () => {
+    const { fetcher, calls } = fakeFetch([{ status: 200, body: { requestId: REQ, outcome: "stored", instancePresent: true } }]);
+    await expect(resolveImport(target, "success", "画像サーバーで画像を確認", "csrf-1", fetcher)).resolves.toEqual({ ok: true });
+    expect(calls[0]!.url).toBe("/api/studies/1.2.826.0.1.3680043.8.498.1/import/resolve");
+    expect(calls[0]!.init).toMatchObject({ method: "POST", credentials: "same-origin" });
+    expect(calls[0]!.init!.headers).toEqual({ "content-type": "application/json", "x-csrf-token": "csrf-1" });
+    expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({ requestId: REQ, outcome: "success", note: "画像サーバーで画像を確認" });
+    const { fetcher: f2, calls: c2 } = fakeFetch([{ status: 200, body: { outcome: "failed" } }]);
+    await resolveImport(target, "failed", "画像が無い", undefined, f2);
+    expect(c2[0]!.init!.headers).not.toHaveProperty("x-csrf-token");
+    expect(JSON.parse(String(c2[0]!.init!.body))).toMatchObject({ outcome: "failed" });
+  });
+
+  it("断られたら BFF の誤りの文をそのまま返す。文が無ければ代わりの文。通信が切れたら接続できなかった文", async () => {
+    const refused = fakeFetch([{ status: 409, body: { error: "画像サーバーにこの画像が見つかりません。成功として記録できません" } }]);
+    await expect(resolveImport(target, "success", "x", "t", refused.fetcher)).resolves.toEqual({
+      ok: false,
+      message: "画像サーバーにこの画像が見つかりません。成功として記録できません",
+    });
+    const bare = fakeFetch([{ status: 500, body: {} }]);
+    await expect(resolveImport(target, "failed", "x", "t", bare.fetcher)).resolves.toEqual({ ok: false, message: RESOLVE_FAILED_MESSAGE });
+    const cut = fakeFetch([null]);
+    await expect(resolveImport(target, "failed", "x", "t", cut.fetcher)).resolves.toEqual({ ok: false, message: UNREACHABLE_REASON });
+  });
+
+  it("ログインが切れた（401）・画面がロックされた（423）ときは、検査一覧などと同じ扱いを呼ぶ", async () => {
+    for (const status of [401, 423]) {
+      const seen: number[] = [];
+      const { fetcher } = fakeFetch([{ status, body: { error: "ログインしてください" } }]);
+      await expect(resolveImport(target, "failed", "x", "t", fetcher, (s) => seen.push(s))).resolves.toEqual({ ok: false, message: "ログインしてください" });
+      expect(seen).toEqual([status]);
+    }
   });
 });

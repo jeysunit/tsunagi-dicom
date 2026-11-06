@@ -45,6 +45,7 @@ function Field({
   msg,
   msgId,
   testId,
+  required,
 }: {
   label: string;
   children: React.ReactNode;
@@ -53,10 +54,15 @@ function Field({
   msg?: string | null;
   msgId?: string;
   testId?: string;
+  /** 項目名の右に「必須」を出す（部品集の `.req`。赤い札にしない） */
+  required?: boolean;
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-label">{label}</span>
+      <span className="text-label">
+        {label}
+        {required && <span className="req ml-1 font-bold text-foreground">必須</span>}
+      </span>
       {children}
       <FieldNote hint={hint} hintId={hintId} msg={msg} msgId={msgId} testId={testId} />
     </label>

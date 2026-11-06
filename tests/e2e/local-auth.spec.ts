@@ -1029,7 +1029,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   // BFF の結果不明の扱いそのものは tests/unit/import-route.test.ts）：状態を 1 回確かめ、決まらなければ結果不明
   let checks = 0;
   await page.route("**/api/import*", async (route) => {
-    const unknown = { outcome: "unknown", error: "インポートの結果を確認できません。状態を確認してください" };
+    const unknown = { outcome: "unknown", studyInstanceUid: deleted, error: "インポートの結果を確認できません。状態を確認してください" };
     if (route.request().method() === "GET") checks++;
     await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(unknown) });
   });
@@ -1049,6 +1049,53 @@ test("段 6：インポートは左のナビから開き、選んだファイル
     "選択 1 件のうち 0 件をインポートしました。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。",
   );
   await page.screenshot({ path: testInfo.outputPath("import-1280-unknown.png"), fullPage: true });
+
+  // 結果不明を管理者が確認して記録する（parts.md の「結果不明を確認する」）。「確認」は名指しを持つ結果不明の行だけ
+  const unknownRow = rows.first();
+  const resolvePanel = page.getByTestId("import-resolve");
+  await expect(resolvePanel).toHaveCount(0);
+  await unknownRow.getByRole("button", { name: "IM0004 の結果不明を確認" }).click();
+  await expect(resolvePanel).toBeVisible();
+  await expect(resolvePanel.getByRole("heading", { name: "結果不明の確認" })).toBeVisible();
+  await expect(resolvePanel).toContainText("IM0004");
+  await expect(resolvePanel).toContainText(deleted);
+  await expect(resolvePanel.getByTestId("import-resolve-input")).toBeFocused();
+  // 主ボタンは置かない。確認内容が空のまま押すと、欄の下に誤りを出して欄へ焦点を戻す（BFF は呼ばない）
+  await expect(resolvePanel.locator("button.bg-primary")).toHaveCount(0);
+  await resolvePanel.getByRole("button", { name: "成功として記録" }).click();
+  await expect(resolvePanel.getByTestId("import-resolve-note-msg")).toHaveText("確認内容を入力してください。");
+  await expect(resolvePanel.getByTestId("import-resolve-input")).toBeFocused();
+  await expect(unknownRow).toContainText("結果不明");
+  await page.screenshot({ path: testInfo.outputPath("import-1280-resolve.png"), fullPage: true });
+  // BFF が断ったとき：欄を閉じず、欄の上に BFF の文を出し、入力と札はそのまま（この要求は BFF に記録が無いので 404）
+  await resolvePanel.getByTestId("import-resolve-input").fill("画像サーバーで確認した");
+  await resolvePanel.getByRole("button", { name: "失敗として記録" }).click();
+  await expect(resolvePanel.getByTestId("import-resolve-error")).toHaveText("この検査に、その要求ID のインポートはありません");
+  await expect(resolvePanel.getByTestId("import-resolve-error")).toHaveAttribute("role", "alert");
+  await expect(resolvePanel.getByTestId("import-resolve-input")).toHaveValue("画像サーバーで確認した");
+  await expect(unknownRow).toContainText("結果不明");
+  // BFF が受けたとき：欄を閉じ、札は成功に替わって「管理者が確認」、件数を数え直し、知らせは結果不明の文を外す。焦点は「続けて選択」
+  let resolveBody: { requestId?: unknown; outcome?: unknown; note?: unknown } | null = null;
+  await page.route("**/api/studies/*/import/resolve", async (route) => {
+    resolveBody = route.request().postDataJSON() as typeof resolveBody;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "stored", instancePresent: true }) });
+  });
+  await resolvePanel.getByRole("button", { name: "成功として記録" }).click();
+  await expect(resolvePanel).toHaveCount(0);
+  expect(resolveBody).toMatchObject({ outcome: "success", note: "画像サーバーで確認した" });
+  expect(typeof (resolveBody as { requestId?: unknown } | null)?.requestId).toBe("string");
+  await expect(rows.first()).toContainText("IM0004");
+  await expect(rows.first()).toContainText("成功");
+  await expect(rows.first()).toContainText("管理者が確認");
+  await expect(rows.first().getByRole("button", { name: /結果不明を確認$/ })).toHaveCount(0);
+  await expect(picker.getByTestId("import-formbar")).toHaveText("選択 1 件 → 成功 1・失敗 0");
+  await expect(result).toContainText("1 件（");
+  await expect(result).toContainText("）をインポートしました。");
+  await expect(result).not.toContainText("分かりません");
+  await expect(page.getByTestId("import-live")).toHaveText("IM0004 を成功として記録しました。");
+  await expect(picker.getByRole("button", { name: "続けて選択" })).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("import-1280-resolved.png"), fullPage: true });
+  await page.unroute("**/api/studies/*/import/resolve");
   await page.unroute("**/api/import*");
 
   // 入れた検査は、検査一覧に戻り、「インポート」の印で分かる

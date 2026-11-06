@@ -12,6 +12,12 @@ import { formatCount, formatSize, type PreviewTags } from "@/lib/import/dicom-pr
  */
 export type PickState = "check" | "wait" | "run" | "ok" | "ng" | "uk" | "ex" | "cx";
 
+/** 結果不明の行を確認して記録するときに BFF へ渡す名指し（インポートの要求の ID と、その検査の Study Instance UID） */
+export interface ResolveTarget {
+  requestId: string;
+  studyInstanceUid: string;
+}
+
 export interface PickItem<F = File> {
   id: number;
   /** 同じファイルを見分ける鍵（場所つきの名前・大きさ・更新時刻） */
@@ -27,6 +33,8 @@ export interface PickItem<F = File> {
   /** 除外（利用者が外した） */
   off: boolean;
   tags: PreviewTags | null;
+  /** 結果不明の行を管理者が確認して記録するための名指し。BFF に届いた要求だけが持つ（届いたか分からない行には無い） */
+  resolve?: ResolveTarget;
 }
 
 export type PickPhase = "idle" | "busy" | "done";
@@ -227,4 +235,36 @@ export function addedMessage(fresh: readonly PickItem<unknown>[], duplicates: nu
   if (!fresh.length) return dup;
   const total = all.reduce((s, i) => s + i.size, 0);
   return `${formatCount(fresh.length)} 件を追加しました。${ex ? `対象外 ${formatCount(ex)} 件。` : ""}${dup}合計 ${formatCount(all.length)} 件・${formatSize(total)}。`;
+}
+
+/** 確認できる行（結果不明で、BFF に届いた要求の名指しを持つ）。「確認」のボタンを出す行 */
+export const isResolvable = (i: PickItem<unknown>): i is PickItem<unknown> & { resolve: ResolveTarget } => i.state === "uk" && !i.off && !!i.resolve;
+
+/** 結果不明の理由の句を替える先（確認して記録した行の、札の下の 1 句） */
+export const RESOLVED_NOTE = "管理者が確認";
+
+/** 確認内容の欄の誤り（空・空白だけ） */
+export const NOTE_REQUIRED = "確認内容を入力してください。";
+
+/** 確認して記録したあと：その行の札を成功か失敗に替える。名指しは外し、札の下の 1 句は「管理者が確認」にする */
+export function resolveItem<F>(items: readonly PickItem<F>[], id: number, outcome: "success" | "failed"): PickItem<F>[] {
+  return items.map((i) => {
+    if (i.id !== id || !isResolvable(i)) return i;
+    const next: PickItem<F> = { ...i, state: outcome === "success" ? "ok" : "ng", reason: RESOLVED_NOTE };
+    delete next.resolve;
+    return next;
+  });
+}
+
+/** 確認して記録したときの読み上げ（結果不明が残るときは、残りの数を添える） */
+export function resolvedMessage(name: string, outcome: "success" | "failed", remaining: number): string {
+  const head = `${name} を${outcome === "success" ? "成功" : "失敗"}として記録しました。`;
+  return remaining ? `${head}結果不明 ${formatCount(remaining)} 件。` : head;
+}
+
+/** 次に確認する行（今の行の後ろにある確認できる行を、並びの順で探す。無ければ先頭から。無ければ null） */
+export function nextResolvable<T extends PickItem<unknown>>(items: readonly T[], afterId: number): T | null {
+  const list = sortForList(items).filter(isResolvable);
+  const at = list.findIndex((i) => i.id === afterId);
+  return (at >= 0 ? list[at + 1] : undefined) ?? list.find((i) => i.id !== afterId) ?? null;
 }
