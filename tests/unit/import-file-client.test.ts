@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RESOLVE_UNREACHABLE_MESSAGE } from "@/lib/import/picker-model";
 import {
   ALREADY_NOTE,
   checkedOutcomeOf,
@@ -230,7 +231,7 @@ describe("結果不明を確認して記録する（POST /api/studies/{uid}/impo
     const bare = fakeFetch([{ status: 500, body: {} }]);
     await expect(resolveImport(target, "failed", "x", "t", bare.fetcher)).resolves.toEqual({ ok: false, message: RESOLVE_FAILED_MESSAGE });
     const cut = fakeFetch([null]);
-    await expect(resolveImport(target, "failed", "x", "t", cut.fetcher)).resolves.toEqual({ ok: false, message: UNREACHABLE_REASON });
+    await expect(resolveImport(target, "failed", "x", "t", cut.fetcher)).resolves.toEqual({ ok: false, message: RESOLVE_UNREACHABLE_MESSAGE });
   });
 
   it("ログインが切れた（401）・画面がロックされた（423）ときは、検査一覧などと同じ扱いを呼ぶ", async () => {

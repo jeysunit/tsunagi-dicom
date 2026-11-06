@@ -23,6 +23,7 @@ import {
   nextResolvable,
   NOTE_REQUIRED,
   resolveItem,
+  RESOLVE_UNREACHABLE_MESSAGE,
   resolvedMessage,
   resultNotice,
   seriesImageText,
@@ -398,7 +399,7 @@ export function FilePicker({
     try {
       result = await resolveUnknown(item.resolve, outcome, note);
     } catch {
-      result = { ok: false, message: "サーバーに接続できませんでした" };
+      result = { ok: false, message: RESOLVE_UNREACHABLE_MESSAGE };
     }
     if (!mounted.current || gen !== generation.current) return;
     if (!result.ok) {
@@ -481,7 +482,7 @@ export function FilePicker({
         </h2>
         <div className="in flex flex-col gap-3 px-4 py-3">
           {notice && (
-            <Notice kind={notice.kind} alert={notice.alert} data-testid={`${testId}-result`}>
+            <Notice kind={notice.kind} alert={notice.alert} silent={notice.silent} data-testid={`${testId}-result`}>
               {notice.text}
             </Notice>
           )}
@@ -639,7 +640,7 @@ export function FilePicker({
             </>
           )}
           {phase === "done" && (
-            <Button ref={againButton} type="button" variant="outline" data-pk="again" onClick={again}>
+            <Button ref={againButton} type="button" variant="outline" data-pk="again" disabled={resolving?.busy} onClick={again}>
               続けて選択
             </Button>
           )}
@@ -680,6 +681,7 @@ export function FilePicker({
                 ref={noteInput}
                 type="text"
                 maxLength={500}
+                aria-required="true"
                 value={resolving.note}
                 readOnly={resolving.busy}
                 aria-invalid={resolving.problem ? true : undefined}

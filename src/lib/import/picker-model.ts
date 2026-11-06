@@ -35,6 +35,8 @@ export interface PickItem<F = File> {
   tags: PreviewTags | null;
   /** 結果不明の行を管理者が確認して記録するための名指し。BFF に届いた要求だけが持つ（届いたか分からない行には無い） */
   resolve?: ResolveTarget;
+  /** 結果不明の行を管理者が確認して記録した行（札は成功か失敗。結果の知らせに「うち K 件は管理者が確認」と数える） */
+  confirmed?: boolean;
 }
 
 export type PickPhase = "idle" | "busy" | "done";
@@ -90,6 +92,9 @@ export interface PickCounts {
   selectedBytes: number;
   ok: number;
   ng: number;
+  /** 成功・失敗のうち、管理者が確認して記録した行 */
+  confirmedOk: number;
+  confirmedNg: number;
   /** 結果不明 */
   unknown: number;
   cancelled: number;
@@ -106,6 +111,8 @@ export function countItems(items: readonly PickItem<unknown>[]): PickCounts {
     selectedBytes: selected.reduce((s, i) => s + i.size, 0),
     ok: selected.filter((i) => i.state === "ok").length,
     ng: selected.filter((i) => i.state === "ng").length,
+    confirmedOk: selected.filter((i) => i.state === "ok" && i.confirmed).length,
+    confirmedNg: selected.filter((i) => i.state === "ng" && i.confirmed).length,
     unknown: selected.filter((i) => i.state === "uk").length,
     cancelled: selected.filter((i) => i.state === "cx").length,
     checking: items.filter((i) => i.state === "check").length,
@@ -151,25 +158,42 @@ function unknownText(c: PickCounts, help: string): string {
 /** 結果不明の文の最後に添える、確かめを頼む先（管理者でない利用者に出す。管理者には空を渡す） */
 export const UNKNOWN_HELP = "管理者に確かめを頼んでください。";
 
+/** 成功の文。管理者が記録した行を含むときは「インポート済みです（うち K 件は管理者が確認）」の型にする */
+function okText(c: PickCounts, lead: string): string {
+  return c.confirmedOk
+    ? `${lead}${formatCount(c.ok)} 件はインポート済みです（うち ${formatCount(c.confirmedOk)} 件は管理者が確認）。`
+    : `${lead}${formatCount(c.ok)} 件をインポートしました。`;
+}
+
+/** 失敗の文（失敗が 0 件なら空）。管理者が記録した行があれば、理由の前に「うち K 件は管理者が確認」を添える */
+function ngText(c: PickCounts): string {
+  if (!c.ng) return "";
+  const who = c.confirmedNg ? `うち ${formatCount(c.confirmedNg)} 件は管理者が確認。` : "";
+  return `${formatCount(c.ng)} 件は失敗しました（${who}理由は各行の状態）。`;
+}
+
 /**
  * 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗か結果不明があるとき。
+ * 管理者が記録した行を含むときは silent（role を付けない）：記録のときに読み上げの領域が 1 回伝えるので、知らせでは読み直さない。
  * 失敗の文は「理由は各行の状態」で止める（理由が「もう画像サーバーにある」のときは、選び直しても入らないため）
  */
-export function resultNotice(c: PickCounts, unknownHelp = UNKNOWN_HELP): { kind: "ok" | "warn" | "err"; text: string; alert: boolean } {
+export function resultNotice(c: PickCounts, unknownHelp = UNKNOWN_HELP): { kind: "ok" | "warn" | "err"; text: string; alert: boolean; silent?: true } {
   const trouble = c.ng > 0 || c.unknown > 0;
+  const silent = c.confirmedOk + c.confirmedNg > 0 ? ({ silent: true } as const) : {};
   if (c.cancelled) {
     return {
       kind: trouble ? "err" : "warn",
-      text: `${formatCount(c.ok)} 件をインポートしました。残り ${formatCount(c.cancelled)} 件は中止したためインポートしていません。${c.ng ? `${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。` : ""}${unknownText(c, unknownHelp)}`,
+      text: `${okText(c, "")}残り ${formatCount(c.cancelled)} 件は中止したためインポートしていません。${ngText(c)}${unknownText(c, unknownHelp)}`,
       alert: trouble,
+      ...silent,
     };
   }
-  if (trouble) {
-    const failed = c.ng ? `${formatCount(c.ng)} 件は失敗しました（理由は各行の状態）。` : "";
+  if (trouble || c.confirmedOk) {
     return {
-      kind: "err",
-      text: `選択 ${formatCount(c.selected)} 件のうち ${formatCount(c.ok)} 件をインポートしました。${failed}${unknownText(c, unknownHelp)}`,
-      alert: true,
+      kind: trouble ? "err" : "ok",
+      text: `${okText(c, `選択 ${formatCount(c.selected)} 件のうち `)}${ngText(c)}${unknownText(c, unknownHelp)}`,
+      alert: trouble,
+      ...silent,
     };
   }
   return { kind: "ok", text: `${formatCount(c.ok)} 件（${formatSize(c.selectedBytes)}）をインポートしました。`, alert: false };
@@ -243,6 +267,9 @@ export const isResolvable = (i: PickItem<unknown>): i is PickItem<unknown> & { r
 /** 結果不明の理由の句を替える先（確認して記録した行の、札の下の 1 句） */
 export const RESOLVED_NOTE = "管理者が確認";
 
+/** 記録を送れなかった（通信が切れた）ときの文。何が起きたか・次にすること（RESOLVE_FAILED_MESSAGE と同じ型） */
+export const RESOLVE_UNREACHABLE_MESSAGE = "サーバーに接続できませんでした。時間をおいて、やり直してください";
+
 /** 確認内容の欄の誤り（空・空白だけ） */
 export const NOTE_REQUIRED = "確認内容を入力してください。";
 
@@ -250,7 +277,7 @@ export const NOTE_REQUIRED = "確認内容を入力してください。";
 export function resolveItem<F>(items: readonly PickItem<F>[], id: number, outcome: "success" | "failed"): PickItem<F>[] {
   return items.map((i) => {
     if (i.id !== id || !isResolvable(i)) return i;
-    const next: PickItem<F> = { ...i, state: outcome === "success" ? "ok" : "ng", reason: RESOLVED_NOTE };
+    const next: PickItem<F> = { ...i, state: outcome === "success" ? "ok" : "ng", reason: RESOLVED_NOTE, confirmed: true };
     delete next.resolve;
     return next;
   });

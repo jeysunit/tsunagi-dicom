@@ -338,6 +338,32 @@ describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 
     expect(resultNotice(countItems(solved), "")).toMatchObject({ kind: "ok", alert: false });
   });
 
+  it("記録したあとの知らせの文：管理者が記録した行を含むときは「インポート済みです（うち K 件は管理者が確認）」の型で、読み上げの役（role）を付けない", () => {
+    const t = { requestId: "0b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e", studyInstanceUid: "1.2.3" };
+    const rec = (list: ReturnType<typeof items>, id: number, o: "success" | "failed") => resolveItem(list, id, o);
+    // 成功だけ（結果不明が無くなった）：ok・role なし
+    const allOk = rec(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }]), 2, "success");
+    expect(resultNotice(countItems(allOk), "")).toEqual({ kind: "ok", alert: false, silent: true, text: "選択 2 件のうち 2 件はインポート済みです（うち 1 件は管理者が確認）。" });
+    // 成功と失敗と結果不明が混ざる：成功・失敗・結果不明の順。失敗の理由の前に、記録した失敗の件数
+    const mixed = rec(rec(items([
+      { name: "a", state: "ok" }, { name: "b", state: "ng" }, { name: "c", state: "uk", resolve: t }, { name: "d", state: "uk", resolve: t }, { name: "e", state: "uk", resolve: t },
+    ]), 3, "success"), 4, "failed");
+    expect(resultNotice(countItems(mixed), "")).toEqual({
+      kind: "err",
+      alert: true,
+      silent: true,
+      text: "選択 5 件のうち 2 件はインポート済みです（うち 1 件は管理者が確認）。2 件は失敗しました（うち 1 件は管理者が確認。理由は各行の状態）。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。",
+    });
+    // 記録した失敗だけが混ざる：成功の文は今までどおり、失敗の文だけ「うち」を持つ
+    const onlyNg = rec(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }]), 2, "failed");
+    expect(resultNotice(countItems(onlyNg), "").text).toBe("選択 2 件のうち 1 件をインポートしました。1 件は失敗しました（うち 1 件は管理者が確認。理由は各行の状態）。");
+    // 中止と重なる
+    const cut = rec(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }, { name: "c", state: "cx" }]), 2, "success");
+    expect(resultNotice(countItems(cut), "").text).toBe("2 件はインポート済みです（うち 1 件は管理者が確認）。残り 1 件は中止したためインポートしていません。");
+    // 記録した行を含まないときは、前の結果の文のまま（silent を持たない）
+    expect(resultNotice(countItems(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }])), "")).not.toHaveProperty("silent");
+  });
+
   it("結果不明を確認して記録したときの読み上げと、次に確認する行", () => {
     expect(resolvedMessage("IM0007", "success", 1)).toBe("IM0007 を成功として記録しました。結果不明 1 件。");
     expect(resolvedMessage("IM0007", "failed", 0)).toBe("IM0007 を失敗として記録しました。");

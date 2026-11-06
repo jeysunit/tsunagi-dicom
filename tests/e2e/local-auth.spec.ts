@@ -1060,6 +1060,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(resolvePanel).toContainText("IM0004");
   await expect(resolvePanel).toContainText(deleted);
   await expect(resolvePanel.getByTestId("import-resolve-input")).toBeFocused();
+  await expect(resolvePanel.getByTestId("import-resolve-input")).toHaveAttribute("aria-required", "true");
   // 主ボタンは置かない。確認内容が空のまま押すと、欄の下に誤りを出して欄へ焦点を戻す（BFF は呼ばない）
   await expect(resolvePanel.locator("button.bg-primary")).toHaveCount(0);
   await resolvePanel.getByRole("button", { name: "成功として記録" }).click();
@@ -1076,11 +1077,18 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(unknownRow).toContainText("結果不明");
   // BFF が受けたとき：欄を閉じ、札は成功に替わって「管理者が確認」、件数を数え直し、知らせは結果不明の文を外す。焦点は「続けて選択」
   let resolveBody: { requestId?: unknown; outcome?: unknown; note?: unknown } | null = null;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
   await page.route("**/api/studies/*/import/resolve", async (route) => {
     resolveBody = route.request().postDataJSON() as typeof resolveBody;
+    await gate;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "stored", instancePresent: true }) });
   });
   await resolvePanel.getByRole("button", { name: "成功として記録" }).click();
+  // 記録を送っている間は、3 つのボタンと「続けて選択」を押せない
+  await expect(resolvePanel.getByRole("button", { name: "成功として記録" })).toBeDisabled();
+  await expect(picker.getByRole("button", { name: "続けて選択" })).toBeDisabled();
+  release();
   await expect(resolvePanel).toHaveCount(0);
   expect(resolveBody).toMatchObject({ outcome: "success", note: "画像サーバーで確認した" });
   expect(typeof (resolveBody as { requestId?: unknown } | null)?.requestId).toBe("string");
@@ -1089,9 +1097,9 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(rows.first()).toContainText("管理者が確認");
   await expect(rows.first().getByRole("button", { name: /結果不明を確認$/ })).toHaveCount(0);
   await expect(picker.getByTestId("import-formbar")).toHaveText("選択 1 件 → 成功 1・失敗 0");
-  await expect(result).toContainText("1 件（");
-  await expect(result).toContainText("）をインポートしました。");
-  await expect(result).not.toContainText("分かりません");
+  await expect(result).toHaveText("選択 1 件のうち 1 件はインポート済みです（うち 1 件は管理者が確認）。");
+  // 読み上げは隠した領域に 1 回だけ。記録したあとの知らせには role を付けない
+  await expect(result).not.toHaveAttribute("role", /.+/);
   await expect(page.getByTestId("import-live")).toHaveText("IM0004 を成功として記録しました。");
   await expect(picker.getByRole("button", { name: "続けて選択" })).toBeFocused();
   await page.screenshot({ path: testInfo.outputPath("import-1280-resolved.png"), fullPage: true });

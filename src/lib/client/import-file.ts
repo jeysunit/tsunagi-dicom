@@ -1,6 +1,6 @@
 import type { ImportOutcome, ResolveResult } from "@/components/ui/file-picker";
 import { handleAuthStatus } from "@/lib/client/api";
-import type { ResolveTarget } from "@/lib/import/picker-model";
+import { RESOLVE_UNREACHABLE_MESSAGE, type ResolveTarget } from "@/lib/import/picker-model";
 
 // インポートの画面（docs/spec.md の 3.5「取り込み」。段 6）が、選んだファイルを 1 件ずつ BFF へ送る。
 // 本文はファイルのバイトのまま（POST /api/import）。要求の ID は x-request-id、まとめて選んだ組は x-import-batch・
@@ -162,6 +162,6 @@ export async function resolveImport(
     const body = (await res.json().catch(() => ({}))) as { error?: unknown };
     return { ok: false, message: typeof body.error === "string" && body.error ? body.error : RESOLVE_FAILED_MESSAGE };
   } catch {
-    return { ok: false, message: UNREACHABLE_REASON };
+    return { ok: false, message: RESOLVE_UNREACHABLE_MESSAGE };
   }
 }
