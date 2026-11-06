@@ -20,6 +20,8 @@ export default async function ImportPage() {
   const config = getConfig();
   // 検証モードで書き込みを止めているときは、部品を出さない（帯に「書き込み：無効」が出ている）
   const writes = config.auth.mode !== "dev" || !!config.auth.devAllowWrite;
+  // 結果不明を照らせる役割（管理者）には「管理者に確かめを頼んでください。」を出さず、結果不明の行に「確認」を出す
+  const canResolve = can(access.session.role, "pacs.reconcile");
   return (
     <section className="space-y-3" data-testid="import-page">
       <PageHeader title="インポート" />
@@ -27,8 +29,8 @@ export default async function ImportPage() {
         <ImportScreen
           limitBytes={config.screen.importMaxMb * 1024 * 1024}
           csrfToken={access.session.local?.row.csrfToken}
-          // 結果不明を照らせる役割（管理者）には「管理者に確かめを頼んでください。」を出さない
-          unknownHelp={can(access.session.role, "pacs.reconcile") ? "" : undefined}
+          unknownHelp={canResolve ? "" : undefined}
+          canResolve={canResolve}
         />
       ) : (
         <EmptyState fact="書き込みが無効のため、インポートできません。" data-testid="import-disabled" />

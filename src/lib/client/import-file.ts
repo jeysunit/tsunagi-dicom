@@ -1,5 +1,6 @@
-import type { ImportOutcome } from "@/components/ui/file-picker";
+import type { ImportOutcome, ResolveResult } from "@/components/ui/file-picker";
 import { handleAuthStatus } from "@/lib/client/api";
+import { RESOLVE_UNREACHABLE_MESSAGE, type ResolveTarget } from "@/lib/import/picker-model";
 
 // インポートの画面（docs/spec.md の 3.5「取り込み」。段 6）が、選んだファイルを 1 件ずつ BFF へ送る。
 // 本文はファイルのバイトのまま（POST /api/import）。要求の ID は x-request-id、まとめて選んだ組は x-import-batch・
@@ -15,8 +16,11 @@ export interface ImportBatch {
 
 interface Answer {
   status: number;
-  data: { outcome?: unknown; error?: unknown };
+  data: { outcome?: unknown; error?: unknown; studyInstanceUid?: unknown };
 }
+
+/** 答えにある検査の UID（BFF が記録に残した要求だけが返す）。無ければ空 */
+const studyUidOf = (answer: Answer | null): string => (typeof answer?.data.studyInstanceUid === "string" ? answer.data.studyInstanceUid : "");
 
 /** 画像サーバーにもうあった画像（Orthanc の AlreadyStored）の、成功の札の下の 1 句 */
 export const ALREADY_NOTE = "もう画像サーバーにありました";
@@ -52,8 +56,9 @@ export function outcomeOf(answer: Answer): ImportOutcome | null {
  * BFF に届かなかったときだけ失敗（届いたか分からないときは結果不明のまま）。ほかは結果不明。
  * 結果不明の理由は、いつも同じ 1 句にする（行ごとに語を変えない。BFF の文は記録と状態の確かめの側に残る）
  */
-export function checkedOutcomeOf(answer: Answer | null, sent: "reached" | "unreachable"): ImportOutcome {
-  const unknown: ImportOutcome = { ok: false, unknown: true, reason: UNKNOWN_REASON };
+export function checkedOutcomeOf(answer: Answer | null, sent: "reached" | "unreachable", target?: ResolveTarget): ImportOutcome {
+  // 結果不明の行は、BFF に届いた要求（検査の UID が分かる）だけ、管理者が確認して記録するための名指しを持つ
+  const unknown: ImportOutcome = { ok: false, unknown: true, reason: UNKNOWN_REASON, ...(target ? { resolve: target } : {}) };
   // 確かめも読めない：送った要求が届いたかも分からないので、通信が切れたときも結果不明にする（失敗と言い切らない）
   if (!answer || answer.status < 200 || answer.status >= 300) return unknown;
   // 記録が無い（none）：送っている間に切れたときだけ失敗にする。BFF は送り直された同じ画像を断るので、選び直して
@@ -92,6 +97,8 @@ export async function importFile(
 ): Promise<ImportOutcome> {
   const requestId = newId();
   let sent: "reached" | "unreachable" = "reached";
+  // 送った答えにあった検査の UID（状態の確かめの答えに無いときの代わり）
+  let postedUid = "";
   try {
     const res = await fetcher("/api/import", {
       method: "POST",
@@ -109,6 +116,7 @@ export async function importFile(
     // 頭が届いても本文を読み切れなければ、画像サーバーに入ったかが分からない。失敗と決めずに状態を確かめる
     if (AUTH_STATUSES.has(res.status)) onAuth(res.status);
     const answer = await read(res);
+    postedUid = studyUidOf(answer);
     const outcome = answer ? outcomeOf(answer) : null;
     if (outcome) return outcome;
   } catch {
@@ -118,8 +126,42 @@ export async function importFile(
   try {
     const res = await fetcher(`/api/import?${new URLSearchParams({ requestId })}`, { credentials: "same-origin" });
     if (AUTH_STATUSES.has(res.status)) onAuth(res.status);
-    return checkedOutcomeOf(await read(res), sent);
+    const checked = await read(res);
+    const uid = studyUidOf(checked) || postedUid;
+    return checkedOutcomeOf(checked, sent, uid ? { requestId, studyInstanceUid: uid } : undefined);
   } catch {
-    return checkedOutcomeOf(null, sent);
+    return checkedOutcomeOf(null, sent, postedUid ? { requestId, studyInstanceUid: postedUid } : undefined);
+  }
+}
+
+/** 記録できなかったが BFF の文が無いときの文（何が起きたか・次にすること） */
+export const RESOLVE_FAILED_MESSAGE = "記録できませんでした。時間をおいて、やり直してください";
+
+/**
+ * 結果不明の行を、管理者が確認して成功か失敗として記録する（POST /api/studies/{uid}/import/resolve。BFF は画像サーバーを読み直し、
+ * 成功は画像があるときだけ記録する）。記録できなかったときは BFF の誤りの文（何が起きたか・なぜか・次にすること）を返す。
+ * ログインが切れた（401）・画面がロックされた（423）ときは onAuth を呼ぶ
+ */
+export async function resolveImport(
+  target: ResolveTarget,
+  outcome: "success" | "failed",
+  note: string,
+  csrfToken: string | undefined,
+  fetcher: typeof fetch = fetch,
+  onAuth: (status: number) => void = handleAuthStatus,
+): Promise<ResolveResult> {
+  try {
+    const res = await fetcher(`/api/studies/${encodeURIComponent(target.studyInstanceUid)}/import/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(csrfToken ? { "x-csrf-token": csrfToken } : {}) },
+      body: JSON.stringify({ requestId: target.requestId, outcome, note }),
+      credentials: "same-origin",
+    });
+    if (AUTH_STATUSES.has(res.status)) onAuth(res.status);
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+    return { ok: false, message: typeof body.error === "string" && body.error ? body.error : RESOLVE_FAILED_MESSAGE };
+  } catch {
+    return { ok: false, message: RESOLVE_UNREACHABLE_MESSAGE };
   }
 }

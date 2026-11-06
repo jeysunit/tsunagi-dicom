@@ -11,6 +11,11 @@ import {
   cancelWaiting,
   countItems,
   formbarText,
+  isResolvable,
+  nextResolvable,
+  RESOLVED_NOTE,
+  resolveItem,
+  resolvedMessage,
   resultNotice,
   seriesImageText,
   skippedNote,
@@ -297,6 +302,78 @@ describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 
       alert: true,
       text: "0 件をインポートしました。残り 1 件は中止したためインポートしていません。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。管理者に確かめを頼んでください。",
     });
+  });
+
+  it("結果不明を確認して記録する：名指しを持つ結果不明の行だけが確認できる。記録すると札が替わり、名指しを外し、件数を数え直す", () => {
+    const target = { requestId: "0b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e", studyInstanceUid: "1.2.3" };
+    const list = items([
+      { name: "a", state: "ok" },
+      { name: "b", state: "uk", resolve: target },
+      { name: "c", state: "uk" },
+      { name: "d", state: "uk", resolve: target, off: true },
+      { name: "e", state: "uk", resolve: { ...target, requestId: "1b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e" } },
+    ]);
+    // 名指しが無い行（BFF に届いたか分からない）・除外した行・結果不明でない行は確認できない
+    expect(list.map(isResolvable)).toEqual([false, true, false, false, true]);
+    const ok = resolveItem(list, 2, "success");
+    expect(ok[1]).toMatchObject({ state: "ok", reason: RESOLVED_NOTE });
+    expect(ok[1]).not.toHaveProperty("resolve");
+    expect(badgeOf(ok[1]!)).toEqual({ kind: "ok", label: "成功" });
+    // 選択の数は変わらず、結果不明が 1 減って成功が 1 増える（選択 ＝ 成功 ＋ 失敗 ＋ 結果不明 ＋ 中止）
+    const before = countItems(list);
+    const after = countItems(ok);
+    expect(after.selected).toBe(before.selected);
+    expect([after.ok, after.ng, after.unknown]).toEqual([before.ok + 1, before.ng, before.unknown - 1]);
+    expect(formbarText("done", after)).toBe("選択 4 件 → 成功 2・失敗 0・結果不明 2");
+    // 失敗に替えた行は、失敗・結果不明と同じ並び（先頭）のまま、選んだ順に並ぶ
+    const ng = resolveItem(list, 5, "failed");
+    expect(ng[4]).toMatchObject({ state: "ng", reason: RESOLVED_NOTE });
+    expect(sortForList(ng).map((i) => i.name)).toEqual(["b", "c", "d", "e", "a"]);
+    // 確認できない行・ほかの行には何も起こらない
+    expect(resolveItem(list, 3, "success")).toEqual(list);
+    expect(resolveItem(list, 1, "failed")).toEqual(list);
+    // 結果不明の行がなくなれば、知らせは結果不明の文を持たない（成功だけなら ok）
+    const solved = resolveItem(resolveItem(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: target }, { name: "e", state: "uk", resolve: target }]), 2, "success"), 3, "success");
+    expect(countItems(solved).unknown).toBe(0);
+    expect(resultNotice(countItems(solved), "")).toMatchObject({ kind: "ok", alert: false });
+  });
+
+  it("記録したあとの知らせの文：管理者が記録した行を含むときは「インポート済みです（うち K 件は管理者が確認）」の型で、読み上げの役（role）を付けない", () => {
+    const t = { requestId: "0b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e", studyInstanceUid: "1.2.3" };
+    const rec = (list: ReturnType<typeof items>, id: number, o: "success" | "failed") => resolveItem(list, id, o);
+    // 成功だけ（結果不明が無くなった）：ok・role なし
+    const allOk = rec(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }]), 2, "success");
+    expect(resultNotice(countItems(allOk), "")).toEqual({ kind: "ok", alert: false, silent: true, text: "選択 2 件のうち 2 件はインポート済みです（うち 1 件は管理者が確認）。" });
+    // 成功と失敗と結果不明が混ざる：成功・失敗・結果不明の順。失敗の理由の前に、記録した失敗の件数
+    const mixed = rec(rec(items([
+      { name: "a", state: "ok" }, { name: "b", state: "ng" }, { name: "c", state: "uk", resolve: t }, { name: "d", state: "uk", resolve: t }, { name: "e", state: "uk", resolve: t },
+    ]), 3, "success"), 4, "failed");
+    expect(resultNotice(countItems(mixed), "")).toEqual({
+      kind: "err",
+      alert: true,
+      silent: true,
+      text: "選択 5 件のうち 2 件はインポート済みです（うち 1 件は管理者が確認）。2 件は失敗しました（うち 1 件は管理者が確認。理由は各行の状態）。1 件は、画像サーバーに入ったか分かりません（各行の状態）。確かめるまで、同じ検査はインポートできません。",
+    });
+    // 記録した失敗だけが混ざる：成功の文は今までどおり、失敗の文だけ「うち」を持つ
+    const onlyNg = rec(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }]), 2, "failed");
+    expect(resultNotice(countItems(onlyNg), "").text).toBe("選択 2 件のうち 1 件をインポートしました。1 件は失敗しました（うち 1 件は管理者が確認。理由は各行の状態）。");
+    // 中止と重なる
+    const cut = rec(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }, { name: "c", state: "cx" }]), 2, "success");
+    expect(resultNotice(countItems(cut), "").text).toBe("2 件はインポート済みです（うち 1 件は管理者が確認）。残り 1 件は中止したためインポートしていません。");
+    // 記録した行を含まないときは、前の結果の文のまま（silent を持たない）
+    expect(resultNotice(countItems(items([{ name: "a", state: "ok" }, { name: "b", state: "uk", resolve: t }])), "")).not.toHaveProperty("silent");
+  });
+
+  it("結果不明を確認して記録したときの読み上げと、次に確認する行", () => {
+    expect(resolvedMessage("IM0007", "success", 1)).toBe("IM0007 を成功として記録しました。結果不明 1 件。");
+    expect(resolvedMessage("IM0007", "failed", 0)).toBe("IM0007 を失敗として記録しました。");
+    const target = { requestId: "0b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e", studyInstanceUid: "1.2.3" };
+    const list = items([{ name: "a", state: "uk", resolve: target }, { name: "b", state: "ok" }, { name: "c", state: "uk", resolve: target }, { name: "d", state: "uk" }]);
+    // 並びの順で、今の行の後ろ。最後なら先頭から。ほかに無ければ null
+    expect(nextResolvable(list, 1)?.name).toBe("c");
+    expect(nextResolvable(list, 3)?.name).toBe("a");
+    expect(nextResolvable(items([{ name: "a", state: "uk", resolve: target }]), 1)).toBeNull();
+    expect(nextResolvable(items([{ name: "a" }]), 1)).toBeNull();
   });
 
   it("シリーズ／画像：S2 / I15。片方だけ読めないときは —、両方とも無ければ空", () => {

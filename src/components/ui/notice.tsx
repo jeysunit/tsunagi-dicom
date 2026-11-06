@@ -16,6 +16,7 @@ export type NoticeKind = keyof typeof KINDS;
 export function Notice({
   kind,
   alert = false,
+  silent = false,
   className,
   children,
   ...props
@@ -23,6 +24,8 @@ export function Notice({
   kind: NoticeKind;
   /** 画面の上の誤りの知らせとして読み上げる（kind が err のときだけ効く） */
   alert?: boolean;
+  /** 読み上げの役を付けない。別の読み上げの領域が同じ変化を 1 回伝えるとき（結果不明を記録したあとの結果の知らせ）に使う */
+  silent?: boolean;
   children: React.ReactNode;
 } & Omit<React.ComponentProps<"div">, "role">) {
   const { Icon, bar, tone } = KINDS[kind];
@@ -30,7 +33,7 @@ export function Notice({
     <div
       data-slot="notice"
       data-k={kind}
-      role={alert && kind === "err" ? "alert" : "status"}
+      role={silent ? undefined : alert && kind === "err" ? "alert" : "status"}
       className={cn("flex items-start gap-2 rounded border border-l-4 border-border bg-surface px-3 py-2 text-sm text-foreground", bar, className)}
       {...props}
     >
