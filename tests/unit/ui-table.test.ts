@@ -15,8 +15,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-// 一覧の表（docs/design-system/parts.md の「一覧の表（`.tbl`）」）の決まりを、部品の出す HTML で確かめる。
-// 押した・キーの振る舞いのうち、部品の外から決まる部分（キーの意味）は rowKeyAction で確かめる。
+// 一覧の表（docs/design-system/parts.md の「一覧の表（`.tbl`）」）の決まりを、部品の出す HTML で確認する。
+// 押した・キーの振る舞いのうち、部品の外から決まる部分（キーの意味）は rowKeyAction で確認する。
 
 const html = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 
@@ -77,7 +77,7 @@ describe("一覧の表（ui/table）", () => {
     expect(picked).toContain("bg-selected-strong");
     expect(picked).toContain("[&amp;&gt;td:first-child]:shadow-[inset_3px_0_0_var(--color-ring)]");
     expect(picked).not.toContain("font-bold");
-    // hover の地は選んだ行に当てない
+    // hover の地は選んだ行に適用しない
     expect(picked).not.toContain("hover:bg-muted");
 
     const other = row({ selected: false, onSelect: () => undefined });

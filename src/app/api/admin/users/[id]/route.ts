@@ -25,7 +25,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const session = await requireSession("user.manage");
     const { id } = await params;
     const ctx = await authContext();
-    // 大事な操作：直前に本人の確かめ（/api/auth/reauth）が要る。利用者の管理は、TOTP を登録した管理者には TOTP まで求める
+    // 大事な操作：直前に本人の確認（/api/auth/reauth）が要る。利用者の管理は、TOTP を登録した管理者には TOTP まで求める
     // （パスワードとセッションだけで、役割の格上げ・ほかの管理者の TOTP のやり直しをさせない。docs/spec.md の 3.6）
     assertRecentReauth(ctx, session.local!.row, session.local!.user, { requireTotp: true });
     const change = await readJson(request, Body);

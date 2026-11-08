@@ -5,7 +5,7 @@ import { BackendError, BackendUnknownError, type Backend, type JobState, type Pa
  * HL7 の書き換えの試験のための、画像ごとの小さな Orthanc。検査の ID は Orthanc と同じく患者 ID と
  * StudyInstanceUID から決まるので、仮の患者 ID の画像と正式な患者の画像は、同じ UID でも別の検査になる。
  * 書き換え（modify）は UID を保ち、元を残す（KeepSource: true）。同じ検査の同じ SOP の画像は上書きする
- * （OverwriteInstances）。元の画像は deleteStudyInstances で名指しで消す。
+ * （OverwriteInstances）。元の画像は deleteStudyInstances で指定して消す。
  */
 export interface FakeOrthanc {
   backend: Backend;
@@ -14,7 +14,7 @@ export interface FakeOrthanc {
   unstable: Set<string>;
   /**
    * 次の書き換えの仕事の結果（既定は Success。partial は 1 枚だけ書き換えて Success）。beforeModify は仕事が画像を
-   * 読んだ後に呼ぶ（最中に届いた画像を作る）。wholeStudyDelete は、次の画像の削除で名指しに関わらず検査ごと消す
+   * 読んだ後に呼ぶ（最中に届いた画像を作る）。wholeStudyDelete は、次の画像の削除で、どの画像を指定しても検査ごと消す
    * （画像の削除を誤る Orthanc）。beforeDelete は削除の前（ファイルの印を見る前）、duringDelete は印を見た後で消す前に
    * 呼ぶ（届き直しを作る）。changesFail は次の変更の記録の読み取りを結果不明で失敗させ、deleteFailAfter は次の削除を
    * その枚数だけ消した後に結果不明で止める（時間切れ・一部だけの削除）
@@ -52,7 +52,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     createHash("sha256").update(`${patientId}|${uid}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-");
   const idOf = (i: PatientInstance) => studyId(i.PatientID, i.StudyInstanceUID);
   const triple = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
-  // Orthanc のファイルの印（FileUuid）。画像を足す・置き換えるたびに新しい印になる（画像の物ごとに持つ）
+  // Orthanc のファイルの印（FileUuid）。画像を追加する・置き換えるたびに新しい印になる（画像の物ごとに持つ）
   const files = new WeakMap<PatientInstance, string>();
   const fileOf = (i: PatientInstance) => {
     if (!files.has(i)) files.set(i, randomUUID());
@@ -61,7 +61,7 @@ export function createFakeOrthanc(): FakeOrthanc {
   // Orthanc の画像の ID（検査と UID の組で決まる）と、変更の記録（届いた画像の ID の並び。位置は並びの長さ）
   const instanceIdOf = (i: PatientInstance) => `${idOf(i)}|${triple(i)}`;
   const arrivals: string[] = [];
-  // 書き換えの写しの ModifiedFrom（元の画像の ID）。画像の物ごとに持つので、上書きされた画像には無い
+  // 書き換えのコピーの ModifiedFrom（元の画像の ID）。画像の物ごとに持つので、上書きされた画像には無い
   const modifiedFrom = new WeakMap<PatientInstance, string>();
   const complete = (instance: Partial<PatientInstance> & Pick<PatientInstance, "PatientID" | "StudyInstanceUID">): PatientInstance => ({
     PatientName: "",
@@ -130,7 +130,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     async studyIsStable(id: string) {
       return !fake.unstable.has(id);
     },
-    // 値の修正（段 6）の試験のため：検査の要点（画像の値から作る。検査日・検査名・版は持たない）
+    // 値の修正（フェーズ 6）の試験のため：検査の要点（画像の値から作る。検査日・検査名・版は持たない）
     async studyInfo(id: string) {
       const found = fake.instances.filter(i => idOf(i) === id);
       if (!found.length) {
@@ -198,7 +198,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     async studyInstanceOrigins(id: string) {
       return Object.fromEntries(fake.instances.filter(i => idOf(i) === id).map(i => [triple(i), modifiedFrom.get(i) ?? null]));
     },
-    // http.ts と同じく、印を見て消す画像の ID を決め、1 枚ずつ、消す直前に変更の記録で届き直しを確かめてから ID で消す。
+    // http.ts と同じく、印を見て消す画像の ID を決め、1 枚ずつ、消す直前に変更の記録で届き直しを確認してから ID で消す。
     // Orthanc と同じく、消した画像の変更の記録も消える
     async deleteStudyInstances(
       id: string, named: PatientInstance[], source: { since: number; files: Record<string, string> }, beforeEach?: () => Promise<void>,

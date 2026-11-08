@@ -136,14 +136,14 @@ describe("接続の状態（ConnStatus）", () => {
       runs++;
       await gate;
     });
-    // 1 回目が終わる前の 2 回目は、何も流さない
+    // 1 回目が終わる前の 2 回目は、何も実行しない
     await runExclusive(lock, async () => {
       runs++;
     });
     expect(runs).toBe(1);
     release();
     await first;
-    // 終われば、また流せる。失敗しても lock は戻る
+    // 終われば、また実行できる。失敗しても lock は戻る
     await expect(runExclusive(lock, async () => Promise.reject(new Error("x")))).rejects.toThrow("x");
     expect(lock.current).toBe(false);
   });
@@ -155,7 +155,7 @@ describe("接続の状態（ConnStatus）", () => {
     expect(checkSummary([ok, ok, ok])).toBe("3 件すべてに接続できました。");
     expect(checkSummary([ok, ng, unreadable])).toBe("3 件のうち 2 件に接続できませんでした。");
     expect(checkSummary([ng, ng])).toBe("2 件のうち 2 件に接続できませんでした。");
-    // 全部が読めなかった（要求が届かない・権限・期限切れ）ときと、確かめる相手が無いときは「確かめられなかった」
+    // 全部が読めなかった（要求が届かない・権限・期限切れ）ときと、確認する相手が無いときは「確かめられなかった」
     expect(checkSummary([unreadable, unreadable])).toBe("接続を確かめられませんでした。");
     expect(checkSummary([])).toBe("接続を確かめられませんでした。");
   });

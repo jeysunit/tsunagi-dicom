@@ -20,11 +20,11 @@ import {
   type RequestRow,
 } from "@/lib/pacs-ops";
 
-// ほかの機器へ送る（docs/spec.md の 3.4。段 4）。書き込みの操作の共通の決まり（3.5）を通す：
+// ほかの機器へ送る（docs/spec.md の 3.4。フェーズ 4）。書き込みの操作の共通の決まり（3.5）を通す：
 // 役割（study.send）・CSRF・検証モードの書き込みの止め・呼ぶ前の記録（記録できなければ呼ばない）・呼んだ後の記録・
-// 要求の ID で二度流さない・答えが分からなければ結果不明。
+// 要求の ID で二度実行しない・答えが分からなければ結果不明。
 // Orthanc には C-STORE の送信（/modalities/{id}/store）を非同期で求め、仕事の ID を暗号化した token にして画面へ渡す。
-// GET（?requestId=…）は、同じ要求のいまの結果を返す（送り直さずに確かめる道）。
+// GET（?requestId=…）は、同じ要求のいまの結果を返す（送り直さずに確認する道）。
 
 type Context = { params: Promise<{ uid: string }> };
 
@@ -61,7 +61,7 @@ export async function POST(request: Request, { params }: Context) {
     const patientId = stringValue(dataset, TAG.PatientID);
     const detail = { requestId, modality, aet: target.aet };
 
-    // 呼ぶ前に「求めた」を記録する。記録の並びの中で、次の2つを確かめてから書く：
+    // 呼ぶ前に「求めた」を記録する。記録の並びの中で、次の2つを確認してから書く：
     // - 同じ要求の ID が並んで届いたときは、先の1つだけを通す
     // - 同じ検査を同じ送り先へ送った要求で、結果の分からないもの（照らし合わせの前）があれば、新しい要求でも断る（重ねて送らない）
     type Begin = { kind: "repeated" } | { kind: "pending"; pending: string[] } | { kind: "first" };
@@ -126,7 +126,7 @@ export async function POST(request: Request, { params }: Context) {
   }
 }
 
-/** 同じ要求のいまの結果（送り直さずに確かめる）。画面が答えを受け取れなかったときに使う */
+/** 同じ要求のいまの結果（送り直さずに確認する）。画面が答えを受け取れなかったときに使う */
 export async function GET(request: Request, { params }: Context) {
   try {
     const session = await requireSession();

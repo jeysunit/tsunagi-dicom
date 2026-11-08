@@ -10,8 +10,8 @@ import { createHttpBackend } from "@/lib/backend/http";
 import { wadoRsTarget } from "@/lib/backend/relay-path";
 import { BackendError } from "@/lib/backend/types";
 
-// 実の画像サーバーの代わりに、手元に自前の CA の証明書で HTTPS のサーバーを立てて確かめる。
-// 証明書の確かめを切る道は無いので、BACKEND_CA_FILE（caPem）が無ければつながらないことも見る。
+// 実の画像サーバーの代わりに、手元に自前の CA の証明書で HTTPS のサーバーを立てて確認する。
+// 証明書の検証を切る道は無いので、BACKEND_CA_FILE（caPem）が無ければつながらないことも見る。
 
 let dir: string;
 let server: Server;
@@ -50,7 +50,7 @@ beforeAll(async () => {
     (req, res) => {
       seen.push({ url: req.url ?? "", authorization: req.headers.authorization, method: req.method ?? "", accept: req.headers.accept });
       if (/\/(thumbnail|rendered)$/.test(req.url ?? "")) {
-        // 実の Orthanc の DICOMweb のプラグインと同じく、image/jpeg・image/png の名指し以外の Accept は 400
+        // 実の Orthanc の DICOMweb のプラグインと同じく、image/jpeg・image/png 以外の Accept は 400
         const accept = req.headers.accept;
         if (accept === "image/jpeg" || accept === "image/png") {
           res.writeHead(200, { "content-type": accept });
@@ -191,7 +191,7 @@ describe("実の画像サーバーへの接続", () => {
   });
 
   describe("中継の Accept", () => {
-    // ブラウザの <img> の Accept（Chrome）と、png を名指しする Safari の形
+    // ブラウザの <img> の Accept（Chrome）と、png を指定する Safari の形
     const IMG_ACCEPT = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
     const SAFARI_ACCEPT = "image/png,image/svg+xml,image/*;q=0.8,video/*;q=0.8,*/*;q=0.5";
     const relay = (rest: string[], accept?: string | null) =>

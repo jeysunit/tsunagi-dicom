@@ -3,7 +3,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // jsdom を持たないので、useSyncExternalStore だけを「購読して、ブラウザ側の値（getSnapshot）を返す」形に差し替え、
-// ロックの状態が購読側へ届き、上の帯の右端が何も描かなくなることを確かめる
+// ロックの状態が購読側へ届き、上の帯の右端が何も描かなくなることを確認する
 const subscribed: Array<{ subscribe: (l: () => void) => () => void; getSnapshot: () => boolean }> = [];
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();

@@ -80,7 +80,7 @@ const newest = (rows: StudySummary[], count: number) => sortStudiesNewestFirst(r
 
 /**
  * 検査日の新しい順に limit 件まで集める。fetchWindow は、条件（検査日の範囲を含む）で 1 回問い合わせ、
- * 答えの行（BFF の側で条件を確かめ直したもの）と、続きがあるかを返す。today（`YYYYMMDD`）は区切りの基準
+ * 答えの行（BFF の側で条件を確認し直したもの）と、続きがあるかを返す。today（`YYYYMMDD`）は区切りの基準
  */
 export async function collectNewestStudies(fetchWindow: FetchWindow, limit: number, query: StudyQuery | undefined, today: string): Promise<StudySearch> {
   const base: StudyQuery = { ...query };
@@ -100,10 +100,10 @@ export async function collectNewestStudies(fetchWindow: FetchWindow, limit: numb
   };
   // complete：区切ったどの範囲も読みきり、上限で切り捨てた検査も無い。
   // stopped：読みきれなかった範囲がある（1 日に収まっても続きがある・回数の上限に届いた）。そこより古い範囲へは進まない
-  // （進むと、新しい側に読み残しを抱えたまま古い検査を足し、「新しい側から欠けなく並ぶ」が崩れる。
+  // （進むと、新しい側に読み残しを抱えたまま古い検査を追加し、「新しい側から欠けなく並ぶ」が崩れる。
   // 画像サーバーが limit より少ない数で切ることも、規格は認めている（PS3.18 8.3.4.4.1 の maxResults））
   // 検査日の条件の無い検索では、検査日の無い検査も条件に合うが、区切った問い合わせ（検査日の範囲の条件）では引けない。
-  // 引けたかを確かめられないので、全部を返したとはしない
+  // 引けたかを確認できないので、全部を返したとはしない
   let complete = bounds.from !== undefined || bounds.to !== undefined;
   let stopped = false;
   const collect = async (range: Range, need: number): Promise<StudySummary[]> => {

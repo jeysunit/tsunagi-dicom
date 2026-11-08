@@ -20,8 +20,8 @@ import { parseMessage } from "./message";
 import { extractUpdate, type Command } from "./update";
 import { buildAck } from "./ack";
 
-// HL7 による患者情報の更新（design.md）。UID を保つ書き換え・確かめ・照らし合わせの部品は src/lib/keep-uid-write.ts にあり、
-// 画面の属性の訂正と共有する。ここには、メッセージの受理・重複の確かめ・HL7 の命令から書き換えの段取りを作る部分を置く。
+// HL7 による患者情報の更新（design.md）。UID を保つ書き換え・確認・照らし合わせの部品は src/lib/keep-uid-write.ts にあり、
+// 画面の属性の訂正と共有する。ここには、メッセージの受理・重複の確認・HL7 の命令から書き換えの段取りを作る部分を置く。
 export {
   enqueue,
   history,
@@ -146,7 +146,7 @@ function rememberEntry(
 
 export function planStudy(command: Command, attributes: Record<string, string>, id: string, before: PatientInstance[]) {
   const p = checkStudyInstances(before);
-  // 患者 ID での検索は検査の要約で引くので、画像の患者 ID もメッセージの患者 ID と同じかを確かめる（揃いは上で確かめた）
+  // 患者 ID での検索は検査の要約で引くので、画像の患者 ID もメッセージの患者 ID と同じかを確認する（揃いは上で確認した）
   if (command.kind !== "ORM" && p.PatientID !== (command.kind === "A40" ? command.priorPatientId : command.patientId)) {
     throw new BackendError("画像の患者 ID がメッセージの患者 ID と違う");
   }
@@ -195,7 +195,7 @@ function findPreviousMessage(rows: HistoryRow[], common: {
       && (!r.occurredAt || Date.now() - r.occurredAt.getTime() <= 7 * 86400000)
   );
 }
-/** 受信を記録し、重複と未解決の書き換えを確かめてから反映する（design.md §9・§10）。 */
+/** 受信を記録し、重複と未解決の書き換えを確認してから反映する（design.md §9・§10）。 */
 export async function processMessage(
   buffer: Buffer,
   peer: string,
@@ -289,7 +289,7 @@ export async function processMessage(
     }
     const sources = await Promise.all(ids.map(id => backend.studyInstanceTags(id)));
     const attributes = await mergeAttributes(backend, command, sources);
-    // 全検査の入力を確かめてから、最初の書き換えを呼ぶ。
+    // 全検査の入力を確認してから、最初の書き換えを呼ぶ。
     const plans = ids.map((id, i) => planStudy(command, attributes, id, sources[i]!));
     for (const plan of plans) {
       if (await writeAndVerify(backend, plan, messageId, row, options)) {

@@ -58,8 +58,8 @@ import type { AppConfig } from "@/lib/config";
 
 // 実の Orthanc への接続（Orthanc 専用。docs/spec.md の 0）。検索と中継は Orthanc の DICOMweb のプラグイン、
 // 件数は Orthanc の REST を使う。資格情報はここだけで使う。
-// 証明書は必ず確かめる。BACKEND_CA_FILE があれば、Node の既定の CA（NODE_EXTRA_CA_CERTS を含む）に足して使う。
-// 確かめを切る道は作らない。
+// 証明書は必ず検証する。BACKEND_CA_FILE があれば、Node の既定の CA（NODE_EXTRA_CA_CERTS を含む）に追加して使う。
+// 確認を切る道は作らない。
 
 const TIMEOUT_MS = 15_000;
 /** 書き込みの操作の答えを待つ時間。過ぎたら結果不明（docs/spec.md の 3.5） */
@@ -68,7 +68,7 @@ const POST_TIMEOUT_MS = 30_000;
 const EXPORT_TIMEOUT_MS = 10 * 60_000;
 /** インポートの答えを待つ時間。大きなファイル（IMPORT_MAX_MB まで）を送り終えて Orthanc が書くまでを待つ。過ぎたら結果不明 */
 const IMPORT_TIMEOUT_MS = 5 * 60_000;
-/** 書き出しの本文を流す間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
+/** 書き出しの本文をストリーミングする間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
 const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
 /** 付け替えの印の、Orthanc の利用者のメタデータの名前（deploy/orthanc/tsunagi-lock.lua と同じ。design.md §15.4） */
@@ -76,7 +76,7 @@ const LOCK_METADATA = "TsunagiLock";
 /** 画像の UID の組（studyInstanceFiles の鍵） */
 const instanceKey = (i: PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
 /**
- * 書き込みの操作の答えのうち、Orthanc が受けなかったと確かめられないもの（docs/spec.md の 3.5 の結果不明）：
+ * 書き込みの操作の答えのうち、Orthanc が受けなかったと確認できないもの（docs/spec.md の 3.5 の結果不明）：
  * 手前の入口の 502・503・504（Orthanc が受けた後に、入口が待ちきれなかったことがある）と、移す答え（3xx）
  */
 export const isUncertainStatus = (status: number) => status === 502 || status === 503 || status === 504 || (status >= 300 && status < 400);
@@ -125,7 +125,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       write?: boolean;
       /** どの資格情報で求めるか。既定は GET・HEAD が読む資格情報、POST・PUT・DELETE が書く資格情報 */
       credential?: "read" | "write";
-      /** 時間切れを呼ぶ側で決める（本文を流す間は別の時間切れにする書き出しなど）。あれば timeoutMs は使わない */
+      /** 時間切れを呼ぶ側で決める（本文をストリーミングする間は別の時間切れにする書き出しなど）。あれば timeoutMs は使わない */
       signal?: AbortSignal;
     } = {},
   ) {
@@ -303,7 +303,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
   }
 
   /**
-   * QIDO-RS の検査の検索を 1 回。ask 件まで求め、答えの行（BFF の側で条件を確かめ直したもの）と、続きがあるか
+   * QIDO-RS の検査の検索を 1 回。ask 件まで求め、答えの行（BFF の側で条件を確認し直したもの）と、続きがあるか
    * （返した数が ask に届いたか、Warning 299 があった。PS3.18 8.3.4.4.1）を返す
    */
   async function qidoStudies(ask: number, studyQuery?: StudyQuery): Promise<WindowAnswer> {
@@ -326,13 +326,13 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     const rows = res.status === 204 ? [] : ((await res.json()) as unknown);
     const datasets = Array.isArray(rows) ? (rows as DicomJsonDataset[]) : [];
     return {
-      // 範囲と詳細条件は画像サーバーで絞るが、答えをそのまま信じず、ここでも確かめる
+      // 範囲と詳細条件は画像サーバーで絞るが、答えをそのまま信じず、ここでも確認する
       rows: datasets.map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, studyQuery)),
       more: datasets.length >= ask || warnsMoreResults(res.headers.get("warning")),
     };
   }
 
-  /** UID は字を確かめてから URL に入れる（画像サーバーの path の外へ出さない） */
+  /** UID は字を確認してから URL に入れる（画像サーバーの path の外へ出さない） */
   function checkedUid(uid: string): string {
     if (!isDicomUid(uid)) throw new BackendError("StudyInstanceUID が正しくありません", 400);
     return uid;
@@ -428,7 +428,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
     },
 
     async relayDicomweb(req: RelayRequest) {
-      // 呼ぶ側でも確かめるが、ここでも読み取りの WADO-RS だけにする（二重の確かめ）
+      // 呼ぶ側でも確認するが、ここでも読み取りの WADO-RS だけにする（二重の確認）
       if (req.method !== "GET" && req.method !== "HEAD") throw new BackendError("中継は読み取りだけ", 405);
       const target = wadoRsTarget(req.target.path.split("/"));
       if (!target || target.path !== req.target.path) throw new BackendError("中継は WADO-RS の読み取りだけ", 404);
@@ -540,7 +540,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       };
     },
 
-    // Lua は Orthanc の時計で印の期限と比べるので、Orthanc の時計（/tools/now。UTC の秒まで）とのずれを確かめる。
+    // Lua は Orthanc の時計で印の期限と比べるので、Orthanc の時計（/tools/now。UTC の秒まで）とのずれを確認する。
     // Orthanc の時刻は now から now + 1 秒の間、この機でそれを読んだ時刻は sent から received の間なので、ずれはその幅で見る
     async checkLockClock() {
       const sent = Date.now();
@@ -564,7 +564,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       if (!Number.isSafeInteger(untilEpochSeconds) || untilEpochSeconds <= 0) {
         throw new BackendError("付け替えの印の期限が正しくありません", 400);
       }
-      // 付ける前に、Orthanc の時計とのずれを確かめる
+      // 付ける前に、Orthanc の時計とのずれを確認する
       await this.checkLockClock();
       const res = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, {
         method: "PUT",
@@ -577,7 +577,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         const hint = res.status === 404 ? `。Orthanc の UserMetadata に ${LOCK_METADATA} が要る` : "";
         throw new BackendError(`画像サーバーが付け替えの印を断りました（${res.status}）${hint}`);
       }
-      // 印が確かに立ったことを読み直して確かめる（PUT の答えだけで信じない）。入口で道を絞るときに印の道を 1 つの
+      // 印が確かに立ったことを再取得して確認する（PUT の答えだけで信じない）。入口で道を絞るときに印の道を 1 つの
       // 資格情報にまとめられるよう、書いたのと同じ資格情報で読む
       const check = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, { credential: "write" });
       const value = check.ok ? (await check.text()).trim() : "";
@@ -624,7 +624,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
 
     // 書き換えた元の画像だけを、画像の ID で 1 枚ずつ消す。検査ごとは消さない（最中に届いた画像を残す）。
     // 書き換えの前とファイルの印が違う画像と、消す直前に変更の記録で届き直しの見える画像（同じ UID で届き直して
-    // 置き換わった画像）も消さない。Orthanc は画像を消すとその変更の記録も消すので、届き直しは消す前に確かめる。
+    // 置き換わった画像）も消さない。Orthanc は画像を消すとその変更の記録も消すので、届き直しは消す前に確認する。
     // 記録を読んでから消すまでの間に届き直した画像は消えうる（Orthanc の削除に条件を付けられない）。C-STORE はこの間、
     // 付け替えの印で Orthanc の Lua が断るので、残るのは REST・STOW-RS で届き直した画像だけ（design.md §15.4）
     async deleteStudyInstances(id: string, instances: PatientInstance[], source: SourceFiles, beforeEach?: () => Promise<void>) {
@@ -652,7 +652,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       }
     },
 
-    // 仕事の完了は呼び手が確かめる（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
+    // 仕事の完了は呼び手が確認する（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
     // OverwriteInstances で元の画像が置き換わる。患者 ID が変わると元の検査が残り、呼び手が deleteStudyInstances で消す
     async modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>) {
       if (!isOrthancId(orthancStudyId)) {
@@ -765,7 +765,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       }
       if (!res.ok) {
         await res.body?.cancel();
-        // 手前の入口の 502・503・504 と移す答え（3xx）は、Orthanc が受けなかったと確かめられない（受けた後に答えが失われたかもしれない）
+        // 手前の入口の 502・503・504 と移す答え（3xx）は、Orthanc が受けなかったと確認できない（受けた後に答えが失われたかもしれない）
         if (isUncertainStatus(res.status)) throw new BackendUnknownError();
         throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
       }
@@ -801,7 +801,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
 
     async exportStudy(orthancStudyId: string) {
       if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
-      // ZIP は大きくなりうる。答えが始まるまでは EXPORT_TIMEOUT_MS を待ち、本文を流す間は、塊と塊の間が
+      // ZIP は大きくなりうる。答えが始まるまでは EXPORT_TIMEOUT_MS を待ち、本文をストリーミングする間は、塊と塊の間が
       // EXPORT_IDLE_MS を超えたときだけ切る（全体の長さの時間切れで、大きな検査の ZIP を途中で切らない）
       const abort = new AbortController();
       let timer = setTimeout(() => abort.abort(), EXPORT_TIMEOUT_MS);
@@ -843,7 +843,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const res = await call(orthancUrl, `studies/${orthancStudyId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
       await res.body?.cancel();
       if (res.status === 404) throw new BackendError("検査が見つかりません", 404);
-      // 受けなかったと確かめられない答えは結果不明（照らせば、消えたかが分かる）
+      // 受けなかったと確認できない答えは結果不明（照らせば、消えたかが分かる）
       if (!res.ok && isUncertainStatus(res.status)) throw new BackendUnknownError();
       if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     },
@@ -856,7 +856,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         write: true,
         timeoutMs: IMPORT_TIMEOUT_MS,
       });
-      // 受けなかったと確かめられない答えは結果不明（照らせば、入ったかが SOP Instance UID で分かる）
+      // 受けなかったと確認できない答えは結果不明（照らせば、入ったかが SOP Instance UID で分かる）
       if (!res.ok && isUncertainStatus(res.status)) {
         await res.body?.cancel();
         throw new BackendUnknownError();
@@ -922,7 +922,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       const res = await call(orthancUrl, `instances/${instanceId}`, { method: "DELETE", write: true, timeoutMs: POST_TIMEOUT_MS });
       await res.body?.cancel();
       if (res.status === 404) throw new BackendError("画像が見つかりません", 404);
-      // 受けなかったと確かめられない答えは結果不明（deleteStudy と同じ）
+      // 受けなかったと確認できない答えは結果不明（deleteStudy と同じ）
       if (!res.ok && isUncertainStatus(res.status)) throw new BackendUnknownError();
       if (!res.ok) throw new BackendError(`画像サーバーがエラーを返しました（${res.status}）`);
     },

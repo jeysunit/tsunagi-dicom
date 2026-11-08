@@ -32,7 +32,7 @@ export function formatSlashDate(value: unknown): string {
 
 /**
  * DICOM の TM を `09:30` にする。TM は `HH`・`HHMM`・`HHMMSS`・`HHMMSS.F…`（小数は 1〜6 桁）のどれか（PS3.5 6.2）。
- * 時だけの値（`07`）は分が分からないので `07:--` にする（`07:00` と書くと、無い値を足すことになる）。
+ * 時だけの値（`07`）は分が分からないので `07:--` にする（`07:00` と書くと、無い値を追加することになる）。
  * 古い形の `HH:MM:SS`（ACR-NEMA）も読む。読めなければ空
  */
 export function formatDicomTime(value: unknown): string {
@@ -98,7 +98,7 @@ function birthInside(birthDate: unknown, studyDate: unknown, letter: boolean): s
 }
 
 /**
- * 患者の帯と確かめの欄の生年月日：西暦と、全角の括弧から後ろ（`.unit` で包むため分けて返す）。
+ * 患者の帯と確認欄の生年月日：西暦と、全角の括弧から後ろ（`.unit` で包むため分けて返す）。
  * `{ date: "1975/05/14", note: "（昭50・51歳）" }`。括弧の中が空なら note も空。生年月日が読めなければどちらも空
  */
 export function birthParts(birthDate: unknown, studyDate: unknown): { date: string; note: string } {
@@ -107,7 +107,7 @@ export function birthParts(birthDate: unknown, studyDate: unknown): { date: stri
   return { date, note: inside ? `（${inside}）` : "" };
 }
 
-/** 帯の生年月日・性別を 1 つの文字にする：`1975/05/14（昭50・51歳）男`。生年月日が出せなければ飛ばす。性別は空でも「不明」を付ける（title・確かめの欄の要約に使う） */
+/** 帯の生年月日・性別を 1 つの文字にする：`1975/05/14（昭50・51歳）男`。生年月日が出せなければ飛ばす。性別は空でも「不明」を付ける（title・確認欄の要約に使う） */
 export function formatBirthLine(birthDate: unknown, sex: unknown, studyDate: unknown): string {
   const { date, note } = birthParts(birthDate, studyDate);
   return `${date}${note}${sexLabel(sex)}`;
@@ -164,7 +164,7 @@ function eraLetter(c: string): string {
   return (code >= 0xff21 && code <= 0xff5a ? String.fromCharCode(code - 0xfee0) : c).toUpperCase();
 }
 
-/** 元号の範囲を確かめる。範囲の外なら誤りの文（元号の名前と範囲を入れる） */
+/** 元号の範囲を確認する。範囲の外なら誤りの文（元号の名前と範囲を入れる） */
 function eraRangeError(index: number, date: SimpleDate): string | null {
   const era = ERAS[index]!;
   const next = index > 0 ? ERAS[index - 1] : undefined;
@@ -185,7 +185,7 @@ function eraRangeError(index: number, date: SimpleDate): string | null {
 /**
  * 生年月日の入力を読み取る。受ける形は西暦 `1975/05/14`、英字 1 字の `S50/05/14`、漢字 1 字の `昭50/05/14`、
  * 正式名の `昭和50年5月14日`（年の 1 は `元` でもよい。前後の空白は捨てる）。
- * 確かめる順は、形（暦に無い日を含む）→ 元号の範囲 → 今日より後。today は呼ぶ側が決める（画面は画面の今日、BFF はサーバーの今日）。
+ * 確認する順は、形（暦に無い日を含む）→ 元号の範囲 → 今日より後。today は呼ぶ側が決める（画面は画面の今日、BFF はサーバーの今日）。
  * 読めたら日付と DICOM の DA（`YYYYMMDD`）を返す。空の入力は形が合わない扱い（空を許すかは呼ぶ側が決める）
  */
 export function parseBirthInput(value: string, today: SimpleDate): { ok: true; date: SimpleDate; da: string } | { ok: false; message: string } {

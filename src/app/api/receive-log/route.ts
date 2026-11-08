@@ -5,8 +5,8 @@ import { getConfig } from "@/lib/config";
 import { receiveLogView } from "@/lib/receive-log";
 import { ReceivePeriodError, resolveReceivePeriod } from "@/lib/receive-period";
 
-// 受け取りの記録（docs/spec.md の 3.3。段 4）。期間（period・from・to）の中で Orthanc が受け取った検査を、新しい順に返す。
-// 読む元は Orthanc の変更の記録（/changes）と、画像のメタデータ（RemoteAET など）。BFF には写して持たない。
+// 受け取りの記録（docs/spec.md の 3.3。フェーズ 4）。期間（period・from・to）の中で Orthanc が受け取った検査を、新しい順に返す。
+// 読む元は Orthanc の変更の記録（/changes）と、画像のメタデータ（RemoteAET など）。BFF にはコピーして持たない。
 // 返す項目は役割の許可の一覧（receive・study）で絞る。返した検査は、検索と同じ形で記録してから返す。
 
 export async function GET(request: Request) {

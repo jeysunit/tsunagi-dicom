@@ -10,8 +10,8 @@ import { visible } from "../../hl7-receiver/visible";
 
 // UID を保つ書き換えの部品（openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 2）。HL7 による患者情報の更新
 // （src/lib/hl7/apply.ts）から切り出したもの。Study・Series・SOP Instance UID を保ったまま、患者の属性と受付番号を
-// 書き換え、書き換えの後に全部の画像を確かめ、結果不明・部分反映を照らす。患者 ID の変わる書き換えは、付け替えの印を
-// 付けてから書き換え、書き換えた画像を確かめてから元の画像を名指しで消す。
+// 書き換え、書き換えの後に全部の画像を確認し、結果不明・部分反映を照らす。患者 ID の変わる書き換えは、付け替えの印を
+// 付けてから書き換え、書き換えた画像を確認してから元の画像を指定して消す。
 // 書き換えの経過は監査の記録の行（detail の event・writeId）に残し、その行だけから照らし合わせを決める。
 // 文中の design.md §n は、HL7 の設計（openspec/changes/archive/2026-10-24-add-hl7-patient-update-receiver/design.md）の節。
 
@@ -21,7 +21,7 @@ export type HistoryRow = AuditEntryInput & {
   occurredAt?: Date;
 };
 export const writeAudit: AuditWriter = async (input) => appendAudit(await getDb(), input);
-/** 監査の記録の書き換えの行が、鍵つきの値とつなぎに合わない（書き換えられた・差し込まれた）。人が確かめるまで処理しない */
+/** 監査の記録の書き換えの行が、鍵つきの値とつなぎに合わない（書き換えられた・差し込まれた）。人が確認するまで処理しない */
 export class HistoryTampered extends BackendUnknownError {
   constructor(seq: number, reason: string) {
     super(`監査の記録が鍵つきの値・つなぎと合わない（seq ${seq}：${reason}）`);
@@ -33,8 +33,8 @@ export class HistoryTampered extends BackendUnknownError {
  */
 const WRITE_ACTIONS: readonly AuditAction[] = ["hl7", "modify"];
 /**
- * 監査の一本のつなぎから、書き換えの経過を古い順に読む（design.md §13）。つなぎの全部を確かめ（行の action を書き換えて
- * 書き換えの行を隠されても見つける）、確かめた行のうち書き換えの操作の行だけを返す（確かめた後に読み直さない。design.md §15.1）。
+ * 監査の一本のつなぎから、書き換えの経過を古い順に読む（design.md §13）。つなぎの全部を確認（行の action を書き換えて
+ * 書き換えの行を隠されても見つける）、確認した行のうち書き換えの操作の行だけを返す（確認した後に再取得しない。design.md §15.1）。
  * 覚え（remember）を持つ行は鍵つきだけを受ける。合わない行があれば投げる。
  */
 export async function history(): Promise<HistoryRow[]> {
@@ -48,7 +48,7 @@ export async function history(): Promise<HistoryRow[]> {
   } catch (e) {
     throw new HistoryTampered(0, e instanceof Error ? e.message : "先頭の控えを読めない");
   }
-  // 鍵の無い行は、つなぎの決まりで最初の鍵つきの行より前だけに受ける（後ろに書き足された鍵の無い行は、偽の照らし
+  // 鍵の無い行は、つなぎの決まりで最初の鍵つきの行より前だけに受ける（後ろに追記された鍵の無い行は、偽の照らし
   // 合わせ（manual）でありうる）。覚えを持つ行は、その前の部分でも鍵つきだけを受ける（鍵を持たない者でも作れるため）
   const rows: StoredAuditRow[] = [];
   const chain = await verifyAuditChain(db, 1000, {
@@ -96,7 +96,7 @@ export function enqueue<T>(work: () => Promise<T>): Promise<T> {
   queue.tail = next.catch(() => undefined);
   return next;
 }
-/** UID を保つ書き換えで書き換え・確かめる値 */
+/** UID を保つ書き換えで書き換え・確認する値 */
 export const KEEP_UID_VALUES = [
   "PatientID",
   "PatientName",
@@ -117,7 +117,7 @@ export interface WriteDetail {
   after: PatientInstance[];
   /**
    * 同じ StudyInstanceUID で替え先の患者にすでにある画像（照合の後に届いた画像を書き換えるときだけ。design.md §15）。
-   * 書き換えた画像はこの検査にまとまるので、前と後のどちらの確かめにも足す。
+   * 書き換えた画像はこの検査にまとまるので、前と後のどちらの確認にも追加する。
    */
   alongside?: PatientInstance[];
   /**
@@ -151,9 +151,9 @@ export function sameInstances(actual: PatientInstance[], expected: PatientInstan
   return expected.every(e => actual.some(a => triple(a) === triple(e) && values.every(k => a[k] === e[k])));
 }
 /**
- * 書き換える検査の画像を確かめる。画像が無い・UID の組が欠ける・重なる・StudyInstanceUID が揃わない・
+ * 書き換える検査の画像を確認する。画像が無い・UID の組が欠ける・重なる・StudyInstanceUID が揃わない・
  * 患者の値と受付番号が画像どうしで揃わないときは投げる。uniform が false なら、患者 ID のほかの値の揃いは見ない
- * （画面の属性の訂正は、部分反映で値の揃わなくなった検査を、人が確かめて揃え直すのにも使うため）
+ * （画面の属性の訂正は、部分反映で値の揃わなくなった検査を、人が確認して揃え直すのにも使うため）
  */
 export function checkStudyInstances(before: PatientInstance[], uniform = true): PatientInstance {
   if (!before.length) {
@@ -187,7 +187,7 @@ const LOCK_SETTLE_MS = 1_000;
 
 interface SourceLock {
   renew(): Promise<void>;
-  /** 印が切れずに続いていることを確かめ、要れば延ばす。切れたかもしれない・延ばせないときは投げる（元を消す直前に呼ぶ） */
+  /** 印が切れずに続いていることを確認し、要れば延ばす。切れたかもしれない・延ばせないときは投げる（元を消す直前に呼ぶ） */
   ensure(): Promise<void>;
   /** 付け直しに失敗した・期限を過ぎたことがある（その間に C-STORE が入りえた） */
   lost(): boolean;
@@ -196,7 +196,7 @@ interface SourceLock {
   /** いまの期限（ミリ秒の時刻） */
   until(): number;
   /**
-   * 付け直しを止め、印は外さずに期限で切れるのを待つ（仕事の終わりを読めないとき。仕事が写している間に外さない）。
+   * 付け直しを止め、印は外さずに期限で切れるのを待つ（仕事の終わりを読めないとき。仕事がコピーしている間に外さない）。
    * この後の release は印を外さない
    */
   keep(): Promise<void>;
@@ -218,7 +218,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   // 書いた期限（この機の時計の時刻。記録と照らし合わせに使う）と、同じ期限の単調な時計の上の値（切れたかを見る）
   let until = 0;
   let untilMono = 0;
-  // Lua は Orthanc の時計で比べる。lockStudy が付けるたびに時計のずれを margin の内と確かめるので、期限の margin 前から
+  // Lua は Orthanc の時計で比べる。lockStudy が付けるたびに時計のずれを margin の内と確認するので、期限の margin 前から
   // 切れたとみなす。切れたかは単調な時計で見る（付けた後にこの機の時計が巻き戻っても、切れを見逃さない）
   const margin = options.lockClockToleranceMs ?? LOCK_CLOCK_TOLERANCE_MS;
   const expired = () => untilMono > 0 && performance.now() >= untilMono - margin;
@@ -266,7 +266,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
     untilMono = nextMono;
   };
   await renew();
-  // 仕事を待つ間・元の検査を読む間・写しを確かめる間も切らさないように、期限の 4 分の 1 ごとに付け直す
+  // 仕事を待つ間・元の検査を読む間・コピーを確認する間も切らさないように、期限の 4 分の 1 ごとに付け直す
   const timer = setInterval(() => void renew().catch(() => undefined), Math.max(ttl / 4, 10));
   timer.unref?.();
   let kept = false;
@@ -278,7 +278,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
   };
   return {
     renew,
-    // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる（renew が確かめる）
+    // 期限を過ぎていれば、その間に C-STORE が入りえたので、付け直して続けずにやめる（renew が確認する）
     ensure: renew,
     lost: () => failure !== undefined || (!released && expired()),
     settledLost: async () => {
@@ -296,7 +296,7 @@ async function lockSource(backend: Backend, id: string, options: ProcessOptions,
       const expiredAtStop = !released && expired();
       await stop();
       let held = failure === undefined && !expiredAtStop;
-      // 印の間に Orthanc の時計が進んでいれば（付けた時に確かめたずれから外れていれば）、Lua は印を切れたと読んだかもしれない
+      // 印の間に Orthanc の時計が進んでいれば（付けた時に確認したずれから外れていれば）、Lua は印を切れたと読んだかもしれない
       if (held) {
         try {
           await backend.checkLockClock();
@@ -320,19 +320,19 @@ type RemoveOutcome = {
   /** 消す前に元の検査にあった、書き換えていない画像（最中に届いた画像）が消えた */
   arrivalsLost?: true;
   /**
-   * 替え先の書き換えた画像の ModifiedFrom が、元の画像の ID と合わない（写しが同じ UID の別の画像に置き換わった）。
-   * 消す前に見つければ元は消さない。消した後に見つけたとき（確かめから消すまでの間に置き換わった）も、成功にしない
+   * 替え先の書き換えた画像の ModifiedFrom が、元の画像の ID と合わない（コピーが同じ UID の別の画像に置き換わった）。
+   * 消す前に見つければ元は消さない。消した後に見つけたとき（確認から消すまでの間に置き換わった）も、成功にしない
    */
   foreignCopies?: true;
-  /** 付け替えの印が途中で切れた・付け直せなかった（その間の C-STORE を写しが黙って上書きしえた）。元は消さない */
+  /** 付け替えの印が途中で切れた・付け直せなかった（その間の C-STORE をコピーが黙って上書きしえた）。元は消さない */
   lockLost?: true;
 };
 /**
- * 患者 ID の変わる書き換えの後に、元の検査から書き換えた画像だけを名指しで消す（design.md §15）。書き換えは元を残すので、
+ * 患者 ID の変わる書き換えの後に、元の検査から書き換えた画像だけを指定して消す（design.md §15）。書き換えは元を残すので、
  * 替え先の検査（元の検査の外の、同じ StudyInstanceUID の検査）が書き換えた後の画像と過不足なく合い、書き換えた画像の
- * ModifiedFrom がどれも元の画像の ID と同じときだけ消す。合わなければ消さずに戻り、後の確かめが部分反映として止める。
+ * ModifiedFrom がどれも元の画像の ID と同じときだけ消す。合わなければ消さずに戻り、後の確認が部分反映として止める。
  * 消す前に元の検査にあった、書き換えていない画像（最中に届いた画像）が、消した後に 1 枚でも無ければ arrivalsLost
- * （名指ししていない画像まで消えた）
+ * （指定していない画像まで消えた）
  */
 async function removeSource(backend: Backend, d: WriteDetail, lock?: SourceLock): Promise<RemoveOutcome> {
   // 元の検査の画像。画像を全部消すと Orthanc は検査ごと無くすので、引き当てに無ければ空とする
@@ -347,7 +347,7 @@ async function removeSource(backend: Backend, d: WriteDetail, lock?: SourceLock)
     return {};
   }
   const written = new Set(d.before.map(triple));
-  // 写しの確かめ：Orthanc は書き換えの写しに元の画像の ID（ModifiedFrom）を残す。写しの後に同じ UID の画像が
+  // コピーの確認：Orthanc は書き換えのコピーに元の画像の ID（ModifiedFrom）を残す。コピーの後に同じ UID の画像が
   // REST・STOW-RS で届いて置き換わると、ModifiedFrom が無くなる。元の画像の ID の無い前の版の記録では消さない
   const sourceIds = d.sourceFiles.ids;
   const copiesFromSource = async () => {
@@ -364,14 +364,14 @@ async function removeSource(backend: Backend, d: WriteDetail, lock?: SourceLock)
     if (!lock) {
       return { lockLost: true };
     }
-    // 1 枚を消す直前ごとに、印が切れずに続いていることを確かめる（切れたかもしれなければ消すのをやめる）
+    // 1 枚を消す直前ごとに、印が切れずに続いていることを確認する（切れたかもしれなければ消すのをやめる）
     await backend.deleteStudyInstances(d.oldOrthancId, named, d.sourceFiles, lock.ensure);
   }
   const left = new Set((await sourceInstances()).map(triple));
   const outcome: RemoveOutcome = source.every(i => written.has(triple(i)) || left.has(triple(i))) ? {} : { arrivalsLost: true };
-  // 確かめてから消すまでの間に、写しが REST・STOW-RS で置き換わった（印では止まらない）。元はもう消えたので、部分反映として
+  // 確認してから消すまでの間に、コピーが REST・STOW-RS で置き換わった（印では止まらない）。元はもう消えたので、部分反映として
   // 人に見せる（design.md §15.4 の残る隙）
-  // 最中に届いた画像の消失を見つけた後は、この確かめが失敗しても見つけたことを失わない（部分反映として返す）
+  // 最中に届いた画像の消失を見つけた後は、この確認が失敗しても見つけたことを失わない（部分反映として返す）
   try {
     if (named.length && !await copiesFromSource()) {
       outcome.foreignCopies = true;
@@ -422,13 +422,13 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
       if (!job || !["Success", "Failure"].includes(job.state)) {
         continue;
       }
-      // 患者 ID の変わる書き換えは元の検査が残るので、仕事の終わりを読めずに止まった後も、確かめてから元の画像を
-      // 名指しで消す（書き換えたときと同じ。消し終えていれば何もしない。design.md §15.4）。元の検査が残っていれば、
+      // 患者 ID の変わる書き換えは元の検査が残るので、仕事の終わりを読めずに止まった後も、確認してから元の画像を
+      // 指定して消す（書き換えたときと同じ。消し終えていれば何もしない。design.md §15.4）。元の検査が残っていれば、
       // 消す間は付け替えの印を付ける
       let removed: RemoveOutcome = {};
       // 印を付けて書き換えた仕事が、印の期限（dispatch か結果不明の行の lockUntil の最後）までに終わっていなければ、
-      // 印の切れた後に写したかもしれない（その間の C-STORE を写しが黙って上書きしうる。BFF が仕事を待つ間に止まれば
-      // 付け直しも止まる）。期限か仕事の終わりの時刻を読めなければ確かめられないので、同じく元を消さずに部分反映として
+      // 印の切れた後にコピーしたかもしれない（その間の C-STORE をコピーが黙って上書きしうる。BFF が仕事を待つ間に止まれば
+      // 付け直しも止まる）。期限か仕事の終わりの時刻を読めなければ確認できないので、同じく元を消さずに部分反映として
       // 人に見せる。照らし合わせが付け直した印の行（dispatch より後）は、書き換えの印に数えない
       const history = rows.filter(r => r.detail?.writeId === d.writeId);
       const lockedWrite = history.slice(0, history.indexOf(dispatch)).some(r => r.detail?.event === "lock");
@@ -459,13 +459,13 @@ export async function reconcile(backend: Backend, rows: HistoryRow[], audit: Aud
           }
           removed = { lockLost: true };
         } finally {
-          // 外すまでに切れていれば（最後に消す間に届き直した画像を消したかもしれない）、成功にしない。確かめはこの後
+          // 外すまでに切れていれば（最後に消す間に届き直した画像を消したかもしれない）、成功にしない。確認はこの後
           if (lock && !await lock.release()) {
             removed = { ...removed, lockLost: true };
           }
         }
       }
-      // 元を消す間の異常を見つけた後は、確かめに失敗しても解かずに残さず、部分反映として人に見せる
+      // 元を消す間の異常を見つけた後は、確認に失敗しても解かずに残さず、部分反映として人に見せる
       const anomaly = Boolean(removed.arrivalsLost || removed.foreignCopies || removed.lockLost);
       const checked = await verify(backend, d).catch((e: unknown) => {
         if (!anomaly) throw e;
@@ -517,7 +517,7 @@ export type AuditRow = (
   patientId?: string,
   studyInstanceUid?: string,
 ) => Promise<unknown>;
-// request を残した後だけ書き、仕事の終わりと全画像を確かめる（design.md §4・§10）。
+// request を残した後だけ書き、仕事の終わりと全画像を確認する（design.md §4・§10）。
 export async function writeAndVerify(
   backend: Backend,
   plan: KeepUidPlan,
@@ -558,7 +558,7 @@ async function writeStudy(
   // 患者 ID の変わる書き換えは、後で元の画像を消すので、書き換えの前のファイルの印を残す（design.md §15.4）
   const sourceFiles = lock ? await backend.studyInstanceFiles(id) : undefined;
   // 照合（planStudy）の後・印を付ける前に、同じ UID の画像が別の値で置き換わっていれば、その画像を照合していない。
-  // 印を付けた後（C-STORE はもう入らない）に読み直し、照合した画像と同じでなければ書き換えない
+  // 印を付けた後（C-STORE はもう入らない）に再取得し、照合した画像と同じでなければ書き換えない
   if (lock && !sameInstances(await backend.studyInstanceTags(id), before)) {
     throw new BackendError("書き換えの前に検査の画像が変わった");
   }
@@ -572,7 +572,7 @@ async function writeStudy(
     ...(alongside?.length ? { alongside } : {}),
     ...(sourceFiles ? { sourceFiles } : {})
   };
-  // 元の検査を読む間に印が切れた・付け直せなかったら、その間の C-STORE を写しうるので、書き換えを始めない
+  // 元の検査を読む間に印が切れた・付け直せなかったら、その間の C-STORE をコピーうるので、書き換えを始めない
   await lock?.ensure();
   await row("request", "success", { ...d }, after[0]!.PatientID, d.StudyInstanceUID);
   let state: string | undefined;
@@ -585,7 +585,7 @@ async function writeStudy(
     }
     const { jobId } = await backend.modifyStudyKeepingUids(id, replace);
     jobCreated = true;
-    // 照らし合わせが、仕事がこの期限より後に終わったかを確かめられるよう、印の期限を残す（BFF が仕事を待つ間に止まると、
+    // 照らし合わせが、仕事がこの期限より後に終わったかを確認できるよう、印の期限を残す（BFF が仕事を待つ間に止まると、
     // 付け直しも止まる）
     await row("dispatch", "success", { writeId: d.writeId, jobId, ...(lock ? { lockUntil: new Date(lock.until()).toISOString() } : {}) });
     const deadline = Date.now() + (options.jobTimeoutMs ?? 120000);
@@ -601,12 +601,12 @@ async function writeStudy(
       await lock?.renew();
     }
   } catch (e) {
-    // 仕事ができて写しているかもしれない（仕事を作った後か、書き換えを求めた答えが来なかった。Orthanc が断ったと分かる
+    // 仕事ができてコピーしているかもしれない（仕事を作った後か、書き換えを求めた答えが来なかった。Orthanc が断ったと分かる
     // BackendError だけが、仕事の無いことを示す）
     const mayCopy = jobCreated || !(e instanceof BackendError);
     // 途中の付け直しの答えも待つ
     if (mayCopy && lock && await lock.settledLost()) {
-      // 仕事の間に印が切れた・付け直せなかった：その間の C-STORE を写しが黙って上書きしえたので、照らし合わせで
+      // 仕事の間に印が切れた・付け直せなかった：その間の C-STORE をコピーが黙って上書きしえたので、照らし合わせで
       // 自動に解かず、元を消さずに部分反映として人に見せる（design.md §15.4）
       await lock.keep();
       await row("result", "failed", {
@@ -615,7 +615,7 @@ async function writeStudy(
       throw new BackendError("付け替えの印が途中で切れた");
     }
     if (mayCopy) {
-      // 仕事がまだ写しているかもしれないので、印は外さずに期限で切れるのを待つ。照らし合わせは、仕事がこの期限より
+      // 仕事がまだコピーしているかもしれないので、印は外さずに期限で切れるのを待つ。照らし合わせは、仕事がこの期限より
       // 後に終わっていれば元を消さない
       await lock?.keep();
       await row("result", "unknown", {
@@ -629,14 +629,14 @@ async function writeStudy(
     refusal = e.message;
   }
   let checked: Awaited<ReturnType<typeof verify>> | undefined;
-  // 患者 ID の変わる書き換え（A40）だけ、元の検査が残る。書き換えた画像を確かめてから元の画像を名指しで消す（design.md §15）
+  // 患者 ID の変わる書き換え（A40）だけ、元の検査が残る。書き換えた画像を確認してから元の画像を指定して消す（design.md §15）
   let removed: RemoveOutcome = {};
   try {
     if (state === "Success" && lock) {
       // 仕事を待つ間に印が切れていれば、元を消さない
       removed = lock.lost() ? { lockLost: true } : await removeSource(backend, d, lock);
       // 外すまでに切れていれば（最後に消す間に届き直した画像を消したかもしれない）、成功にしない。照らし合わせと同じく、
-      // 外してから確かめる（確かめる間の付け直しの失敗で、結果が揺れない）
+      // 外してから確認する（確認する間の付け直しの失敗で、結果が揺れない）
       if (!await lock.release()) {
         removed = { ...removed, lockLost: true };
       }
@@ -651,7 +651,7 @@ async function writeStudy(
       throw e;
     }
   }
-  // 元を消す間の異常（印の切れ・写しの置き換わり・最中に届いた画像の消失）を見つけた後は、確かめに失敗しても結果不明に
+  // 元を消す間の異常（印の切れ・コピーの置き換わり・最中に届いた画像の消失）を見つけた後は、確認に失敗しても結果不明に
   // 戻さず（照らし合わせが自動で解きうる）、部分反映として人に見せる
   const anomaly = Boolean(removed.arrivalsLost || removed.foreignCopies || removed.lockLost);
   try {

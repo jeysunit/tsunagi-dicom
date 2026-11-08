@@ -59,7 +59,7 @@ it("既定の8接続は保ち、9本目を閉じて busy の数を送る", async
   });
   const sockets: Socket[] = [];
   try {
-    // 待ち受けを使わず、接続数の既定値と知らせを確かめる（design.md §12）。
+    // 待ち受けを使わず、接続数の既定値と知らせを確認する（design.md §12）。
     for (let i = 0; i < 9; i++) {
       const socket = new Socket();
       Object.defineProperty(socket, "remoteAddress", { value: "192.0.2.1" });
@@ -134,7 +134,7 @@ it("100件の枠の誤りは64件まで持ち、復旧後に溢れた36件をま
     const socket = new Socket();
     Object.defineProperty(socket, "remoteAddress", { value: "192.0.2.1" });
     server.emit("connection", socket);
-    // 許可の確かめが済んでから、枠の外の字を渡す。
+    // 許可の確認が済んでから、枠の外の字を渡す。
     await Promise.resolve();
     await Promise.resolve();
     socket.emit("data", Buffer.from("x"));

@@ -5,12 +5,12 @@ import { hashPassword } from "@/lib/auth/password-hash";
 import { checkPassword } from "@/lib/auth/password-policy";
 
 // 管理者のパスワードを失くしたときの戻し方（docs/spec.md の 3.6）。
-// コンテナの中でだけ流せるコマンド（src/cli/reset-admin-password.ts）から呼ぶ。画面・API からは呼ばない。
+// コンテナの中でだけ実行できるコマンド（src/cli/reset-admin-password.ts）から呼ぶ。画面・API からは呼ばない。
 // 新しい一時のパスワードを決めて返し、次のログインで本人が変える（mustChangePassword）。
 // 認証の世代を上げてセッションを閉じる。TOTP は、resetTotp のときだけ消す（既定は残す）。
 // 監査の記録には、誰が（コンテナの中の操作）・いつ・どの利用者をを残す。パスワードは記録に入れない。
 //
-// コンテナの中でコマンドを流せる人は、データベースのファイルと SESSION_SECRET にも触れる。
+// コンテナの中でコマンドを実行できる人は、データベースのファイルと SESSION_SECRET にも触れる。
 // つまり「台に入れる人は管理者になれる」ことは、このコマンドの有無で変わらない。このコマンドは、その人が
 // 記録を残さずに行う道ではなく、記録を残して行う道を用意するためのもの。
 
@@ -27,7 +27,7 @@ export class AdminResetError extends Error {
   }
 }
 
-/** コマンドを流した者の手がかり。OS の利用者名は確かめた値、operator は自分で名乗った値（確かめていない） */
+/** コマンドを実行した者の手がかり。OS の利用者名は確認した値、operator は自分で名乗った値（確認していない） */
 export interface ResetOperator {
   osUser: string;
   hostname: string;

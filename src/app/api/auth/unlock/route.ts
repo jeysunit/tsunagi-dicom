@@ -11,9 +11,9 @@ const Body = z.object({
 });
 
 // 画面のロックを解く（既定はパスワードだけ。SCREEN_UNLOCK_REQUIRE_TOTP=true なら、登録していれば TOTP も。
-// 求めないときに送られた code は確かめない）。失敗はログインの失敗と同じに数える。
-// BFF の側がロックしていないとき（画面のロックの知らせが届かなかったときなど）も、いつも確かめる
-// （画面の側だけがロックしているずれで、確かめずに中身を出させない。閉じる側に倒す）。
+// 求めないときに送られた code は確認しない）。失敗はログインの失敗と同じに数える。
+// BFF の側がロックしていないとき（画面のロックの知らせが届かなかったときなど）も、いつも確認する
+// （画面の側だけがロックしているずれで、確認せずに中身を出させない。閉じる側に倒す）。
 // ログインの一時停止の間は断る（401、problems に locked）。セッションはロックのまま残し、閉じない
 // （2026-10-18 に承認者が決めた。一時停止が解けたら、同じセッションで解ける。docs/spec.md の 3.6）。
 export async function POST(request: Request) {
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     if (!local) throw new AuthError(401, "ログインしていません。再度ログインしてください");
     const body = await readJson(request, Body);
     await unlockScreen(await authContext(), local.row, local.user, body);
-    // 確かめが通ったので、画面が置いたロックの印（src/lib/auth/lock-cookie.ts）を消す
+    // 確認が通ったので、画面が置いたロックの印（src/lib/auth/lock-cookie.ts）を消す
     await clearLockCookie();
     return Response.json({ locked: false });
   } catch (error) {

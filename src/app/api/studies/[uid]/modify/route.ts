@@ -17,14 +17,14 @@ import { applyAttributeCorrection, checkContent, CorrectionRefused, newStudyUid,
 import { visible } from "../../../../../../hl7-receiver/visible";
 import { assertReauth, contentGroup, contentUnresolved, Kind, OrthancId, pendingAttribute, pendingContent, refuse, refusedBy, requestDetail, UNRESOLVED, Values } from "./shared";
 
-// 患者・検査の値の修正（docs/spec.md の 3.5。段 6。openspec/changes/archive/2026-11-05-add-study-value-correction）。一般と管理者（study.modify）、
+// 患者・検査の値の修正（docs/spec.md の 3.5。フェーズ 6。openspec/changes/archive/2026-11-05-add-study-value-correction）。一般と管理者（study.modify）、
 // 理由を必須、再認証の後（AUTH_MODE=local）。書き込みの操作の共通の決まり（3.5）を通す：CSRF・画面のロック・検証モードの止め・
-// 呼ぶ前の記録（記録できなければ呼ばない）・呼んだ後の記録・要求の ID で二度流さない・答えが分からなければ結果不明。
+// 呼ぶ前の記録（記録できなければ呼ばない）・呼んだ後の記録・要求の ID で二度実行しない・答えが分からなければ結果不明。
 // - 属性の訂正（kind attribute）：患者 ID・氏名・生年月日・性別・受付番号を、Study・Series・SOP Instance UID を保って直す。
-//   HL7 による患者情報の更新と同じ部品（src/lib/keep-uid-write.ts）を使い、同じ列で 1 つずつ流す。どちらかの結果不明・
+//   HL7 による患者情報の更新と同じ部品（src/lib/keep-uid-write.ts）を使い、同じ列で 1 つずつ実行する。どちらかの結果不明・
 //   部分反映が残るあいだは書き換えない。氏名・生年月日・性別は同じ患者 ID の全部の検査、患者 ID の付け替えと受付番号は選んだ1検査。
 // - 中身の訂正（kind content）：検査日・検査名を直した、新しい UID の検査を作る。元の検査は必ず残す（消すのは削除の操作）。
-// - 確かめの画面（./preview）で見せた検査と値は token に結び、書き換える直前に、いまの状態が同じでなければ 409 で断る。
+// - 確認画面（./preview）で見せた検査と値は token に結び、書き換える直前に、いまの状態が同じでなければ 409 で断る。
 
 type Context = { params: Promise<{ uid: string }> };
 
@@ -35,13 +35,13 @@ const Body = z.object({
   requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
   kind: Kind,
   values: Values,
-  /** 修正理由（必須。形は役割の確かめの後に確かめ、断ったことを記録に残す） */
+  /** 修正理由（必須。形は役割の確認の後に確認し、断ったことを記録に残す） */
   reason: z.string().max(4 * REASON_MAX).optional(),
-  /** 確かめの画面（./preview）が返した token */
+  /** 確認画面（./preview）が返した token */
   confirmToken: z.string().min(1).max(2048),
   /** 元の検査を消す指定。どの役割でも断る（元の検査を消すのは削除の操作） */
   deleteSource: z.boolean().optional(),
-  /** 同じ UID の検査が複数あるときに選んだ検査（確かめの画面で選んだもの。token の中のものと同じであること） */
+  /** 同じ UID の検査が複数あるときに選んだ検査（確認画面で選んだもの。token の中のものと同じであること） */
   orthancId: OrthancId.optional(),
 });
 
@@ -78,7 +78,7 @@ export async function POST(request: Request, { params }: Context) {
     const prior = await rowsOfRequest(db, "modify", requestId, uid);
     if (requestOutcome(prior).phase !== "none") return priorResponse(session, uid, requestId, prior);
 
-    // 確かめの画面の token：この利用者が、この UID の検査で、同じ種類と範囲で、期限の中に開いたもの
+    // 確認画面の token：この利用者が、この UID の検査で、同じ種類と範囲で、期限の中に開いたもの
     const shown = openModifyConfirm(confirmToken, getConfig().sessionSecret);
     if (!shown || shown.actorId !== session.actorId || shown.studyInstanceUid !== uid || shown.kind !== kind || shown.scope !== decided.scope
       || (body.orthancId !== undefined && body.orthancId !== shown.orthancId)) {
@@ -115,7 +115,7 @@ interface Run {
   db: Awaited<ReturnType<typeof getDb>>;
 }
 
-/** 列の中で、いまの状態を読み直し、確かめの画面で見せた状態と同じかを照らす */
+/** 列の中で、いまの状態を再取得し、確認画面で見せた状態と同じかを照らす */
 async function snapshotNow(r: Run): Promise<CorrectionSnapshot | Response> {
   let snap: CorrectionSnapshot;
   try {
@@ -130,7 +130,7 @@ async function snapshotNow(r: Run): Promise<CorrectionSnapshot | Response> {
   return snap;
 }
 
-/** 「求めた」の行を、同じ要求の ID の行がまだ無いときだけ足す（記録できなければ Orthanc を呼ばない） */
+/** 「求めた」の行を、同じ要求の ID の行がまだ無いときだけ追加する（記録できなければ Orthanc を呼ばない） */
 async function begin(r: Run, snap: CorrectionSnapshot, detail: Record<string, unknown>): Promise<boolean> {
   return auditIf<boolean>(r.session, async (tx) => {
     if (requestOutcome(await rowsOfRequest(tx, "modify", r.requestId, r.uid)).phase !== "none") return { value: false, fields: null };
@@ -166,7 +166,7 @@ async function runAttribute(r: Run): Promise<Response> {
   }
   const snap = await snapshotNow(r);
   if (snap instanceof Response) return snap;
-  // 同じ患者のほかの検査にも、結果不明・部分反映の中身の訂正が残っていれば書き換えない（写しを作っている最中かもしれない）
+  // 同じ患者のほかの検査にも、結果不明・部分反映の中身の訂正が残っていれば書き換えない（コピーを作っている最中かもしれない）
   for (const st of snap.studies) {
     if ((await pendingContent(r.db, st.info.studyInstanceUid)).length > 0) return refuse(r.session, r.uid, r.requestId, 409, "unresolved", UNRESOLVED);
   }
@@ -176,7 +176,7 @@ async function runAttribute(r: Run): Promise<Response> {
     // 書き換える検査ごとの前の値（戻すときは、この値への属性の訂正をもう一度行う）
     studies: snap.studies.map((st) => ({ StudyInstanceUID: st.info.studyInstanceUid, orthancId: st.orthancId, instances: st.instances.length, before: pick(st.instances[0]!) })),
     ...(snap.target ? { target: snap.target } : {}),
-    // 付け替えの覚え（受理の時刻を除く）。要求全体の結果を後から決めるときに、見回りの覚えとして結果の行に写す
+    // 付け替えの覚え（受理の時刻を除く）。要求全体の結果を後から決めるときに、見回りの覚えとして結果の行にコピーする
     ...(reassignMemory(snap) ? { rememberDraft: reassignMemory(snap) } : {}),
   });
   if (!started) return priorResponse(r.session, r.uid, r.requestId, await rowsOfRequest(r.db, "modify", r.requestId, r.uid));
@@ -237,7 +237,7 @@ async function runContent(r: Run): Promise<Response> {
   const after = Object.fromEntries(Object.entries(snap.fields).map(([f, v]) => [f, v.after]));
   const instanceCount = snap.selected.instances.length;
   // 中身の訂正も、書き換えの部品の組（event group）として残す。結果不明・部分反映のあいだは、HL7 の受信・見回りと画面の
-  // 属性の訂正が、書き換えの部品の unresolved で止まる（Orthanc が元の検査を写している最中に、元を書き換えない）
+  // 属性の訂正が、書き換えの部品の unresolved で止まる（Orthanc が元の検査をコピーしている最中に、元を書き換えない）
   const writeId = randomUUID();
   const started = await begin(r, snap, {
     newStudyInstanceUid: newUid,
@@ -303,7 +303,7 @@ async function runContent(r: Run): Promise<Response> {
 
 /**
  * GET ?requestId=… ：同じ要求のいまの結果。中身の訂正の結果不明は、作るはずだった検査（BFF が決めた StudyInstanceUID）を
- * Orthanc で探して照らす。作られて値が合えば成功、無くて仕事が失敗か見つからなければ失敗として記録に足す。
+ * Orthanc で探して照らす。作られて値が合えば成功、無くて仕事が失敗か見つからなければ失敗として記録に追加する。
  * 属性の訂正は、書き換えごとの結果（HL7 と同じ部品の行）を読み、結果不明・部分反映の書き換えの ID を返す（管理者が /api/hl7/resolve で解く）
  */
 export async function GET(request: Request, { params }: Context) {
@@ -327,10 +327,10 @@ export async function GET(request: Request, { params }: Context) {
       if (pending.length) return Response.json({ requestId, outcome: "unknown", unresolvedWriteIds: pending });
       if (!isUnresolved(o)) return Response.json({ requestId, outcome: o.outcome === "success" ? "modified" : o.outcome ?? "unknown", unresolvedWriteIds: [] });
       // 要求全体の結果が無い・結果不明のまま（書き換えの後、結果を記録する前に止まった・記録に失敗した・書き換えの結果不明を後で
-      // 照らし合わせが解いた）。列の中で、書き換えごとの記録から決めて足す
+      // 照らし合わせが解いた）。列の中で、書き換えごとの記録から決めて追加する
       return await enqueue(() => settleAttribute(session, uid, requestId));
     }
-    // 部分反映（作られた検査が合わない・元が残っていない）は、自動では解かない。管理者が ./resolve で確かめて解く
+    // 部分反映（作られた検査が合わない・元が残っていない）は、自動では解かない。管理者が ./resolve で確認して解く
     if (contentUnresolved(rows) && (o.outcome === "success" || o.outcome === "failed")) {
       return Response.json({ requestId, outcome: "partial", error: "修正した検査を確認できませんでした。管理者に確認を依頼してください" }, { status: 202 });
     }
@@ -363,7 +363,7 @@ async function reconcileContent(session: Session, uid: string, requestId: string
     Response.json({ requestId, outcome: "unknown", studyCreated, error: "修正の結果を確認できません。管理者に確認を依頼してください" }, { status: 202 });
   if (!o.jobId) return undecided(null);
   const backend = getBackend();
-  // 仕事の終わりを先に確かめてから、作られた検査を読む（写している最中の検査を、そろったと読まない）
+  // 仕事の終わりを先に確認してから、作られた検査を読む（コピーしている最中の検査を、そろったと読まない）
   const job = await backend.jobStatus(o.jobId);
   if (job !== null && job.state !== "Success" && job.state !== "Failure") return undecided(null);
   const newUid = typeof d.newStudyInstanceUid === "string" ? d.newStudyInstanceUid : "";
@@ -380,7 +380,7 @@ async function reconcileContent(session: Session, uid: string, requestId: string
     : (job === null || job.state === "Failure") && check.newOrthancId === null ? "failed" : null;
   if (!settled) return undecided(check.newOrthancId !== null);
   const written = await auditIf<boolean>(session, async (tx) => {
-    // 記録の並びの中で、まだ結果不明のままかを確かめてから足す（ほかで解かれた・結果が書かれた後は上書きしない）
+    // 記録の並びの中で、まだ結果不明のままかを確認してから追加する（ほかで解かれた・結果が書かれた後は上書きしない）
     const now = await rowsOfRequest(tx, "modify", requestId, uid);
     if (!isUnresolved(requestOutcome(now)) || !contentUnresolved(now)) return { value: false, fields: null };
     return {
@@ -424,7 +424,7 @@ function writesOf(rows: readonly { detail: string | null }[]): string[] {
 }
 
 /**
- * 要求全体の結果の行が無い属性の訂正を、書き換えごとの記録から決めて足す（列の中で呼ぶ。実行中の要求とは重ならない）。
+ * 要求全体の結果の行が無い属性の訂正を、書き換えごとの記録から決めて追加する（列の中で呼ぶ。実行中の要求とは重ならない）。
  * 解いていない書き換えが残れば決めない。書き換えが1つも無ければ（書き換える前に止まった）何も変わっていないので失敗。
  * 書き換えの全部が成功（照らし合わせの成功を含む）なら成功、それ以外は失敗
  */
@@ -468,8 +468,8 @@ async function settleAttribute(session: Session, uid: string, requestId: string)
 }
 
 /**
- * GET（requestId なし）：この検査の、管理者の確かめを待っている値の修正（結果不明・部分反映）。修正の窓を開き直したとき・
- * 頁を読み直したときに、状態の確認と解除の道へ戻すため。本人の要求のほか、照らし合わせの役割（管理者）なら全部を返す。
+ * GET（requestId なし）：この検査の、管理者の確認を待っている値の修正（結果不明・部分反映）。修正の窓を開き直したとき・
+ * 頁を再読み込みしたときに、状態の確認と解除の道へ戻すため。本人の要求のほか、照らし合わせの役割（管理者）なら全部を返す。
  * 書き換えの ID は、HL7 の書き換えのもの（この検査に当たるもの）も含める（管理者が /api/hl7/resolve で解く）
  */
 async function pending(session: Session, uid: string): Promise<Response> {

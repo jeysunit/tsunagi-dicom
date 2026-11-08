@@ -1,14 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// 段 4 の画面（docs/spec.md の 3.3・3.4）：受け取りの記録・機器の一覧と C-ECHO・送る。
-// 検証モード（AUTH_MODE=dev）とモックの Orthanc に対して流す。この試験のサーバーは DEV_ALLOW_WRITE=false（既定）なので、
-// 送る操作は止まることを確かめる。送るの一巡りは、AUTH_MODE=local のサーバー（tests/e2e/local-auth.spec.ts）で確かめる。
+// フェーズ 4 の画面（docs/spec.md の 3.3・3.4）：受け取りの記録・機器の一覧と C-ECHO・送る。
+// 検証モード（AUTH_MODE=dev）とモックの Orthanc に対して実行する。この試験のサーバーは DEV_ALLOW_WRITE=false（既定）なので、
+// 送る操作は止まることを確認する。送るの一巡りは、AUTH_MODE=local のサーバー（tests/e2e/local-auth.spec.ts）で確認する。
 
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 /** 受信一覧を、見本の受信の日（2026-10-17）の期間で開く（期間の初期設定は今日で、見本の受信は入らない） */
 const RECEIVED_SAMPLE_DAY = "/received?period=range&from=2026-10-17&to=2026-10-17";
 
-// 役割は管理者と一般の2つ（2026-10-20。docs/spec.md の 3.6）。前の技師で流していた試験は、一般で流す
+// 役割は管理者と一般の2つ（2026-10-20。docs/spec.md の 3.6）。前の技師で実行していた試験は、一般で実行する
 async function asRole(page: Page, label: "管理者" | "一般") {
   await page.goto("/");
   const button = page.getByTestId("dev-mode-band").getByRole("button", { name: label });
@@ -19,7 +19,7 @@ async function asRole(page: Page, label: "管理者" | "一般") {
 }
 
 // 期待の変更（文言）：画面の言葉を docs/spec.md の 2.2 の用語集に合わせた（受け取り→受信一覧・取り込み→インポート・
-// 一覧で開く→検査一覧で表示・つながった→成功（時刻つき）・書き込みは止めている→書き込み：無効など）。確かめる振る舞いは同じ。
+// 一覧で開く→検査一覧で表示・つながった→成功（時刻つき）・書き込みは止めている→書き込み：無効など）。確認する振る舞いは同じ。
 test("受け取りの記録：一般は、受け取った検査を新しい順に 1 件 1 行で見られ、REST で入った検査は「インポート」と分かる", async ({ page }) => {
   await asRole(page, "一般");
   await page.getByRole("navigation", { name: "ページ" }).getByRole("link", { name: "受信一覧" }).click();
@@ -29,7 +29,7 @@ test("受け取りの記録：一般は、受け取った検査を新しい順�
   await expect(page.getByTestId("received-period-today")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("received-none")).toHaveText("今日の受信はありません。期間を変えてください。");
   await expect(page.getByTestId("received-table").locator("thead th")).toHaveCount(8);
-  // 期間を指定：開始日と終了日がそろうと、頁を読み直さずに読み、URL にも期間が残る
+  // 期間を指定：開始日と終了日がそろうと、頁を再読み込みせずに読み、URL にも期間が残る
   await page.getByTestId("received-period-range").click();
   await page.getByTestId("received-from").fill("2026-10-17");
   await page.getByTestId("received-to").fill("2026-10-17");
@@ -117,7 +117,7 @@ test("受信一覧の絞り込み：送信元 AE・検索で絞り、前に開�
   await expect(page.getByTestId("received-empty")).toHaveText("該当する受信履歴はありません");
   await page.getByTestId("received-search").fill("");
 
-  // 再読み込み：画面の API から読み直す（頁は読み直さない）。新しく届いた行（答えに足した合成の行）が出て新着になり、
+  // 再読み込み：画面の API から再取得する（頁は再読み込みしない）。新しく届いた行（答えに追加した合成の行）が出て新着になり、
   // ほかの行の新着の印は、開いている間は前に開いた時刻のまま
   await page.route("**/api/receive-log?**", async (route) => {
     const res = await route.fetch();

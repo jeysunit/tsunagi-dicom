@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 // 部品の主な寸法を、部品集（docs/design-system/parts.md。ui-kit 1.2.2 の components.css）の値と比べる（部品集 delivery.md の C4）。
-// 上の帯の写し（1280 幅の上の帯と左のナビ）は、撮るだけで比べない。検証モード（AUTH_MODE=dev）とモックに対して流す。
+// 上の帯のコピー（1280 幅の上の帯と左のナビ）は、撮るだけで比べない。検証モード（AUTH_MODE=dev）とモックに対して実行する。
 
 async function asAdmin(page: Page) {
   await page.goto("/");
@@ -84,7 +84,7 @@ test.describe("部品の寸法", () => {
     await page.goto("/modalities");
     const all = page.getByTestId("echo-all");
     await expect(all).toBeVisible();
-    // 表の上の操作は小さいボタン（.btn-sm 28px）。標準（32px）は受け取りの「読み直す」
+    // 表の上の操作は小さいボタン（.btn-sm 28px）。標準（32px）は受け取りの「再読み込み」
     expect(await styleOf(all, ["height", "borderTopLeftRadius", "boxShadow", "borderTopWidth"])).toEqual({
       height: "28px",
       borderTopLeftRadius: "4px",

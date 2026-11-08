@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 // 詳細の操作の行と、一覧の行の「開く」（docs/design-system/components.md の「ボタン」）：
 // 主（藍）は詳細の操作の行の「開く」に 1 つだけ。一覧の行の「開く」は副（白地・枠）。
-// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して流す。
+// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して実行する。
 
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 
@@ -64,4 +64,4 @@ test("詳細の操作の行は Study UID の行より下にあり、見出しの
   expect(open.y).toBeGreaterThan(uid.y + uid.height - 2);
   await expect(detail.getByTestId("detail-head").getByTestId("open-default")).toHaveCount(0);
 });
-// 管理者の操作の行（送信・エクスポート・削除の並び）は、書き込みの有効な local-auth.spec.ts で確かめる
+// 管理者の操作の行（送信・エクスポート・削除の並び）は、書き込みの有効な local-auth.spec.ts で確認する

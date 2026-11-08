@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 // 画面ロックの状態を、LockGuard の外（上の帯）へ伝える。上の帯は LockGuard の外に描かれるので、
-// 画面の側でロックしたとき（頁を読み直すまでの間）に利用者の名前などを外すために使う。
+// 画面の側でロックしたとき（頁を再読み込みするまでの間）に利用者の名前などを外すために使う。
 let locked = false;
 const listeners = new Set<() => void>();
 

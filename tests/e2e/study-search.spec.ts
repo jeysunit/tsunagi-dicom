@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // 横断の検索の当て方（docs/spec.md の 3.1）：患者 ID・受付番号は全体の一致、氏名と検査名は含む。
-// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して流す。
+// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して実行する。
 
 async function asGeneral(page: Page) {
   await page.goto("/");

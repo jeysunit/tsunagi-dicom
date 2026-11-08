@@ -11,8 +11,8 @@ import type { Db } from "@/lib/db";
 // src/lib/audit-key.ts）を hash にする。行には鍵の印（keyId）を持たせる。
 // 鍵を持たない者による書き換え・途中の削除・差し込みは verifyAuditChain で見つかる。末尾の削除（切り詰め）と、
 // 鍵を持つ者による作り直しは、データベースの外に書き出した先頭の控え（src/lib/audit-anchor.ts）と照らして見つける。
-// 鍵つきにする前の行（keyId が空）は、鍵の無い SHA-256 のまま確かめる（追記だけの決まりのため書き換えない）。
-// このモジュールには追記と確かめだけを置き、更新・削除の関数は作らない。
+// 鍵つきにする前の行（keyId が空）は、鍵の無い SHA-256 のまま確認する（追記だけの決まりのため書き換えない）。
+// このモジュールには追記と確認だけを置き、更新・削除の関数は作らない。
 
 export const AUDIT_ACTIONS = [
   "hl7",
@@ -29,7 +29,7 @@ export const AUDIT_ACTIONS = [
   "write",
   // ビューアが画像を取る道（WADO-RS の読み取りの中継）
   "retrieve",
-  // AUTH_MODE=local（段 1b）：ログインの一時停止とその解除・画面のロックと解除・TOTP の登録とやり直し・パスワードの変更
+  // AUTH_MODE=local（フェーズ 1b）：ログインの一時停止とその解除・画面のロックと解除・TOTP の登録とやり直し・パスワードの変更
   "login_lock",
   "login_unlock",
   "screen_lock",
@@ -37,26 +37,26 @@ export const AUDIT_ACTIONS = [
   "mfa_enroll",
   "mfa_reset",
   "password_change",
-  // 大事な操作の前の、もう一度の本人の確かめ（段 1b）
+  // 大事な操作の前の、もう一度の本人の確認（フェーズ 1b）
   "reauth",
-  // 利用者の管理（段 1b）：作る・止める／戻す・役割の変更
+  // 利用者の管理（フェーズ 1b）：作る・止める／戻す・役割の変更
   "user_create",
   "user_status_change",
   "role_change",
   // 管理者のパスワードを失くしたときに、コンテナの中のコマンドで一時のパスワードを出した（src/lib/auth/admin-reset.ts）。
   // 画面・API からは使えない。detail の via は container_cli
   "admin_password_reset",
-  // 段 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
-  // 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、段 3 で道を外すまでこの名前で記録した
+  // フェーズ 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
+  // フェーズ 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、フェーズ 3 で道を外すまでこの名前で記録した
   "study_state",
-  // 段 4（docs/spec.md の 3.3〜3.5）：受け取りの記録を開いた・機器へ C-ECHO・ほかの機器へ送る（detail の phase：
+  // フェーズ 4（docs/spec.md の 3.3〜3.5）：受け取りの記録を開いた・機器へ C-ECHO・ほかの機器へ送る（detail の phase：
   // request＝Orthanc を呼ぶ前、result＝呼んだ後、done＝仕事の終わりを読んだ、reconcile＝結果不明を照らした）
   "receive_log",
   "echo",
   "send",
   // 送信一覧を開いた（送った記録を読んだ。detail の returned に、返した患者 ID と StudyInstanceUID の組）
   "send_log",
-  // 段 5：書き出し（ZIP）。削除は上の delete（detail の phase は send と同じ）
+  // フェーズ 5：書き出し（ZIP）。削除は上の delete（detail の phase は send と同じ）
   "export",
   // つなぎの鍵が替わった（鍵つきにした・SESSION_SECRET を替えた）。detail の from（前の行の keyId。鍵の無い行なら sha256）と to
   "audit_key",
@@ -81,9 +81,9 @@ export interface AuditEntryInput {
   outcome?: AuditOutcome;
   patientId?: string | null;
   studyInstanceUid?: string | null;
-  /** 確かめた接続元。信じるプロキシの設定が無い間は null（src/lib/auth/source-address.ts） */
+  /** 確認した接続元。信じるプロキシの設定が無い間は null（src/lib/auth/source-address.ts） */
   sourceAddress?: string | null;
-  /** 要求のヘッダーにあった接続元（X-Forwarded-For など）。偽れるので、確かめていない値として分けて持つ */
+  /** 要求のヘッダーにあった接続元（X-Forwarded-For など）。偽れるので、確認していない値として分けて持つ */
   sourceAddressUnverified?: string | null;
   detail?: Record<string, unknown> | null;
   /** 既定はサーバーの時計の今 */
@@ -109,14 +109,14 @@ export interface AuditRow {
   keyId: string | null;
 }
 
-/** hash の元にする行。後から足した項目は、無い（null の）行では省ける */
+/** hash の元にする行。後から追加した項目は、無い（null の）行では省ける */
 export type AuditHashInput = Omit<AuditRow, "hash" | "sourceAddressUnverified" | "keyId"> &
   Partial<Pick<AuditRow, "sourceAddressUnverified" | "keyId">>;
 
 /**
- * 鍵つきにする前の行（keyId が空）の hash：鍵の無い SHA-256。古い行を確かめるためだけに使う。
- * 項目を足すときは末尾に足し、古い行の確かめ方を変えない：
- * 後から足した項目は、値があるときだけ並びに入れる（値の無い行は、足す前と同じ hash になる）
+ * 鍵つきにする前の行（keyId が空）の hash：鍵の無い SHA-256。古い行を確認するためだけに使う。
+ * 項目を追加するときは末尾に追加し、古い行の確認方を変えない：
+ * 後から追加した項目は、値があるときだけ並びに入れる（値の無い行は、追加する前と同じ hash になる）
  */
 export function computeAuditHash(row: AuditHashInput): string {
   const later = row.sourceAddressUnverified != null ? [row.sourceAddressUnverified] : [];
@@ -139,7 +139,7 @@ export function computeAuditHash(row: AuditHashInput): string {
 }
 
 /**
- * 鍵つきの行の hash：HMAC-SHA256。並びの形は固定（先頭に形の印 v1、末尾に確かめていない接続元と鍵の印）。
+ * 鍵つきの行の hash：HMAC-SHA256。並びの形は固定（先頭に形の印 v1、末尾に確認していない接続元と鍵の印）。
  * 鍵の印も並びに入れ、行の keyId を別の鍵の印に書き換えられないようにする
  */
 export function computeAuditMac(row: AuditHashInput, key: AuditKey): string {
@@ -220,8 +220,8 @@ async function createRow(tx: Tx, last: AuditRow | null, input: AuditEntryInput, 
 }
 
 /**
- * appendAuditWith と同じ並びと transaction で、write が input に null を返したときは記録を足さない
- * （記録の並びの中で「もう書いてあるか」を確かめてから書くため。docs/spec.md の 3.5。送った仕事の終わりの記録など）
+ * appendAuditWith と同じ並びと transaction で、write が input に null を返したときは記録を追加しない
+ * （記録の並びの中で「もう書いてあるか」を確認してから書くため。docs/spec.md の 3.5。送った仕事の終わりの記録など）
  */
 export function appendAuditIf<T>(
   db: Db,
@@ -257,7 +257,7 @@ export function appendAuditIf<T>(
   queue.tail = run.catch(() => undefined);
   // 鍵が替わったことの行を書いたら、すぐに先頭の控えを書き出す（次の定期の書き出しを待たない）。
   // 切り替えの位置をデータベースの外に残し、切り替えの後の行を鍵の無い形に作り直されても見つけるため。
-  // 控えの書き出しは並びの外で行う（控えの側が記録を足すことがあるので、並びの中で待つと止まる）
+  // 控えの書き出しは並びの外で行う（控えの側が記録を追加することがあるので、並びの中で待つと止まる）
   return run.then(async (result) => {
     if (switched) await anchorAfterKeySwitch(db);
     return result;
@@ -280,7 +280,7 @@ export interface AuditAnchorRef {
 }
 
 export interface AuditChainOptions {
-  /** 確かめに使う鍵の束。既定は設定から作ったもの */
+  /** 確認に使う鍵の束。既定は設定から作ったもの */
   keyring?: AuditKeyring;
   /** 照らし合わせる先頭の控え */
   anchors?: readonly AuditAnchorRef[];
@@ -291,15 +291,15 @@ export interface AuditChainOptions {
    */
   requireAnchors?: boolean;
   /**
-   * 確かめた行を 1 行ずつ渡す（食い違いの見つかった行と、その後の行は渡さない）。確かめた行をそのまま使い、確かめた後に
-   * 読み直して、その間に書き換えられた行を使うことを防ぐ（HL7 の経過。src/lib/hl7/apply.ts）
+   * 確認した行を 1 行ずつ渡す（食い違いの見つかった行と、その後の行は渡さない）。確認した行をそのまま使い、確認した後に
+   * 再取得して、その間に書き換えられた行を使うことを防ぐ（HL7 の経過。src/lib/hl7/apply.ts）
    */
   onRow?: (row: AuditRow) => void;
 }
 
 /**
  * 先頭の控えと照らした結果。checked：照らした（控えの seq の行が全部合った）。not-configured：控えのファイルを
- * 設定していないので照らしていない（末尾の削除と、鍵を持つ者による作り直しは確かめていない）。no-rows：行がまだ無い
+ * 設定していないので照らしていない（末尾の削除と、鍵を持つ者による作り直しは確認していない）。no-rows：行がまだ無い
  */
 export type AuditAnchorStatus = "checked" | "not-configured" | "no-rows";
 
@@ -315,15 +315,15 @@ export type AuditChainResult =
   | { ok: false; checked: number; seq: number; reason: string };
 
 /**
- * つなぎを頭から確かめる。最初に見つかった食い違いを返す。
- * - 鍵つきの行は、行の鍵の印の鍵で hash を確かめる。受け付ける鍵は設定で決まる（SESSION_SECRET と
- *   SESSION_SECRET_PREVIOUS_FILE）。知らない鍵の印の行は、確かめられないので食い違いとして返す。
+ * つなぎを頭から確認する。最初に見つかった食い違いを返す。
+ * - 鍵つきの行は、行の鍵の印の鍵で hash を確認する。受け付ける鍵は設定で決まる（SESSION_SECRET と
+ *   SESSION_SECRET_PREVIOUS_FILE）。知らない鍵の印の行は、確認できないので食い違いとして返す。
  * - 鍵の印が替わってよいのは、鍵が替わったことの行（audit_key）だけ。その行は、新しい鍵で書かれ、detail の from が
  *   前の行の鍵の印（鍵の無い行なら sha256）、to が自分の鍵の印と同じでなければならない。前に使い終えた鍵へは戻れない。
- *   そのため、前の鍵（漏れたかもしれない）を名乗って、取り替えの後に行を書き足したり、取り替えの行を作ったりできない。
+ *   そのため、前の鍵（漏れたかもしれない）を名乗って、取り替えの後に行を追記したり、取り替えの行を作ったりできない。
  * - 鍵の無い行（前の版の形）は、最初の鍵つきの行より前だけで受ける。鍵つきの行の後に鍵の無い行があれば、作り直しとして返す。
  *   鍵の無い行を前から全部作り直された（鍵つきの行を消した）ときは、つなぎだけでは見つからず、先頭の控えで見つける。
- * - 先頭の控えを渡せば、控えの seq の行の hash が控えと同じか、控えより行が少なくないか（末尾の削除）も確かめる
+ * - 先頭の控えを渡せば、控えの seq の行の hash が控えと同じか、控えより行が少なくないか（末尾の削除）も確認する
  *   （鍵つきの hash には鍵の印も入るので、鍵の印を書き換えると hash も変わる）。結果の anchors.status で、控えと照らしたかが分かる。
  */
 export async function verifyAuditChain(db: Db, batchSize = 1000, options: AuditChainOptions = {}): Promise<AuditChainResult> {

@@ -9,7 +9,7 @@ import { getConfig } from "@/lib/config";
 // 画像ごとの「主なタグ」（詳細のパネルのサムネイルから開く画像の場所。docs/spec.md の 3.1）。
 // 選んだ1枚の画像の値（WADO-RS の metadata）のうち、設定（INSTANCE_TAGS）のタグだけを、設定の順に返す。設定に無いタグは返さない。
 // 値の全部（…/values）と同じ明示の権限（dicom.all_values）のときだけ返し、断ったものも記録する。開いたことを監査の記録に残す。
-// 画像サーバーへは BFF の側で求める（ブラウザに中継の道を足さない。docs/spec.md の 3.2）。読み取りだけ。
+// 画像サーバーへは BFF の側で求める（ブラウザに中継の道を追加しない。docs/spec.md の 3.2）。読み取りだけ。
 
 type Context = { params: Promise<{ uid: string; series: string; sop: string }> };
 

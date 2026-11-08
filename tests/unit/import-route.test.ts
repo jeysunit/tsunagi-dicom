@@ -3,9 +3,9 @@ import type { AppConfig } from "@/lib/config";
 import { dicomFile } from "./helpers/dicom-file";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 6 のインポート（docs/spec.md の 3.5 の「取り込み」）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確かめる。
+// フェーズ 6 のインポート（docs/spec.md の 3.5 の「取り込み」）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
 // 大きさの上限と DICOM でないものを Orthanc へ渡す前に断る、断ったことも記録に残る、呼ぶ前と後の監査の行（要求の ID で結ぶ）、
-// 同じ要求の ID を二度流さない、結果不明と照らし合わせ、CSRF（Origin）、検証モードの書き込みの止め、
+// 同じ要求の ID を二度実行しない、結果不明と照らし合わせ、CSRF（Origin）、検証モードの書き込みの止め、
 // インポートした検査が検査一覧で分かる（imported）を見る。
 // もうある画像・検査の取り込み直しを断る（同じ組の続きの画像は通す）、同じ検査に結果の分からない取り込み・削除・修正が
 // あれば断る、Orthanc が保存した値がファイルの値と違えば入れた画像を消して断る、も見る。
@@ -114,13 +114,13 @@ async function removeStudy(uid: string) {
   const b = await backend();
   await b.deleteStudy((await b.lookupStudy(uid))!);
 }
-/** 試験のために、記録に別の操作の行を足す（試験の利用者の名前で） */
+/** 試験のために、記録に別の操作の行を追加する（試験の利用者の名前で） */
 async function record(action: "hl7" | "delete" | "modify", uid: string, outcome: "success" | "unknown", detail: Record<string, unknown>) {
   const { appendAudit } = await import("@/lib/audit");
   await appendAudit(await db(), { actorId: "test", actorRole: "admin", authMode: "dev", action, outcome, studyInstanceUid: uid, detail });
 }
 /**
- * 並んで届いた別の取り込み（同じ利用者・別の要求の ID）の「求めた」と結果の行を、STUDY に足す。結果の行（失敗）も足すので、
+ * 並んで届いた別の取り込み（同じ利用者・別の要求の ID）の「求めた」と結果の行を、STUDY に追加する。結果の行（失敗）も追加するので、
  * 解けていない要求としては残らない（後の試験を止めない）
  */
 async function startedImport(extra: Record<string, unknown>, studyInstanceUid = STUDY) {
@@ -155,7 +155,7 @@ describe("インポート", () => {
     expect(await res.json()).toEqual({ requestId, outcome: "stored", studyInstanceUid: STUDY, labeled: true });
 
     const rows = await rowsOf(requestId);
-    // 送る直前に「送る」の行（dispatch）を足す（管理者が手で解いた後に送り出さないため）
+    // 送る直前に「送る」の行（dispatch）を追加する（管理者が手で解いた後に送り出さないため）
     expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
       ["request", "success"],
       ["dispatch", "success"],
@@ -224,7 +224,7 @@ describe("インポート", () => {
   });
 
   // 同じ組の続きの例外は、Orthanc のその検査の画像が全部、同じ利用者の同じ組の成功の結果の行（Orthanc の答えが Success）の
-  // 画像のときだけ。もうある見本の検査（STUDY。組の知らない見本の画像を持つ）に、見本の画像の行を記録に足して確かめる
+  // 画像のときだけ。もうある見本の検査（STUDY。組の知らない見本の画像を持つ）に、見本の画像の行を記録に追加して確認する
   it.each([
     ["例外に当たる行（対照）", {}, {}, 200],
     ["別の利用者の行", { actorId: "someone-else" }, {}, 409],
@@ -401,7 +401,7 @@ describe("インポート", () => {
     const blocked = await post(dicomFile({ studyInstanceUid: STUDY, sopInstanceUid: nextSop(), patientId: PATIENT }));
     expect(blocked.status).toBe(409);
     expect(await blocked.json()).toMatchObject({ pending: [requestId] });
-    // 画像が消えたと読めれば（ここでは検査ごと消えた）、失敗を足して解く。消す画像を ID で名指しで読むので、
+    // 画像が消えたと読めれば（ここでは検査ごと消えた）、失敗を追加して解く。消す画像を ID で指定して読むので、
     // 同じ SOP Instance UID のほかの画像が複数あっても（SOP Instance UID の引き当てが 409 でも）解ける
     remove.mockRestore();
     const { BackendError } = await import("@/lib/backend/types");
@@ -531,7 +531,7 @@ describe("インポート", () => {
     expect(res.status).toBe(202);
     expect(label).not.toHaveBeenCalled();
     expect(detailOf((await rowsOf(requestId)).at(-1))).toMatchObject({ phase: "result", reason: "verify_failed" });
-    // 読めるようになれば、状態の確認で照らして成功を足し、印を付ける
+    // 読めるようになれば、状態の確認で照らして成功を追加し、印を付ける
     vi.restoreAllMocks();
     expect(await (await status(requestId)).json()).toMatchObject({ outcome: "stored", reconciled: true, labeled: true });
   });
@@ -663,7 +663,7 @@ describe("インポート", () => {
       ["dispatch", "success"],
       ["result", "unknown"],
       ["reconcile", "success"],
-      // 成功を足した後に印を付け、付けたかを別の行に残す
+      // 成功を追加した後に印を付け、付けたかを別の行に残す
       ["label", "success"],
     ]);
     expect(await listed(STUDY)).toMatchObject({ imported: true });

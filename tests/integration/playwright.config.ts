@@ -3,10 +3,10 @@ import { defineConfig } from "@playwright/test";
 import { bffUrl, gateUrl, ITEST, orthancUrl } from "./support/env";
 
 // 結合の試験：本物の Orthanc と DCMTK（docker/test/compose.yaml のコンテナ）を相手に、BFF を
-// BACKEND_MOCK=false・AUTH_MODE=local で動かす。node tests/integration/run.mjs から流す
-// （コンテナを立て、試験だけの資格情報を作り、終わったら片付ける）。先に npm run build を流しておく。
+// BACKEND_MOCK=false・AUTH_MODE=local で動かす。node tests/integration/run.mjs から実行する
+// （コンテナを立て、試験だけの資格情報を作り、終わったら片付ける）。先に npm run build を実行しておく。
 
-// リポジトリの直下から流す（run.mjs がそうする。support/env.ts の場所もここから決める）
+// リポジトリの直下から実行する（run.mjs がそうする。support/env.ts の場所もここから決める）
 const root = process.cwd();
 
 export default defineConfig({
@@ -23,7 +23,7 @@ export default defineConfig({
     baseURL: bffUrl,
     locale: "ja-JP",
     // trace は入力した値（試験だけの管理者のパスワード）と通信の中身を残し、CI の成果物として上がるので、取らない。
-    // 失敗の手がかりは、画面の写し（スクリーンショット。パスワードの欄は伏せ字で写る）と error-context.md・コンテナの記録
+    // 失敗の手がかりは、スクリーンショット（パスワードの欄は伏せ字で表示される）と error-context.md・コンテナの記録
     trace: "off",
     screenshot: "only-on-failure",
     video: "off",

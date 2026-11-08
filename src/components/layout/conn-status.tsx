@@ -53,7 +53,7 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
     return () => window.clearInterval(timer);
   }, [load]);
 
-  // 開く直前に、ボタンの真下（右端をそろえて）へ置き、状態を読み直す。popover は最前面の層に出るので、位置は自分で決める
+  // 開く直前に、ボタンの真下（右端をそろえて）へ置き、状態を再取得する。popover は最前面の層に出るので、位置は自分で決める
   useEffect(() => {
     const popover = popoverRef.current;
     const button = buttonRef.current;
@@ -81,10 +81,10 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
   const view = state.kind === "ready" ? state.view : undefined;
   const targets = view?.modalities?.map((m) => m.id) ?? [];
 
-  // 登録された接続先すべてに、つながるかの確かめ（C-ECHO）をかけ、終わったら状態を読み直す。接続先の頁の「全部を接続確認」と同じ要求
+  // 登録された接続先すべてに、つながるかの確認（C-ECHO）をかけ、終わったら状態を再取得する。接続先の頁の「全部を接続確認」と同じ要求
   async function checkAll() {
     if (targets.length === 0) return;
-    // 再描画の前に素早く 2 回押されても 1 回だけ流す（state は描画まで替わらないので ref で塞ぐ）
+    // 再描画の前に素早く 2 回押されても 1 回だけ実行する（state は描画まで替わらないので ref で塞ぐ）
     await runExclusive(checkingRef, async () => {
       setChecking(true);
       setReport("");
@@ -98,7 +98,7 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
     });
   }
   // 読めなかった（401・423・通信の失敗）ときは、接続先が落ちているとは言えないので「一部が接続不可」にせず別の札にする。
-  // 読めたが全体の状態が無い（この役割には全体の状態を返さない）ときは、確かめた結果を持たないので「未確認」
+  // 読めたが全体の状態が無い（この役割には全体の状態を返さない）ときは、確認した結果を持たないので「未確認」
   const overall = state.kind === "error" ? "unknown" : state.kind === "loading" ? "loading" : (view?.overall ?? "unchecked");
 
   return (
@@ -195,9 +195,9 @@ export async function runExclusive(lock: { current: boolean }, fn: () => Promise
 }
 
 /**
- * 手で押した「接続確認」の結果を読み上げる 1 文（parts.md の 3 つの型）。N は確かめた件数、M は失敗の件数。
+ * 手で押した「接続確認」の結果を読み上げる 1 文（parts.md の 3 つの型）。N は確認した件数、M は失敗の件数。
  * どの接続先にも要求が届かなかった（権限・画面の期限切れ・通信の失敗で、全部が読めなかった）ときは「確かめられなかった」の型にする。
- * この製品は、状態を持たない相手（確かめる手段が無い相手）を接続確認に含めないので、全部を数える
+ * この製品は、状態を持たない相手（確認する手段が無い相手）を接続確認に含めないので、全部を数える
  */
 export function checkSummary(results: Pick<PostResult, "ok" | "data">[]): string {
   if (results.length === 0 || results.every((r) => !r.ok)) return "接続を確かめられませんでした。";

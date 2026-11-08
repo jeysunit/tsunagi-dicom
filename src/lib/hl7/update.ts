@@ -40,7 +40,7 @@ function patientId(f: Field, issuer: string): string {
   return id;
 }
 
-// PN の順とグループの長さは、並べ替えた後で確かめる（design.md §8）。
+// PN の順とグループの長さは、並べ替えた後で確認する（design.md §8）。
 function patientName(fieldValue: Field): string | undefined {
   const names = ["", "", ""];
   fieldValue.forEach((r, i) => {
@@ -72,7 +72,7 @@ function birthDate(birth: string): string | undefined {
   return date;
 }
 
-/** 扱う構造と DICOM に入る値を確かめ、空欄を変更対象から外す（design.md §7〜§9）。 */
+/** 扱う構造と DICOM に入る値を確認し、空欄を変更対象から外す（design.md §7〜§9）。 */
 export function extractUpdate(msg: Message, issuer = "RIS_EMU"): UpdateResult {
   const type = value(field(msg, "MSH", 9));
   const trigger = msg.header.trigger;

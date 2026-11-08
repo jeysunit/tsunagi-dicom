@@ -1,6 +1,6 @@
 # tsunagi-dicom（つなぎだいこむ）
 
-画像サーバーの Orthanc の前に置く、日本の現場向けの PACS の画面。Orthanc は**改造せずに**そのまま使い、日本の医療機関の画像の見方に合わせた検査の一覧とビューアの選び分けに、PACS の運用の操作（受け取ったものを見る・ほかの機器へ送るなど）を足して、1つの画面で行えるようにする。独立した Web の画面と、その裏の中継のサーバー（BFF）として動く。中継のサーバーは、ブラウザと Orthanc の間に立ち、ログイン・役割の確かめ・記録をしてから Orthanc に問い合わせる部分。
+画像サーバーの Orthanc の前に置く、日本の現場向けの PACS の画面。Orthanc は**改造せずに**そのまま使い、日本の医療機関の画像の見方に合わせた検査の一覧とビューアの選び分けに、PACS の運用の操作（受け取ったものを見る・ほかの機器へ送るなど）を追加して、1つの画面で行えるようにする。独立した Web の画面と、その裏の中継のサーバー（BFF）として動く。中継のサーバーは、ブラウザと Orthanc の間に立ち、ログイン・役割の確認・記録をしてから Orthanc に問い合わせる部分。
 
 Orthanc とセットで導入する。tsunagi-dicom と Orthanc は別々のコンテナで、1つの compose（`deploy/compose.yaml`）で配る（下の「Orthanc とセットで導入する」）。
 
@@ -93,22 +93,22 @@ flowchart LR
 - **検査の一覧**：検査日・モダリティですぐ絞れる。患者 ID・氏名・受付番号・検査の記述での検索もできる。「詳細条件」では、期間・生年月日・性別・受付番号・検査名で絞れる（Orthanc の検索の条件になるので、古い検査も引ける）。絞り込みの見出しには件数が付く。氏名は漢字とかなに分けて出し、生年月日は和暦と年齢で出す。1 件を 1 行で並べ、受付番号の列もある。一覧は自動で更新し、新しく届いた検査は 30 秒ほどで出る（間隔は `STUDY_LIST_REFRESH_SECONDS` で変える。`0` で止める。Orthanc の変更の記録の番号が進んだときだけ、検査を検索し直す）。
 - **検査の詳細**：一覧の下に、選んだ検査の患者・検査の情報とシリーズのサムネイルを出す。DICOM タグは検査単位の要約で見られる。シリーズのサムネイルを押すと、そのシリーズの画像の一覧と、選んだ画像のタグを見られる。タグは、施設が `INSTANCE_TAGS` で決めた主なタグと、値の全部を切り替えて出す。
 - **ビューアの選び分け**：OHIF Viewer・Stone Web Viewer・VolView など、設定で与えたビューアから選んで開く。検査ごと・モダリティごとに既定を覚える。ビューアは、このアプリの中継（読み取りだけ）から画像を取る。
-- **受け取ったものを見る**：Orthanc が受け取った検査を、いつ・どの機器から（AE タイトル）・何件で、新しい順に並べる。受け元・送り先の機器の一覧と、つながるかの確かめ（C-ECHO）もある。
+- **受け取ったものを見る**：Orthanc が受け取った検査を、いつ・どの機器から（AE タイトル）・何件で、新しい順に並べる。受け元・送り先の機器の一覧と、つながるかの確認（C-ECHO）もある。
 - **ほかの機器へ送る**：検査の詳細から、Orthanc に登録された機器を選んで送り、終わるまでの状態を見せる。答えが分からないときは送り直さず、「結果が分からない」と出す。
-- **書き出しと削除**：検査の画像の全部を ZIP で落とせる（ファイルの名前に患者の情報を入れない）。削除は管理者だけで、理由を必須にし、確かめの画面と再認証（パスワードだけ。一度通れば `REAUTH_MINUTES` の間は聞き直さない）を挟む。確かめの画面に出すのは Orthanc から読み直した値で、確かめた後に検査が変わったときや、同じ UID の検査が2つあるときは消さない。
+- **書き出しと削除**：検査の画像の全部を ZIP で落とせる（ファイルの名前に患者の情報を入れない）。削除は管理者だけで、理由を必須にし、確認画面と再認証（パスワードだけ。一度通れば `REAUTH_MINUTES` の間は聞き直さない）を挟む。確認画面に出すのは Orthanc から再取得した値で、確認した後に検査が変わったときや、同じ UID の検査が2つあるときは消さない。
 - **ログインと役割**：利用者のログイン（パスワードと、二要素の認証の TOTP。削除の前の再認証はパスワードだけ、利用者の管理の前の再認証は TOTP も求める）、役割（管理者と一般の2つ。一般は普段使う機能の全部、管理者はそれに加えて削除・ユーザー管理・システムの設定）、役割ごとに見える項目とできる操作の制限。一般の画面には、管理者だけの画面と操作を出さない。ログインの一時停止、画面のロック、利用者の棚卸しの画面もある。
 - **監査の記録**：検索・詳細の表示・ビューアで開いたこと・画像の取得・受け取りの記録を開いたこと・C-ECHO・送る（求めた・結果・終わり）・書き出し・削除（理由）を記録する。記録はハッシュでつなぎ、書き換えを見つけられる。
 - **画面**：明るい地を既定にし、暗い地に切り替えられる。画面は日本語だけ。
 
 検像・読影・緊急の印と、レポートは持たない。これらは、それぞれを受け持つ外の仕組み（検像の端末・RIS・レポートの仕組み・オーダ）の仕事とした。
 
-実の Orthanc での確かめは、一部がまだ残っている。
+実の Orthanc での確認は、一部がまだ残っている。
 
-Orthanc とビューアのソースには手を入れない。つなぎ先はすべて設定（環境変数）で決める。画像の検索と取得は Orthanc の DICOMweb を使い、PACS の運用の操作は Orthanc の REST を使う。書き込みの操作（送る・削除など）は、どれも役割の確かめと監査の記録を通す。
+Orthanc とビューアのソースには手を入れない。つなぎ先はすべて設定（環境変数）で決める。画像の検索と取得は Orthanc の DICOMweb を使い、PACS の運用の操作は Orthanc の REST を使う。書き込みの操作（送る・削除など）は、どれも役割の確認と監査の記録を通す。
 
 ## これからの予定
 
-作る順に近い並びで、変わることがある。この道具は治験・研究・システムの試験のための道具で、**機能は足すより削る**。
+作る順に近い並びで、変わることがある。このツールは治験・研究・システムの試験のためのツールで、**機能は追加するより削る**。
 
 1. 取り込み（ファイルから）と、患者・検査の値の修正（一般と管理者。理由と再認証が要る）。
 2. 保管の状態・検査の結合と分割・機器の登録。
@@ -140,7 +140,7 @@ flowchart LR
 - ホストに公開するのは、tsunagi-dicom の画面（3000）と Orthanc の DICOM（4242）だけ。待ち受けの既定は 127.0.0.1。
 - 画像と Orthanc のデータベースは volume `orthanc-db`、tsunagi-dicom のデータ（利用者・設定・操作ログ）は volume `tsunagi-data` に置く。
 - Docker のホストの上の利用者とプロセスは、Orthanc のコンテナの IP アドレスで REST に届く（認証は要る）。ホストにログインできる人を絞る。
-- 確かめた版は Docker Engine 29.9.1・Docker Compose v5.6.0。Docker Compose は v2.24 以上が要る。
+- 確認した版は Docker Engine 29.9.1・Docker Compose v5.6.0。Docker Compose は v2.24 以上が要る。
 
 ```sh
 cd deploy
@@ -153,19 +153,19 @@ docker compose up -d
 
 施設の値は `deploy/.env`（compose の変数。リポジトリに入れない）に書く。変数の一覧は `deploy/compose.yaml` の頭にある。
 
-- **検査装置から受けるとき**：`ORTHANC_DICOM_BIND` を、受ける側の IP アドレス（か `0.0.0.0`）にする。Orthanc は、登録した接続先からだけ画像を受け、AE タイトルと送り元の IP アドレスの組を確かめる（`DicomCheckModalityHost: true`）。`deploy/orthanc/site.json` を `deploy/orthanc/site.local.json` に写し、AE タイトル（`DicomAet`）と接続先（`DicomModalities`。送信元の検査装置と送信先の機器。`Host` は IP アドレス）を書いて、`ORTHANC_SITE_CONFIG=./orthanc/site.local.json` で指す。127.0.0.1 に公開したポートなど、Docker の userland-proxy を通るつなぎでは送り元の IP アドレスが変わる（`docs/spec.md` の 5）。
+- **検査装置から受けるとき**：`ORTHANC_DICOM_BIND` を、受ける側の IP アドレス（か `0.0.0.0`）にする。Orthanc は、登録した接続先からだけ画像を受け、AE タイトルと送り元の IP アドレスの組を確認する（`DicomCheckModalityHost: true`）。`deploy/orthanc/site.json` を `deploy/orthanc/site.local.json` にコピー、AE タイトル（`DicomAet`）と接続先（`DicomModalities`。送信元の検査装置と送信先の機器。`Host` は IP アドレス）を書いて、`ORTHANC_SITE_CONFIG=./orthanc/site.local.json` で指す。127.0.0.1 に公開したポートなど、Docker の userland-proxy を通るつなぎでは送り元の IP アドレスが変わる（`docs/spec.md` の 5）。
 - **画面を施設のネットワークに公開するとき**：TLS を終端するリバースプロキシを前に置く（cookie は `Secure`）。`TSUNAGI_HTTP_BIND` は、リバースプロキシからだけ届く IP アドレスにする。
 - **tsunagi-dicom の設定**（ビューアの URL など。`.env.example` の変数）：`deploy/tsunagi.env`（リポジトリに入れない）に書く。つなぎ先（Orthanc）と資格情報の渡し方は `deploy/compose.yaml` が決めるので、書かない。
 
 ### 開発・試験用の一式（Orthanc・ris-emulator・dicom-test-generator・storescp）
 
-`docker/dev/compose.yaml` は、上の compose に、ris-emulator（ワークリストの提供元）、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を足したもの。架空の患者だけで使う。Docker（Compose v2.24 以上）があれば、リポジトリの直下で次の1行で立つ。
+`docker/dev/compose.yaml` は、上の compose に、ris-emulator（ワークリストの提供元）、dicom-test-generator（送信元）と DCMTK の storescp（送信先）を追加したもの。架空の患者だけで使う。Docker（Compose v2.24 以上）があれば、リポジトリの直下で次の1行で立つ。
 
 ```sh
 docker/dev/up.sh
 ```
 
-secret のファイルを作り（`docker/dev/secrets/`）、tsunagi-dicom のイメージをこのリポジトリから作り、一式を立ててから、開く URL とパスワードのファイルの場所を出す。ris-emulator の予約 → dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → 送信 → storescp と流す手順は [`docs/round-trip-test.md`](docs/round-trip-test.md) にある。
+secret のファイルを作り（`docker/dev/secrets/`）、tsunagi-dicom のイメージをこのリポジトリから作り、一式を立ててから、開く URL とパスワードのファイルの場所を出す。ris-emulator の予約 → dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → 送信 → storescp と実行する手順は [`docs/round-trip-test.md`](docs/round-trip-test.md) にある。
 
 ## 試しに動かす（モック）
 
@@ -186,7 +186,7 @@ mkdir -p data && DATABASE_URL="file:./data/tsunagi.db" npm run db:migrate
 DATABASE_URL="file:./data/tsunagi.db" npm run dev
 ```
 
-アプリの利用者のログイン（`AUTH_MODE=local`）で試すとき：最初の管理者は、利用者が1人もいないときだけ、起動の時に秘密のファイルから作る（`compose.yaml` の `INITIAL_ADMIN_USERNAME`・`INITIAL_ADMIN_PASSWORD_FILE` の例）。最初のログインで TOTP（`MFA_REQUIRED=true` のとき）を登録し、パスワードを本人のものに変える。**管理者は2人以上置く**。管理者のパスワードを失くしたときは、コンテナの中でだけ流せるコマンドで戻す（`docker compose exec tsunagi node cli/reset-admin-password.mjs --user <ユーザーID>`。使い方と前提は `docs/security-and-maintenance.md` の 4）。cookie は `Secure` なので、手元（`127.0.0.1`・`localhost`）のほかでは TLS（リバースプロキシ）の後ろに置く。
+アプリの利用者のログイン（`AUTH_MODE=local`）で試すとき：最初の管理者は、利用者が1人もいないときだけ、起動の時に秘密のファイルから作る（`compose.yaml` の `INITIAL_ADMIN_USERNAME`・`INITIAL_ADMIN_PASSWORD_FILE` の例）。最初のログインで TOTP（`MFA_REQUIRED=true` のとき）を登録し、パスワードを本人のものに変える。**管理者は2人以上置く**。管理者のパスワードを失くしたときは、コンテナの中でだけ実行できるコマンドで戻す（`docker compose exec tsunagi node cli/reset-admin-password.mjs --user <ユーザーID>`。使い方と前提は `docs/security-and-maintenance.md` の 4）。cookie は `Secure` なので、手元（`127.0.0.1`・`localhost`）のほかでは TLS（リバースプロキシ）の後ろに置く。
 
 ```sh
 printf '%s\n' '<最初のパスワード>' > secrets/initial_admin_password.txt   # 8 文字以上・英字と数字を両方含める
@@ -196,13 +196,13 @@ BACKEND_MOCK=true AUTH_MODE=local docker compose up --build
 
 別の場所にある Orthanc につなぐときは、`BACKEND_ORTHANC_URL`（Orthanc の REST）と `BACKEND_DICOMWEB_URL`（Orthanc の DICOMweb のプラグイン）の2つを設定する（`docs/spec.md` の 2.1）。Orthanc とセットで導入するときは、`deploy/compose.yaml` がこの2つを決める。
 
-試験：`npm run lint`・`npm run typecheck`・`npm test`（Vitest）・`npm run build && npm run test:e2e`（Playwright。モックに対して、`AUTH_MODE=dev` と `AUTH_MODE=local` のサーバーを起こして流す）。
+試験：`npm run lint`・`npm run typecheck`・`npm test`（Vitest）・`npm run build && npm run test:e2e`（Playwright。モックに対して、`AUTH_MODE=dev` と `AUTH_MODE=local` のサーバーを起動して実行する）。
 
-検証モードで送るなどの書き込みの操作も試すときは `DEV_ALLOW_WRITE=true` を足す（モックの中だけで書く）。実の Orthanc と検査装置の試験用のソフト（dicom-test-generator）で、受信 → 表示 → 送信を確かめる手順は [`docs/round-trip-test.md`](docs/round-trip-test.md) にある（開発用の compose `docker/dev/compose.yaml` を使う）。
+検証モードで送るなどの書き込みの操作も試すときは `DEV_ALLOW_WRITE=true` を追加する（モックの中だけで書く）。実の Orthanc と検査装置の試験用のソフト（dicom-test-generator）で、受信 → 表示 → 送信を確認する手順は [`docs/round-trip-test.md`](docs/round-trip-test.md) にある（開発用の compose `docker/dev/compose.yaml` を使う）。
 
 ## イメージ（GHCR）
 
-配備では、GHCR のイメージ（`ghcr.io/jeysunit/tsunagi-dicom`）を版のタグ（`vX.Y.Z`）か digest で指定する（`deploy/compose.yaml` と `compose.yaml` の `TSUNAGI_IMAGE`）。イメージは CI が通ってから出す（`.github/workflows/image.yml`）。**`main` への merge では出さない**（`main` では試験だけを流す）。出すのは、次の3つのときだけ。
+配備では、GHCR のイメージ（`ghcr.io/jeysunit/tsunagi-dicom`）を版のタグ（`vX.Y.Z`）か digest で指定する（`deploy/compose.yaml` と `compose.yaml` の `TSUNAGI_IMAGE`）。イメージは CI が通ってから出す（`.github/workflows/image.yml`）。**`main` への merge では出さない**（`main` では試験だけを実行する）。出すのは、次の3つのときだけ。
 
 1. 版のタグ（`vX.Y.Z`）の push（リリース）
 2. 手動（Actions の Image を `main` で実行する。試しのイメージが要るとき）
@@ -214,7 +214,7 @@ BACKEND_MOCK=true AUTH_MODE=local docker compose up --build
 | `sha-<短い hash>` | 版のタグ・手動（`main`）・週の作り直し。同じ commit を作り直すと、新しいイメージへ移る |
 | `rebuild-YYYYMMDD` | 週に1回（月曜 03:17 UTC）の、`main` の作り直し（日付は UTC）。イメージの中で apt で入れる包みの更新を取り込む |
 
-**リリースの手順。** `main` が出したい状態で、CI が緑であることを確かめてから、版のタグを付けて push する。
+**リリースの手順。** `main` が出したい状態で、CI が緑であることを確認してから、版のタグを付けて push する。
 
 ```sh
 git switch main && git pull --ff-only
@@ -224,7 +224,7 @@ git push origin vX.Y.Z
 
 push すると Image が走り、CI が通ってからイメージを出して、digest に署名する。**同じ版のタグは出し直せない**（上書きしない）。直すなら新しい `Z` の版を出す。
 
-**署名の確かめ。** 出したイメージの digest には、GitHub Actions の OIDC による cosign の鍵の要らない署名が付いている。配備の前に、digest を調べて確かめる：
+**署名の検証。** 出したイメージの digest には、GitHub Actions の OIDC による cosign の鍵の要らない署名が付いている。配備の前に、digest を調べて確認する：
 
 ```sh
 docker buildx imagetools inspect ghcr.io/jeysunit/tsunagi-dicom:vX.Y.Z   # 出てくる Digest を使う
@@ -233,39 +233,39 @@ cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-版のタグのイメージだけを受け入れるなら、`--certificate-identity-regexp` の代わりに `--certificate-identity https://github.com/jeysunit/tsunagi-dicom/.github/workflows/image.yml@refs/tags/vX.Y.Z` で、その版の workflow が署名したことまで確かめる。
+版のタグのイメージだけを受け入れるなら、`--certificate-identity-regexp` の代わりに `--certificate-identity https://github.com/jeysunit/tsunagi-dicom/.github/workflows/image.yml@refs/tags/vX.Y.Z` で、その版の workflow が署名したことまで検証する。
 
 **古いイメージの片付け**（`.github/workflows/image-cleanup.yml`、週に1回、月曜 06:41 UTC）：
 
 - 残す：版のタグ（`v*`）の付いたイメージは全部。ほかのタグ（`sha-*`・`rebuild-*`）の付いたイメージは新しい順に 10 個。出してから 2 日より新しいイメージは全部。
 - 消す：上に当たらないタグ付きのイメージと、タグの無いイメージ（`sha-*` のタグが新しいイメージへ移った後の古いイメージなど）。
 - 署名・SBOM・provenance・プラットフォーム別の子は、親のイメージと一緒に残し、一緒に消す。
-- **いまは dry-run**（消さずに、消す候補を実行の記録に出すだけ）。記録を確かめてから dry-run を外す。
+- **いまは dry-run**（消さずに、消す候補を実行の記録に出すだけ）。記録を確認してから dry-run を外す。
 - digest で止めて配備するなら、版のタグの付いたイメージの digest を使う（ほかのイメージは、いずれ消える）。
 
 ## 注意
 
-- **医療機器としての承認・認証を受けていない。** 治験・研究・システムの試験の環境で使うための画面で、診療の現場の PACS として使うためのものではない。診療の現場へ広げるかは、医療機器プログラムに当たるかを公開の資料で確かめてから決める。
+- **医療機器としての承認・認証を受けていない。** 治験・研究・システムの試験の環境で使うための画面で、診療の現場の PACS として使うためのものではない。診療の現場へ広げるかは、医療機器プログラムに当たるかを公開の資料で確認してから決める。
 - 厚生労働省のガイドライン（第7.0版 システム運用編）の項目との対応を [`docs/guideline-mapping.md`](docs/guideline-mapping.md) に示す。**ガイドラインに合っているかどうかは、運用を含めて各施設が判断する。このソフトウェアだけでは決まらない。**
 - `AUTH_MODE=dev` は、モックのバックエンド（`BACKEND_MOCK=true`）のときだけ起動する。
-- **役割を4つから2つにした版へ上げるとき**（2026-10-20）：データベースの migration で、管理者の利用者は管理者のまま、医師・技師・閲覧の利用者は一般になる。閲覧だった利用者も、一般になって送信・エクスポートなどができるようになる（権限が広がる）。上げる前に、管理者がユーザー管理で閲覧の利用者を確かめ、要らない利用者は無効にしておく。監査の記録の役割の名前は、記録した時のまま残る（`docs/spec.md` の 3.6）。
-- Orthanc に直に入れる道（Orthanc の REST・Orthanc の画面・DICOM の通信）は、このアプリの確かめと記録の外にある。Orthanc の側の絞り込みは [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の 4.1。
+- **役割を4つから2つにした版へ上げるとき**（2026-10-20）：データベースの migration で、管理者の利用者は管理者のまま、医師・技師・閲覧の利用者は一般になる。閲覧だった利用者も、一般になって送信・エクスポートなどができるようになる（権限が広がる）。上げる前に、管理者がユーザー管理で閲覧の利用者を確認し、要らない利用者は無効にしておく。監査の記録の役割の名前は、記録した時のまま残る（`docs/spec.md` の 3.6）。
+- Orthanc に直に入れる道（Orthanc の REST・Orthanc の画面・DICOM の通信）は、このアプリの確認と記録の外にある。Orthanc の側の絞り込みは [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の 4.1。
 
 ## 作る側の資料（決まりの在り処）
 
-開発の段階と、各段の完了の線は [`docs/spec.md`](docs/spec.md) の「6. 段階」にある。
+開発のフェーズと、各フェーズの完了の線は [`docs/spec.md`](docs/spec.md) の「6. フェーズ」にある。
 
 | 文書 | 中身 |
 |---|---|
-| [`docs/spec.md`](docs/spec.md) | 仕様（目的と使う場面・原則・技術の構成・機能・段階・既知の制約） |
+| [`docs/spec.md`](docs/spec.md) | 仕様（目的と使う場面・原則・技術の構成・機能・フェーズ・既知の制約） |
 | [`docs/guideline-mapping.md`](docs/guideline-mapping.md) | 第7.0版 システム運用編の節ごとの対応表と、電子保存の三原則ごとの対応 |
-| [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | セキュリティと保守の方針（システム構成図・通信の一覧・秘密の置き場・記録・版と支える期間・使い終えるときの片付け） |
+| [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | セキュリティと保守の方針（システム構成図・通信の一覧・秘密の保存先・記録・版と支える期間・使い終えるときの片付け） |
 | [`docs/round-trip-test.md`](docs/round-trip-test.md) | 開発用の compose（Orthanc・検査装置の試験用のソフト・storescp）での往復の試験の手順 |
-| [`docs/integration-test.md`](docs/integration-test.md) | 本物の Orthanc と DCMTK のコンテナでの結合の試験（CI で毎回流す。手元での流し方） |
+| [`docs/integration-test.md`](docs/integration-test.md) | 本物の Orthanc と DCMTK のコンテナでの結合の試験（CI で毎回実行する。手元での実行方法） |
 | [`SECURITY.md`](SECURITY.md) | 脆弱性の報告の窓口と支える版 |
-| [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | 氏名の形の試験の一覧（機械で読める写しは `tests/fixtures/patient-names.json`） |
+| [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | 氏名の形の試験の一覧（機械的に読めるコピーは `tests/fixtures/patient-names.json`） |
 | [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、架空の患者の応答の見本と、その置き換えの規則 |
-| [`AGENTS.md`](AGENTS.md) | 開発の決まり（人にも、コーディングの支援の道具にも同じ） |
+| [`AGENTS.md`](AGENTS.md) | 開発の決まり（人にも、コーディングの支援のツールにも同じ） |
 | [`.env.example`](.env.example) | 設定の例 |
 
 ## ライセンス

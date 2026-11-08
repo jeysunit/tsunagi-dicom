@@ -76,7 +76,7 @@ const cases: [string, Record<string, string>, string][] = [
     },
     "AUTH_MODE: dev は BACKEND_MOCK=true のときだけ起動する",
   ],
-  // 段 4 から検証モードでは true を受けるので、検証モードのほか（local）で使ったときに止まることを確かめる
+  // フェーズ 4 から検証モードでは true を受けるので、検証モードのほか（local）で使ったときに止まることを確認する
   [
     "DEV_ALLOW_WRITE=true を検証モードのほかで使う",
     { AUTH_MODE: "local", DEV_ALLOW_WRITE: "true" },

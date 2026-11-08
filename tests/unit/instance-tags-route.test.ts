@@ -4,7 +4,7 @@ import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
 // 画像ごとの「主なタグ」の画面の API（GET /api/studies/{uid}/series/{series}/instances/{sop}/tags。docs/spec.md の 3.1）を、
-// 本物の SQLite・本物のログイン（AUTH_MODE=local）・本物の役割の確かめで通して確かめる。
+// 本物の SQLite・本物のログイン（AUTH_MODE=local）・本物の役割の確認で通して確認する。
 // 役割の割り当てだけを差し替え、一般から「すべての DICOM の値を見る」（dicom.all_values）を外して、断る形も見る。
 // 設定（INSTANCE_TAGS）は試験ごとに替える。
 

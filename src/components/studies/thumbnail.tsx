@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 // 代表のサムネイル。BFF の中継（WADO-RS の thumbnail）から取る。取れなければ印だけを出す。
-// UID は呼ぶ側で形を確かめたもの（数字と `.`）だけを使う（src/lib/backend/relay-path.ts と同じ形）。
+// UID は呼ぶ側で形を確認したもの（数字と `.`）だけを使う（src/lib/backend/relay-path.ts と同じ形）。
 const UID = /^[0-9]+(\.[0-9]+)*$/;
 
 export function Thumbnail({

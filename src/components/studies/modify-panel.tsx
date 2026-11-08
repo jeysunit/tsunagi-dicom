@@ -17,13 +17,13 @@ import { checkFieldValue, FIELD_LABELS, type CorrectionField, type CorrectionKin
 import type { StudyView } from "@/lib/fields";
 import { birthInputHint, formatBirthLine, formatSlashDate, localToday, parseBirthInput, parseDicomDate, readSex } from "@/lib/format/japanese-date";
 
-// 患者・検査の値の修正（docs/spec.md の 3.5。段 6）。一般と管理者。窓は2つに分ける。
+// 患者・検査の値の修正（docs/spec.md の 3.5。フェーズ 6）。一般と管理者。窓は2つに分ける。
 // - 患者情報修正：患者ID・氏名・生年月日・性別・受付番号。UID を保つ。氏名・生年月日・性別は同じ患者ID の全部の検査に、
-//   患者ID の付け替えと受付番号は、この検査だけに当てる（範囲は確かめの画面に出す）。
+//   患者ID の付け替えと受付番号は、この検査だけに適用する（範囲は確認画面に出す）。
 // - 検査情報修正：検査日・検査名。直した新しい検査を作り、元の検査は残す。
-// 入力 → 確認（BFF が Orthanc から読んだ前と後の値・当てる検査・付け替え先の患者の値）→ 修正理由 → 修正する、の順に進む。
+// 入力 → 確認（BFF が Orthanc から読んだ前と後の値・適用する検査・付け替え先の患者の値）→ 修正理由 → 修正する、の順に進む。
 // 大事な操作なので、BFF が再認証を求めたら、パスワードを入れてから続ける。答えが分からなければ「結果不明」と要求ID を出し、
-// もう一度修正させずに、状態を確認する道と、管理者が確かめて解く道だけを出す。
+// もう一度修正させずに、状態を確認する道と、管理者が確認して解く道だけを出す。
 
 /** いまの値（BFF が Orthanc から読んだもの。一覧の行の値ではない） */
 interface Current {
@@ -85,7 +85,7 @@ interface PendingItem {
   writeIds: string[];
 }
 
-/** この検査の、管理者の確かめを待っている修正（読めなければ空。新しい修正は BFF が断る） */
+/** この検査の、管理者の確認を待っている修正（読めなければ空。新しい修正は BFF が断る） */
 async function readPending(uid: string): Promise<PendingItem[]> {
   try {
     const res = await fetch(`/api/studies/${encodeURIComponent(uid)}/modify`, { credentials: "same-origin", cache: "no-store" });
@@ -124,14 +124,14 @@ export function ModifyPanel({
   screen: ScreenInfo;
   panelId: string;
   onClose: () => void;
-  /** 修正できたあと（一覧と詳細を読み直す） */
+  /** 修正できたあと（一覧と詳細を再取得する） */
   onModified: () => void;
 }) {
   const uid = study.studyInstanceUid ?? "";
   const [current, setCurrent] = useState<Current | null>(null);
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // この検査の、管理者の確かめを待っている修正（窓を閉じた・頁を読み直した後も、状態の確認と解除の道へ戻す）
+  // この検査の、管理者の確認を待っている修正（窓を閉じた・頁を再読み込みした後も、状態の確認と解除の道へ戻す）
   const [pending, setPending] = useState<PendingItem[]>([]);
   const fetchCurrent = useCallback((orthancId?: string) => {
     void readPending(uid).then(setPending);
@@ -147,7 +147,7 @@ export function ModifyPanel({
     });
   }, [uid]);
   useEffect(() => fetchCurrent(), [fetchCurrent]);
-  /** 同じ UID の検査の中から選んで、読み直す */
+  /** 同じ UID の検査の中から選んで、再取得する */
   function load(orthancId: string) {
     setCurrent(null);
     setLoadError(null);
@@ -284,7 +284,7 @@ function CorrectionForm({
   const [checking, setChecking] = useState(false);
   const [authing, setAuthing] = useState(false);
   const base = `/api/studies/${encodeURIComponent(uid)}/modify`;
-  // 確かめの欄（確認の表と理由・再認証）を開いたら、その欄へスクロールして、入力欄にフォーカスする（docs/design-system/parts.md）
+  // 確認欄（確認の表と理由・再認証）を開いたら、その欄へスクロールして、入力欄にフォーカスする（docs/design-system/parts.md）
   const confirmRef = useRef<HTMLFormElement>(null);
   const reauthRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -604,7 +604,7 @@ function CorrectionForm({
         </form>
       )}
       {phase.kind === "reauth" && (
-        // 再認証はパスワードだけ（docs/design-system/parts.md の「確かめの使い分け」。削除の確かめと同じ部品）
+        // 再認証はパスワードだけ（docs/design-system/parts.md の「確認の使い分け」。削除の確認と同じ部品）
         <div ref={reauthRef}>
           <ReauthForm
             ariaLabel="再認証"

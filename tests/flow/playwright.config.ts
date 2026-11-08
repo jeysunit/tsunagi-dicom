@@ -1,7 +1,7 @@
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
-// 開発用の compose（docker/dev/compose.yaml）の流れの試験。node tests/flow/run.mjs から流す
+// 開発用の compose（docker/dev/compose.yaml）の流れの試験。node tests/flow/run.mjs から実行する
 // （docker/dev/up.sh で一式を立て、終わったら片付ける）。tsunagi-dicom はコンテナの中で動くので、webServer は使わない。
 
 const root = process.cwd();

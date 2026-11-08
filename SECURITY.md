@@ -15,6 +15,6 @@
 
 ## 支える版 / Supported versions
 
-まだ版を出していない（段 1a）。最初の版を出したら、ここに支える版の表を書く。方針（案）は [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の「6. 保守の方針」。
+まだ版を出していない（フェーズ 1a）。最初の版を出したら、ここに支える版の表を書く。方針（案）は [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) の「6. 保守の方針」。
 
 No release has been published yet. A supported-versions table will be added with the first release. See the proposed policy in [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) (section 6, in Japanese).

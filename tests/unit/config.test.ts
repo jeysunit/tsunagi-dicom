@@ -283,7 +283,7 @@ describe("設定の読み込み", () => {
     });
 
     it("段 4：DEV_ALLOW_WRITE は検証モード（モックだけ）でだけ使え、既定は書き込みを止める", () => {
-      // 段 4 で書き込みの操作（送る）ができたので、検証モードでは true を受ける（前は段 4 まで起動しなかった）
+      // フェーズ 4 で書き込みの操作（送る）ができたので、検証モードでは true を受ける（前はフェーズ 4 まで起動しなかった）
       expect(loadConfig({ ...base, DEV_ALLOW_WRITE: "true" }).auth.devAllowWrite).toBe(true);
       expect(loadConfig({ ...base, DEV_ALLOW_WRITE: "false" }).auth).toMatchObject({ mode: "dev", devAllowWrite: false });
       expect(loadConfig(base).auth.devAllowWrite).toBe(false);

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ConfirmActions, ConfirmPanel } from "@/components/ui/confirm-panel";
 import { ReauthForm } from "@/components/ui/reauth-form";
 
-// 確かめの欄と再認証の欄（docs/design-system/parts.md の「確かめの使い分け」）の形を、サーバーの側で描いて確かめる。
+// 確認欄と再認証の欄（docs/design-system/parts.md の「確認の使い分け」）の形を、サーバーの側で描いて確認する。
 // フォーカスとスクロールはブラウザの動きなので、e2e（tests/e2e/local-auth.spec.ts）で見る。
 
 const noop = () => undefined;

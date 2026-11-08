@@ -22,7 +22,7 @@ async function handle(request: Request, { params }: Context): Promise<Response> 
       });
     }
     // ログインしていない（401。利用者が分からないので記録しない）・画面のロック中（423）は、ここで断る。
-    // 役割の確かめは relayWadoRs（403）
+    // 役割の確認は relayWadoRs（403）
     const session = await requireSession();
     return await relayWadoRs(
       {

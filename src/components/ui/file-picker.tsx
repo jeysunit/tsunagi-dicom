@@ -37,7 +37,7 @@ import {
 import { cn } from "@/lib/utils";
 
 // ファイルを選ぶ部品（docs/design-system/parts.md の「ファイルを選ぶ部品」。ui-kit 1.2.6 の `.picker`）。
-// 選ぶ→件数・大きさ・患者と検査を確かめる→除外（戻せる）か中止で外す→インポート、の順を変えない。
+// 選ぶ→件数・大きさ・患者と検査を確認する→除外（戻せる）か中止で外す→インポート、の順を変えない。
 // 送る中身（1 件ずつの要求）は呼ぶ側の importFile が持つ。この部品は、選んだものの数え方・並び・状態・焦点・読み上げを持つ。
 // ファイル名とタグの値は外から来る値なので、React の文字として出す（HTML として入れない）。
 
@@ -53,7 +53,7 @@ export type ImportOutcome = { ok: true; note?: string } | { ok: false; reason: s
  */
 export type ResolveResult = { ok: true } | { ok: false; message: string };
 
-/** 結果を行の状態に写す。結果不明の行は、確認して記録するための名指しを持つ（届いたか分からない行には無い） */
+/** 結果を行の状態にコピーする。結果不明の行は、確認して記録するための識別子を持つ（届いたか分からない行には無い） */
 const stateOf = (o: ImportOutcome): Pick<PickItem, "state" | "reason" | "resolve"> =>
   o.ok ? { state: "ok", reason: o.note ?? "", resolve: undefined } : { state: o.unknown ? "uk" : "ng", reason: o.reason, resolve: o.unknown ? o.resolve : undefined };
 
@@ -61,9 +61,9 @@ const stateOf = (o: ImportOutcome): Pick<PickItem, "state" | "reason" | "resolve
 const SAY_DELAY_MS = 30;
 /** 中止の確認の窓を開いている間、進みを止めて待つ間隔 */
 const DIALOG_POLL_MS = 100;
-/** 頭の確かめを同時に読む数（大きなフォルダで、一度に全部のファイルを読まない） */
+/** 頭の確認を同時に読む数（大きなフォルダで、一度に全部のファイルを読まない） */
 const READ_WORKERS = 8;
-/** 確かめの結果を一覧にまとめて書く間隔 */
+/** 確認の結果を一覧にまとめて書く間隔 */
 const FLUSH_MS = 50;
 
 /** DADS のプログレスインジケーターの静的インジケーター（砂時計、24px）。部品集の catalog と同じ絵 */
@@ -136,16 +136,16 @@ export function FilePicker({
   unknownHelp,
   resolveUnknown,
 }: {
-  /** 1 件の大きさの上限（バイト）。超えたものは対象外にする（受け手も確かめる） */
+  /** 1 件の大きさの上限（バイト）。超えたものは対象外にする（受け手も確認する） */
   limitBytes: number;
   /** 1 件を送る。index は選択の中の番目（0 から）、total は選択の件数。失敗は理由の 1 句（製品の言葉）で返す */
   importFile: (file: File, at: { index: number; total: number }) => Promise<ImportOutcome>;
   title?: string;
   testId?: string;
-  /** 結果不明の知らせの最後の 1 文（確かめを頼む先）。初期値は「管理者に確かめを頼んでください。」。管理者には空を渡す */
+  /** 結果不明の知らせの最後の 1 文（確認を頼む先）。初期値は「管理者に確かめを頼んでください。」。管理者には空を渡す */
   unknownHelp?: string;
   /**
-   * 結果不明の行を確認して記録する（確認できる利用者＝管理者にだけ渡す）。渡すと、結果の後、名指し（要求の ID と検査の UID）を
+   * 結果不明の行を確認して記録する（確認できる利用者＝管理者にだけ渡す）。渡すと、結果の後、識別子（要求の ID と検査の UID）を
    * 持つ結果不明の行に「確認」を出し、押すと一覧の下に確認の欄を開く。渡さなければ「確認」は出さない
    */
   resolveUnknown?: (target: ResolveTarget, outcome: "success" | "failed", note: string) => Promise<ResolveResult>;
@@ -165,7 +165,7 @@ export function FilePicker({
   const [abortText, setAbortText] = useState("");
   const abortedRef = useRef(false);
   const nextId = useRef(1);
-  // 選択を解除したら上がる。解除の前に始めた確かめの結果を、解除の後の一覧に書かない
+  // 選択を解除したら上がる。解除の前に始めた確認の結果を、解除の後の一覧に書かない
   const generation = useRef(0);
   const rootRef = useRef<HTMLElement>(null);
   const filesButton = useRef<HTMLButtonElement>(null);
@@ -181,7 +181,7 @@ export function FilePicker({
   const noteInput = useRef<HTMLInputElement>(null);
   const [focusTarget, setFocusTarget] = useState<{ to: "files" | "abort" | "again" | "list" | "keep" | "resolve"; seq: number; id?: number } | null>(null);
   const sayTimer = useRef<number | undefined>(undefined);
-  // 最後に焦点のあった行のボタン（行が対象外になってボタンが消えると、焦点はどこにも無くなる。そのときの戻し先を決めるため）
+  // 最後に焦点のあった行のボタン（行が対象外になってボタンが消えると、焦点はどこにも無くなる。そのときの復元先を決めるため）
   const lastRowFocus = useRef<string | undefined>(undefined);
 
   const setItems = useCallback((next: PickItem[] | ((prev: PickItem[]) => PickItem[])) => {
@@ -252,7 +252,7 @@ export function FilePicker({
       const { items: next, fresh, duplicates } = addFiles(itemsRef.current, files.map(inputOf), nextId.current);
       nextId.current += fresh.length;
       setItems(next);
-      // 足した後は「ファイルを選択」へ焦点を戻す。部品の外にある焦点は奪わない（ドロップの間に、ほかの所で入力していることがある）
+      // 追加した後は「ファイルを選択」へ焦点を戻す。部品の外にある焦点は奪わない（ドロップの間に、ほかの所で入力していることがある）
       const active = document.activeElement;
       if (!active || active === document.body || rootRef.current?.contains(active)) focusSoon("files");
       if (fresh.length === 0) {
@@ -260,7 +260,7 @@ export function FilePicker({
         return;
       }
       const gen = generation.current;
-      // 確かめは READ_WORKERS 件ずつ並べて読み（大きなフォルダで一度に全部を読まない）、結果はまとめて一覧に書く
+      // 確認は READ_WORKERS 件ずつ並べて読み（大きなフォルダで一度に全部を読まない）、結果はまとめて一覧に書く
       const patches = new Map<number, Partial<PickItem>>();
       let flushTimer: number | undefined;
       const flush = () => {
@@ -278,7 +278,7 @@ export function FilePicker({
           try {
             const head = new Uint8Array(await item.file.slice(0, Math.min(item.size, HEAD_BYTES)).arrayBuffer());
             const r = checkHead(head, item.size, limitBytes);
-            // 対象外になった行は、確かめの間に除外していても対象外にする（対象外の行は除外も戻すも持たない）
+            // 対象外になった行は、確認の間に除外していても対象外にする（対象外の行は除外も戻すも持たない）
             patch = r.kind === "dicom" ? { state: "wait", tags: r.tags } : { state: "ex", reason: r.reason, off: false };
           } catch {
             patch = { state: "ex", reason: UNREADABLE_REASON, off: false };
@@ -291,7 +291,7 @@ export function FilePicker({
         window.clearTimeout(flushTimer);
         flush();
         if (gen !== generation.current || !mounted.current) return;
-        // 焦点：確かめの間に行の「除外」「戻す」へ移していたら、そのボタンに保つ。そのボタンが消えた（対象外になった）ら一覧の領域へ。
+        // 焦点：確認の間に行の「除外」「戻す」へ移していたら、そのボタンに保つ。そのボタンが消えた（対象外になった）ら一覧の領域へ。
         // 部品の外へ移していたら動かさない。部品の中のほかの所・どこにも無い（押したボタンが組み直された）ときは「ファイルを選択」へ
         const active = document.activeElement;
         const inside = active instanceof HTMLElement && !!rootRef.current?.contains(active);
@@ -431,7 +431,7 @@ export function FilePicker({
   const done = c.ok + c.ng + c.unknown;
   const notice = phase === "done" ? resultNotice(c, unknownHelp) : null;
   const showDrop = items.length === 0 || idle;
-  // 開いている確認の欄の行（名指しを持つ結果不明の行だけ。ほかに変わっていたら欄は出さない）
+  // 開いている確認の欄の行（識別子を持つ結果不明の行だけ。ほかに変わっていたら欄は出さない）
   const resolveItemNow = (() => {
     const row = resolving ? items.find((i) => i.id === resolving.id) : undefined;
     return row && isResolvable(row) ? row : undefined;
@@ -470,7 +470,7 @@ export function FilePicker({
             return;
           }
           const out: FileWithPath[] = [];
-          // フォルダを辿っている間に「選択を解除」「続けて選択」を押したら、辿った結果を足さない
+          // フォルダを辿っている間に「選択を解除」「続けて選択」を押したら、辿った結果を追加しない
           const gen = generation.current;
           void Promise.all(entries.map((en) => readEntry(en, out))).then(() => {
             if (gen === generation.current && mounted.current) add(out);

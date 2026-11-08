@@ -3,7 +3,7 @@ import type { ModalityGroup } from "@/lib/modalities";
 
 // ビューアの部品（ViewerAdapter。docs/spec.md の 3.2）。設定で URL が与えられたものだけを出す。
 // ビューアは BFF の中継（/api/dicom-web）から画像を取るように、ビューアの側で設定する（中継の住所はビューアの設定）。
-// ここでは、検査を開く URL だけを作る。Weasis（weasis://）は段 4 の後なので、まだ出さない。
+// ここでは、検査を開く URL だけを作る。Weasis（weasis://）はフェーズ 4 の後なので、まだ出さない。
 
 export const VIEWER_IDS = ["ohif", "stone", "volview", "dicomweb"] as const;
 export type ViewerId = (typeof VIEWER_IDS)[number];
@@ -39,11 +39,11 @@ export function availableViewers(viewers: AppConfig["viewers"]): ViewerInfo[] {
 const trim = (url: string) => url.replace(/\/+$/, "");
 
 /**
- * 検査を開く URL。UID は呼ぶ側で形を確かめたもの（数字と `.`）だけを渡す。設定に URL が無いビューアは null。
+ * 検査を開く URL。UID は呼ぶ側で形を確認したもの（数字と `.`）だけを渡す。設定に URL が無いビューアは null。
  * - OHIF v3：`/viewer?StudyInstanceUIDs=`
  * - Stone Web Viewer：`/index.html?study=`
- * - VolView：`?urls=[…]`（中継の WADO-RS の検査の URL を渡す。実の VolView で確かめる前の形。PR を参照）
- * - DICOMweb：研究の道具に渡す `PUBLIC_DICOMWEB_URL` の検査の URL（このアプリの監査の外）
+ * - VolView：`?urls=[…]`（中継の WADO-RS の検査の URL を渡す。実の VolView で確認する前の形。PR を参照）
+ * - DICOMweb：研究のツールに渡す `PUBLIC_DICOMWEB_URL` の検査の URL（このアプリの監査の外）
  */
 export function viewerUrl(
   id: ViewerId,

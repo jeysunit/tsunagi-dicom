@@ -14,9 +14,9 @@ import {
 } from "@/lib/keep-uid-write";
 import { visible } from "../../hl7-receiver/visible";
 
-// 患者・検査の値の修正（docs/spec.md の 3.5。段 6。openspec/changes/archive/2026-11-05-add-study-value-correction/design.md）の、
+// 患者・検査の値の修正（docs/spec.md の 3.5。フェーズ 6。openspec/changes/archive/2026-11-05-add-study-value-correction/design.md）の、
 // 直す検査を Orthanc から読む部分と、書き換えの段取りを作る部分。道（src/app/api/studies/[uid]/modify）が使う。
-// 確かめの画面（preview）と実行の両方が同じ読み方をし、見せた状態の印（state）で、確かめの後に検査が変わっていないかを照らす。
+// 確認画面（preview）と実行の両方が同じ読み方をし、見せた状態の印（state）で、確認の後に検査が変わっていないかを照らす。
 
 /** 断る理由（画面に出す文言と、記録に残す短い名前） */
 export class CorrectionRefused extends Error {
@@ -64,7 +64,7 @@ export interface CorrectionSnapshot {
   fields: Record<string, { before: string; after: string }>;
   /** 患者 ID の付け替えの替え先の患者（Orthanc にあれば、その値にそろえる） */
   target?: { patientId: string; exists: boolean; attributes: Record<string, string> };
-  /** 確かめの画面で見せた状態の印（SHA-256） */
+  /** 確認画面で見せた状態の印（SHA-256） */
   state: string;
 }
 
@@ -101,8 +101,8 @@ async function readStudy(backend: Backend, uid: string, orthancId: string): Prom
   if (!info || info.studyInstanceUid !== uid) throw new CorrectionRefused(409, "changed", "確認の後に検査が更新されました。もう一度確認してください");
   const instances = await backend.studyInstanceTags(orthancId);
   try {
-    // 患者 ID のほかの値は、画像どうしで揃っていなくても受ける（部分反映の後に、人が確かめて揃え直すため。揃っていない項目は
-    // 確かめの画面に出す）
+    // 患者 ID のほかの値は、画像どうしで揃っていなくても受ける（部分反映の後に、人が確認して揃え直すため。揃っていない項目は
+    // 確認画面に出す）
     checkStudyInstances(instances, false);
   } catch (e) {
     throw new CorrectionRefused(409, "inconsistent", "検査の画像どうしで値が揃っていないため、修正できません", {
@@ -163,8 +163,8 @@ function digest(s: Omit<CorrectionSnapshot, "state">): string {
 }
 
 /**
- * 直す検査と前の値を Orthanc から読む（確かめの画面と、書き換える直前の両方で使う）。
- * 種類と項目が合わない・混ぜた要求は 400、検査が無ければ 404、同じ UID の検査が複数あって選んでいない・確かめの後に変わった・
+ * 直す検査と前の値を Orthanc から読む（確認画面と、書き換える直前の両方で使う）。
+ * 種類と項目が合わない・混ぜた要求は 400、検査が無ければ 404、同じ UID の検査が複数あって選んでいない・確認の後に変わった・
  * 替え先の患者の値と違う・変わる値が無いなどは 409 で断る（CorrectionRefused）
  */
 export async function readSnapshot(
@@ -182,7 +182,7 @@ export async function readSnapshot(
   let studies = [selected];
   let target: CorrectionSnapshot["target"];
   if (scope === "patient") {
-    // 氏名・生年月日・性別は患者のすべての検査に共通（PS3.3 C.7.1.1）。同じ患者 ID の全部の検査に当てる
+    // 氏名・生年月日・性別は患者のすべての検査に共通（PS3.3 C.7.1.1）。同じ患者 ID の全部の検査に適用する
     const ids = await backend.findStudiesByPatientId(p.PatientID);
     if (!ids.includes(selected.orthancId)) throw new CorrectionRefused(409, "changed", "確認の後に検査が更新されました。もう一度確認してください");
     studies = [];
@@ -207,7 +207,7 @@ export async function readSnapshot(
       ? Object.fromEntries(PATIENT_ATTRS.map((k) => [k, basis[0]![k]]))
       : Object.fromEntries(PATIENT_ATTRS.filter((k) => values[k] !== undefined).map((k) => [k, values[k]!]));
     if (basis.length && PATIENT_ATTRS.some((k) => values[k] !== undefined && values[k] !== attributes[k])) {
-      // 付け替え先の患者の値は、断る応答にも監査の記録にも入れない（見せるのは、記録を残す確かめの画面の成功の応答だけ）
+      // 付け替え先の患者の値は、断る応答にも監査の記録にも入れない（見せるのは、記録を残す確認画面の成功の応答だけ）
       throw new CorrectionRefused(409, "target_mismatch", "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います");
     }
     // 付け替え先の患者に同じ UID の検査があり、同じ画像（UID の組）を持っていれば、書き換えた画像が上書きになるので断る
@@ -247,19 +247,19 @@ export function attributePlans(s: CorrectionSnapshot): KeepUidPlan[] {
     ? { PatientID: s.target!.patientId, ...s.target!.attributes }
     : Object.fromEntries(Object.entries(s.values) as [string, string][]);
   return s.studies.map((st) => {
-    // 直す項目だけを書き換える（確かめの画面で見せていない値を、先頭の画像の値などで上書きしない）
+    // 直す項目だけを書き換える（確認画面で見せていない値を、先頭の画像の値などで上書きしない）
     const replace: Record<string, string> = { ...after };
     return { id: st.orthancId, before: st.instances, replace, after: st.instances.map((i) => ({ ...i, ...replace })), ...(st.alongside.length ? { alongside: st.alongside } : {}) };
   });
 }
 
-/** 属性の訂正を流した答え */
+/** 属性の訂正を実行した答え */
 export interface AttributeOutcome {
   outcome: "success" | "failed" | "unknown";
   /** 書き換えた検査の数（値が変わらずに飛ばした検査は数えない）と、書き換える検査の数 */
   count: number;
   total: number;
-  /** 書き換えの ID（監査の記録の書き換えの行。照らし合わせ・管理者が解くときに名指しする） */
+  /** 書き換えの ID（監査の記録の書き換えの行。照らし合わせ・管理者が解くときに指定する） */
   writes: string[];
   /** 画像の一部だけが書き換わった・同じ患者の検査の途中で止まった */
   partial: boolean;
@@ -269,7 +269,7 @@ export interface AttributeOutcome {
 }
 
 /**
- * 属性の訂正を、検査ごとに UID を保つ書き換えの部品で流す（HL7 と同じ列の中で呼ぶ）。1つの検査で失敗・結果不明になれば、
+ * 属性の訂正を、検査ごとに UID を保つ書き換えの部品で実行する（HL7 と同じ列の中で呼ぶ）。1つの検査で失敗・結果不明になれば、
  * 残りの検査は書き換えずに止める。row は書き換えの経過を監査の記録に残す（modify の行）
  */
 export async function applyAttributeCorrection(
@@ -295,7 +295,7 @@ export async function applyAttributeCorrection(
   // 同じ患者の複数の検査を書き換えるときは、書き換えの前に組（group）の行を残し、全部を書き換え終えたら閉じる。途中で
   // 止まると（失敗・結果不明・BFF が止まった）、前の検査だけが直り、患者の検査どうしで値が食い違う（検査ごとには揃っている）。
   // 閉じていない組・部分反映や結果不明で閉じた組は、書き換えの部品の unresolved が拾い、管理者が /api/hl7/resolve で組の ID を
-  // 名指しして解くまで、画面と HL7 の書き換えを止める（1つの検査の書き換えが後で照らし合わせで解けても、組は残る）
+  // 指定して解くまで、画面と HL7 の書き換えを止める（1つの検査の書き換えが後で照らし合わせで解けても、組は残る）
   const group = plans.length > 1 ? {
     writeId: randomUUID(),
     messageId: requestId,
@@ -373,7 +373,7 @@ export function newStudyUid(): string {
   return `2.25.${BigInt(`0x${randomUUID().replace(/-/g, "")}`)}`;
 }
 
-/** 中身の訂正の結果を確かめた答え */
+/** 中身の訂正の結果を確認した答え */
 export interface ContentCheck {
   /** 作られた検査（無ければ null） */
   newOrthancId: string | null;
@@ -384,7 +384,7 @@ export interface ContentCheck {
 }
 
 /**
- * 中身の訂正の後に、作られた検査を BFF が決めた StudyInstanceUID で探し、直した値と画像の数を確かめる（照らし合わせにも使う）。
+ * 中身の訂正の後に、作られた検査を BFF が決めた StudyInstanceUID で探し、直した値と画像の数を確認する（照らし合わせにも使う）。
  * Series・SOP の UID は元の画像と重ならないこと（新しい UID になったこと）も見る
  */
 export async function checkContent(

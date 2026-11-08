@@ -11,13 +11,13 @@ import type { ModalityView } from "@/lib/fields";
 import { formatDateTimeIn } from "@/lib/format/japanese-date";
 import { cn } from "@/lib/utils";
 
-// 接続先の表と接続確認（docs/spec.md の 3.3。段 4）。1 件 1 行。「接続確認」で Orthanc から C-ECHO を送る。
-// 「最後の接続確認」の列は、未確認（札。確かめられる相手でまだ確かめていない）・確認中（札。その行のボタンは押せない）・成功（札と時刻）・失敗（札と時刻と理由の 1 句）。
+// 接続先の表と接続確認（docs/spec.md の 3.3。フェーズ 4）。1 件 1 行。「接続確認」で Orthanc から C-ECHO を送る。
+// 「最後の接続確認」の列は、未確認（札。確認できる相手でまだ確認していない）・確認中（札。その行のボタンは押せない）・成功（札と時刻）・失敗（札と時刻と理由の 1 句）。
 // 画面の言葉は docs/spec.md の 2.2、文の型は docs/design-system/writing.md。
 
 interface EchoResult {
   ok: boolean;
-  /** 確かめた時刻（`10:32:05`） */
+  /** 確認した時刻（`10:32:05`） */
   at: string;
   /** 失敗の理由の 1 句（なぜか＋次にすること）。成功のときは無い */
   reason?: string;

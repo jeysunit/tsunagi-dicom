@@ -1,5 +1,5 @@
 # 版のタグ（v*）の push、手動（workflow_dispatch）、週に1回（schedule）のときだけ、CI（ci.yml）を通してから、イメージを作って GHCR へ出し、
-# digest に鍵の要らない署名（cosign・GitHub の OIDC）を付ける。main への push では出さない（main の試験は ci.yml が流す）。
+# digest に鍵の要らない署名（cosign・GitHub の OIDC）を付ける。main への push では出さない（main の試験は ci.yml が実行する）。
 # 版のタグの push：vX.Y.Z と sha-<短い hash>。手動（main を選ぶ）：sha-<短い hash> だけ。週に1回（main）：sha-<短い hash> と rebuild-YYYYMMDD（層の cache を使わない）。
 # 作り直しと手動は版のタグ（vX.Y.Z）を付けない・上書きしない（semver のタグは、版のタグの push のときにしか作られない）。
 # packages: write と id-token: write はイメージの仕事にだけ付ける（リポジトリ全体を読み書きにしない）。
@@ -23,7 +23,7 @@ concurrency:
 jobs:
   ci:
     name: CI
-    # 手動の実行は main からだけ（版のタグの上で流して、版のタグを作り直さないため）
+    # 手動の実行は main からだけ（版のタグの上で実行して、版のタグを作り直さないため）
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     uses: ./.github/workflows/ci.yml
     permissions:

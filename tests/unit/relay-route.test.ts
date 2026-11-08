@@ -3,8 +3,8 @@ import type { Role } from "@/lib/auth/roles";
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 中継の route handler（src/app/api/dicom-web/[...path]/route.ts）を、セッションの cookie から通して確かめる。
-// 本物の SQLite・本物のログイン（AUTH_MODE=local）・本物の役割の確かめを使い、役割の割り当てだけを差し替えて、
+// 中継の route handler（src/app/api/dicom-web/[...path]/route.ts）を、セッションの cookie から通して確認する。
+// 本物の SQLite・本物のログイン（AUTH_MODE=local）・本物の役割の確認を使い、役割の割り当てだけを差し替えて、
 // 画像の取得（image.retrieve）が割り当てられていない役割では、中継が 403 を返し、断ったことが記録に残ることを見る。
 // Next.js の外なので、next/headers（cookie・ヘッダー）と、設定（getConfig）だけを差し替える。
 
@@ -27,7 +27,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
 });
 
 // 一般（general）から画像の取得を外した割り当て（「割り当ての無い役割」を作る。2026-10-20 に役割を2つにしたので、
-// 前の閲覧（viewer）で作っていた形を一般で作り、割り当てのある役割は管理者で見る。確かめる中身は同じ）
+// 前の閲覧（viewer）で作っていた形を一般で作り、割り当てのある役割は管理者で見る。確認する中身は同じ）
 vi.mock("@/lib/auth/roles", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/auth/roles")>();
   const map = { ...real.ROLE_PERMISSIONS, general: real.ROLE_PERMISSIONS.general.filter((p) => p !== "image.retrieve") };

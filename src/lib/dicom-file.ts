@@ -1,15 +1,15 @@
-// インポート（docs/spec.md の 3.5「取り込み」）で、Orthanc へ渡す前に DICOM のファイルの形を確かめ、頭の値を読む。
+// インポート（docs/spec.md の 3.5「取り込み」）で、Orthanc へ渡す前に DICOM のファイルの形を確認し、頭の値を読む。
 // 画素は読まない（長さで読み飛ばす）。読むのは、DICOM のファイルの形（PS3.10 7.1：128 バイトの前置きの後に "DICM"）、
 // File Meta Information（group 0002。PS3.10 7.1 で、いつも Explicit VR Little Endian）の転送構文と SOP Instance UID、
-// データセットの SOP Instance UID (0008,0018)（File Meta と同じかを確かめる）・患者 ID (0010,0020)・StudyInstanceUID (0020,000D)。
+// データセットの SOP Instance UID (0008,0018)（File Meta と同じかを確認する）・患者 ID (0010,0020)・StudyInstanceUID (0020,000D)。
 // 監査の記録の「どの患者と検査に」を、Orthanc を呼ぶ前に残すため（3.5 の共通の決まり）と、結果不明を
 // SOP Instance UID で照らすため。読めないファイルは Orthanc へ渡さずに断る。
 // 読んだ値が、Orthanc（DCMTK）の読む値と食い違わないよう、形の崩れたファイルは断る：
 // - File Meta Information の先頭は File Meta Information Group Length (0002,0000)（UL。PS3.10 7.1 の Table 7.1-1 で Type 1）。
 //   その値が示す範囲だけを File Meta として読み、範囲の中の要素がちょうどその範囲で終わること、範囲の外（データセット）に
-//   group 0002 の要素が無いことを確かめる。
+//   group 0002 の要素が無いことを確認する。
 // - File Meta とデータセットの最上位の要素は、タグの厳密な昇順で並ぶこと（同じタグを二度持たない。PS3.5 7.1）。
-//   データセットは最後の要素まで確かめる（途中で読むのをやめると、後ろに置いた同じタグを Orthanc が読みうる）。
+//   データセットは最後の要素まで確認する（途中で読むのをやめると、後ろに置いた同じタグを Orthanc が読みうる）。
 // - 読む値の要素は、長さが決まっていて、Explicit VR では決まった VR（PS3.6 の 6 章：UI・CS・LO）であること。
 // それでも Orthanc の読みと食い違いうるので、取り込んだ後に Orthanc が保存した値と照らす（src/app/api/import/route.ts）。
 
@@ -163,7 +163,7 @@ class Reader {
   }
 }
 
-/** DICOM のファイルの形を確かめ、頭の値を読む。DICOM でない・転送構文を読めない・形が壊れているときは DicomFileError を投げる */
+/** DICOM のファイルの形を確認し、頭の値を読む。DICOM でない・転送構文を読めない・形が壊れているときは DicomFileError を投げる */
 export function readDicomFileHeader(bytes: Uint8Array): DicomFileHeader {
   if (bytes.byteLength < 132 || String.fromCharCode(...bytes.subarray(128, 132)) !== "DICM") {
     throw new DicomFileError("not_dicom", "DICOM のファイルではありません");

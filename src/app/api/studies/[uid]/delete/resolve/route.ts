@@ -14,18 +14,18 @@ import {
   rowsOfRequest,
 } from "@/lib/pacs-ops";
 
-// 結果の分からない削除を、管理者が手で解く（docs/spec.md の 3.5。段 5）。管理者だけ（pacs.reconcile）。
+// 結果の分からない削除を、管理者が手で解く（docs/spec.md の 3.5。フェーズ 5）。管理者だけ（pacs.reconcile）。
 // 検査が Orthanc にまだあるだけでは、先の DELETE が止まった・終わったとは言えない（遅れて消えることがある）ので、
 // BFF は自動では「消えていない」と確定させない。管理者が Orthanc の側（ログ・再起動の有無・仕事の一覧など）で
-// 先の削除の処理が終わっていることを確かめ、その内容を書いて解く。解くまで、同じ検査の新しい削除は断る。
-// 解くときに Orthanc をもう一度読み、検査が無ければ「消えた」、まだあれば「消えていない」として記録に足す（phase は reconcile）。
+// 先の削除の処理が終わっていることを確認し、その内容を書いて解く。解くまで、同じ検査の新しい削除は断る。
+// 解くときに Orthanc をもう一度読み、検査が無ければ「消えた」、まだあれば「消えていない」として記録に追加する（phase は reconcile）。
 // Orthanc には書き込みを求めない。
 
 type Context = { params: Promise<{ uid: string }> };
 
 const Body = z.object({
   requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
-  /** 先の削除の処理が終わっていることを、どこで・どう確かめたか（必須） */
+  /** 先の削除の処理が終わっていることを、どこで・どう確認したか（必須） */
   note: z.string().trim().min(1, "確認内容を入力してください").max(500),
 });
 
@@ -46,7 +46,7 @@ export async function POST(request: Request, { params }: Context) {
       const now = requestOutcome(rows);
       if (!isUnresolved(now)) return { value: "settled", fields: null };
       // 解けるのは、元の処理が DELETE を送り終えた後（結果不明・「送る」の行がある）か、送る前に決めた時間を過ぎて、
-      // もう送られないと言えるとき（送る直前の確かめで断る）だけ。「求めた」のまま動いている要求は解かない
+      // もう送られないと言えるとき（送る直前の確認で断る）だけ。「求めた」のまま動いている要求は解かない
       const age = now.requestedAt ? Date.now() - now.requestedAt.getTime() : 0;
       const sentOrAbandoned = now.phase === "result" || now.dispatched || age > DELETE_DISPATCH_DEADLINE_MS;
       if (!sentOrAbandoned) return { value: "running", fields: null };

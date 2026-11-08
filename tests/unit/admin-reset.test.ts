@@ -26,7 +26,7 @@ import type { Db } from "@/lib/db";
 import { run, type CliContext, type CliDeps } from "@/cli/reset-admin-password";
 import { testDatabases } from "./helpers/test-db";
 
-// 管理者のパスワードを失くしたときの戻し方（docs/spec.md の 3.6）を、migration を流した本物の SQLite に対して確かめる。
+// 管理者のパスワードを失くしたときの戻し方（docs/spec.md の 3.6）を、migration を実行した本物の SQLite に対して確認する。
 
 const dbs = testDatabases("tsunagi-admin-reset-");
 beforeAll(() => dbs.setup(), 60_000);
@@ -120,7 +120,7 @@ describe("管理者のパスワードを戻す", () => {
     expect((await resolveSession(ctx, token)).kind).toBe("anonymous");
     // 古いパスワードは通らない
     await expect(login(ctx, "admin1", OLD_PASSWORD)).rejects.toMatchObject({ status: 401 });
-    // 一時のパスワードは通り、TOTP の段を経て、パスワードの変更の段になる
+    // 一時のパスワードは通り、TOTP のステップを経て、パスワードの変更のステップになる
     const next = await login(ctx, "admin1", TEMP_PASSWORD);
     expect(next.stage).toBe("totp");
     const pending = await sessionOf(db, next.token);

@@ -2,7 +2,7 @@
 
 ## Purpose
 検査一覧の詳細のパネルで、シリーズのサムネイルから、そのシリーズの画像ごとに DICOM タグを見る機能を定める。
-出すタグは施設が設定で決め、値の全部も同じ場所で見られる。読み取りだけで、権限の確かめと操作ログを通す。
+出すタグは施設が設定で決め、値の全部も同じ場所で見られる。読み取りだけで、権限の確認と操作ログを通す。
 
 ## Requirements
 
@@ -184,12 +184,12 @@
 
 ### Requirement: 読み取りだけと操作ログ
 
-画像の一覧とタグの読み取りは、BFF が画像サーバーへ読み取りだけを求めなければならない（SHALL）。ブラウザから画像サーバーへの道（中継）は足さない。読むたびに、操作ログに `view_study` を残し、`detail` に `level`・SeriesInstanceUID・SOPInstanceUID と、出したタグの組（`set`：`configured` か `all`）を書く。
+画像の一覧とタグの読み取りは、BFF が画像サーバーへ読み取りだけを求めなければならない（SHALL）。ブラウザから画像サーバーへの道（中継）は追加しない。読むたびに、操作ログに `view_study` を残し、`detail` に `level`・SeriesInstanceUID・SOPInstanceUID と、出したタグの組（`set`：`configured` か `all`）を書く。
 
 #### Scenario: 主なタグを読んだ記録
 
 - **WHEN** 利用者が画像の場所で #2 の画像を選ぶ
-- **THEN** 操作ログに `view_study` の行が足され、`detail` に `level: "instance"`・その画像の SOPInstanceUID・`set: "configured"` が入る
+- **THEN** 操作ログに `view_study` の行が追加され、`detail` に `level: "instance"`・その画像の SOPInstanceUID・`set: "configured"` が入る
 
 #### Scenario: 中継からは読めない
 

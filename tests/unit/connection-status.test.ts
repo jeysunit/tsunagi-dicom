@@ -3,7 +3,7 @@ import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
 // 上の帯の接続の状態（GET /api/connection-status。docs/spec.md の 3.3）を、検証モード（AUTH_MODE=dev。モックの Orthanc）の
-// セッションから通して確かめる。役割ごとに返す項目（許可の一覧の connection・modality）、載っていない項目は返らないこと、
+// セッションから通して確認する。役割ごとに返す項目（許可の一覧の connection・modality）、含まれていない項目は返らないこと、
 // 権限の無い要求を断って記録すること、直近の接続確認の結果を反映すること、画像サーバーが読めないときの全体の状態を見る。
 
 const state = vi.hoisted(() => ({
@@ -100,10 +100,10 @@ describe("接続の状態の API", () => {
     const offline = body.connection.modalities.find((m: { id: string }) => m.id === "offline");
     expect(offline).toMatchObject({ result: "ng" });
     expect(typeof offline.at).toBe("string");
-    // 確かめていない接続先は、結果も時刻も持たない
+    // 確認していない接続先は、結果も時刻も持たない
     expect(body.connection.modalities.find((m: { id: string }) => m.id === "workstation")).toMatchObject({ result: null, at: null });
 
-    // 失敗した接続先を、機器の側が直ったあとの成功で置き換える（モックでは offline は常に失敗するので、監査の記録に成功を足して確かめる）
+    // 失敗した接続先を、機器の側が直ったあとの成功で置き換える（モックでは offline は常に失敗するので、監査の記録に成功を追加して確認する）
     const { appendAudit } = await import("@/lib/audit");
     await appendAudit(await db(), {
       actorId: "t",
@@ -176,7 +176,7 @@ describe("接続の状態の組み立て", () => {
     });
     expect(connectionView(record, { study: [], series: [], connection: ["overall"] })).toEqual({ overall: record.overall });
     expect(connectionView(record, { study: [], series: [] })).toEqual({});
-    // 接続先は、名前（id）を見せてよい役割にだけ。AE タイトルはさらに aet が載っているときだけ
+    // 接続先は、名前（id）を見せてよい役割にだけ。AE タイトルはさらに aet が含まれているときだけ
     expect(connectionView(record, { study: [], series: [], connection: ["modalities"] })).toEqual({});
     expect(connectionView(record, { study: [], series: [], connection: ["modalities"], modality: ["id"] }).modalities).toEqual([
       { id: "unchecked", result: null, at: null },

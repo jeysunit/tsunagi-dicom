@@ -20,13 +20,13 @@ import { auditKeyringFrom, deriveAuditKey } from "@/lib/audit-key";
 import { createDb, type Db } from "@/lib/db";
 import { auditTestConfig } from "./helpers/audit-config";
 
-// 監査の記録の試験。migration（trigger を含む）を流した本物の SQLite に対して行う。
+// 監査の記録の試験。migration（trigger を含む）を実行した本物の SQLite に対して行う。
 // つなぎの鍵は設定の SESSION_SECRET から導くので、試験だけの値に差し替える（tests/unit/helpers/audit-config.ts）。
 vi.mock("@/lib/config", async (importOriginal) => (await import("./helpers/audit-config")).withAuditKey(await importOriginal()));
 
 const SECRET = auditTestConfig.sessionSecret;
 const key = () => deriveAuditKey(auditTestConfig.sessionSecret);
-/** 書き換えの無いつなぎの確かめの結果（鍵の無い行の数と、照らした控え） */
+/** 書き換えの無いつなぎの確認の結果（鍵の無い行の数と、照らした控え） */
 const okChain = (checked: number, legacy = 0, anchors?: { checked: number; latestSeq: number }) => ({
   ok: true,
   checked,
@@ -140,8 +140,8 @@ describe("監査の記録", () => {
         .filter(([, v]) => typeof v === "function")
         .map(([k]) => k)
         .sort();
-      // appendAuditWith は、BFF のデータベースの変更と記録の1行の追記を、1つの transaction で書くもの（段 2）。
-      // appendAuditIf は、同じ並びの中で「もう書いてあれば書かない」を確かめてから追記するもの（段 4）。
+      // appendAuditWith は、BFF のデータベースの変更と記録の1行の追記を、1つの transaction で書くもの（フェーズ 2）。
+      // appendAuditIf は、同じ並びの中で「もう書いてあれば書かない」を確認してから追記するもの（フェーズ 4）。
       // 記録の行は追記するだけで、更新・削除はしない
       // computeAuditMac・computeAuditHash は hash の計算だけで、データベースに書かない
       expect(functions).toEqual(["appendAudit", "appendAuditIf", "appendAuditWith", "computeAuditHash", "computeAuditMac", "verifyAuditChain"]);
@@ -173,7 +173,7 @@ describe("監査の記録", () => {
     it("データベースの側でも、行の更新を断る", async () => {
       const db = await freshDb();
       await appendMany(db, 2);
-      // Prisma は SQLite の RAISE(ABORT) を別の名前の失敗に写すので、文言ではなく、断られて行が残ることを見る
+      // Prisma は SQLite の RAISE(ABORT) を別の名前の失敗にコピーするので、文言ではなく、断られて行が残ることを見る
       await expect(db.auditLog.update({ where: { seq: 1 }, data: { action: "delete" } })).rejects.toThrow();
       await expect(db.$executeRawUnsafe(`UPDATE "AuditLog" SET "action" = 'delete'`)).rejects.toThrow();
       expect((await db.auditLog.findUniqueOrThrow({ where: { seq: 1 } })).action).toBe("view_study");
@@ -252,7 +252,7 @@ describe("監査の記録", () => {
         detail: null,
         prevHash: GENESIS_HASH,
       };
-      // 欄を足す前の並び（12 の値）の SHA-256
+      // 欄を追加する前の並び（12 の値）の SHA-256
       const before = createHash("sha256")
         .update(JSON.stringify([1, "2026-10-18T00:00:00.000Z", "dev", "viewer", "dev", "search", "success", null, null, null, null, GENESIS_HASH]))
         .digest("hex");
@@ -373,7 +373,7 @@ describe("監査の記録", () => {
       await dropGuards(db);
       const other = deriveAuditKey("y".repeat(48));
       const { hash: _hash, ...row } = await db.auditLog.findUniqueOrThrow({ where: { seq: 2 } });
-      // 自分の鍵で計算し直しても、その鍵は確かめる側に無い
+      // 自分の鍵で計算し直しても、その鍵は確認する側に無い
       await db.auditLog.update({ where: { seq: 2 }, data: { keyId: other.id, hash: computeAuditMac({ ...row, keyId: other.id }, other) } });
       expect(await verifyAuditChain(db)).toMatchObject({ ok: false, seq: 2, reason: expect.stringContaining("鍵") });
     });
@@ -438,7 +438,7 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     resetAuditAnchorState();
     const db = await freshDb();
     const file = anchorFile();
-    // 初めての起動で控えのファイルを作り（1 行目が作ったことの行）、記録を足して控える
+    // 初めての起動で控えのファイルを作り（1 行目が作ったことの行）、記録を追加して控える
     await writeAuditAnchor(db, file, () => undefined);
     await appendMany(db, 2);
     await writeAuditAnchor(db, file, () => undefined);
@@ -461,7 +461,7 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     resetAuditAnchorState();
     const db = await freshDb();
     const file = anchorFile();
-    // 施設が置いた空の控えのファイルへ書く（作ったことの行は足さない）
+    // 施設が置いた空の控えのファイルへ書く（作ったことの行は追加しない）
     writeFileSync(file, "");
     await appendMany(db, 5);
     await writeAuditAnchor(db, file, () => undefined);
@@ -513,7 +513,7 @@ describe("先頭の控え（データベースの外）と照らす", () => {
       ok: false,
       reason: expect.stringContaining("先頭の控えが無い"),
     });
-    // 控えのファイルを設定していなければ、控えとは照らさない（つなぎだけを確かめる）
+    // 控えのファイルを設定していなければ、控えとは照らさない（つなぎだけを確認する）
     expect(await verifyAuditChain(db, 1000, { anchors: missing })).toEqual(okChain(2));
   });
 
@@ -522,14 +522,14 @@ describe("先頭の控え（データベースの外）と照らす", () => {
     const db = await freshDb();
     const sub = path.join(anchorDir, `later${++m}`);
     const file = path.join(sub, "anchors.jsonl");
-    // 初めての起動で、置き場のフォルダがまだ無い（ボリュームをつなぎ忘れた、など）
+    // 初めての起動で、保存先のフォルダがまだ無い（ボリュームをつなぎ忘れた、など）
     await expect(writeAuditAnchor(db, file, () => undefined)).rejects.toThrow();
     expect(await db.auditLog.count()).toBe(0);
     mkdirSync(sub);
     const first = await writeAuditAnchor(db, file, () => undefined);
     expect(first?.seq).toBe(1);
     expect(await readAuditAnchors(file)).toEqual([{ seq: 1, hash: first!.hash }]);
-    // 置き場の書き込みに失敗しても、ログ（標準出力）には書く
+    // 保存先の書き込みに失敗しても、ログ（標準出力）には書く
     rmSync(file);
     mkdirSync(file);
     await appendMany(db, 1);
@@ -557,7 +557,7 @@ describe("鍵つきにする前の行からの移り方と、鍵の取り替え"
   });
 
   it("既存のデータベース（鍵の無い SHA-256 の行）に migration を当てて起動しても、確かめは通り、次の行から鍵つきになる", async () => {
-    // この版より前の migration だけを当てたデータベースに、前の版の形の行（鍵の無い SHA-256）を書く
+    // この版より前の migration だけを適用したデータベースに、前の版の形の行（鍵の無い SHA-256）を書く
     const migrationsDir = path.resolve("prisma/migrations");
     const KEYED = "20261021120000_audit_log_keyed_chain";
     const names = readdirSync(migrationsDir).filter((n) => /^\d{14}_/.test(n)).sort();
@@ -588,14 +588,14 @@ describe("鍵つきにする前の行からの移り方と、鍵の取り替え"
         .run(seq, row.occurredAt.getTime(), row.actorId, row.actorRole, row.authMode, row.action, row.outcome, prevHash, hash);
       prevHash = hash;
     }
-    // この版の migration を当てる
+    // この版の migration を適用する
     raw.exec(readFileSync(path.join(migrationsDir, KEYED, "migration.sql"), "utf8"));
     raw.close();
 
     const db = await createDb(`file:${file}`);
     opened.push(db);
     expect(await verifyAuditChain(db)).toEqual(okChain(3, 3));
-    // 次の追記で、鍵が替わったこと（sha256 → 鍵の印）を1行書いてから、鍵つきの行を足す
+    // 次の追記で、鍵が替わったこと（sha256 → 鍵の印）を1行書いてから、鍵つきの行を追加する
     await appendAudit(db, entry(0));
     const rows = await db.auditLog.findMany({ orderBy: { seq: "asc" } });
     expect(rows.map((r) => [r.seq, r.action, r.keyId])).toEqual([
@@ -634,7 +634,7 @@ describe("鍵つきにする前の行からの移り方と、鍵の取り替え"
   });
 });
 
-/** 鍵を持つ者の真似：末尾に1行を、その鍵で書き足す（trigger は外してある前提） */
+/** 鍵を持つ者の真似：末尾に1行を、その鍵で追記する（trigger は外してある前提） */
 async function forgeAppend(db: Db, key: ReturnType<typeof deriveAuditKey>, extra: Partial<AuditRow> = {}) {
   const last = await db.auditLog.findFirstOrThrow({ orderBy: { seq: "desc" } });
   const base = {
@@ -663,7 +663,7 @@ describe("鍵の取り替えと、鍵の無い形への作り直しを悪用さ�
     auditTestConfig.audit.sessionSecretPrevious = [];
   });
 
-  /** 鍵 A で 2 行、鍵 B に替えて 1 行（と鍵が替わったことの行）。確かめる側は A を前の鍵として受ける */
+  /** 鍵 A で 2 行、鍵 B に替えて 1 行（と鍵が替わったことの行）。確認する側は A を前の鍵として受ける */
   async function rotated() {
     const db = await freshDb();
     await appendMany(db, 2);
@@ -800,7 +800,7 @@ describe("鍵の取り替えと、鍵の無い形への作り直しを悪用さ�
     try {
       const db = await freshDb();
       const file = path.join(anchorDir, "anchors.jsonl");
-      // 初めての起動で控えのファイルを作り（1 行目）、記録を足して控える（4 行目）
+      // 初めての起動で控えのファイルを作り（1 行目）、記録を追加して控える（4 行目）
       await writeAuditAnchor(db, file, () => undefined);
       await appendMany(db, 3);
       await writeAuditAnchor(db, file, () => undefined);

@@ -12,7 +12,7 @@ const Body = z.object({
   currentPassword: z.string().max(MAX_PASSWORD_LENGTH * 4).optional(),
 });
 
-// TOTP の登録を確かめる（登録の頁で出した秘密から、認証のアプリが出した番号）。
+// TOTP の登録を確認する（登録の頁で出した秘密から、認証のアプリが出した番号）。
 export async function POST(request: Request) {
   try {
     const state = await checkedState(request);

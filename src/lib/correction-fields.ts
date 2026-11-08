@@ -1,7 +1,7 @@
-// 患者・検査の値の修正（docs/spec.md の 3.5。段 6）で直せる項目と、値の形の確かめ。画面と BFF の両方で使う。
+// 患者・検査の値の修正（docs/spec.md の 3.5。フェーズ 6）で直せる項目と、値の形の確認。画面と BFF の両方で使う。
 // 値の修正は2種類に分ける（openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 1）。
 // - 属性の訂正（attribute）：患者 ID・氏名・生年月日・性別・受付番号。UID を保つ。直す範囲で3つに分ける。
-//   - patient：氏名・生年月日・性別。同じ患者 ID の全部の検査に当てる
+//   - patient：氏名・生年月日・性別。同じ患者 ID の全部の検査に適用する
 //   - reassign：患者 ID の付け替え。選んだ1つの検査だけ（氏名・生年月日・性別を添えてよい。替え先の患者があれば、その値にそろえる）
 //   - accession：受付番号。選んだ1つの検査だけ
 // - 中身の訂正（content）：検査日・検査名。新しい UID の検査を作る。
@@ -64,7 +64,7 @@ function isRefusedChar(c: number): boolean {
 const hasRefusedChar = (v: string) => [...v].some((ch) => isRefusedChar(ch.codePointAt(0)!));
 
 /**
- * 1つの値の形を確かめる（PS3.5 6.2）。問題が無ければ null。空の文字列は「値を空にする」で、患者 ID のほかは受ける
+ * 1つの値の形を確認する（PS3.5 6.2）。問題が無ければ null。空の文字列は「値を空にする」で、患者 ID のほかは受ける
  * （氏名・生年月日・性別・受付番号・検査日は Type 2。検査名は Type 3）
  */
 export function checkFieldValue(field: CorrectionField, value: string): string | null {
@@ -87,7 +87,7 @@ export function checkFieldValue(field: CorrectionField, value: string): string |
       return null;
     }
     case "PatientBirthDate":
-      // 和暦などの入力は、先に readBirthValue で YYYYMMDD にしてから確かめる
+      // 和暦などの入力は、先に readBirthValue で YYYYMMDD にしてから確認する
       return value === "" || isDicomDate(value) ? null : BIRTH_FORMAT_ERROR;
     case "StudyDate":
       return value === "" || isDicomDate(value) ? null : `${label}は YYYYMMDD の8桁の日付で入力してください`;
@@ -127,7 +127,7 @@ export function correctionScope(kind: CorrectionKind, values: CorrectionValues):
 /**
  * 生年月日の値を読み取り、DICOM の DA（YYYYMMDD）にする（docs/spec.md の 3.1「生年月日の入力」）。空は「値を空にする」でそのまま。
  * API の値は YYYYMMDD で、画面の入力と同じ形（`S50/05/14`・`昭和50年5月14日` など）も受ける。どちらも画面と同じ読み取り
- * （形 → 元号の範囲 → 今日より後）で確かめ、同じ文で断る。today はサーバーの時間帯（TZ）の今日
+ * （形 → 元号の範囲 → 今日より後）で確認し、同じ文で断る。today はサーバーの時間帯（TZ）の今日
  */
 export function readBirthValue(value: string, today: SimpleDate): { ok: true; da: string } | { ok: false; message: string } {
   if (value === "") return { ok: true, da: "" };
@@ -137,7 +137,7 @@ export function readBirthValue(value: string, today: SimpleDate): { ok: true; da
 }
 
 /**
- * 直す値を DICOM に書く形にそろえる（確かめの画面と実行の両方で、形を確かめる前に通す）。
+ * 直す値を DICOM に書く形にそろえる（確認画面と実行の両方で、形を確認する前に通す）。
  * 生年月日は YYYYMMDD にし、読めなければ問題を返す。性別の U（不明）は空にする（Patient's Sex の列挙値は M・F・O だけ）
  */
 export function normalizeCorrectionValues(values: CorrectionValues, today: SimpleDate): { values: CorrectionValues } | { problem: FieldProblem } {
@@ -150,7 +150,7 @@ export function normalizeCorrectionValues(values: CorrectionValues, today: Simpl
   return { values: { ...out, PatientBirthDate: read.da } };
 }
 
-/** 全部の項目の値の形を確かめる。最初の問題を返す */
+/** 全部の項目の値の形を確認する。最初の問題を返す */
 export function checkCorrectionValues(values: CorrectionValues): FieldProblem | null {
   for (const [field, value] of Object.entries(values)) {
     if (!isCorrectionField(field)) return { field: null, message: "修正できない項目があります" };

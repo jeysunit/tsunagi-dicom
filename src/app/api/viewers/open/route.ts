@@ -8,7 +8,7 @@ import { availableViewers, isViewerId, viewerUrl } from "@/lib/viewers";
 
 // 検査をビューアで開く（docs/spec.md の 3.2）。どの検査をどのビューアで開いたかを監査の記録に残してから、
 // ビューアの URL へ移す（302）。ビューアは BFF の中継（/api/dicom-web）から画像を取るように、ビューアの側で設定する。
-// DICOMweb の URL（研究の道具に渡すもの）は、移さずに URL を返す。その URL はこのアプリの監査の外。
+// DICOMweb の URL（研究のツールに渡すもの）は、移さずに URL を返す。その URL はこのアプリの監査の外。
 // このアプリの画面（同じ origin）から開いた要求だけを受ける。同じサイトの別の origin・別のサイトからの要求
 // （Sec-Fetch-Site が same-origin でない、Origin が違う）は、開いた記録を作らずに 403（利用者が分かれば断ったことを記録する）。
 

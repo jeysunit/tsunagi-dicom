@@ -4,7 +4,7 @@ import { visible } from "../../../hl7-receiver/visible";
 import type { Header } from "./message";
 const clean = (s = "") => visible(s).replace(/[|^~\\&]/g, "");
 
-/** 送り手の欄を安全に写し、受理・反映失敗・拒否の ACK を作る（design.md §11・§14）。 */
+/** 送り手の欄を安全にコピー、受理・反映失敗・拒否の ACK を作る（design.md §11・§14）。 */
 export function buildAck(code: "AA" | "AE" | "AR", reason: string, header?: Header): string {
   const escape: Record<string, string> = { "|": "F", "^": "S", "~": "R", "&": "T", "\\": "E" };
   const text = visible(reason).replace(/[|^~&\\]/g, (c) => `\\${escape[c]}\\`);

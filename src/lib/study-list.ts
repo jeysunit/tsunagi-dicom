@@ -51,7 +51,7 @@ export interface StudyListResult {
   count: { count: number; exact: boolean };
   /** ブラウザへ返す形（許可の一覧で絞ったもの） */
   studies: StudyView[];
-  /** 見出しごとの件数（許可の一覧に載っていない項目の見出しは含めない） */
+  /** 見出しごとの件数（許可の一覧に含まれていない項目の見出しは含めない） */
   facets: StudyFacets;
   /** 監査の記録に残す、件数を数えた条件・範囲・件数（ブラウザへは返さない） */
   facetAudit: FacetAudit;
@@ -62,7 +62,7 @@ export interface StudyListResult {
 }
 
 /**
- * インポートの印のある検査（Orthanc のラベル。段 6）。読めなければ印を出さずに一覧を出す（印は補いの情報で、一覧を止めない）。
+ * インポートの印のある検査（Orthanc のラベル。フェーズ 6）。読めなければ印を出さずに一覧を出す（印は補いの情報で、一覧を止めない）。
  * 古い Orthanc（ラベルの無い 1.12.0 より前）でも同じ
  */
 async function importedUids(deps: ListDeps): Promise<Set<string>> {
@@ -96,7 +96,7 @@ async function decorate(deps: ListDeps, studies: StudySummary[]) {
 /**
  * 見出しごとの件数。許可の一覧で絞った後の項目だけから数える（見えない項目の件数は、キーごと出さない）。
  * 各見出しの件数は、それを押したあとの一覧の件数と同じ：モダリティの件数は横断の検索を、
- * 検査日の件数はモダリティと横断の検索を、いまの値のまま当てる。
+ * 検査日の件数はモダリティと横断の検索を、いまの値のまま適用する。
  * `dateViews` は検査日で絞らない一覧（検査日の件数の元。いまの一覧が全期間ならそれと同じ）
  */
 export function computeFacets(
@@ -162,7 +162,7 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
   // 検査日を許されていない役割には、検査日の絞り込みも効かせない（隠した項目で探せないように。原則 8）
   const dateAllowed = fields.includes("studyDate");
   const fetchedAt = Date.now();
-  // 詳細条件（生年月日・性別・受付番号・検査名）は、許可の一覧に載った項目の条件だけを画像サーバーへ渡す。
+  // 詳細条件（生年月日・性別・受付番号・検査名）は、許可の一覧に含まれた項目の条件だけを画像サーバーへ渡す。
   // 許可されていない項目の条件が付いていたら、条件を外して広げず、0 件にする（隠した項目で探せないように。原則 8。
   // 横断の検索が、隠した項目では合わないのと同じ向き）
   const advanced = advancedQuery(filter, fields);
@@ -182,7 +182,7 @@ export async function listStudies(deps: ListDeps, filter: StudyFilter = DEFAULT_
   let failed = false;
   if (extraSearch) {
     try {
-      // 検査日だけを外す（詳細条件は、いまの一覧と同じに当てる。押したあとの一覧の件数と合うように）
+      // 検査日だけを外す（詳細条件は、いまの一覧と同じに適用する。押したあとの一覧の件数と合うように）
       const all = await search(advanced);
       dateFetched = all.studies.length;
       dateComplete = all.complete;

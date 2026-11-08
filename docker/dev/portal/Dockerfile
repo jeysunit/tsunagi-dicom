@@ -3,7 +3,7 @@ ARG NODE_IMAGE=node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d
 FROM ${NODE_IMAGE}
 WORKDIR /app
 COPY docker/dev/portal/*.ts ./
-# 色と字のトークンは、デザインシステムの写し（docs/design-system/ui-kit）をそのまま使う
+# 色と字のトークンは、デザインシステムのコピー（docs/design-system/ui-kit）をそのまま使う
 COPY docs/design-system/ui-kit/tokens.css ./
 USER node
 EXPOSE 8080

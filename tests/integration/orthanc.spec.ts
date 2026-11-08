@@ -12,9 +12,9 @@ import { isDicomFile, readZip } from "./support/zip";
 
 // 結合の試験（docs/integration-test.md）：本物の Orthanc（DICOMweb のプラグイン・Basic 認証）と DCMTK を相手に、
 // BFF（BACKEND_MOCK=false・AUTH_MODE=local）を通して、受け取る → 見る → 送る → 書き出す → 消すを一巡りする。
-// docs/round-trip-test.md の手順を、検査装置の試験用のソフトの代わりに DCMTK（storescu・storescp）で流すもの。
+// docs/round-trip-test.md の手順を、検査装置の試験用のソフトの代わりに DCMTK（storescu・storescp）で実行するもの。
 // 画面の細かい振る舞いはモックの試験（tests/e2e）で見る。ここでは BFF と Orthanc のつなぎを見る。
-// 前の試験の結果に依るので、順に流す。
+// 前の試験の結果に依るので、順に実行する。
 
 test.describe.configure({ mode: "serial" });
 
@@ -353,7 +353,7 @@ test("6 エクスポート：ZIP が開け、中の DICOM のファイルの数�
 
 test("7 削除：管理者が理由と再認証（パスワード）を通して消すと、Orthanc から消える", async ({ browser }) => {
   test.setTimeout(120_000);
-  // 新しくログインしたセッション（まだ再認証していない）で流し、消す前に必ず再認証を求められることを見る
+  // 新しくログインしたセッション（まだ再認証していない）で実行し、消す前に必ず再認証を求められることを見る
   const fresh = await newContext(browser);
   try {
     const { page } = fresh;
@@ -412,19 +412,19 @@ test("8（round-trip-test の 7）答えが失われたとき：Orthanc は送�
   const received = await waitFor("storescp に C が届く", () => receivedOf(C), (uids) => uids.length >= C.sopInstanceUids.length);
   expect(new Set(received)).toEqual(new Set(C.sopInstanceUids));
 
-  // 新しく送ろうとしても、同じ検査・同じ送り先は断られ、先の要求の ID を確かめるように出る
+  // 新しく送ろうとしても、同じ検査・同じ送り先は断られ、先の要求の ID を確認するように出る
   const again = await sendToScp(page, C);
   await expect(again.getByTestId("send-status")).toHaveAttribute("data-state", "Unknown", { timeout: 30_000 });
   await expect(again.getByTestId("send-status")).toContainText(requestId);
   expect((await storeJobs()).filter((j) => !before.has(j.ID))).toHaveLength(1);
 
-  // 管理者が送り先で確かめた内容を書き、「届いていた」を記録する
+  // 管理者が送り先で確認した内容を書き、「届いていた」を記録する
   await again.getByTestId("send-resolve-note").fill("storescp の受け取りの記録で、同じ UID の 2 件を確かめた（結合の試験）");
   await again.getByTestId("send-resolve").getByRole("button", { name: "送信済みとして記録" }).click();
   await expect(again.getByTestId("send-status")).toHaveAttribute("data-state", "Settled");
   await expect(again.getByTestId("send-status")).toContainText("送信済みとして記録しました");
 
-  // 照らした後は、また送れる（同じ画面からは送り直せない：開き直して新しい送信の確かめの画面にする）
+  // 照らした後は、また送れる（同じ画面からは送り直せない：開き直して新しい送信の確認画面にする）
   const third = await sendToScp(page, C);
   await expect(third.getByTestId("send-status")).toHaveAttribute("data-state", "Success", { timeout: 90_000 });
 });
@@ -468,7 +468,7 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
   ).toHaveLength(1);
   // 削除 B：求めた → 送る直前（dispatch）→ 結果
   expect(trailsOf("delete", B)).toEqual([["request:success", "dispatch:success", "result:success"]]);
-  // 書き出し A：求めた → 流し終えた
+  // 書き出し A：求めた → ストリーミングを終えた
   // 書き出しの結果の行は、10 で見る
   // C-ECHO：つながった・つながらないの両方が、送り先の名前つきで残る
   const echoes = rows.filter((r) => r.action === "echo" && r.detail.modality === ITEST.scp.id).map((r) => r.detail.connected);
@@ -479,13 +479,13 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
 // どちらも期待は緩めない（docs/round-trip-test.md の「実測で決めること」）
 test("10 書き出しの結果が記録に残り、サムネイルがブラウザの Accept のまま中継から画像で返る", async () => {
   const { page } = admin;
-  // 書き出し：流し終えた「結果」の行（求めた行と要求の ID で結ぶ）
+  // 書き出し：ストリーミングを終えた「結果」の行（求めた行と要求の ID で結ぶ）
   const exportTrail = [...requestTrails(readAudit(), "export", A.studyInstanceUid).values()];
   observe("audit.exportTrail", exportTrail);
   expect.soft(exportTrail, "書き出しの結果の行が記録されていない").toEqual([["request:success", "result:success"]]);
 
   // サムネイル：一覧と詳細の <img> は、ブラウザの画像の Accept（Chromium の既定）のまま中継を通る。
-  // 直すときの手がかりとして、JPEG を名指ししたときの答えも残す
+  // 直すときの手がかりとして、JPEG を指定したときの答えも残す
   const thumbnail = `/api/dicom-web/studies/${A.studyInstanceUid}/thumbnail`;
   const asImg = await page.request.get(thumbnail, { headers: { accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" } });
   const asJpeg = await page.request.get(thumbnail, { headers: { accept: "image/jpeg" } });
@@ -500,7 +500,7 @@ test("10 書き出しの結果が記録に残り、サムネイルがブラウ�
 test("11 詳細条件：生年月日・性別・受付番号・検査名が、本物の Orthanc の QIDO-RS で引ける（2026-10-21）", async () => {
   test.setTimeout(180_000);
   const { page } = admin;
-  // 詳細条件の値だけを替えた、架空の患者の検査を2つ足す（生年月日は同じ、性別・受付番号・検査名は違う）
+  // 詳細条件の値だけを替えた、架空の患者の検査を2つ追加する（生年月日は同じ、性別・受付番号・検査名は違う）
   const D = syntheticStudy("adv-d", 21, 1, {
     patientBirthDate: "19750510",
     patientSex: "F",
@@ -518,14 +518,14 @@ test("11 詳細条件：生年月日・性別・受付番号・検査名が、�
     await storescuToOrthanc(study.batch);
     await waitFor(`Orthanc に ${study.batch} が入る`, () => lookupStudy(study.studyInstanceUid), (ids) => ids.length === 1);
   }
-  /** BFF の画面の API で絞った検査（試験で足した2つのうちのどれか） */
+  /** BFF の画面の API で絞った検査（試験で追加した2つのうちのどれか） */
   const found = async (params: Record<string, string>) => {
     const res = await page.request.get(`/api/studies?${new URLSearchParams(params)}`);
     expect(res.status()).toBe(200);
     const { studies } = (await res.json()) as { studies: { studyInstanceUid: string }[] };
     return [D, E].filter((s) => studies.some((r) => r.studyInstanceUid === s.studyInstanceUid)).map((s) => s.batch);
   };
-  // Orthanc の QIDO-RS の答え（BFF が後から確かめて捨てる前）。大文字と小文字の扱いを記録する
+  // Orthanc の QIDO-RS の答え（BFF が後から確認して捨てる前）。大文字と小文字の扱いを記録する
   const raw = async (query: Record<string, string>) => {
     const rows = await orthancJson<Record<string, { Value?: unknown[] }>[]>(`dicom-web/studies?${new URLSearchParams(query)}`);
     return [D, E].filter((s) => rows.some((r) => r["0020000D"]?.Value?.[0] === s.studyInstanceUid)).map((s) => s.batch);
@@ -553,7 +553,7 @@ test("11 詳細条件：生年月日・性別・受付番号・検査名が、�
   }
 
   // 性別が空の検査：QIDO-RS の `PatientSex=`（空）は「条件なし」で、空の検査だけを引けない。
-  // 詳細条件の性別に「不明」を足さない理由（仕様の 3.1。2026-11-01 に Orthanc 26.9.1 で測った）
+  // 詳細条件の性別に「不明」を追加しない理由（仕様の 3.1。2026-11-01 に Orthanc 26.9.1 で測った）
   const U = syntheticStudy("adv-u", 24, 1, { patientSex: "" });
   writeDumps(U);
   await storescuToOrthanc(U.batch);
@@ -598,7 +598,7 @@ test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像�
   // 別のシリーズの下の画像としては返さない
   expect((await page.request.get(`/api/studies/${A.studyInstanceUid}/series/1.2.3/instances/${second}/values`)).status()).toBe(404);
 
-  // Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID と患者 ID を返すか（BFF が確かめに使う）を記録する
+  // Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID と患者 ID を返すか（BFF が確認に使う）を記録する
   const rows = await orthancJson<Record<string, unknown>[]>(
     `dicom-web/studies/${A.studyInstanceUid}/series/${A.seriesInstanceUid}/instances?includefield=00100020`,
   );
@@ -608,7 +608,7 @@ test("12 画像単位の DICOM タグ：本物の Orthanc の QIDO-RS で画像�
   expect.soft(keys.sort(), "Orthanc の画像の単位の QIDO-RS が、検査・シリーズの UID か患者 ID を返さなくなった").toEqual(["0020000D", "0020000E", "00100020"].sort());
 });
 
-// 13（検査を 1001 件足す）より前に流す
+// 13（検査を 1001 件追加する）より前に実行する
 test("14 画像ごとの主なタグ：ISO 2022 IR 87 の検査の氏名と検査名が、本物の Orthanc の WADO-RS の metadata から崩れずに返る（2026-10-23）", async () => {
   test.setTimeout(120_000);
   const { page } = admin;
@@ -642,7 +642,7 @@ test("14 画像ごとの主なタグ：ISO 2022 IR 87 の検査の氏名と検�
   // 設定に無いタグ（患者ID）は返らない
   expect(JSON.stringify(tags)).not.toContain(J.patientId);
 
-  // Orthanc の WADO-RS の metadata の答えの、文字の集合と日本語の値（モックの見本に写す）
+  // Orthanc の WADO-RS の metadata の答えの、文字の集合と日本語の値（モックの見本にコピーする）
   const metadata = await orthancJson<Record<string, { vr: string; Value?: unknown[] }>[]>(
     `dicom-web/studies/${J.studyInstanceUid}/series/${J.seriesInstanceUid}/instances/${sop}/metadata`,
   );
@@ -660,7 +660,7 @@ test("14 画像ごとの主なタグ：ISO 2022 IR 87 の検査の氏名と検�
   await expect(table.locator('tr[data-tag="0008,1030"]')).toContainText("頭部単純");
 });
 
-// 13（検査を 1001 件足す）より前に流す
+// 13（検査を 1001 件追加する）より前に実行する
 test("22 文字の集合の組み合わせ：Orthanc が日本語・ハングルを読み崩す組と崩さない組を測って固める（今の振る舞いを記録する試験）", async () => {
   test.setTimeout(180_000);
   const jp = { name: "ITEST^HANAKO=試験^花子=しけん^はなこ", description: "頭部単純" };
@@ -727,7 +727,7 @@ test("22 文字の集合の組み合わせ：Orthanc が日本語・ハングル
 });
 
 test("13 上限を超えたとき：検査が 1000 件を超えても、いちばん新しい検査が一覧に出て、件数は「以上」になる（2026-10-21）", async () => {
-  // 最後の試験に置く（Orthanc に 1000 件を超える検査を足すので、ほかの試験の一覧に混ざらないように）
+  // 最後の試験に置く（Orthanc に 1000 件を超える検査を追加するので、ほかの試験の一覧に混ざらないように）
   test.setTimeout(600_000);
   const { page } = admin;
   // 古い検査（2020-01-01 から 1 日に 1 件、1001 日分）を先に入れ、いちばん新しい検査を最後に入れる。
@@ -1126,7 +1126,7 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
   await storescuToOrthanc(more.batch);
   expect(await instances()).toBe(3);
 
-  // 読めない印の値は、確かめられないので断る（受ける側に倒さない）
+  // 読めない印の値は、確認できないので断る（受ける側に倒さない）
   expect((await orthanc(`studies/${id}/metadata/TsunagiLock`, { method: "PUT", body: "not-a-time", contentType: "text/plain" })).status).toBe(200);
   const unreadable = { ...syntheticStudy("lock-unreadable", 56, 3), studyInstanceUid: study.studyInstanceUid };
   writeDumps(unreadable);
@@ -1186,7 +1186,7 @@ test("20 付け替えの印：期限の切れていない印のある検査と�
   }
 });
 
-// HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後（21 の前。21 は人が解いてから流す）に置く
+// HL7 の書き換えを部分反映で止めたまま終わるので、HL7 を使う試験の最後（21 の前。21 は人が解いてから実行する）に置く
 test("19 HL7 見回りの書き換えの最中の C-STORE は断られ、REST で届いた画像は消えずに残って部分反映で止まる（2026-10-25）", async () => {
   const token = process.env.ITEST_HL7_TOKEN;
   if (!token) {
@@ -1242,7 +1242,7 @@ test("19 HL7 見回りの書き換えの最中の C-STORE は断られ、REST �
   expect(now.some(i => i.sop === during.sopInstanceUids[0])).toBe(false);
   // REST で最中に届いた画像は、仮の患者 ID のまま Orthanc に残っている（Orthanc に元を消させないため）
   expect(now.filter(i => i.sop === restSop)).toEqual([{ sop: restSop, patientId: first.patientId }]);
-  // どの画像も失っていない（書き換えた画像は統合した先にあり、元の画像は名指しで消したか、そのまま残っている）
+  // どの画像も失っていない（書き換えた画像は統合した先にあり、元の画像は指定して消したか、そのまま残っている）
   for (const sop of [...first.sopInstanceUids, ...late.sopInstanceUids])
     expect(now.some(i => i.sop === sop)).toBe(true);
   const results = readAudit().filter(r => r.action === "hl7" && r.detail.type === "sweep" && r.detail.event === "result"
@@ -1281,8 +1281,8 @@ test("21 HL7 A40：書き換えた画像が元を消す前に REST で同じ UID
   await storescuToOrthanc(study.batch);
   const [oldId] = await waitFor("仮の患者の検査", () => lookupStudy(study.studyInstanceUid), ids => ids.length === 1);
   const finalId = "JP-TEST-HL7-FOREIGN";
-  // 仕事が写し終えた後、BFF が元を消す前に、統合した先の患者 ID・同じ値・同じ UID で、中身の違う画像を REST で入れる
-  // （OverwriteInstances で写しが置き換わり、ModifiedFrom が無くなる）
+  // 仕事がコピーし終えた後、BFF が元を消す前に、統合した先の患者 ID・同じ値・同じ UID で、中身の違う画像を REST で入れる
+  // （OverwriteInstances でコピーが置き換わり、ModifiedFrom が無くなる）
   const [sop] = study.sopInstanceUids;
   gate.onceJobSucceeded(async () => {
     await restCreate({
@@ -1302,7 +1302,7 @@ test("21 HL7 A40：書き換えた画像が元を消す前に REST で同じ UID
   expect((await orthanc(`studies/${oldId}/metadata/TsunagiLock`)).status).toBe(404);
 });
 
-// ── 段 6：患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction） ──
+// ── フェーズ 6：患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction） ──
 
 /** 管理者でログインし直し、再認証（パスワード）を済ませて、画面の書き込みの API を呼ぶ形を返す */
 async function correctionSession(browser: Browser) {
@@ -1313,7 +1313,7 @@ async function correctionSession(browser: Browser) {
   const headers = { origin: bffUrl, "x-csrf-token": latestCsrfToken() };
   expect((await fresh.page.request.post("/api/auth/reauth", { headers, data: { password: user.changed } })).status()).toBe(200);
   const post = (path: string, data: unknown) => fresh.page.request.post(path, { headers, data });
-  /** 確かめの画面を開き、見せた token で修正する */
+  /** 確認画面を開き、見せた token で修正する */
   const correct = async (uid: string, kind: "attribute" | "content", values: Record<string, string>) => {
     const preview = await post(`/api/studies/${uid}/modify/preview`, { kind, values });
     expect(preview.status(), await preview.text()).toBe(200);
@@ -1379,7 +1379,7 @@ test("23 患者情報修正（氏名）：全画像の氏名が直り、Study・
     for (const t of await hl7Tags(study)) expect(t).toMatchObject({ PatientID: study.patientId, PatientName: name, AccessionNumber: study.accessionNumber });
     // 患者 ID を変えない訂正は、OverwriteInstances で元の画像を置き換え、同じ検査の ID のまま
     expect(await lookupStudy(study.studyInstanceUid)).toEqual([id]);
-    // 置き換えた画像の受信の記録のメタデータ（docs/round-trip-test.md の「実測で決めること」に写す）
+    // 置き換えた画像の受信の記録のメタデータ（docs/round-trip-test.md の「実測で決めること」にコピーする）
     const after = await receptionOf(id!);
     observe("modify.keep-uid.reception-metadata", {
       before: { RemoteAET: reception.RemoteAET, Origin: reception.Origin },
@@ -1536,7 +1536,7 @@ test("26 インポート：DICOM のファイルを BFF から Orthanc へ入れ
     expect(listed.studies.find((s) => s.studyInstanceUid === study.studyInstanceUid)).toMatchObject({ imported: true });
     expect(listed.studies.find((s) => s.studyInstanceUid === A.studyInstanceUid)).toMatchObject({ imported: false });
     const rows = readAudit().filter((r) => r.action === "import" && r.detail.requestId === answers[0]!.requestId);
-    // 送る直前に「送る」の行（dispatch）を足す（管理者が手で解いた後に送り出さないため）
+    // 送る直前に「送る」の行（dispatch）を追加する（管理者が手で解いた後に送り出さないため）
     expect(rows.map((r) => `${r.detail.phase}:${r.outcome}`)).toEqual(["request:success", "dispatch:success", "result:success"]);
     expect(rows[0]).toMatchObject({ studyInstanceUid: study.studyInstanceUid });
     expect(rows[0]!.detail).toMatchObject({ sopInstanceUid: expect.any(String), bytes: files[0]!.length });

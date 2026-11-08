@@ -1,7 +1,7 @@
 // ファイルを選ぶ部品（docs/design-system/parts.md の「ファイルを選ぶ部品」）の数え方・並び・文言。画面の部品
-// （src/components/ui/file-picker.tsx）から呼ぶ、DOM を持たない関数だけを置く（Vitest で確かめる）。
+// （src/components/ui/file-picker.tsx）から呼ぶ、DOM を持たない関数だけを置く（Vitest で確認する）。
 // 数え方は 1 つ：件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 ＝ 成功 ＋ 失敗 ＋ 結果不明 ＋ 中止（インポート中は待ち・実行中も入る）。
-// 結果不明は tsunagi で足した状態（docs/design-system/parts.md の「tsunagi で決めたこと」）。受け手の答えが分からず、
+// 結果不明は tsunagi で追加した状態（docs/design-system/parts.md の「tsunagi で決めたこと」）。受け手の答えが分からず、
 // 成功とも失敗とも言えない行（docs/spec.md の 3.5 の「結果不明」）。
 
 import { formatCount, formatSize, type PreviewTags } from "@/lib/import/dicom-preview";
@@ -12,7 +12,7 @@ import { formatCount, formatSize, type PreviewTags } from "@/lib/import/dicom-pr
  */
 export type PickState = "check" | "wait" | "run" | "ok" | "ng" | "uk" | "ex" | "cx";
 
-/** 結果不明の行を確認して記録するときに BFF へ渡す名指し（インポートの要求の ID と、その検査の Study Instance UID） */
+/** 結果不明の行を確認して記録するときに BFF へ渡す識別子（インポートの要求の ID と、その検査の Study Instance UID） */
 export interface ResolveTarget {
   requestId: string;
   studyInstanceUid: string;
@@ -33,7 +33,7 @@ export interface PickItem<F = File> {
   /** 除外（利用者が外した） */
   off: boolean;
   tags: PreviewTags | null;
-  /** 結果不明の行を管理者が確認して記録するための名指し。BFF に届いた要求だけが持つ（届いたか分からない行には無い） */
+  /** 結果不明の行を管理者が確認して記録するための識別子。BFF に届いた要求だけが持つ（届いたか分からない行には無い） */
   resolve?: ResolveTarget;
   /** 結果不明の行を管理者が確認して記録した行（札は成功か失敗。結果の知らせに「うち K 件は管理者が確認」と数える） */
   confirmed?: boolean;
@@ -41,7 +41,7 @@ export interface PickItem<F = File> {
 
 export type PickPhase = "idle" | "busy" | "done";
 
-/** 足すファイル。path は場所つきの名前（フォルダの中なら webkitRelativePath・ドロップの fullPath、無ければ名前） */
+/** 追加するファイル。path は場所つきの名前（フォルダの中なら webkitRelativePath・ドロップの fullPath、無ければ名前） */
 export interface PickInput<F = File> {
   file: F;
   path: string;
@@ -49,7 +49,7 @@ export interface PickInput<F = File> {
   lastModified: number;
 }
 
-/** 続けて選んだファイルを足す（置き換えない）。同じファイルは 1 件のまま、足さなかった数を返す */
+/** 続けて選んだファイルを追加する（置き換えない）。同じファイルは 1 件のまま、追加しなかった数を返す */
 export function addFiles<F>(items: readonly PickItem<F>[], inputs: readonly PickInput<F>[], nextId: number): { items: PickItem<F>[]; fresh: PickItem<F>[]; duplicates: number } {
   const seen = new Set(items.map((i) => i.key));
   const fresh: PickItem<F>[] = [];
@@ -121,7 +121,7 @@ export function countItems(items: readonly PickItem<unknown>[]): PickCounts {
 
 /**
  * 一覧の並び：失敗・結果不明→対象外→それ以外。同じ並びの中は選んだ順。除外した行は元の場所に残す（除外する前の状態で並べる）。
- * 結果不明は、失敗と同じく確かめの要る行なので、失敗と同じ並びに置く
+ * 結果不明は、失敗と同じく確認の要る行なので、失敗と同じ並びに置く
  */
 export function sortForList<T extends PickItem<unknown>>(items: readonly T[]): T[] {
   const rank = (i: PickItem<unknown>) => (i.state === "ng" || i.state === "uk" ? 0 : i.state === "ex" ? 1 : 2);
@@ -146,7 +146,7 @@ export function formbarText(phase: PickPhase, c: PickCounts): string {
 }
 
 /**
- * 結果不明の行の文（docs/design-system/writing.md の「結果不明」：分からないこと＋確かめる人＋それまで何ができないか。
+ * 結果不明の行の文（docs/design-system/writing.md の「結果不明」：分からないこと＋確認する人＋それまで何ができないか。
  * 成功とも失敗とも書かない）。0 件なら空
  */
 function unknownText(c: PickCounts, help: string): string {
@@ -155,7 +155,7 @@ function unknownText(c: PickCounts, help: string): string {
     : "";
 }
 
-/** 結果不明の文の最後に添える、確かめを頼む先（管理者でない利用者に出す。管理者には空を渡す） */
+/** 結果不明の文の最後に添える、確認を頼む先（管理者でない利用者に出す。管理者には空を渡す） */
 export const UNKNOWN_HELP = "管理者に確かめを頼んでください。";
 
 /** 成功の文。管理者が記録した行を含むときは「インポート済みです（うち K 件は管理者が確認）」の型にする */
@@ -174,7 +174,7 @@ function ngText(c: PickCounts): string {
 
 /**
  * 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗か結果不明があるとき。
- * 管理者が記録した行を含むときは silent（role を付けない）：記録のときに読み上げの領域が 1 回伝えるので、知らせでは読み直さない。
+ * 管理者が記録した行を含むときは silent（role を付けない）：記録のときに読み上げの領域が 1 回伝えるので、知らせでは再度読み上げない。
  * 失敗の文は「理由は各行の状態」で止める（理由が「もう画像サーバーにある」のときは、選び直しても入らないため）
  */
 export function resultNotice(c: PickCounts, unknownHelp = UNKNOWN_HELP): { kind: "ok" | "warn" | "err"; text: string; alert: boolean; silent?: true } {
@@ -252,7 +252,7 @@ export function seriesImageText(tags: PreviewTags | null): string {
   return `S${tags.seriesNumber || "—"} / I${tags.instanceNumber || "—"}`;
 }
 
-/** 足したときの読み上げ */
+/** 追加したときの読み上げ */
 export function addedMessage(fresh: readonly PickItem<unknown>[], duplicates: number, all: readonly PickItem<unknown>[]): string {
   const ex = fresh.filter((i) => i.state === "ex").length;
   const dup = duplicates ? `同じ ${formatCount(duplicates)} 件は追加していません。` : "";
@@ -261,7 +261,7 @@ export function addedMessage(fresh: readonly PickItem<unknown>[], duplicates: nu
   return `${formatCount(fresh.length)} 件を追加しました。${ex ? `対象外 ${formatCount(ex)} 件。` : ""}${dup}合計 ${formatCount(all.length)} 件・${formatSize(total)}。`;
 }
 
-/** 確認できる行（結果不明で、BFF に届いた要求の名指しを持つ）。「確認」のボタンを出す行 */
+/** 確認できる行（結果不明で、BFF に届いた要求の識別子を持つ）。「確認」のボタンを出す行 */
 export const isResolvable = (i: PickItem<unknown>): i is PickItem<unknown> & { resolve: ResolveTarget } => i.state === "uk" && !i.off && !!i.resolve;
 
 /** 結果不明の理由の句を替える先（確認して記録した行の、札の下の 1 句） */
@@ -273,7 +273,7 @@ export const RESOLVE_UNREACHABLE_MESSAGE = "サーバーに接続できません
 /** 確認内容の欄の誤り（空・空白だけ） */
 export const NOTE_REQUIRED = "確認内容を入力してください。";
 
-/** 確認して記録したあと：その行の札を成功か失敗に替える。名指しは外し、札の下の 1 句は「管理者が確認」にする */
+/** 確認して記録したあと：その行の札を成功か失敗に替える。識別子は外し、札の下の 1 句は「管理者が確認」にする */
 export function resolveItem<F>(items: readonly PickItem<F>[], id: number, outcome: "success" | "failed"): PickItem<F>[] {
   return items.map((i) => {
     if (i.id !== id || !isResolvable(i)) return i;

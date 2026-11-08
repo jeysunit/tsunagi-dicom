@@ -11,7 +11,7 @@ import { RECEIVE_LIMIT, receiveLogView, type ReceiveLog } from "@/lib/receive-lo
 import { ReceivePeriodError, resolveReceivePeriod, type ReceivePeriod } from "@/lib/receive-period";
 import { loadFailed } from "@/lib/ui-text";
 
-// 受け取りの記録の頁（docs/spec.md の 3.3。段 4）。期間（URL の period・from・to。無ければ今日）の中で Orthanc が受け取った検査を、
+// 受け取りの記録の頁（docs/spec.md の 3.3。フェーズ 4）。期間（URL の period・from・to。無ければ今日）の中で Orthanc が受け取った検査を、
 // 新しい順に 1 件 1 行で出す。いつ（受け取った時刻）・どの機器から（呼んできた AE タイトル）・誰の・何の検査か・画像の数・状態。
 // 返した検査は、画面の API と同じく記録してから描く（記録に失敗したら描かない）。
 // 時刻は Orthanc から UTC で来るので、サーバーの時間帯（TZ）に直して `2026/10/17 18:01:00` の形で出す。

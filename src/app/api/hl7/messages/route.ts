@@ -28,7 +28,7 @@ const schema = z.union([
 ]);
 const digest = (s: string) => createHash("sha256").update(s).digest();
 
-/** 人のセッションを使わず、受け口の token だけを確かめる（design.md §3）。 */
+/** 人のセッションを使わず、受け口の token だけを確認する（design.md §3）。 */
 export async function POST(request: Request): Promise<Response> {
   try {
     const token = getConfig().hl7ReceiverToken;

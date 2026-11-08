@@ -2,10 +2,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 4 の画面の API（受け取りの記録・機器の一覧・C-ECHO・ほかの機器へ送る・送った仕事の状態。docs/spec.md の 3.3〜3.5）を、
-// 検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確かめる。
+// フェーズ 4 の画面の API（受け取りの記録・機器の一覧・C-ECHO・ほかの機器へ送る・送った仕事の状態。docs/spec.md の 3.3〜3.5）を、
+// 検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
 // 役割ごとに許す・断る、断ったことも記録に残る、監査の行（呼ぶ前・呼んだ後・終わり。要求の ID で結ぶ）、
-// 同じ要求の ID を二度流さない、結果不明、CSRF（Origin）、検証モードの書き込みの止め、モックでの一巡りを見る。
+// 同じ要求の ID を二度実行しない、結果不明、CSRF（Origin）、検証モードの書き込みの止め、モックでの一巡りを見る。
 
 const state = vi.hoisted(() => ({
   role: undefined as string | undefined,
@@ -156,7 +156,7 @@ describe("機器の一覧と C-ECHO", () => {
     state.role = "general";
     const tech = (await (await GET()).json()).modalities;
     for (const m of tech) expect(Object.keys(m).sort()).toEqual(["aet", "id"]);
-    // 外した確かめ：閲覧には断る（閲覧の役割を無くした。2026-10-20）
+    // 外した確認：閲覧には断る（閲覧の役割を無くした。2026-10-20）
   });
 
   it("つながる機器・つながらない機器・登録の無い機器を確かめ、結果を記録する", async () => {
@@ -250,7 +250,7 @@ describe("ほかの機器へ送る", () => {
       ["request", "success"],
       ["result", "unknown"],
     ]);
-    // 確かめの道（GET）と、同じ要求の ID の送り直しは、Orthanc を呼ばない
+    // 確認の道（GET）と、同じ要求の ID の送り直しは、Orthanc を呼ばない
     const { GET } = await import("@/app/api/studies/[uid]/send/route");
     const status = await GET(new Request(`${ORIGIN}/api/studies/${STUDY}/send?requestId=${requestId}`), uidParams(STUDY));
     expect(await status.json()).toMatchObject({ requestId, outcome: "unknown" });
@@ -323,7 +323,7 @@ describe("ほかの機器へ送る", () => {
     expect((await readJob(signJobToken(payload, state.config!.sessionSecret, Date.now() - JOB_TOKEN_TTL_MS - 1000))).status).toBe(404);
     // ほかの鍵（SESSION_SECRET を替えた後）の token
     expect(openJobToken(signJobToken(payload, "t".repeat(48)), state.config!.sessionSecret)).toBeNull();
-    // 外した確かめ：閲覧には仕事の状態を読ませない（閲覧の役割を無くした。2026-10-20）
+    // 外した確認：閲覧には仕事の状態を読ませない（閲覧の役割を無くした。2026-10-20）
   });
 
   it("同じ要求の ID が並んで届いても、Orthanc を呼ぶのは1回、「求めた」の行も1つ", async () => {
@@ -409,7 +409,7 @@ describe("ほかの機器へ送る", () => {
     // 別の送り先へは送れる
     expect((await send({ modality: "workstation", requestId: crypto.randomUUID() })).status).toBe(202);
     expect(spy).toHaveBeenCalledTimes(2);
-    // 一般は照らし合わせを記録できない。管理者が送り先で確かめて記録する
+    // 一般は照らし合わせを記録できない。管理者が送り先で確認して記録する
     expect((await resolveSend(first, false)).status).toBe(403);
     state.role = "admin";
     expect(await (await resolveSend(first, false)).json()).toEqual({ requestId: first, outcome: "not_delivered" });

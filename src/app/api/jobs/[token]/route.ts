@@ -8,7 +8,7 @@ import { openJobToken, requestOutcome, rowsOfRequest } from "@/lib/pacs-ops";
 // 送った仕事（Orthanc の job）の状態（docs/spec.md の 3.4）。画面は、送ったときに受けた暗号化した token で読む。
 // 書き換えた token・期限の過ぎた token・ほかの利用者の token は 404（仕事の ID を替えて、ほかの仕事を覗けないように）。
 // 返すのは状態・進み・誤りの番号と文言・始めと終わりの時刻だけ（仕事の中身は返さない）。
-// 仕事の終わり（成功・失敗）を初めて読んだときに、監査の記録（send の done）に残す（記録の並びの中で確かめて、1行だけ）。
+// 仕事の終わり（成功・失敗）を初めて読んだときに、監査の記録（send の done）に残す（記録の並びの中で確認して、1行だけ）。
 
 type Context = { params: Promise<{ token: string }> };
 

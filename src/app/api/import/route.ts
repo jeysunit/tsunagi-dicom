@@ -14,13 +14,13 @@ import { can } from "@/lib/auth/roles";
 import { pendingAttribute, pendingContent } from "../studies/[uid]/modify/shared";
 import { cleanupTarget, parse, requestFile } from "./shared";
 
-// インポート（docs/spec.md の 3.5 の「取り込み」。段 6）。DICOM のファイル 1 つを、本文のバイトのまま受けて Orthanc へ入れる
+// インポート（docs/spec.md の 3.5 の「取り込み」。フェーズ 6）。DICOM のファイル 1 つを、本文のバイトのまま受けて Orthanc へ入れる
 // （POST /instances）。画面は複数のファイルを 1 つずつ送る（BFF が持つのは 1 つのファイルの分のメモリだけ）。
 // 書き込みの操作の共通の決まり（3.5）を通す：役割（study.import）・CSRF・検証モードの書き込みの止め・呼ぶ前の記録
-// （記録できなければ呼ばない）・呼んだ後の記録・要求の ID で二度流さない・答えが分からなければ結果不明。
+// （記録できなければ呼ばない）・呼んだ後の記録・要求の ID で二度実行しない・答えが分からなければ結果不明。
 // Orthanc へ渡す前に、大きさの上限（IMPORT_MAX_MB）と DICOM のファイルの形（"DICM"・File Meta Information・タグの並び）を
-// 確かめて断る。
-// もうある画像・検査は取り込まない（取り込み直しで、値の修正の確かめ（理由・再認証・未解決の要求）を通らずに中身を置き換えない）：
+// 確認して断る。
+// もうある画像・検査は取り込まない（取り込み直しで、値の修正の確認（理由・再認証・未解決の要求）を通らずに中身を置き換えない）：
 // - 同じ SOP Instance UID の画像が Orthanc にあれば断る。
 // - 同じ StudyInstanceUID の検査が Orthanc にあれば断る。例外は、同じ利用者が同じ組（x-import-batch）で先に入れた検査に、
 //   同じ患者 ID の画像を続けて入れるときだけ（検査の 2 枚目からの画像）。
@@ -28,10 +28,10 @@ import { cleanupTarget, parse, requestFile } from "./shared";
 // 取り込んだ後に、Orthanc が保存した値（画像の親の検査の StudyInstanceUID と患者 ID）を読み、ファイルから読んだ値と違えば、
 // 入れた画像を消して断る（消す前に記録し、消した結果も記録する）。合ったときだけ、インポートの印（Orthanc のラベル）を付ける。
 // 結果不明は、GET（?requestId=…）で SOP Instance UID を引き当て、同じ照らしをする。照らして値が違っても、GET では消さない
-// （見つけた画像が、この要求の入れた画像とは言えないため）。結果不明のまま管理者の確かめに残す。照らすのは、求めた本人と
-// 照らし合わせの役割（管理者）。管理者は、Orthanc の側で確かめた結果を、/api/studies/{uid}/import/resolve で名指しして解く。
+// （見つけた画像が、この要求の入れた画像とは言えないため）。結果不明のまま管理者の確認に残す。照らすのは、求めた本人と
+// 照らし合わせの役割（管理者）。管理者は、Orthanc の側で確認した結果を、/api/studies/{uid}/import/resolve で指定して解く。
 // 引き当てと「求めた」の記録の間に、並んで届いた別の要求の ID の同じ画像・検査の取り込みは、記録の並びの中で見つけて断る。
-// Orthanc へ送る直前に「送る」の行（dispatch）を足す。管理者に解かれた要求・決めた時間を過ぎた要求は送らない。
+// Orthanc へ送る直前に「送る」の行（dispatch）を追加する。管理者に解かれた要求・決めた時間を過ぎた要求は送らない。
 
 const header = (request: Request, name: string) => request.headers.get(name) ?? "";
 
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
       return refuse(400, "unsupported_charset", "患者IDの文字コードを読めないため、取り込めません");
     }
 
-    // もうある画像・検査は取り込まない（取り込み直しで、値の修正の確かめを通らずに中身を置き換えない）
+    // もうある画像・検査は取り込まない（取り込み直しで、値の修正の確認を通らずに中身を置き換えない）
     const backend = getBackend();
     // 引き当てる前の記録の末尾。引き当ての後に始まった、同じ画像・検査のほかの取り込みを、記録の並びの中で見つける
     const checkedAt = (await db.auditLog.findFirst({ orderBy: { seq: "desc" }, select: { seq: true } }))?.seq ?? 0;
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
 
     // 呼ぶ前に「求めた」を記録する。同じ要求の ID が並んで届いたときは、先の1つだけを通す。記録の並びの中で、
     // 引き当ての後に同じ画像・検査のほかの取り込みが始まっていないか（並んで届いた別の要求の ID の取り込み）と、
-    // 同じ検査に結果の分からない取り込み・削除・修正が無いかを確かめて断る
+    // 同じ検査に結果の分からない取り込み・削除・修正が無いかを確認して断る
     type Begin =
       | { kind: "first" }
       | { kind: "repeated" }
@@ -149,8 +149,8 @@ export async function POST(request: Request) {
     const result = (outcome: "success" | "failed" | "unknown", extra: Record<string, unknown> = {}) =>
       audit(session, { action: "import", outcome, patientId, studyInstanceUid: uid, detail: { ...detail, phase: "result", ...extra } });
 
-    // Orthanc へ送る直前に、記録の並びの中で、自分の要求がまだ有効か（管理者に解かれていない・決めた時間の中）を確かめ、
-    // 「送る」の行（dispatch）を足す。止まっていた処理が、解かれた後や決めた時間の後に送り出して、後から入れた画像を
+    // Orthanc へ送る直前に、記録の並びの中で、自分の要求がまだ有効か（管理者に解かれていない・決めた時間の中）を確認し、
+    // 「送る」の行（dispatch）を追加する。止まっていた処理が、解かれた後や決めた時間の後に送り出して、後から入れた画像を
     // 置き換えないため（削除と同じ。管理者が手で解けるのは、決めた時間を過ぎてから）
     type Dispatch = "go" | "settled" | "stale";
     const dispatch = await auditIf<Dispatch>(session, async (tx) => {
@@ -223,7 +223,7 @@ export async function POST(request: Request) {
   }
 }
 
-/** 同じ要求のいまの結果（送り直さずに確かめる）。結果不明なら、SOP Instance UID を引き当てて照らす */
+/** 同じ要求のいまの結果（送り直さずに確認する）。結果不明なら、SOP Instance UID を引き当てて照らす */
 export async function GET(request: Request) {
   try {
     const session = await requireSession();
@@ -244,17 +244,17 @@ export async function GET(request: Request) {
       const file = requestFile(rows);
       const backend = getBackend();
       const reconcileDetail = file ? { requestId, ...(file.batch ? { batch: file.batch } : {}), sopInstanceUid: file.sopInstanceUid } : { requestId };
-      // 照らした結果は、記録の並びの中で、まだ解けていないことを確かめてから足す（照らしている間に管理者が手で解いた結果を
-      // 上書きしない）。解けていれば足さずに false
+      // 照らした結果は、記録の並びの中で、まだ解けていないことを確認してから追加する（照らしている間に管理者が手で解いた結果を
+      // 上書きしない）。解けていれば追加せずに false
       const settle = (fields: { outcome: "success" | "failed"; patientId: string | null; detail: Record<string, unknown> }) =>
         auditIf<boolean>(session, async (tx) => {
           if (!isUnresolved(requestOutcome(await rowsOfRequest(tx, "import", requestId, uid)))) return { value: false, fields: null };
           return { value: true, fields: { action: "import", studyInstanceUid: uid, ...fields } };
         });
       const settled = async () => priorResponse(session, requestId, uid, await rowsOfRequest(db, "import", requestId, uid), undefined, true);
-      // 保存した値が違って、入れた画像を消そうとした要求：消す画像（Orthanc の答えの画像の ID）を名指しで読み、もう無いと
-      // 読めたときだけ失敗を足して解く（同じ SOP Instance UID のほかの画像には左右されない）。まだあれば（消せなかった・答えが
-      // 分からない）、結果不明のまま管理者の確かめに残す（消し直さない）。読めなければ投げる（結果不明のまま）
+      // 保存した値が違って、入れた画像を消そうとした要求：消す画像（Orthanc の答えの画像の ID）を指定して読み、もう無いと
+      // 読めたときだけ失敗を追加して解く（同じ SOP Instance UID のほかの画像には左右されない）。まだあれば（消せなかった・答えが
+      // 分からない）、結果不明のまま管理者の確認に残す（消し直さない）。読めなければ投げる（結果不明のまま）
       const cleanup = cleanupTarget(rows);
       if (cleanup) {
         if (await backend.instanceExists(cleanup)) {
@@ -273,7 +273,7 @@ export async function GET(request: Request) {
       }
       const found = file ? await backend.findInstanceStudy(file.sopInstanceUid) : null;
       // 入っていると読めたときだけ、POST と同じく Orthanc が保存した値と照らす。無いだけでは失敗と確定しない
-      // （Orthanc が書き終える前の照らしもありうる）。照らした値が合えば成功を足し、印を付ける
+      // （Orthanc が書き終える前の照らしもありうる）。照らした値が合えば成功を追加し、印を付ける
       if (found && file) {
         // 「求めた」の行の患者 ID は記録の形（recorded）なので、Orthanc の値も同じ形にして比べる
         const checked = await checkStored(
@@ -282,7 +282,7 @@ export async function GET(request: Request) {
           { studyInstanceUid: uid, sopInstanceUid: file.sopInstanceUid, patientId: file.patientId, compare: (a, b) => samePatientId(recorded(a), b) },
         );
         // 値が違うときは消さない：SOP Instance UID で見つけただけでは、この要求が入れた画像と言えない（答えが分からない間に、
-        // ほかの道で同じ UID の画像が届いたのかもしれない）。結果不明のまま、管理者の確かめに残す
+        // ほかの道で同じ UID の画像が届いたのかもしれない）。結果不明のまま、管理者の確認に残す
         if (checked.kind === "mismatch") {
           return Response.json(
             { requestId, outcome: "unknown", studyInstanceUid: uid, error: `${MISMATCH}。管理者に連絡してください`, mismatched: checked.mismatched },
@@ -290,7 +290,7 @@ export async function GET(request: Request) {
           );
         }
         if (checked.kind === "ok") {
-          // 成功を足してから印を付ける（管理者が先に解いていれば、足さず、印も付けない）。付けたか（付けた・付けられなかった）は、
+          // 成功を追加してから印を付ける（管理者が先に解いていれば、追加せず、印も付けない）。付けたか（付けた・付けられなかった）は、
           // 要求の結果を変えない別の行（phase が label）に残す。行が無ければ、付ける前に止まった
           const added = await settle({
             outcome: "success",
@@ -350,7 +350,7 @@ async function existingTarget(
 /**
  * Orthanc を引き当てた後（記録の番号 since より後）に始まった、ほかの要求の ID の取り込み（断った行は除く）。同じ画像なら
  * instance_exists、同じ検査なら study_exists（同じ利用者の同じ組の別の画像だけは除く）。無ければ null。
- * 引き当てと「求めた」の記録の間に、並んで届いた取り込みが入ると、どちらも引き当てを通るため（記録の並びの中で確かめる）
+ * 引き当てと「求めた」の記録の間に、並んで届いた取り込みが入ると、どちらも引き当てを通るため（記録の並びの中で確認する）
  */
 async function startedSince(
   tx: Tx,
@@ -401,7 +401,7 @@ const BATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
  * 同じ組の続きの画像を受けてよいか：Orthanc のその検査の画像の SOP Instance UID を全部読み、どれもが、同じ利用者の同じ組の
  * 取り込みの成功の結果の行（Orthanc の答えが Success、この検査の Orthanc の ID）に含まれるときだけ true。知らない画像が
  * 1 つでもあれば（装置から届いた・ほかの人が入れた画像がある）false。照らし合わせの行は根拠に使わない。
- * 記録の印ではなく、Orthanc の中身で「この組だけが入れた検査」を確かめる（引き当てと取り込みの間に、ほかで作られた検査を
+ * 記録の印ではなく、Orthanc の中身で「この組だけが入れた検査」を確認する（引き当てと取り込みの間に、ほかで作られた検査を
  * この組のものと読み違えない）
  */
 async function batchOwnsStudy(
@@ -421,7 +421,7 @@ async function batchOwnsStudy(
   });
   if (rows.length === 0) return false;
   // 組は、最初の要求から BATCH_WINDOW_MS の中で、ファイルの数が最初の要求と同じで、まだ終わっていない（入った番目の数が
-  // ファイルの数より少ない）ときだけ続けられる（終わった組・古い組・ファイルの数を変えた要求で画像を足させない）
+  // ファイルの数より少ない）ときだけ続けられる（終わった組・古い組・ファイルの数を変えた要求で画像を追加させない）
   if (rows[0]!.occurredAt.getTime() < now - BATCH_WINDOW_MS) return false;
   const done = new Set<number>();
   const ours = new Set<string>();
@@ -440,7 +440,7 @@ async function batchOwnsStudy(
 
 /**
  * 同じ利用者の同じ組で、同じ何番目のファイルを、ほかの要求がもう使ったか（入った・結果が分からない。失敗と決まった要求は
- * 除く）。終わった組に番目を使い回して画像を足させない。並んで届いた同じ番目も見つける（記録の並びの中で確かめる）
+ * 除く）。終わった組に番目を使い回して画像を追加させない。並んで届いた同じ番目も見つける（記録の並びの中で確認する）
  */
 async function batchIndexUsed(tx: Tx, session: Session, batch: Batch, requestId: string): Promise<boolean> {
   const rows = await tx.auditLog.findMany({

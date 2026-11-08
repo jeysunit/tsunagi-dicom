@@ -6,7 +6,7 @@ import { parseInstanceTags } from "@/lib/instance-tags";
 // 設定の読み込み（docs/spec.md の 2.1。正本は .env.example）。
 // 足りない・誤った値があれば、どの変数かを並べて ConfigError を投げる。値そのものは文言に出さない（秘密を漏らさない）。
 
-/** Orthanc 専用（docs/spec.md の 0）。汎用の DICOMweb（dicomweb）は段 3 で外した */
+/** Orthanc 専用（docs/spec.md の 0）。汎用の DICOMweb（dicomweb）はフェーズ 3 で外した */
 export type BackendKind = "orthanc";
 export type AuthMode = "local" | "oidc" | "dev";
 
@@ -19,7 +19,7 @@ export interface AppConfig {
     username?: string;
     password?: string;
     /**
-     * 書く資格情報（BACKEND_WRITE_USERNAME・BACKEND_WRITE_PASSWORD。段 4）。Orthanc への書き込みの操作（POST）に使う。
+     * 書く資格情報（BACKEND_WRITE_USERNAME・BACKEND_WRITE_PASSWORD。フェーズ 4）。Orthanc への書き込みの操作（POST）に使う。
      * 無ければ読む資格情報で書く（試しの環境のため。患者の情報を置く環境では分けることが施設の必須。
      * docs/security-and-maintenance.md の 4.1）
      */
@@ -75,7 +75,7 @@ export interface AppConfig {
   audit: {
     /** 先頭の控えを追記するファイル（AUDIT_ANCHOR_FILE）。無ければコンテナのログ（標準出力）にだけ書く */
     anchorFile?: string;
-    /** 前に使っていた SESSION_SECRET（SESSION_SECRET_PREVIOUS_FILE）。その鍵で書いた行を確かめるためだけに使う */
+    /** 前に使っていた SESSION_SECRET（SESSION_SECRET_PREVIOUS_FILE）。その鍵で書いた行を確認するためだけに使う */
     sessionSecretPrevious: string[];
   };
   hl7ReceiverToken?: string;
@@ -123,7 +123,7 @@ const int = (fallback: number, min: number, max = Number.MAX_SAFE_INTEGER) =>
 const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で始まる URL にする" });
 
 /**
- * ビューアの根の URL。検査を開く道（OHIF の `/viewer`・Stone の `/index.html`）は src/lib/viewers.ts が足すので、根に書いた値は断る
+ * ビューアの根の URL。検査を開く道（OHIF の `/viewer`・Stone の `/index.html`）は src/lib/viewers.ts が追加するので、根に書いた値は断る
  * （書くと `/ohif/viewer/viewer` を開いて 404 になる。docs/spec.md の 2.1 の表）
  */
 const viewerRoot = (route: string) =>
@@ -196,10 +196,10 @@ const envSchema = z.object({
     .refine((v) => Buffer.byteLength(v, "utf8") >= SESSION_SECRET_MIN_BYTES, "32 バイト以上の乱数にする")
     .optional(),
   SESSION_SECRET_FILE: z.string().optional(),
-  // 前に使っていた SESSION_SECRET（1 行に 1 つ）。監査の記録のうち、その鍵で書いた行を確かめるためだけに使う
+  // 前に使っていた SESSION_SECRET（1 行に 1 つ）。監査の記録のうち、その鍵で書いた行を確認するためだけに使う
   // （docs/adr/0001-audit-chain-mac.md）。セッションや token には使わない
   SESSION_SECRET_PREVIOUS_FILE: z.string().optional(),
-  // 監査の記録の先頭（seq と hash）の控えを追記するファイル（JSON Lines）。データベースとは別の置き場にする
+  // 監査の記録の先頭（seq と hash）の控えを追記するファイル（JSON Lines）。データベースとは別の保存先にする
   AUDIT_ANCHOR_FILE: z
     .string()
     .refine((v) => v.startsWith("/"), "絶対のパスにする（例：/audit-anchors/audit-anchors.jsonl）")
@@ -235,7 +235,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     raw[key] = value === undefined || value.trim() === "" ? undefined : value;
   }
 
-  // SESSION_SECRET はファイルでも渡せるので、どちらも無いことは型の確かめの外で見る（型の誤りと一緒に並べる）
+  // SESSION_SECRET はファイルでも渡せるので、どちらも無いことは型の確認の外で見る（型の誤りと一緒に並べる）
   const sessionSecretMissing: ConfigProblem[] =
     raw.SESSION_SECRET === undefined && raw.SESSION_SECRET_FILE === undefined
       ? [{ variable: "SESSION_SECRET", message: `必須。${SESSION_SECRET_HINT}` }]
@@ -293,7 +293,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
   ) {
     problem("SESSION_SECRET_FILE", "32 バイト以上の乱数にする");
   }
-  // 前の SESSION_SECRET（監査の記録の確かめだけに使う）。空の行は飛ばす。どれも 32 バイト以上
+  // 前の SESSION_SECRET（監査の記録の確認だけに使う）。空の行は飛ばす。どれも 32 バイト以上
   let sessionSecretPrevious: string[] = [];
   if (e.SESSION_SECRET_PREVIOUS_FILE !== undefined) {
     try {
@@ -328,7 +328,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     problem("BACKEND_USERNAME", "パスワードがあるときは必須");
   }
 
-  // 書く資格情報（段 4。docs/security-and-maintenance.md の 4.1）。名前とパスワードは組で渡す
+  // 書く資格情報（フェーズ 4。docs/security-and-maintenance.md の 4.1）。名前とパスワードは組で渡す
   const bothWritePasswords = e.BACKEND_WRITE_PASSWORD !== undefined && e.BACKEND_WRITE_PASSWORD_FILE !== undefined;
   const writePassword = secret("BACKEND_WRITE_PASSWORD", e.BACKEND_WRITE_PASSWORD, e.BACKEND_WRITE_PASSWORD_FILE);
   const writePasswordFileFailed = e.BACKEND_WRITE_PASSWORD_FILE !== undefined && writePassword === undefined;
@@ -352,7 +352,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
   if (e.AUTH_MODE === "oidc") {
     problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは local（アプリの利用者）と開発用の dev（モックだけ）が動く");
   } else if (e.AUTH_MODE === "dev" && !e.BACKEND_MOCK) {
-    // 段 1a〜1b の決まり（docs/spec.md の 4）。実の画像サーバーには local を使う
+    // フェーズ 1a〜1b の決まり（docs/spec.md の 4）。実の画像サーバーには local を使う
     problem("AUTH_MODE", "dev は BACKEND_MOCK=true のときだけ起動する。実の画像サーバーには local を使う");
   }
 
@@ -446,7 +446,7 @@ function dedupe(problems: ConfigProblem[]): ConfigProblem[] {
 
 let cached: AppConfig | undefined;
 
-/** process.env から一度だけ読む。起動の時の確かめは src/instrumentation.ts */
+/** process.env から一度だけ読む。起動の時の確認は src/instrumentation.ts */
 export function getConfig(): AppConfig {
   cached ??= loadConfig();
   return cached;

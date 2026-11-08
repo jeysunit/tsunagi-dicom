@@ -9,7 +9,7 @@ import { getBackend } from "@/lib/backend";
 // 検査単位の値（/api/studies/{uid}/values）は QIDO-RS の検査の検索の1行の要約で、どの画像の値かが分からない
 // （画像ごとに値が違う検査もある）。ここは選んだ1枚の画像の値の全部（WADO-RS の metadata）を返す。
 // 検査単位と同じ明示の権限（dicom.all_values）のときだけ返し、断ったものも記録する。開いたことを監査の記録に残す。
-// 画像サーバーへは BFF の側で求める（ブラウザに中継の道を足さない。docs/spec.md の 3.2）。読み取りだけ。
+// 画像サーバーへは BFF の側で求める（ブラウザに中継の道を追加しない。docs/spec.md の 3.2）。読み取りだけ。
 
 type Context = { params: Promise<{ uid: string; series: string; sop: string }> };
 

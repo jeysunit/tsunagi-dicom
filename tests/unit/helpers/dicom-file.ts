@@ -67,13 +67,13 @@ export interface DicomFileOptions {
   /** Specific Character Set (0008,0005)。あれば入れ、患者 ID のバイトは patientIdBytes で渡す */
   charset?: string;
   patientIdBytes?: Buffer;
-  /** データセットの後ろに足す要素（タグの並びを崩したファイルを作る） */
+  /** データセットの後ろに追加する要素（タグの並びを崩したファイルを作る） */
   append?: { tag: number; vr: string; value: string }[];
-  /** File Meta の後ろ（データセットの前）に足す group 0002 の要素（Group Length の範囲の外に置く） */
+  /** File Meta の後ろ（データセットの前）に追加する group 0002 の要素（Group Length の範囲の外に置く） */
   outsideMeta?: { tag: number; vr: string; value: string }[];
-  /** File Meta Information Group Length の値に足す数（範囲を崩す）。null なら Group Length を入れない */
+  /** File Meta Information Group Length の値に追加する数（範囲を崩す）。null なら Group Length を入れない */
   groupLengthDelta?: number | null;
-  /** ファイルの最後に足すバイト */
+  /** ファイルの最後に追加するバイト */
   trailing?: Buffer;
 }
 

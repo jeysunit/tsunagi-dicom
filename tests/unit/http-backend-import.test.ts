@@ -5,8 +5,8 @@ import { createHttpBackend } from "@/lib/backend/http";
 import { BackendError, BackendUnknownError, IMPORT_LABEL } from "@/lib/backend/types";
 import { dicomFile } from "./helpers/dicom-file";
 
-// 段 6：インポートの実の Orthanc の REST への要求（POST /instances・ラベル・/tools/find・/tools/lookup）を、
-// 手元の HTTP のサーバー（Orthanc Book の REST API の形で答える）に対して確かめる。書き込みは書く資格情報で求めることも見る。
+// フェーズ 6：インポートの実の Orthanc の REST への要求（POST /instances・ラベル・/tools/find・/tools/lookup）を、
+// 手元の HTTP のサーバー（Orthanc Book の REST API の形で答える）に対して確認する。書き込みは書く資格情報で求めることも見る。
 
 const STUDY_ID = "27f7126f-4f66a988-7e83e3f1-37d4d1c4-2c4b1f7a";
 const INSTANCE_ID = "8f5a1c0e-1d2e3f40-51627384-95a6b7c8-d9e0f1a2";

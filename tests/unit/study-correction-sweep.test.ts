@@ -6,7 +6,7 @@ import { applyAttributeCorrection, readSnapshot } from "@/lib/study-correction";
 import { createFakeOrthanc, type FakeOrthanc } from "./helpers/fake-orthanc";
 
 // 画面の患者 ID の付け替え（属性の訂正。openspec/changes/archive/2026-11-05-add-study-value-correction/design.md の 2）と、HL7 の見回り
-// （照合の後に届いた画像の書き換え）の組み合わせを、画像ごとの小さな Orthanc で確かめる。付け替えの覚えは、付け替えた検査
+// （照合の後に届いた画像の書き換え）の組み合わせを、画像ごとの小さな Orthanc で確認する。付け替えの覚えは、付け替えた検査
 // だけを統合する（付け替え先の患者の予約の検査には広げない）。人が書き戻した付け替えを、見回りは統合し直さない。
 
 const S = "2.25.300";
@@ -20,7 +20,7 @@ const options = { readHistory: async () => rows, allowWrite: true, pollMs: 1, lo
 const sweep = () => sweepArrivals(orthanc.backend, audit, options);
 const quietly = () => vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-/** 画面の付け替えを、道（src/app/api/studies/[uid]/modify）と同じ行の形で流す */
+/** 画面の付け替えを、道（src/app/api/studies/[uid]/modify）と同じ行の形で実行する */
 async function reassign(uid: string, to: string) {
   const requestId = crypto.randomUUID();
   const snap = await readSnapshot(orthanc.backend, uid, "attribute", { PatientID: to });

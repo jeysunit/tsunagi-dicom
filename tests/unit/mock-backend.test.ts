@@ -51,7 +51,7 @@ describe("モックのバックエンド", () => {
     const res = await backend.relayDicomweb({ method: "GET", target, search: "" });
     expect(res.status).toBe(404);
 
-    // 確かめを通っていない宛先（検索）は、モックの側でも断る
+    // 確認を通っていない宛先（検索）は、モックの側でも断る
     await expect(
       backend.relayDicomweb({ method: "GET", target: { path: "studies", studyInstanceUid: "" }, search: "" }),
     ).rejects.toMatchObject({ status: 404 });
@@ -188,7 +188,7 @@ describe("モックのバックエンド（段 2：検査日の範囲・シリ�
 
   it("中継：写しのある画像の検査・シリーズのサムネイルだけを PNG で返す", async () => {
     const backend = createMockBackend();
-    // 写しのある1枚（rest/instances/…/preview.png）の検査を、見本から探す
+    // コピーのある1枚（rest/instances/…/preview.png）の検査を、見本から探す
     const { studies } = await backend.searchStudies();
     let found: { study: string; series: string } | null = null;
     for (const s of studies) {

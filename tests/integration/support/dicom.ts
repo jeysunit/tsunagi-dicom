@@ -10,7 +10,7 @@ import { ITEST } from "./env";
 export const newUid = () => `2.25.${BigInt(`0x${randomUUID().replaceAll("-", "")}`).toString(10)}`;
 
 export interface SyntheticStudy {
-  /** 組の名前（dump の置き場のフォルダ名） */
+  /** 組の名前（dump の保存先のフォルダ名） */
   batch: string;
   patientId: string;
   /** DICOM の PN（ローマ字=漢字=かな）。文字の集合は charset */

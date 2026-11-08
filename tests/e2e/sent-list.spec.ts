@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// 送信一覧（docs/spec.md の 3.4。送受信の一覧の送る側の形）。検証モード（AUTH_MODE=dev）とモックの Orthanc に対して流す。
+// 送信一覧（docs/spec.md の 3.4。送受信の一覧の送る側の形）。検証モード（AUTH_MODE=dev）とモックの Orthanc に対して実行する。
 // この試験のサーバーは DEV_ALLOW_WRITE=false なので送信の記録が無い。空の画面は本物の画面の API で、行のある画面は
-// 画面の API の答えを試験の中の合成の行（架空の患者）に差し替えて確かめる（BFF の組み立ては tests/unit/sent-log.test.ts）。
+// 画面の API の答えを試験の中の合成の行（架空の患者）に差し替えて確認する（BFF の組み立ては tests/unit/sent-log.test.ts）。
 
 const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012";
 const STATUSES = ["sent", "failed", "unknown", "running", "pending"] as const;

@@ -1,4 +1,4 @@
-# 開発の一式だけの、ビューアの足し分（docker/dev/compose.yaml の include で、配る compose に重ねる）。
+# 開発の一式だけの、ビューアの追加分（docker/dev/compose.yaml の include で、配る compose に重ねる）。
 # Orthanc に OHIF と Stone Web Viewer の plugin を入れ、tsunagi-dicom の「開く」が開く先（VIEWER_OHIF_URL・VIEWER_STONE_URL）を、
 # ホストの 127.0.0.1 の入口（viewer-proxy。GET と HEAD だけを通す。docker/dev/compose.yaml）にする。
 # ビューアは Orthanc の DICOMweb（/dicom-web）から直に画像を取る。ブラウザが Orthanc の認証（Basic）を聞く。

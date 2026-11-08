@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/lib/api/respond";
 import { AuthFailure, HASH_BUSY_MESSAGE } from "@/lib/auth/local-auth";
 
-// 失敗の答え（src/lib/api/respond.ts）。パスワードの確かめが混んで断ったときは 503 と Retry-After。
+// 失敗の答え（src/lib/api/respond.ts）。パスワードの確認が混んで断ったときは 503 と Retry-After。
 
 describe("失敗の答え", () => {
   it("混んで断ったときは 503 と Retry-After を付ける", async () => {

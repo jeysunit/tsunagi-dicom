@@ -1,7 +1,7 @@
 import { inflateRawSync } from "node:zlib";
 
 // 書き出しの ZIP を開く（試験だけ）。中央のディレクトリを読み、各ファイルの名前と中身を取り出す。
-// 形が崩れていれば投げる（「ZIP が開ける」ことの確かめ）。ZIP64 の終わりの記録にも対応する。
+// 形が崩れていれば投げる（「ZIP が開ける」ことの確認）。ZIP64 の終わりの記録にも対応する。
 
 export interface ZipEntry {
   name: string;

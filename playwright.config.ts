@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
-// 画面の試験。モックのバックエンド（tests/fixtures の合成のデータ）に対して流す。
+// 画面の試験。モックのバックエンド（tests/fixtures の合成のデータ）に対して実行する。
 // 先に `npm run build` で standalone を作っておく（scripts/e2e-server.mjs が起動する）。
 
 const PORT = 3100;
@@ -11,7 +11,7 @@ const baseURL = `http://127.0.0.1:${PORT}`;
 const LOCAL_PORT = 3102;
 export const LOCAL_BASE_URL = `http://127.0.0.1:${LOCAL_PORT}`;
 
-/** 画像サーバーのパスワードの代わりの印。画面と API の応答に出ないことを確かめる */
+/** 画像サーバーのパスワードの代わりの印。画面と API の応答に出ないことを確認する */
 export const BACKEND_PASSWORD_MARKER = "e2e-backend-password-must-not-leak";
 
 export const e2eEnv = {
@@ -26,14 +26,14 @@ export const e2eEnv = {
   // 監査の記録の先頭の控え（/api/audit/verify は、控えと照らせないと ok にしない）。scripts/e2e-server.mjs が起動の前に消す
   AUDIT_ANCHOR_FILE: path.resolve(".e2e/audit-anchors.jsonl"),
   TZ: "Asia/Tokyo",
-  // ビューアの選び分けの試験（段 2）。例の名前だけ。画面の試験は BFF の移り先を控えるだけで、この宛先へは通信しない
+  // ビューアの選び分けの試験（フェーズ 2）。例の名前だけ。画面の試験は BFF の移り先を控えるだけで、この宛先へは通信しない
   VIEWER_OHIF_URL: "https://viewer.example.org/ohif",
   VIEWER_STONE_URL: "https://viewer.example.org/stone",
   PUBLIC_DICOMWEB_URL: "https://pacs.example.org/dicom-web",
   // Next.js の待ち受けの住所（AUTH_MODE=dev の起動の条件ではない。dev はモックのときだけ起動する）
   HOSTNAME: "127.0.0.1",
   PORT: String(PORT),
-  // 試験のデータベースを作る prisma migrate deploy が、外へ版の確かめを送らないようにする
+  // 試験のデータベースを作る prisma migrate deploy が、外へ版の確認を送らないようにする
   CHECKPOINT_DISABLE: "1",
 };
 
@@ -56,9 +56,9 @@ export const localEnv = {
   DATABASE_URL: `file:${path.resolve(".e2e/local/e2e.db")}`,
   AUDIT_ANCHOR_FILE: path.resolve(".e2e/local/audit-anchors.jsonl"),
   PORT: String(LOCAL_PORT),
-  // standalone の .next/static は、検証モードのサーバーの方で写す（同時に写さない）
+  // standalone の .next/static は、検証モードのサーバーの方でコピーする（同時にコピーしない）
   E2E_SKIP_PREPARE: "true",
-  // 検査一覧の自動更新を止める形は、こちらのサーバーで確かめる（検証モードのサーバーは既定の 30 秒）
+  // 検査一覧の自動更新を止める形は、こちらのサーバーで確認する（検証モードのサーバーは既定の 30 秒）
   STUDY_LIST_REFRESH_SECONDS: "0",
 };
 

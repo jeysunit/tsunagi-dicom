@@ -5,10 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ChevronDown, Menu, TriangleAlert } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-// 部品集（ui-kit）の写しを守る検査（部品集 system/delivery.md の 4 の C1）。
-// 写しは製品の側で直さない。指紋（SHA256SUMS）と一致しなければ、写しが手で直されたか、写し直しが不完全。
-// tsunagi は components.css を読まないので、写さない（部品の値は docs/design-system/parts.md に合わせる）。
-// SHA256SUMS は部品集のものをそのまま写す（delivery.md の 4 の C1）。components.css の行が残るのは、そのため。
+// 部品集（ui-kit）のコピーを守る検査（部品集 system/delivery.md の 4 の C1）。
+// コピーは製品の側で直さない。指紋（SHA256SUMS）と一致しなければ、コピーが手で直されたか、コピーのやり直しが不完全。
+// tsunagi は components.css を読まないので、コピーしない（部品の値は docs/design-system/parts.md に合わせる）。
+// SHA256SUMS は部品集のものをそのままコピーする（delivery.md の 4 の C1）。components.css の行が残るのは、そのため。
 
 const KIT = "docs/design-system/ui-kit";
 const COPIED = ["tokens.css", "icons.svg", "VERSION"] as const;

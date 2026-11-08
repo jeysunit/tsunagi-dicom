@@ -32,7 +32,7 @@ export type AuthState =
   | { kind: "locked"; session: Session }
   | { kind: "active"; session: Session };
 
-/** 認証の誤り。route handler では src/lib/api/respond.ts が状態の番号に写す */
+/** 認証の誤り。route handler では src/lib/api/respond.ts が状態の番号にコピーする */
 export class AuthError extends Error {
   constructor(
     readonly status: 401 | 403 | 423,
@@ -68,7 +68,7 @@ export async function authContext(): Promise<AuthContext> {
 
 /**
  * 役割はデータベースの値を毎回読む（管理者が変えたら、次の要求から効く）。
- * 知らない役割の名前（誤記・空・migration 20261020100000_two_roles を通っていない前の名前など）は、どの役割にも当てず、
+ * 知らない役割の名前（誤記・空・migration 20261020100000_two_roles を通っていない前の名前など）は、どの役割にも適用せず、
  * セッションを使わせない（ログインしていない扱い。閉じる側に倒す）。前の役割の名前の移し替えは migration だけが行う
  */
 function toSession(user: User, row: SessionRow): Session | null {
@@ -133,7 +133,7 @@ export type AuditFields = Omit<
   "actorId" | "actorRole" | "authMode" | "sourceAddress" | "sourceAddressUnverified"
 >;
 
-/** いまの利用者で監査の記録に1行足す。接続元の分け方は src/lib/auth/source-address.ts */
+/** いまの利用者で監査の記録に1行追加する。接続元の分け方は src/lib/auth/source-address.ts */
 export async function audit(session: Session, fields: AuditFields, source?: AuditSource) {
   const db = await getDb();
   return appendAudit(db, {
@@ -149,7 +149,7 @@ export async function audit(session: Session, fields: AuditFields, source?: Audi
 export type AuditSource = ReturnType<typeof sourceFromHeaders>;
 
 /**
- * 送り元を、要求の間に読んで取っておく。答えを返した後に書く記録（書き出しを流し終えたとき）では headers() を読めない
+ * 送り元を、要求の間に読んで取っておく。答えを返した後に書く記録（書き出しのストリーミングを終えたとき）では headers() を読めない
  * （Next.js は要求の外の headers() を失敗にする）ので、要求の間に取った値を audit の source に渡す
  */
 export async function auditSource(): Promise<AuditSource> {
@@ -177,8 +177,8 @@ export async function auditWith<T>(
 }
 
 /**
- * auditWith と同じく記録の並びと transaction の中で write を流し、write が fields に null を返したときは記録を足さない
- * （「もう書いてあれば書かない」を、並びの中で確かめるため）
+ * auditWith と同じく記録の並びと transaction の中で write を実行し、write が fields に null を返したときは記録を追加しない
+ * （「もう書いてあれば書かない」を、並びの中で確認するため）
  */
 export async function auditIf<T>(
   session: Session,
@@ -199,7 +199,7 @@ export async function auditIf<T>(
 }
 
 /**
- * ログインしている利用者に、操作の権限があるかを確かめる。無ければ、断ったことを監査の記録に残してから 403
+ * ログインしている利用者に、操作の権限があるかを確認する。無ければ、断ったことを監査の記録に残してから 403
  * （断った要求も残す。docs/spec.md の 3.6 の監査の記録）
  */
 export async function requirePermission(

@@ -7,7 +7,7 @@ import { enqueue, history, unresolved, verify } from "@/lib/keep-uid-write";
 import { visible } from "../../../../../hl7-receiver/visible";
 const Body = z.object({ writeId: z.uuid(), note: z.string().trim().min(1).max(500) }).strict();
 
-/** 管理者の確認内容と全画像の読み直しを記録する。書き換えは呼ばない（design.md §10）。 */
+/** 管理者の確認内容と全画像の再取得を記録する。書き換えは呼ばない（design.md §10）。 */
 export async function POST(request: Request) {
   try {
     const session = await checkedScreenWrite(request);
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       if (!d) {
         return Response.json({ error: "この書き換えは無いか、結果が確定しています" }, { status: 409 });
       }
-      // 検査情報修正（中身の訂正）は、仕事の終わりを確かめる道（/api/studies/{uid}/modify/resolve）で解く
+      // 検査情報修正（中身の訂正）は、仕事の終わりを確認する道（/api/studies/{uid}/modify/resolve）で解く
       if ((d as { content?: unknown }).content === true) {
         return Response.json({ error: "検査情報修正の結果は、その検査の検査情報修正から確認済みとして解除してください" }, { status: 409 });
       }

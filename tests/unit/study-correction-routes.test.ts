@@ -2,9 +2,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 6 の患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction）を、検証モード
-// （AUTH_MODE=dev。モックの Orthanc）のセッションから通して確かめる。属性の訂正（患者情報修正）は UID を保ち、
-// 中身の訂正（検査情報修正）は新しい UID の検査を作る。混ぜた要求・値の形・役割・理由・確かめの token・監査の記録・
+// フェーズ 6 の患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction）を、検証モード
+// （AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。属性の訂正（患者情報修正）は UID を保ち、
+// 中身の訂正（検査情報修正）は新しい UID の検査を作る。混ぜた要求・値の形・役割・理由・確認の token・監査の記録・
 // 結果不明と部分反映・HL7 の書き換えとの組み合わせを見る。再認証（AUTH_MODE=local）は tests/e2e で見る。
 
 const state = vi.hoisted(() => ({
@@ -109,7 +109,7 @@ async function tokenOf(kind: string, values: Values, uid = STUDY, extra: Record<
   const res = await preview(kind, values, uid, extra);
   return res.ok ? ((await res.json()).confirmToken as string) : "m1.none.none.none";
 }
-/** 値の修正を求める。本文に confirmToken が無ければ、いま確かめの画面を開いて token を添える */
+/** 値の修正を求める。本文に confirmToken が無ければ、いま確認画面を開いて token を添える */
 async function modify(body: Record<string, unknown>, uid = STUDY, origin = ORIGIN) {
   const { POST } = await import("@/app/api/studies/[uid]/modify/route");
   const full: Record<string, unknown> = {
@@ -231,7 +231,7 @@ describe("属性の訂正（患者情報修正）", () => {
     expect(shown).toMatchObject({ kind: "attribute", scope: "patient" });
     expect(shown.studies).toHaveLength(2);
     expect(shown.fields.PatientName).toEqual({ before: "Yamada^Taro=山田^太郎=やまだ^たろう", after: "Yamada^Jiro=山田^次郎=やまだ^じろう" });
-    // 当てる検査ごとの修正前の値（検査どうしで値が違っても、確かめの画面で分かる）
+    // 適用する検査ごとの修正前の値（検査どうしで値が違っても、確認画面で分かる）
     for (const st of shown.studies) expect(st.before).toEqual({ PatientName: "Yamada^Taro=山田^太郎=やまだ^たろう" });
     const requestId = crypto.randomUUID();
     const res = await modify({ requestId, kind: "attribute", values: { PatientName: "Yamada^Jiro=山田^次郎=やまだ^じろう" }, confirmToken: shown.confirmToken });
@@ -263,7 +263,7 @@ describe("属性の訂正（患者情報修正）", () => {
     expect(events.filter((e) => e === "request")).toHaveLength(2);
     expect(events.filter((e) => e === "result")).toHaveLength(3);
     expect(detailOf((await rowsOf(requestId)).filter((r) => detailOf(r).event === "result").at(-1))).toMatchObject({ partial: false, count: 2, total: 2 });
-    // 同じ要求の ID は二度流さない
+    // 同じ要求の ID は二度実行しない
     const again = await modify({ requestId, kind: "attribute", values: { PatientName: "Yamada^Jiro=山田^次郎=やまだ^じろう" }, confirmToken: shown.confirmToken });
     expect(await again.json()).toMatchObject({ outcome: "modified", repeated: true });
   });
@@ -345,7 +345,7 @@ describe("属性の訂正（患者情報修正）", () => {
     // JP-TEST-0002 の氏名は Shiken^Hanako=試験^花子=しけん^はなこ
     const mismatch = await preview("attribute", { PatientID: "JP-TEST-0002", PatientName: "Yamada^Taro" });
     expect(mismatch.status).toBe(409);
-    // 期待の変更：前は断る応答に付け替え先の患者の値（target）を返していた。患者の値は記録を残す確かめの成功の応答だけで見せるので、
+    // 期待の変更：前は断る応答に付け替え先の患者の値（target）を返していた。患者の値は記録を残す確認の成功の応答だけで見せるので、
     // 断る応答には「違う」ことだけを返し、付け替え先の氏名・生年月日・性別を含めない
     const mismatchBody = await mismatch.json();
     expect(mismatchBody).toEqual({ error: "付け替え先の患者の登録と、入力した氏名・生年月日・性別が違います" });
@@ -363,7 +363,7 @@ describe("属性の訂正（患者情報修正）", () => {
   });
 
   it("実行の道でも、確かめた値と違う氏名を添えた付け替えは、書き換えずに 409 で断る。応答と監査の行に付け替え先の値を入れない", async () => {
-    // 正しい確かめの token を取ってから、氏名を替えて実行する（confirm_invalid で先に断られず、target_mismatch の道に届く）
+    // 正しい確認の token を取ってから、氏名を替えて実行する（confirm_invalid で先に断られず、target_mismatch の道に届く）
     const token = await tokenOf("attribute", { PatientID: "JP-TEST-0002" });
     expect(token).not.toBe("m1.none.none.none");
     const before = await instancesOf(STUDY);
@@ -396,7 +396,7 @@ describe("属性の訂正（患者情報修正）", () => {
 
   it("確かめの画面を開いた後に検査が変わったら（HL7 の更新など）、書き換えずに 409", async () => {
     const p = await (await preview("attribute", { PatientSex: "F" })).json();
-    // 確かめの後に、HL7 の A08 と同じ書き換えで氏名が変わった形
+    // 確認の後に、HL7 の A08 と同じ書き換えで氏名が変わった形
     const b = await backend();
     const [id] = await b.lookupStudyIds(STUDY);
     await b.modifyStudyKeepingUids(id!, { PatientName: "Changed^ByRis" });
@@ -437,7 +437,7 @@ describe("属性の訂正（患者情報修正）", () => {
 
   it("書き換えの後の確かめが合わなければ部分反映。照らし合わせが済むまで値の修正と HL7 の書き換えを断り、管理者が解くと戻る", async () => {
     const { simulateMockHl7 } = await import("@/lib/backend/mock");
-    // 部分反映の前に開いた、別の患者の検査の確かめの画面
+    // 部分反映の前に開いた、別の患者の検査の確認画面
     const otherToken = await tokenOf("attribute", { PatientSex: "M" }, OTHER);
     const otherContent = await tokenOf("content", { StudyDate: "20260101" }, OTHER);
     simulateMockHl7({ changedInstances: 1 });
@@ -446,14 +446,14 @@ describe("属性の訂正（患者情報修正）", () => {
     expect(res.status).toBe(502);
     expect(await res.json()).toMatchObject({ outcome: "partial" });
     simulateMockHl7({});
-    // 確かめの画面も、実行も断る（別の患者の検査でも。HL7 と同じく、全部の書き換えを止める）
+    // 確認画面も、実行も断る（別の患者の検査でも。HL7 と同じく、全部の書き換えを止める）
     const pv = await preview("attribute", { PatientSex: "M" }, OTHER);
     expect(pv.status).toBe(409);
     expect((await pv.json()).error).toContain("管理者が確認するまで、修正はできません");
     const blocked = await modify({ kind: "attribute", values: { PatientSex: "M" }, confirmToken: otherToken }, OTHER);
     expect(blocked.status).toBe(409);
     expect((await blocked.json()).error).toContain("管理者が確認するまで、修正はできません");
-    // 中身の訂正は、部分反映の残る検査だけを止める（別の検査の写しは作れる）
+    // 中身の訂正は、部分反映の残る検査だけを止める（別の検査のコピーは作れる）
     expect((await modify({ kind: "content", values: { StudyDate: "20260101" }, confirmToken: "m1.x.x.x" })).status).toBe(409);
     expect((await modify({ kind: "content", values: { StudyDate: "20260101" }, confirmToken: otherContent }, OTHER)).status).toBe(200);
     // HL7 の書き換えも止まる
@@ -471,7 +471,7 @@ describe("属性の訂正（患者情報修正）", () => {
     expect((await resolveWrite({ writeId: s.unresolvedWriteIds[0], note: "Orthanc の画像を全部確かめた（試験）" })).status).toBe(200);
     const reconciled = (await (await db()).auditLog.findMany({ where: { action: "modify" }, orderBy: { seq: "desc" }, take: 1 }))[0];
     expect(detailOf(reconciled)).toMatchObject({ event: "reconcile", manual: true, writeId: s.unresolvedWriteIds[0] });
-    // 値の揃っていない検査は、確かめの画面に揃っていない項目を出し、もう一度の訂正で揃え直せる
+    // 値の揃っていない検査は、確認画面に揃っていない項目を出し、もう一度の訂正で揃え直せる
     const again = await (await preview("attribute", { AccessionNumber: "ACC-PART" })).json();
     expect(again.studies[0].mixed).toEqual(["AccessionNumber"]);
     expect((await modify({ kind: "attribute", values: { AccessionNumber: "ACC-PART" }, confirmToken: again.confirmToken })).status).toBe(200);
@@ -619,7 +619,7 @@ describe("属性の訂正（患者情報修正）", () => {
     expect((await modify({ kind: "content", values: { StudyDate: "20260101" } }, SIBLING)).status).toBe(202);
     const token = await tokenOf("attribute", { PatientSex: "O" });
     expect(token).toBe("m1.none.none.none");
-    // 確かめの画面を通らずに求めても、列の中で断る
+    // 確認画面を通らずに求めても、列の中で断る
     vi.restoreAllMocks();
     const res = await modify({ kind: "attribute", values: { PatientSex: "O" }, confirmToken: "m1.x.x.x" });
     expect(res.status).toBe(409);
@@ -830,7 +830,7 @@ describe("中身の訂正（検査情報修正）", () => {
     });
     expect(await (await status(requestId)).json()).toMatchObject({ outcome: "unknown", studyCreated: null });
     running.mockRestore();
-    // 結果不明の間は、同じ検査の新しい修正を断り、HL7 の書き換えも止める（Orthanc が元を写している最中かもしれない）
+    // 結果不明の間は、同じ検査の新しい修正を断り、HL7 の書き換えも止める（Orthanc が元をコピーしている最中かもしれない）
     expect((await modify({ kind: "content", values: { StudyDate: "20260101" } })).status).toBe(409);
     const { processMessage } = await import("@/lib/hl7/apply");
     const { readFileSync } = await import("node:fs");
@@ -847,7 +847,7 @@ describe("中身の訂正（検査情報修正）", () => {
     const real = b.lookupStudyIds.bind(b);
     const requestId = crypto.randomUUID();
     const token = await tokenOf("content", { StudyDate: "20260101" });
-    // 仕事の後の確かめで、元の検査が見つからない形
+    // 仕事の後の確認で、元の検査が見つからない形
     const spyCopy = vi.spyOn(b, "modifyStudyNewUid");
     vi.spyOn(b, "lookupStudyIds").mockImplementation(async (uid) => (uid === STUDY && spyCopy.mock.calls.length > 0 ? [] : real(uid)));
     const res = await modify({ requestId, kind: "content", values: { StudyDate: "20260101" }, confirmToken: token });

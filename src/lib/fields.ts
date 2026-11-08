@@ -4,13 +4,13 @@ import { parsePatientName } from "@/lib/format/patient-name";
 import { EMPTY_VIEWER_MEMORY, type ViewerMemoryView } from "@/lib/viewer-memory";
 
 // 役割ごとの許可の一覧（docs/spec.md 原則 8）。
-// 画面の API（BFF が組み立てて返す JSON）は、ここに載った項目だけを返す。画像サーバーの応答をそのまま返さない。
+// 画面の API（BFF が組み立てて返す JSON）は、ここに含まれた項目だけを返す。画像サーバーの応答をそのまま返さない。
 // - 項目は、画面に出す形の名前で持つ（DICOM のタグの名前ではない）。BFF が画像サーバーの応答から組み立てる。
-// - 役割の一覧に無い項目は返さない。一覧に無い役割は何も返さない（足し忘れたときは「出ない」側に倒れる）。
+// - 役割の一覧に無い項目は返さない。一覧に無い役割は何も返さない（追加し忘れたときは「出ない」側に倒れる）。
 // - 既定の役割（管理者・一般。2026-10-20 に4つから2つにした）は、その役割が使える画面に要る項目をすべて含む（見え方は変えない）。
 // - すべての DICOM の値を見る権限（dicom.all_values。src/lib/auth/roles.ts）は、この一覧とは別に持つ。
 // - 画像と文書の本体、ビューアへ渡す取得の道（中継の WADO-RS）は、この選別の対象にしない。
-// 画面に項目を足すときは、ここに足し、「載っていない項目は返らない」試験（tests/unit/fields.test.ts）を付ける。
+// 画面に項目を追加するときは、ここに追加し、「許可の一覧に無い項目は返らない」試験（tests/unit/fields.test.ts）を付ける。
 
 /** 検査の一覧の1行の項目 */
 export const STUDY_FIELDS = [
@@ -41,7 +41,7 @@ export const STUDY_FIELDS = [
   "defaultViewer",
   /** ビューアの覚えの版（変えるときに添え、ほかの利用者が先に変えていれば 409） */
   "viewerVersion",
-  /** インポートした検査か（Orthanc のインポートの印。段 6。docs/spec.md の 3.5） */
+  /** インポートした検査か（Orthanc のインポートの印。フェーズ 6。docs/spec.md の 3.5） */
   "imported",
 ] as const;
 export type StudyField = (typeof STUDY_FIELDS)[number];
@@ -86,7 +86,7 @@ export interface StudyRecord {
 /** 画面の API が返す1行。役割に許された項目だけがある */
 export type StudyView = Partial<StudyRecord>;
 
-/** 受け取りの記録の1行の、検査のほかの項目（段 4。docs/spec.md の 3.3） */
+/** 受け取りの記録の1行の、検査のほかの項目（フェーズ 4。docs/spec.md の 3.3） */
 export const RECEIVE_FIELDS = ["receivedAt", "remoteAet", "origin", "receivedInstances", "receiveState"] as const;
 export type ReceiveField = (typeof RECEIVE_FIELDS)[number];
 
@@ -101,7 +101,7 @@ export type SentField = (typeof SENT_FIELDS)[number];
 export const SENT_STATUSES = ["pending", "running", "sent", "failed", "unknown"] as const;
 export type SentStatus = (typeof SENT_STATUSES)[number];
 
-/** 機器の一覧の項目（段 4）。住所（host・port）と機器ごとの許可は、機器の管理の役割にだけ返す */
+/** 機器の一覧の項目（フェーズ 4）。住所（host・port）と機器ごとの許可は、機器の管理の役割にだけ返す */
 export const MODALITY_FIELDS = ["id", "aet", "host", "port", "manufacturer", "allowEcho", "allowStore"] as const;
 export type ModalityField = (typeof MODALITY_FIELDS)[number];
 const MODALITY_NAME_FIELDS = ["id", "aet"] as const satisfies readonly ModalityField[];
@@ -113,7 +113,7 @@ export type ConnectionField = (typeof CONNECTION_FIELDS)[number];
 export interface FieldAllowlist {
   study: readonly StudyField[];
   series: readonly SeriesField[];
-  /** 無ければ受け取りの記録の項目を返さない（足し忘れは出ない側に倒れる） */
+  /** 無ければ受け取りの記録の項目を返さない（追加し忘れは出ない側に倒れる） */
   receive?: readonly ReceiveField[];
   /** 無ければ送った記録の項目を返さない */
   sent?: readonly SentField[];
@@ -252,8 +252,8 @@ export function studyRecord(
 }
 
 /**
- * 許された項目だけを持つ、新しい物を作る。元の物にある、一覧に無い項目は写さない
- * （元の物を削るのではなく、一覧の項目だけを拾う。足し忘れは「出ない」側に倒れる）
+ * 許された項目だけを持つ、新しい物を作る。元の物にある、一覧に無い項目はコピーしない
+ * （元の物を削るのではなく、一覧の項目だけを拾う。追加し忘れは「出ない」側に倒れる）
  */
 export function pickFields<K extends string>(
   record: Partial<Record<K, unknown>>,

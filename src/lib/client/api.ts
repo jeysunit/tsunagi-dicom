@@ -1,4 +1,4 @@
-// 画面から BFF の画面の API を読む。画面のロック中（423）は頁を読み直してロックの画面にし、
+// 画面から BFF の画面の API を読む。画面のロック中（423）は頁を再読み込みしてロックの画面にし、
 // ログインしていない（401）ならログインの頁へ移す（src/components/auth/lock-guard.tsx と同じ扱い）。
 
 export class ApiError extends Error {

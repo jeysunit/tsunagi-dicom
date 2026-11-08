@@ -8,8 +8,8 @@ import type { Permission } from "@/lib/auth/roles";
 import { AuthError, getAuthState, requireSession, SESSION_COOKIE, type AuthState, type Session } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
 
-// 状態を変える API（ログイン・利用者の管理など）の共通の確かめ。
-// CSRF の対策は3つを重ねる：cookie の SameSite=Strict、Origin の確かめ、セッションごとの token（x-csrf-token）。
+// 状態を変える API（ログイン・利用者の管理など）の共通の確認。
+// CSRF の対策は3つを重ねる：cookie の SameSite=Strict、Origin の確認、セッションごとの token（x-csrf-token）。
 
 export class RequestError extends Error {
   constructor(
@@ -46,7 +46,7 @@ export function assertSameOrigin(request: Request): void {
   if (!isSameOrigin(request)) throw new RequestError(403, "別の画面からの要求は受け付けません（Origin が一致しません）");
 }
 
-/** Origin と CSRF の token を確かめ、いまの認証の状態を返す */
+/** Origin と CSRF の token を確認し、いまの認証の状態を返す */
 export async function checkedState(request: Request): Promise<AuthState> {
   assertLocalMode();
   assertSameOrigin(request);
@@ -60,8 +60,8 @@ export async function checkedState(request: Request): Promise<AuthState> {
 }
 
 /**
- * 画面から BFF のデータベースだけを変える要求（画面の設定・検査の状態など。画像サーバーには書かない）の確かめ。
- * AUTH_MODE=local では Origin と CSRF の token を、検証モードでは Origin を確かめ、ログインしていて
+ * 画面から BFF のデータベースだけを変える要求（画面の設定・検査の状態など。画像サーバーには書かない）の確認。
+ * AUTH_MODE=local では Origin と CSRF の token を、検証モードでは Origin を確認し、ログインしていて
  * 画面のロックが無く、操作の権限がある利用者を返す
  */
 export async function checkedScreenWrite(request: Request, permission?: Permission): Promise<Session> {
@@ -70,7 +70,7 @@ export async function checkedScreenWrite(request: Request, permission?: Permissi
   return requireSession(permission);
 }
 
-/** 本文の JSON を、決めた大きさまで読み、形を確かめる */
+/** 本文の JSON を、決めた大きさまで読み、形を確認する */
 export async function readJson<T>(request: Request, schema: z.ZodType<T>, maxBytes = 4096): Promise<T> {
   const text = await readLimitedText(request, maxBytes);
   if (text === null) throw new RequestError(413, "送信内容が大きすぎます");
@@ -109,7 +109,7 @@ export async function clearSessionCookie(): Promise<void> {
 }
 
 /**
- * 画面が置いたロックの印（src/lib/auth/lock-cookie.ts）を消す。BFF がロックの解除を確かめたとき・ログイン・
+ * 画面が置いたロックの印（src/lib/auth/lock-cookie.ts）を消す。BFF がロックの解除を確認したとき・ログイン・
  * ログアウトのときだけ呼ぶ
  */
 export async function clearLockCookie(): Promise<void> {

@@ -17,7 +17,7 @@ const MEMBERS: Record<ModalityGroup, readonly string[]> = {
   ES: ["ES"],
   MG: ["MG"],
   // 文書（Encapsulated PDF など）。Modality の定義語で文書は DOC（Document）。OT は「Other」で、文書とは限らないので
-  // どの群にも入れない（PS3.3 C.7.3.1.1.1。2026d で確かめた）
+  // どの群にも入れない（PS3.3 C.7.3.1.1.1。2026d で確認した）
   DOC: ["DOC"],
   SR: ["SR"],
 };
@@ -31,7 +31,7 @@ export function orderGroups(groups: readonly ModalityGroup[]): ModalityGroup[] {
   return MODALITY_GROUPS.filter((g) => groups.includes(g));
 }
 
-/** 選んだ群に、群を足す（もう入っていれば外す）。見出しの順にそろえる。空になれば undefined（絞らない） */
+/** 選んだ群に、群を追加する（もう入っていれば外す）。見出しの順にそろえる。空になれば undefined（絞らない） */
 export function toggleGroup(selected: readonly ModalityGroup[] | undefined, group: ModalityGroup): ModalityGroup[] | undefined {
   const current = selected ?? [];
   const next = orderGroups(current.includes(group) ? current.filter((g) => g !== group) : [...current, group]);

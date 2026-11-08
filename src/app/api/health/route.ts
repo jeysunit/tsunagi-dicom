@@ -1,4 +1,4 @@
-// コンテナの生きているかの確かめ用。画像サーバーにはつながない。
+// コンテナの生きているかの確認用。画像サーバーにはつながない。
 export function GET() {
   return Response.json({ status: "ok" });
 }

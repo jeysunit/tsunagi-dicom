@@ -4,7 +4,7 @@ import { AdminResetError, resetAdminPassword } from "@/lib/auth/admin-reset";
 import type { AuthContext } from "@/lib/auth/local-auth";
 import { isValidUsername, USERNAME_HINT } from "@/lib/auth/username";
 
-// 管理者のパスワードを失くしたときに戻すコマンド（docs/spec.md の 3.6）。コンテナの中でだけ流す：
+// 管理者のパスワードを失くしたときに戻すコマンド（docs/spec.md の 3.6）。コンテナの中でだけ実行する：
 //   docker compose exec tsunagi node cli/reset-admin-password.mjs --user <ユーザーID>
 // 画面・API からは使えない。新しい一時のパスワードを標準出力に1回だけ出し（ほかの文は標準エラー出力）、
 // 次のログインで変更を求める。使ったことは監査の記録に残る。

@@ -54,7 +54,7 @@ const PAIRS: [string, string][] = [
   ["foreground", "selected"],
   ["value", "selected"],
   ["label", "selected"],
-  // 地の濃淡で面を分ける段（muted・muted-strong）と、その上のリンク・誤りの文字
+  // 地の濃淡で面を分けるレベル（muted・muted-strong）と、その上のリンク・誤りの文字
   ["foreground", "muted-strong"],
   ["label", "muted-strong"],
   ["link", "muted"],

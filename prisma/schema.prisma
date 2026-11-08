@@ -1,4 +1,4 @@
-// BFF のデータベース（docs/spec.md の 2）。画像サーバーの DICOM の値はここに写さず、書き換えもしない。
+// BFF のデータベース（docs/spec.md の 2）。画像サーバーの DICOM の値はここにコピーせず、書き換えもしない。
 
 generator client {
   provider     = "prisma-client"
@@ -17,7 +17,7 @@ datasource db {
 model AuditLog {
   // 1 から始まる続き番号。抜けがあれば、行が消されたと分かる。値はアプリ（src/lib/audit.ts）が決めて入れる。
   // Prisma は SQLite の Int の @id を `INTEGER PRIMARY KEY AUTOINCREMENT` にする（migration と同じ。
-  // `prisma migrate diff --from-config-datasource --to-schema` で差が無いことを確かめた）。番号を省いて足す道は使わない
+  // `prisma migrate diff --from-config-datasource --to-schema` で差が無いことを確認した）。番号を省いて追加する道は使わない
   seq                     Int      @id
   // いつ（サーバーの時計。UTC で持つ）
   occurredAt              DateTime
@@ -32,7 +32,7 @@ model AuditLog {
   // どの患者と検査に（無い操作は null）
   patientId               String?
   studyInstanceUid        String?
-  // 確かめた接続元。信じるプロキシの設定が無い間は null
+  // 確認した接続元。信じるプロキシの設定が無い間は null
   sourceAddress           String?
   // 補足（JSON の文字列）
   detail                  String?
@@ -46,9 +46,9 @@ model AuditLog {
   @@index([occurredAt])
   @@index([patientId])
   @@index([studyInstanceUid])
-  // 書き込みの操作の要求の ID を、決めた期間の中の同じ操作の行だけから探すため（src/lib/pacs-ops.ts。段 4）
+  // 書き込みの操作の要求の ID を、決めた期間の中の同じ操作の行だけから探すため（src/lib/pacs-ops.ts。フェーズ 4）
   @@index([action, occurredAt])
-  // 書き込みの操作の、同じ検査の要求（解いていない結果不明の要求）を、期間で切らずに探すため（src/lib/pacs-ops.ts。段 5）
+  // 書き込みの操作の、同じ検査の要求（解いていない結果不明の要求）を、期間で切らずに探すため（src/lib/pacs-ops.ts。フェーズ 5）
   @@index([action, studyInstanceUid])
 }
 
@@ -74,7 +74,7 @@ model User {
   // TOTP の秘密（AES-256-GCM で暗号化。鍵は SESSION_SECRET から HKDF で導く。src/lib/auth/sealed-field.ts）
   totpSecretEnc      String?
   totpEnabledAt      DateTime?
-  // 最後に受け入れた TOTP の時間の段（30 秒ごと）。同じ段・前の段の使い回しを断る
+  // 最後に受け入れた TOTP の時間のステップ（30 秒ごと）。同じステップ・前のステップの使い回しを断る
   totpLastStep       Int?
   // ログインの一時停止（第7.0版 14 遵守事項⑥(6)）
   failedLoginCount   Int       @default(0)
@@ -106,15 +106,15 @@ model Session {
   lastActivityAt DateTime
   // 画面のロック（第7.0版 12 遵守事項⑥）。null でなければロックしている
   lockedAt       DateTime?
-  // 登録の途中の TOTP の秘密（暗号化）。登録を確かめたら User へ移す
+  // 登録の途中の TOTP の秘密（暗号化）。登録を確認したら User へ移す
   pendingTotpEnc String?
-  // 大事な操作（利用者の管理・削除など）の前の、もう一度の本人の確かめの時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）。
+  // 大事な操作（利用者の管理・削除など）の前の、もう一度の本人の確認の時刻（src/lib/auth/local-auth.ts の REAUTH_MINUTES）。
   // サーバーの側のこの行だけに持つ（cookie・本文から読まない）。パスワードの変更で消す
   reauthAt       DateTime?
-  // 上の確かめで TOTP まで確かめた時刻。利用者の管理（ユーザーの追加・役割・無効・TOTP のやり直しなど）は、TOTP を登録した
+  // 上の確認で TOTP まで確認した時刻。利用者の管理（ユーザーの追加・役割・無効・TOTP のやり直しなど）は、TOTP を登録した
   // 利用者にはこちらを求める（削除の再認証はパスワードだけ。docs/spec.md の 3.6。2026-10-20）
   reauthMfaAt    DateTime?
-  // 上の確かめを通した時の利用者の役割の世代（User.roleVersion）。違えば、上の2つの時刻は使わない
+  // 上の確認を通した時の利用者の役割の世代（User.roleVersion）。違えば、上の2つの時刻は使わない
   reauthRoleVersion Int?
   // 作った時の利用者の認証の世代（User.credentialVersion）。違えば、このセッションは使えない
   credentialVersion Int    @default(0)
@@ -123,7 +123,7 @@ model Session {
   @@index([expiresAt])
 }
 
-// 利用者ごとの画面の設定（段 2。docs/spec.md の 2）。いまは地の色（明るい地・暗い地）だけ。
+// 利用者ごとの画面の設定（フェーズ 2。docs/spec.md の 2）。いまは地の色（明るい地・暗い地）だけ。
 // actorId は監査の記録の「誰が」と同じ値（AUTH_MODE=local は利用者名、検証モードは dev）。
 model UserPreference {
   actorId   String   @id
@@ -132,8 +132,8 @@ model UserPreference {
   updatedAt DateTime
 }
 
-// 検査ごとに覚えたビューア（段 2。docs/spec.md の 3.2）。変えた人と時刻は監査の記録（study_state。flag は viewer）にも残す。
-// 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の表は、段 3 で外した（migration 20261020000000_remove_study_state）。
+// 検査ごとに覚えたビューア（フェーズ 2。docs/spec.md の 3.2）。変えた人と時刻は監査の記録（study_state。flag は viewer）にも残す。
+// フェーズ 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の表は、フェーズ 3 で外した（migration 20261020000000_remove_study_state）。
 model StudyViewer {
   studyInstanceUid String   @id
   // 検査ごとに覚えたビューア（src/lib/viewers.ts の ID）。null は覚えが無い（モダリティの既定で開く）

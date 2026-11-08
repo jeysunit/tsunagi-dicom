@@ -2,7 +2,7 @@ import { assertLocalMode } from "@/lib/api/auth-route";
 import { errorResponse } from "@/lib/api/respond";
 import { getAuthState } from "@/lib/auth/session";
 
-// いまのセッションの状態（画面のロックの確かめ用。src/components/auth/lock-guard.tsx が一定の間隔で聞く）。
+// いまのセッションの状態（画面のロックの確認用。src/components/auth/lock-guard.tsx が一定の間隔で聞く）。
 // 200：ログインしていてロックしていない、423：画面のロック中、401：ログインしていない。
 // 読むだけで、操作の時刻は数え直さない（サーバーの側のロックの時間を延ばさない）。患者の情報は返さない。
 // 画面の側のロックの状態がずれても（ほかのタブの知らせの取りこぼし・時計のずれなど）、サーバーの側の

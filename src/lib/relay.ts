@@ -7,13 +7,13 @@ import { BackendError, type Backend } from "@/lib/backend/types";
 // - 検索（QIDO-RS）は通さない。検索は画面の API（役割ごとの許可の一覧の対象）を使う。
 // - 中継には書き込み（STOW-RS など）の道を作らない（書き込みは操作ごとの画面の API）。POST・PUT・PATCH・DELETE はいつも 405 で断る。
 // - 利用者のセッションで認可し（ログインしていない・画面のロック中は route handler が断る）、役割に
-//   画像の取得（image.retrieve）が無ければ 403 で断る（段 1b）。
+//   画像の取得（image.retrieve）が無ければ 403 で断る（フェーズ 1b）。
 // - 通したものも断ったものも、監査の記録に残す。通したものは、画像サーバーの答え（状態の番号）が出てから
 //   結果つきで記録し、記録に失敗したら応答を渡さない（記録の無い取得を作らない）。
 
 export interface RelayInput {
   method: string;
-  /** Next.js が分けた path の段（`/api/dicom-web` より後ろ） */
+  /** Next.js が分けた path のセグメント（`/api/dicom-web` より後ろ） */
   segments: string[];
   search: string;
   accept: string | null;
@@ -23,7 +23,7 @@ export interface RelayDeps {
   backend: Pick<Backend, "relayDicomweb">;
   /** いまの利用者の役割に、画像の取得（image.retrieve）が割り当てられているか（src/lib/auth/roles.ts） */
   allowed: boolean;
-  /** いまの利用者で監査の記録に1行足す */
+  /** いまの利用者で監査の記録に1行追加する */
   record: (fields: AuditFields) => Promise<unknown>;
 }
 

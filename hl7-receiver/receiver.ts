@@ -2,7 +2,7 @@ import { BlockList, createServer, isIP, type Server, type Socket } from "node:ne
 import { lookup } from "node:dns/promises";
 import { visible } from "./visible.ts";
 
-/** IPv4 を写した IPv6 も同じ住所として比べる（design.md §12）。 */
+/** IPv4 をコピーした IPv6 も同じ住所として比べる（design.md §12）。 */
 export function normalizeAddress(address: string): string {
   const parsed = addressBits(address);
   if (isIP(address) === 6 && parsed?.size === 32) {
@@ -270,7 +270,7 @@ export function createReceiver(options: ReceiverOptions): Server {
       return;
     }
     sockets.add(socket);
-    // 許可を確かめる前に、本文を読み始めない（design.md §12）。
+    // 許可を確認する前に、本文を読み始めない（design.md §12）。
     socket.pause();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const fail = (event: string) => {

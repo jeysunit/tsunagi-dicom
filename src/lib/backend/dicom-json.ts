@@ -144,7 +144,7 @@ export function studyDateRange(query: StudyQuery | undefined): string | null {
   return from === to ? from : `${from}-${to}`;
 }
 
-/** 検査日の範囲に入るか（モックと、範囲を返さない画像サーバーの答えの確かめに使う） */
+/** 検査日の範囲に入るか（モックと、範囲を返さない画像サーバーの答えの確認に使う） */
 export function inDateRange(studyDate: string, query: StudyQuery | undefined): boolean {
   const from = query?.dateFrom;
   const to = query?.dateTo;
@@ -169,7 +169,7 @@ const words = (value: string) => value.trim().split(/\s+/).filter(Boolean);
 /**
  * 詳細条件（docs/spec.md の 3.1）を QIDO-RS の検索の値にする。生年月日・性別は一致、受付番号・検査名は値を含むもの
  * （`*値*`。空白で区切った語は、その順に含むもの：`chest ct` → `*chest*ct*`）。
- * 値は study-filter.ts で、ワイルドカードの字（`*` `?`）・区切りの字（`\` `,`）・制御文字を含まないことを確かめてある
+ * 値は study-filter.ts で、ワイルドカードの字（`*` `?`）・区切りの字（`\` `,`）・制御文字を含まないことを確認してある
  */
 export function studyQueryParams(query: StudyQuery | undefined): [string, string][] {
   const out: [string, string][] = [];
@@ -197,7 +197,7 @@ function containsInOrder(haystack: string, needle: string): boolean {
 }
 
 /**
- * 検査日の範囲と詳細条件に合うか（モックと、画像サーバーの答えの確かめに使う）。文字の条件は、値を含むか
+ * 検査日の範囲と詳細条件に合うか（モックと、画像サーバーの答えの確認に使う）。文字の条件は、値を含むか
  * （画像サーバーより緩く比べ、画像サーバーが合うとした検査を落とさない）
  */
 export function matchesStudyQuery(study: StudySummary, query: StudyQuery | undefined): boolean {
