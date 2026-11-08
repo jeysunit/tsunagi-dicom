@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   // 1つのコンテナにまとめる（docs/spec.md の 2）
   output: "standalone",
   poweredByHeader: false,
-  // next dev が AGENTS.md に英語の決まりを書き追加しないようにする（開発の決まりは AGENTS.md に1つだけ置く）
+  // next dev が AGENTS.md に英語の決まりを追記しないようにする（開発の決まりは AGENTS.md に1つだけ置く）
   agentRules: false,
   // モックのバックエンド（BACKEND_MOCK=true）が読む合成の見本を、standalone の出力に含める。
   // 本番のイメージにも入るが、読むのは BACKEND_MOCK=true のときだけ（中身は公開の合成のデータ）。

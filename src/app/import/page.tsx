@@ -5,7 +5,7 @@ import { pageAccess } from "@/lib/auth/page-session";
 import { can } from "@/lib/auth/roles";
 import { getConfig } from "@/lib/config";
 
-// インポートの頁（docs/spec.md の 3.5「取り込み」。段 6）。DICOM のファイル・フォルダを選び、1 件ずつ BFF の
+// インポートの頁（docs/spec.md の 3.5「取り込み」。フェーズ 6）。DICOM のファイル・フォルダを選び、1 件ずつ BFF の
 // POST /api/import へ送る。組み方はファイルを選ぶ部品（docs/design-system/parts.md）の 1 つの区画だけ。
 // 役割（study.import）と、検証モードの書き込みの止めは、頁でも見る（BFF も 1 件ごとに断る）。
 

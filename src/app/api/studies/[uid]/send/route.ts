@@ -20,7 +20,7 @@ import {
   type RequestRow,
 } from "@/lib/pacs-ops";
 
-// ほかの機器へ送る（docs/spec.md の 3.4。段 4）。書き込みの操作の共通の決まり（3.5）を通す：
+// ほかの機器へ送る（docs/spec.md の 3.4。フェーズ 4）。書き込みの操作の共通の決まり（3.5）を通す：
 // 役割（study.send）・CSRF・検証モードの書き込みの止め・呼ぶ前の記録（記録できなければ呼ばない）・呼んだ後の記録・
 // 要求の ID で二度実行しない・答えが分からなければ結果不明。
 // Orthanc には C-STORE の送信（/modalities/{id}/store）を非同期で求め、仕事の ID を暗号化した token にして画面へ渡す。

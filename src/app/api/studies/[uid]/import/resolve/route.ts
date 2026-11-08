@@ -9,7 +9,7 @@ import { getDb } from "@/lib/db";
 import { IMPORT_SETTLE_MS, isRequestId, isUnresolved, requestOutcome, rowsOfRequest, type RequestRow } from "@/lib/pacs-ops";
 import { cleanupTarget, requestFile } from "@/app/api/import/shared";
 
-// 結果の分からないインポート・入れた画像を消せなかったインポートを、管理者が手で解く（docs/spec.md の 3.5「取り込み」。段 6）。
+// 結果の分からないインポート・入れた画像を消せなかったインポートを、管理者が手で解く（docs/spec.md の 3.5「取り込み」。フェーズ 6）。
 // 管理者だけ（pacs.reconcile）。削除の手で解く道（delete/resolve）と同じ形。
 // 状態の確認（GET /api/import）は、入ったと読めて値が合うときと、消す画像がもう無いと読めたときだけ自動で解く。
 // それ以外（見つけた画像の値がファイルと違う・消せなかった画像が残る・入ったと読めない）は結果不明のまま、同じ検査の

@@ -173,7 +173,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
       ack({ kind: "order", patientId: "P1", uid: "2.25.5", accession: "OTHER", control: "NW" }, 30_000)
     ]);
     const links = resolveAlias(aliases, "T")!;
-    // 送り直しは最初の段にまとまり、統合の先は P2 のまま。最初の段は期限の外なので使わない
+    // 送り直しは最初のステップにまとまり、統合の先は P2 のまま。最初のステップは期限の外なので使わない
     expect(links.map(l => l.to)).toEqual(["P1", "P2"]);
     expect(withinTtl(links[0]!, now)).toBe(false);
     // 統合された後の P1 の ORM は使わない
@@ -317,7 +317,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(orthanc.instances.some(i => i.SOPInstanceUID === `${STUDY}.3.1`)).toBe(false);
     const result = rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1)!;
     expect(result).toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true } });
-    // 書き換えを頼んだのは指定の画像だけ
+    // 書き換えを頼んだのは指定した画像だけ
     expect(orthanc.deleteCalls.at(-1)?.sops).toEqual([`${STUDY}.2.1`]);
   });
 

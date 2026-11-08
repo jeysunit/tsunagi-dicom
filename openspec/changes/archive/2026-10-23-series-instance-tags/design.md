@@ -5,7 +5,7 @@
 動機は proposal.md の Why。いまの形のうち、この設計に効くものは次のとおり。
 
 - 詳細のパネル（`src/components/studies/study-detail.tsx`）は、検査一覧の下の場所に出る。シリーズのサムネイルは `<li>` の中の絵で、押しても何も起きない。
-- 「DICOM タグ」の画像単位は、すでに画像の並び（`GET …/series/{series}/instances`、BFF の QIDO-RS）と、1 枚の値の全部（`GET …/instances/{sop}/values`、BFF の WADO-RS の `metadata`）を持つ。どちらも `dicom.all_values` で、読むたびに `view_study` を残し、画面は再読み込みする間に前の値を出さない（`staleTime: 0`・`gcTime: 0`）。
+- 「DICOM タグ」の画像単位は、すでに画像の並び（`GET …/series/{series}/instances`、BFF の QIDO-RS）と、1 枚の値の全部（`GET …/instances/{sop}/values`、BFF の WADO-RS の `metadata`）を持つ。どちらも `dicom.all_values` で、読むたびに `view_study` を残し、画面は再取得する間に前の値を出さない（`staleTime: 0`・`gcTime: 0`）。
 - 設定は環境変数を `src/lib/config.ts` が起動の時に zod で確認し、誤りを `ConfigError` で並べて起動を断る。管理の画面で変える設定は、ビューア設定（モダリティごとの既定のビューア。データベースに持ち、`viewer.defaults`）の 1 つだけ。
 - 役割は管理者と一般の 2 つで、`dicom.all_values` は両方に割り当てている（`src/lib/auth/roles.ts`）。
 - 画面の言葉は `docs/spec.md` の 2.2 の用語集から選び、説明の文を画面に置かない。
@@ -21,7 +21,7 @@
 **Non-Goals:**
 
 - 画像（画素）を画像の場所に出すこと。画像はビューアで見る。
-- タグの値の修正（`docs/spec.md` の 3.5 の「値の修正」は別の段）。
+- タグの値の修正（`docs/spec.md` の 3.5 の「値の修正」は別のフェーズ）。
 - シーケンス（SQ）の中を開いて見ること。件数だけを出す。
 - 出すタグを利用者ごとに変えること。施設で 1 つの一覧にする。
 

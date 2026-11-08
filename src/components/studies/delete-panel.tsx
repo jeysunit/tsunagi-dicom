@@ -11,7 +11,7 @@ import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 import type { StudyView } from "@/lib/fields";
 import { formatBirthLine, formatSlashDate } from "@/lib/format/japanese-date";
 
-// 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確認画面：消す検査を並べ、「戻せない」ことを示し、
+// 検査の削除（docs/spec.md の 3.5。フェーズ 5）。管理者だけ。確認画面：消す検査を並べ、「戻せない」ことを示し、
 // 理由を書いてから「削除する」を押す。大事な操作なので、BFF が再認証を求めたら、パスワードを入れてから続ける（TOTP は求めない）。
 // 答えが分からなければ「結果不明」と要求の ID を出し、もう一度消さずに確認する道（Orthanc にまだあるかを読む）だけを出す。
 // 検査がまだあっても「消えていない」とは確定しない。管理者（照らし合わせの役割）は、Orthanc の側で先の削除が終わっていることを
@@ -49,7 +49,7 @@ export function DeletePanel({
   screen: ScreenInfo;
   panelId: string;
   onClose: () => void;
-  /** 消せたあと（一覧を再読み込みする） */
+  /** 消せたあと（一覧を再取得する） */
   onDeleted: () => void;
 }) {
   const [reason, setReason] = useState("");
@@ -57,14 +57,14 @@ export function DeletePanel({
   /** 再認証の要求を送っている間 */
   const [authing, setAuthing] = useState(false);
   const uid = study.studyInstanceUid ?? "";
-  // 確認画面に出すのは、BFF が Orthanc から再読み込みした、消す検査の要点（一覧の行の値ではない）。消すときに確認の token を添える
+  // 確認画面に出すのは、BFF が Orthanc から再取得した、消す検査の要点（一覧の行の値ではない）。消すときに確認の token を添える
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const fetchPreview = useCallback(() => {
     getJson<Preview>(`/api/studies/${encodeURIComponent(uid)}/delete`).then(setPreview, (e: Error) => setPreviewError(e.message));
   }, [uid]);
   useEffect(() => fetchPreview(), [fetchPreview]);
-  /** 確認画面を再読み込みする（検査が変わった・消えていなかったと分かったとき。古い token のまま押し直させない） */
+  /** 確認画面を再取得する（検査が変わった・消えていなかったと分かったとき。古い token のまま押し直させない） */
   function loadPreview() {
     setPreview(null);
     setPreviewError(null);
@@ -88,7 +88,7 @@ export function DeletePanel({
       // この検査に、結果の分からない先の削除がある：その要求を確認する道を出す（新しく消し直させない）
       setPhase({ kind: "unknown", requestId: result.data.pendingRequestIds[0], note: "この検査には結果未確認の削除があります" });
     } else {
-      // 409（確認の後に検査が変わった・同じ UID の検査が2つある・結果の分からない削除がある）は、確認画面を再読み込みする
+      // 409（確認の後に検査が変わった・同じ UID の検査が2つある・結果の分からない削除がある）は、確認画面を再取得する
       if (result.status === 409) loadPreview();
       setPhase({ kind: "error", text: errorText(result) });
     }

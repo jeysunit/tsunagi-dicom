@@ -360,7 +360,7 @@ function totpSecretOf(ctx: AuthContext, user: User): string | null {
   return user.totpSecretEnc ? openField(user.totpSecretEnc, ctx.settings.sessionSecret, user.id) : null;
 }
 
-/** TOTP を確認し、使った段を覚える（同じ段・前の段の使い回しを断る）。合えば true */
+/** TOTP を確認し、使ったステップを覚える（同じステップ・前のステップの使い回しを断る）。合えば true */
 async function acceptTotp(ctx: AuthContext, user: User, secret: string, code: string): Promise<boolean> {
   const step = verifyTotp(secret, code, now(ctx).getTime(), user.totpLastStep);
   if (step === null) return false;
@@ -375,7 +375,7 @@ async function acceptTotp(ctx: AuthContext, user: User, secret: string, code: st
  * ログインした利用者の、もう一度の本人の確認（パスワードと、登録していれば TOTP）。
  * 画面のロックの解除・再認証・パスワードの変更に使う。回数の上限と一時停止を、ログインと同じに数える。
  * requireTotp が false なら（再認証と、画面のロックの解除で SCREEN_UNLOCK_REQUIRE_TOTP=false のとき）、TOTP は確認せず、
- * 送られた番号も使った段に数えない。TOTP を確認したら true を返す
+ * 送られた番号も使ったステップに数えない。TOTP を確認したら true を返す
  */
 async function verifyAgain(
   ctx: AuthContext,
@@ -428,7 +428,7 @@ export interface LoginResult {
   expiresAt: Date;
 }
 
-/** 段を進めた結果。active になったときは、新しい token のセッションに替えている（cookie を付け直す） */
+/** ステップを進めた結果。active になったときは、新しい token のセッションに替えている（cookie を付け直す） */
 export interface StageResult {
   stage: Stage;
   rotated?: { token: string; expiresAt: Date };
@@ -505,7 +505,7 @@ export async function login(
   }
   await releaseAttempt(ctx, user);
 
-  // 平文はここでしか見られないので、ここで2つを確認する（TOTP の段を通る利用者にも効く）：
+  // 平文はここでしか見られないので、ここで2つを確認する（TOTP のステップを通る利用者にも効く）：
   // - いまの規則に合わなくなったパスワード（MFA_REQUIRED を false にしたときの 8〜12 文字など）は、本人が変える。
   // - 保存したハッシュが、いまの強さより弱ければ作り直す（混んでいれば、次のログインに回す）。
   //   作り直しは、パスワードが同時に変えられていないとき（passwordHash が読んだ値のまま）だけ書く
@@ -623,7 +623,7 @@ async function followVersion(ctx: AuthContext, session: SessionRow, from: number
 }
 
 /**
- * 途中のセッションがまだ使える（残っていて、同じ段で、期限の前）という条件。利用者の行を変える
+ * 途中のセッションがまだ使える（残っていて、同じステップで、期限の前）という条件。利用者の行を変える
  * 1つの文（updateMany）の where に入れて、確認と書き込みを分けない
  */
 const liveSession = (session: SessionRow, user: Pick<User, "credentialVersion">, at: Date) => ({
@@ -640,10 +640,10 @@ async function completeLogin(ctx: AuthContext, user: User, detail: Record<string
 }
 
 /**
- * 段を進める。active になるときは、途中のセッションを消して、新しい token・CSRF の token のセッションを開く
- * （途中の段の token を、ログインした後に使い続けない）。そしてログインを記録する。
- * 途中のセッションが、もう無い・ほかの段に進んでいるときは 409（同じ途中のセッションから二度進ませない）。
- * user は、この段で確認したときの利用者（openSession が、確認した時のままかを見る）
+ * ステップを進める。active になるときは、途中のセッションを消して、新しい token・CSRF の token のセッションを開く
+ * （途中のステップの token を、ログインした後に使い続けない）。そしてログインを記録する。
+ * 途中のセッションが、もう無い・ほかのステップに進んでいるときは 409（同じ途中のセッションから二度進ませない）。
+ * user は、このステップで確認したときの利用者（openSession が、確認した時のままかを見る）
  */
 async function advance(
   ctx: AuthContext,
@@ -698,7 +698,7 @@ export interface Enrollment {
 const isOptionalEnrollment = (ctx: AuthContext, session: SessionRow, user: User) =>
   session.stage === "active" && !ctx.settings.mfaRequired && !user.totpSecretEnc;
 
-/** 登録を始める（新しい秘密を作り、セッションに暗号化して置く）。登録の段か、二要素が任意で未登録のログインしたセッション */
+/** 登録を始める（新しい秘密を作り、セッションに暗号化して置く）。登録のステップか、二要素が任意で未登録のログインしたセッション */
 export async function startEnrollment(ctx: AuthContext, session: SessionRow, user: User): Promise<Enrollment> {
   if (session.stage !== "enroll" && !isOptionalEnrollment(ctx, session, user)) {
     throw new AuthFailure(409, "二要素認証を設定する段階ではありません");
@@ -745,7 +745,7 @@ export async function confirmEnrollment(
     updatedAt: at,
   };
   // 確認と書き込みを1つの文にする：まだ登録していない・有効・パスワードが読んだ時のまま・この途中の
-  // セッションがまだ使える（残っていて、同じ段で、期限の前）ときだけ書く
+  // セッションがまだ使える（残っていて、同じステップで、期限の前）ときだけ書く
   // 書けたら、認証の世代を1つ上げる（ほかのセッションは、消す前でも使えなくなる）
   const res = await ctx.db.user.updateMany({
     where: {
@@ -769,7 +769,7 @@ export async function confirmEnrollment(
         : SESSION_GONE_MESSAGE,
     );
   }
-  // いまのセッションを新しい世代に合わせ（パスワードの変更の段に進むときも、この途中のセッションを使い続ける）、
+  // いまのセッションを新しい世代に合わせ（パスワードの変更のステップに進むときも、この途中のセッションを使い続ける）、
   // ほかのセッションを片付ける
   await followVersion(ctx, session, user.credentialVersion, optional ? { pendingTotpEnc: null } : {});
   await closeOtherSessions(ctx, user.id, session.id);
@@ -794,7 +794,7 @@ export async function changePassword(
     throw new AuthFailure(409, "パスワードを変更する段階ではありません");
   }
   // ログインしたセッションでは、いまのパスワードと、登録していれば TOTP を確認する（再認証）。
-  // 変更の段は、いまログインで確認したところなので求めない
+  // 変更のステップは、いまログインで確認したところなので求めない
   if (session.stage === "active") {
     await verifyAgain(ctx, user, { password: input.currentPassword, code: input.code }, "password_change");
   }
@@ -812,7 +812,7 @@ export async function changePassword(
     updatedAt: at,
   };
   // 確認と書き込みを1つの文にする：有効・パスワードと TOTP の秘密と認証の世代が読んだ時のまま・この
-  // セッションがまだ使える（残っていて、同じ段で、期限の前）ときだけ変え、認証の世代を1つ上げる。
+  // セッションがまだ使える（残っていて、同じステップで、期限の前）ときだけ変え、認証の世代を1つ上げる。
   // 世代を上げた時点で、ほかのセッション（同時に進んでいた古いパスワードのログインも）は使えなくなる
   const res = await ctx.db.user.updateMany({
     where: {
@@ -846,7 +846,7 @@ export const REAUTH_TOTP_REQUIRED = "reauth_totp_required";
 /**
  * もう一度の本人の確認（docs/spec.md の 3.6 の「再認証」）。確認した時刻は、サーバーの側のこのセッションの行だけに持つ。
  * - 認証コードを添えなければ、パスワードだけで確認する（削除などの再認証。2026-10-20 に承認者が決めた）。送られていない番号は
- *   確認せず、使った段にも数えない。TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない
+ *   確認せず、使ったステップにも数えない。TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない
  *   （verifyAgain。画面のロックの解除と同じ）。
  * - 認証コードを添えれば、TOTP を登録した利用者には TOTP まで確認し、reauthMfaAt も記す（利用者の管理の再認証）。
  * どちらも、ログインし終えた（active）・ロックしていないセッションだけ。ログインの途中のセッションからは通さない
@@ -896,7 +896,7 @@ function withinReauth(ctx: AuthContext, at: number, when: Date | null, sameRole:
  * 403（problems に REAUTH_REQUIRED）。ログインの一時停止の間は、再認証の有効時間の内でも 403（problems に locked）
  * （一時停止の間は再認証を止める、という承認者の決定に合わせ、前に通した再認証も使わせない）。
  * requireTotp（利用者の管理）のときは、TOTP を登録した利用者には、TOTP まで確認した再認証を求める（problems に
- * REAUTH_TOTP_REQUIRED も）。パスワードとセッションだけで、管理者の作り追加し・役割の格上げ・ほかの管理者の TOTP の
+ * REAUTH_TOTP_REQUIRED も）。パスワードとセッションだけで、管理者の作成・役割の格上げ・ほかの管理者の TOTP の
  * やり直しをさせないため（2026-10-20 の独立レビューの指摘。docs/spec.md の 3.6）
  */
 export function assertRecentReauth(

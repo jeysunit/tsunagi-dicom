@@ -13,7 +13,7 @@ import { availableViewers } from "@/lib/viewers";
 import { testDatabases } from "./helpers/test-db";
 
 // ビューアの覚え（docs/spec.md の 3.2）。BFF のデータベースに持つ。
-// 段 2 の検査の状態の試験（tests/unit/study-state.test.ts）のうち、ビューアの覚えの試験をここへ移した。
+// フェーズ 2 の検査の状態の試験（tests/unit/study-state.test.ts）のうち、ビューアの覚えの試験をここへ移した。
 // 状態の印（検像・読影・緊急・ブックマーク）の試験は、機能ごと外した。
 
 const dbs = testDatabases("tsunagi-viewer-");
@@ -43,7 +43,7 @@ describe("検査ごとのビューアの覚え", () => {
     expect(await rememberViewer(db, "alice", STUDY, "volview", 0)).toEqual({ kind: "ok", version: 1 });
     expect(await rememberViewer(db, "bob", STUDY, "stone", 0)).toEqual({ kind: "conflict", version: 1 });
     expect((await readViewerMemory(db, [STUDY])).get(STUDY)).toEqual({ rememberedViewer: "volview", viewerVersion: 1 });
-    // 再読み込みした版なら通る
+    // 再取得した版なら通る
     expect(await rememberViewer(db, "bob", STUDY, "stone", 1)).toEqual({ kind: "ok", version: 2 });
     // 先の版（まだ無い版）も断る
     expect(await rememberViewer(db, "bob", STUDY, null, 5)).toEqual({ kind: "conflict", version: 2 });

@@ -10,7 +10,7 @@ import { availableViewers, VIEWER_IDS } from "@/lib/viewers";
 // 検査ごとに既定のビューアを覚える（「この検査は次から VolView」。docs/spec.md の 3.2）。null で忘れる。
 // 覚えはほかの利用者にも効くので、操作の権限（viewer.remember）を要る（無ければ断ったことを記録して 403）。
 // 変更と監査の記録は1つの transaction。版はビューアの覚えの行のもので、違えば書かずに 409。
-// 監査の記録の action は、段 2 からの study_state（detail の flag は viewer）のまま（記録済みの行と同じ形で追えるように）。
+// 監査の記録の action は、フェーズ 2 からの study_state（detail の flag は viewer）のまま（記録済みの行と同じ形で追えるように）。
 
 type Context = { params: Promise<{ uid: string }> };
 

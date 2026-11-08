@@ -11,7 +11,7 @@ import { wadoRsTarget } from "@/lib/backend/relay-path";
 import { BackendError } from "@/lib/backend/types";
 
 // 実の画像サーバーの代わりに、手元に自前の CA の証明書で HTTPS のサーバーを立てて確認する。
-// 証明書の確認を切る道は無いので、BACKEND_CA_FILE（caPem）が無ければつながらないことも見る。
+// 証明書の検証を切る道は無いので、BACKEND_CA_FILE（caPem）が無ければつながらないことも見る。
 
 let dir: string;
 let server: Server;
@@ -50,7 +50,7 @@ beforeAll(async () => {
     (req, res) => {
       seen.push({ url: req.url ?? "", authorization: req.headers.authorization, method: req.method ?? "", accept: req.headers.accept });
       if (/\/(thumbnail|rendered)$/.test(req.url ?? "")) {
-        // 実の Orthanc の DICOMweb のプラグインと同じく、image/jpeg・image/png の指定以外の Accept は 400
+        // 実の Orthanc の DICOMweb のプラグインと同じく、image/jpeg・image/png 以外の Accept は 400
         const accept = req.headers.accept;
         if (accept === "image/jpeg" || accept === "image/png") {
           res.writeHead(200, { "content-type": accept });

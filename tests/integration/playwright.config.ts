@@ -23,7 +23,7 @@ export default defineConfig({
     baseURL: bffUrl,
     locale: "ja-JP",
     // trace は入力した値（試験だけの管理者のパスワード）と通信の中身を残し、CI の成果物として上がるので、取らない。
-    // 失敗の手がかりは、画面のコピー（スクリーンショット。パスワードの欄は伏せ字で写る）と error-context.md・コンテナの記録
+    // 失敗の手がかりは、スクリーンショット（パスワードの欄は伏せ字で表示される）と error-context.md・コンテナの記録
     trace: "off",
     screenshot: "only-on-failure",
     video: "off",

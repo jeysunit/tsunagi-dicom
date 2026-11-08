@@ -154,14 +154,14 @@ function parseDetail(detail: string | null): Record<string, unknown> {
   }
 }
 
-/** 記録の行から読んだ、1つの送信のいまの段 */
+/** 記録の行から読んだ、1つの送信のいまの段階 */
 export type SentStage =
   | { kind: "final"; status: SentStatus; finishedAt: Date | null }
   /** Orthanc が仕事を受けた。仕事の状態を読んで決める */
   | { kind: "job"; jobId: string };
 
 /**
- * 1つの送信の記録の行（古い順。「求めた」の行を含む）から、いまの段を読む。
+ * 1つの送信の記録の行（古い順。「求めた」の行を含む）から、いまの段階を読む。
  * 結果・照らした・終わりの行のうち、いちばん新しいものを使う（docs/spec.md の 3.5）
  */
 export function sentStage(rows: readonly AuditRow[], now: Date): SentStage {

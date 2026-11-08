@@ -58,7 +58,7 @@ import type { AppConfig } from "@/lib/config";
 
 // 実の Orthanc への接続（Orthanc 専用。docs/spec.md の 0）。検索と中継は Orthanc の DICOMweb のプラグイン、
 // 件数は Orthanc の REST を使う。資格情報はここだけで使う。
-// 証明書は必ず確認する。BACKEND_CA_FILE があれば、Node の既定の CA（NODE_EXTRA_CA_CERTS を含む）に追加して使う。
+// 証明書は必ず検証する。BACKEND_CA_FILE があれば、Node の既定の CA（NODE_EXTRA_CA_CERTS を含む）に追加して使う。
 // 確認を切る道は作らない。
 
 const TIMEOUT_MS = 15_000;
@@ -68,7 +68,7 @@ const POST_TIMEOUT_MS = 30_000;
 const EXPORT_TIMEOUT_MS = 10 * 60_000;
 /** インポートの答えを待つ時間。大きなファイル（IMPORT_MAX_MB まで）を送り終えて Orthanc が書くまでを待つ。過ぎたら結果不明 */
 const IMPORT_TIMEOUT_MS = 5 * 60_000;
-/** 書き出しの本文を実行する間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
+/** 書き出しの本文をストリーミングする間、次の塊が来るまでを待つ時間（全体の長さでは切らない。大きな検査でも途中で切らない） */
 const EXPORT_IDLE_MS = 2 * 60_000;
 const MAX_SEARCH_LENGTH = 2048;
 /** 付け替えの印の、Orthanc の利用者のメタデータの名前（deploy/orthanc/tsunagi-lock.lua と同じ。design.md §15.4） */
@@ -125,7 +125,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
       write?: boolean;
       /** どの資格情報で求めるか。既定は GET・HEAD が読む資格情報、POST・PUT・DELETE が書く資格情報 */
       credential?: "read" | "write";
-      /** 時間切れを呼ぶ側で決める（本文を実行する間は別の時間切れにする書き出しなど）。あれば timeoutMs は使わない */
+      /** 時間切れを呼ぶ側で決める（本文をストリーミングする間は別の時間切れにする書き出しなど）。あれば timeoutMs は使わない */
       signal?: AbortSignal;
     } = {},
   ) {
@@ -577,7 +577,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
         const hint = res.status === 404 ? `。Orthanc の UserMetadata に ${LOCK_METADATA} が要る` : "";
         throw new BackendError(`画像サーバーが付け替えの印を断りました（${res.status}）${hint}`);
       }
-      // 印が確かに立ったことを再読み込みして確認する（PUT の答えだけで信じない）。入口で道を絞るときに印の道を 1 つの
+      // 印が確かに立ったことを再取得して確認する（PUT の答えだけで信じない）。入口で道を絞るときに印の道を 1 つの
       // 資格情報にまとめられるよう、書いたのと同じ資格情報で読む
       const check = await call(orthancUrl, `studies/${id}/metadata/${LOCK_METADATA}`, { credential: "write" });
       const value = check.ok ? (await check.text()).trim() : "";
@@ -801,7 +801,7 @@ export function createHttpBackend(config: AppConfig["backend"]): Backend {
 
     async exportStudy(orthancStudyId: string) {
       if (!isOrthancId(orthancStudyId)) throw new BackendError("検査の ID が正しくありません", 400);
-      // ZIP は大きくなりうる。答えが始まるまでは EXPORT_TIMEOUT_MS を待ち、本文を実行する間は、塊と塊の間が
+      // ZIP は大きくなりうる。答えが始まるまでは EXPORT_TIMEOUT_MS を待ち、本文をストリーミングする間は、塊と塊の間が
       // EXPORT_IDLE_MS を超えたときだけ切る（全体の長さの時間切れで、大きな検査の ZIP を途中で切らない）
       const abort = new AbortController();
       let timer = setTimeout(() => abort.abort(), EXPORT_TIMEOUT_MS);

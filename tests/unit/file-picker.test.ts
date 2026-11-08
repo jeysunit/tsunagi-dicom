@@ -313,7 +313,7 @@ describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 
       { name: "d", state: "uk", resolve: target, off: true },
       { name: "e", state: "uk", resolve: { ...target, requestId: "1b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e" } },
     ]);
-    // 指定が無い行（BFF に届いたか分からない）・除外した行・結果不明でない行は確認できない
+    // 識別子が無い行（BFF に届いたか分からない）・除外した行・結果不明でない行は確認できない
     expect(list.map(isResolvable)).toEqual([false, true, false, false, true]);
     const ok = resolveItem(list, 2, "success");
     expect(ok[1]).toMatchObject({ state: "ok", reason: RESOLVED_NOTE });

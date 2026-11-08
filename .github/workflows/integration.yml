@@ -40,7 +40,7 @@ jobs:
         if: always()
         with:
           name: integration-results
-          # 測った値（名前・数・状態だけ）と、失敗したときの画面のコピーだけを上げる（trace と HTML の報告は作らない。
+          # 測った値（名前・数・状態だけ）と、失敗したときのスクリーンショットだけを上げる（trace と HTML の報告は作らない。
           # 入力した資格情報が残りうるため。tests/integration/playwright.config.ts）
           path: |
             test-results/integration/observations.json
@@ -68,7 +68,7 @@ jobs:
         if: failure()
         with:
           name: dev-stack-results
-          # 失敗したときの画面のコピーだけを上げる（trace と HTML の報告は作らない。入力した資格情報が残りうるため）
+          # 失敗したときのスクリーンショットだけを上げる（trace と HTML の報告は作らない。入力した資格情報が残りうるため）
           path: test-results/flow/**/*.png
           if-no-files-found: ignore
           retention-days: 7

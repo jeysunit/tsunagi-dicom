@@ -136,7 +136,7 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
     expect(Object.keys(auto.detail).filter((k) => k !== "trigger").sort()).toEqual(Object.keys(manual.detail).sort());
     expect({ outcome: auto.row.outcome, actorRole: auto.row.actorRole }).toEqual({ outcome: manual.row.outcome, actorRole: manual.row.actorRole });
 
-    // 条件が直前の手動の検索と違う名乗りは、手動として扱う（自動の再読み込みは、同じ条件の再読み込みに限る）
+    // 条件が直前の手動の検索と違う名乗りは、手動として扱う（自動の再取得は、同じ条件の再取得に限る）
     const other = await get("?modality=CT&refresh=auto");
     expect(other.detail).not.toHaveProperty("trigger");
     expect(Array.isArray(other.detail.returned)).toBe(true);

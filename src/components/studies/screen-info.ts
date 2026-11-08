@@ -14,15 +14,15 @@ export interface ScreenInfo {
   can: {
     rememberViewer: boolean;
     allValues: boolean;
-    /** ほかの機器へ送る（段 4）。検証モードで書き込みを止めているときは false */
+    /** ほかの機器へ送る（フェーズ 4）。検証モードで書き込みを止めているときは false */
     send: boolean;
     /** 結果の分からない送信を、送り先で確認した結果として記録に追加する（管理者） */
     reconcile: boolean;
-    /** 書き出し（ZIP。段 5）。検証モードで書き込みを止めているときは false */
+    /** 書き出し（ZIP。フェーズ 5）。検証モードで書き込みを止めているときは false */
     export: boolean;
-    /** 削除（段 5。管理者だけ）。検証モードで書き込みを止めているときは false */
+    /** 削除（フェーズ 5。管理者だけ）。検証モードで書き込みを止めているときは false */
     delete: boolean;
-    /** 患者情報修正・検査情報修正（段 6。一般と管理者）。検証モードで書き込みを止めているときは false */
+    /** 患者情報修正・検査情報修正（フェーズ 6。一般と管理者）。検証モードで書き込みを止めているときは false */
     modify?: boolean;
   };
   /** 大事な操作の前の再認証がある（AUTH_MODE=local のときだけ）。再認証はパスワードだけ（docs/spec.md の 3.6） */

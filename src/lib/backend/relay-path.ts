@@ -4,7 +4,7 @@ import { BackendError, type Backend } from "@/lib/backend/types";
 // 中継はビューアが画像を取る道（WADO-RS の読み取り）だけで、検索（QIDO-RS）と書き込み（STOW-RS など）は通さない。
 // 検索は画面の API（役割ごとの許可の一覧の対象）を使う。
 
-// 使える字。`..`・空の段・制御文字・`/`・`%` を断る。`,` はフレームの番号の並び（frames/1,2,3）のため。
+// 使える字。`..`・空のセグメント・制御文字・`/`・`%` を断る。`,` はフレームの番号の並び（frames/1,2,3）のため。
 // どれも URL の path にそのまま書ける字なので、符号化しない
 const SEGMENT = /^[A-Za-z0-9.,_-]+$/;
 
@@ -33,7 +33,7 @@ const isUid = (s: string | undefined): s is string => s !== undefined && s.lengt
 export const isDicomUid = (s: unknown): s is string => typeof s === "string" && isUid(s);
 /** frames の番号の並び（1 から） */
 const FRAME_LIST = /^[1-9][0-9]{0,5}(,[1-9][0-9]{0,5}){0,99}$/;
-/** 大きな値（画素など）の URI の段。Orthanc は `bulk/{tag}/{番号}/{tag}…` の形 */
+/** 大きな値（画素など）の URI のセグメント。Orthanc は `bulk/{tag}/{番号}/{tag}…` の形 */
 const BULK_SEGMENT = /^([0-9A-Fa-f]{8}|[0-9]{1,6})$/;
 const RENDITIONS = new Set(["metadata", "rendered", "thumbnail"]);
 const FRAME_RENDITIONS = new Set(["rendered", "thumbnail"]);
@@ -81,7 +81,7 @@ export function wadoRsTarget(segments: string[]): WadoRsTarget | null {
   return null;
 }
 
-/** 画像の表現（`thumbnail`・`rendered`）を求める path か（最後の段で決める。frames/1/rendered も含む） */
+/** 画像の表現（`thumbnail`・`rendered`）を求める path か（最後のセグメントで決める。frames/1/rendered も含む） */
 export function isImageRendition(path: string): boolean {
   const last = path.split("/").at(-1);
   return last === "thumbnail" || last === "rendered";
@@ -135,7 +135,7 @@ export function withoutAcceptParam(search: string): string {
   return kept.length > 0 ? `?${kept.join("&")}` : "";
 }
 
-/** Accept の中で、q が 0 より大きい形で指定されている media type か（ワイルドカードの範囲指定は指定にしない） */
+/** Accept の中で、q が 0 より大きい形で指定されている media type か（ワイルドカードで範囲を指定しているだけの場合は含めない） */
 function namesMediaType(accept: string, type: string): boolean {
   return accept.split(",").some((part) => {
     const [name, ...params] = part.split(";").map((s) => s.trim().toLowerCase());

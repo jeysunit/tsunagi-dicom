@@ -7,7 +7,7 @@ import { enqueue, history, unresolved, verify } from "@/lib/keep-uid-write";
 import { visible } from "../../../../../hl7-receiver/visible";
 const Body = z.object({ writeId: z.uuid(), note: z.string().trim().min(1).max(500) }).strict();
 
-/** 管理者の確認内容と全画像の再読み込みを記録する。書き換えは呼ばない（design.md §10）。 */
+/** 管理者の確認内容と全画像の再取得を記録する。書き換えは呼ばない（design.md §10）。 */
 export async function POST(request: Request) {
   try {
     const session = await checkedScreenWrite(request);

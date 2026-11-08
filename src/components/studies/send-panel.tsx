@@ -13,7 +13,7 @@ import type { ModalityView, StudyView } from "@/lib/fields";
 import { formatBirthLine, formatDateTimeIn, formatSlashDate } from "@/lib/format/japanese-date";
 import { cn } from "@/lib/utils";
 
-// ほかの機器へ送る（docs/spec.md の 3.4。段 4）。詳細のパネルの「送信」から、登録された機器を選び、
+// ほかの機器へ送る（docs/spec.md の 3.4。フェーズ 4）。詳細のパネルの「送信」から、登録された機器を選び、
 // 確認画面（検査と送り先を2行の表に並べる）を通して送る。送ったあとは、Orthanc の仕事の状態を終わるまで読んで出す。
 // 書き込みの要求は自分で送り直さない。答えが分からなければ「結果不明」と要求の ID を出し、送り直さずに確認する道だけを出す。
 // 送信を受け付けた後は、同じ確認画面から重ねて送らない：実行のボタンを外して「閉じる」だけを出す（2026-10-20。UX のレビューの H7）。
@@ -189,7 +189,7 @@ export function SendPanel({
   const sent = phase.kind !== "idle" && phase.kind !== "error";
   // 終わった後は「再送信…」で確認画面に戻せる（送信完了・送信失敗・再送できると分かったとき）
   const canResend = (phase.kind === "job" && isDone(phase.job)) || (phase.kind === "settled" && phase.resend);
-  // Orthanc が送信を受け付けた後（ジョブの段）は、閉じても送信は続く（結果不明のときは、その知らせの中に次にすることを出す）。
+  // Orthanc が送信を受け付けた後（ジョブの段階）は、閉じても送信は続く（結果不明のときは、その知らせの中に次にすることを出す）。
   // 受け付けの前（送信を開始している間）は閉じさせない：断られた（400・403・409 など）ときに、その知らせを見せるため
   const continuesNote = phase.kind === "job" && !isDone(phase.job);
 

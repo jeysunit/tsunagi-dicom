@@ -17,7 +17,7 @@ import { checkFieldValue, FIELD_LABELS, type CorrectionField, type CorrectionKin
 import type { StudyView } from "@/lib/fields";
 import { birthInputHint, formatBirthLine, formatSlashDate, localToday, parseBirthInput, parseDicomDate, readSex } from "@/lib/format/japanese-date";
 
-// 患者・検査の値の修正（docs/spec.md の 3.5。段 6）。一般と管理者。窓は2つに分ける。
+// 患者・検査の値の修正（docs/spec.md の 3.5。フェーズ 6）。一般と管理者。窓は2つに分ける。
 // - 患者情報修正：患者ID・氏名・生年月日・性別・受付番号。UID を保つ。氏名・生年月日・性別は同じ患者ID の全部の検査に、
 //   患者ID の付け替えと受付番号は、この検査だけに適用する（範囲は確認画面に出す）。
 // - 検査情報修正：検査日・検査名。直した新しい検査を作り、元の検査は残す。
@@ -124,7 +124,7 @@ export function ModifyPanel({
   screen: ScreenInfo;
   panelId: string;
   onClose: () => void;
-  /** 修正できたあと（一覧と詳細を再読み込みする） */
+  /** 修正できたあと（一覧と詳細を再取得する） */
   onModified: () => void;
 }) {
   const uid = study.studyInstanceUid ?? "";
@@ -147,7 +147,7 @@ export function ModifyPanel({
     });
   }, [uid]);
   useEffect(() => fetchCurrent(), [fetchCurrent]);
-  /** 同じ UID の検査の中から選んで、再読み込みする */
+  /** 同じ UID の検査の中から選んで、再取得する */
   function load(orthancId: string) {
     setCurrent(null);
     setLoadError(null);

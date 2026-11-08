@@ -7,7 +7,7 @@ import { createHttpBackend } from "@/lib/backend/http";
 import { readChanges } from "@/lib/backend/orthanc-rest";
 import { BackendError, BackendUnknownError } from "@/lib/backend/types";
 
-// 段 4：実の Orthanc の REST への要求（受け取りの記録・機器・C-ECHO・引き当て・送る・仕事の状態）を、
+// フェーズ 4：実の Orthanc の REST への要求（受け取りの記録・機器・C-ECHO・引き当て・送る・仕事の状態）を、
 // 手元の HTTP のサーバー（Orthanc の REST の形で答える）に対して確認する。答えの形は tests/fixtures/orthanc の見本。
 // 書き込みの操作（POST）は書く資格情報で、読み取りは読む資格情報で求めることも見る。
 
@@ -111,7 +111,7 @@ beforeAll(async () => {
       return json(200, storeMode === "missing-id" ? {} : { ID: JOB, Path: `/jobs/${JOB}` });
     }
     if (url === "/jobs?expand") {
-      // 値の修正（段 6）：終わっていない書き換えの仕事を数える。送るの仕事・終わった書き換えは数えない
+      // 値の修正（フェーズ 6）：終わっていない書き換えの仕事を数える。送るの仕事・終わった書き換えは数えない
       return json(200, [
         { ID: "a", Type: "ResourceModification", State: "Running" },
         { ID: "b", Type: "ResourceModification", State: "Pending" },

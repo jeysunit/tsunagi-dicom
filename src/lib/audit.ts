@@ -29,7 +29,7 @@ export const AUDIT_ACTIONS = [
   "write",
   // ビューアが画像を取る道（WADO-RS の読み取りの中継）
   "retrieve",
-  // AUTH_MODE=local（段 1b）：ログインの一時停止とその解除・画面のロックと解除・TOTP の登録とやり直し・パスワードの変更
+  // AUTH_MODE=local（フェーズ 1b）：ログインの一時停止とその解除・画面のロックと解除・TOTP の登録とやり直し・パスワードの変更
   "login_lock",
   "login_unlock",
   "screen_lock",
@@ -37,26 +37,26 @@ export const AUDIT_ACTIONS = [
   "mfa_enroll",
   "mfa_reset",
   "password_change",
-  // 大事な操作の前の、もう一度の本人の確認（段 1b）
+  // 大事な操作の前の、もう一度の本人の確認（フェーズ 1b）
   "reauth",
-  // 利用者の管理（段 1b）：作る・止める／戻す・役割の変更
+  // 利用者の管理（フェーズ 1b）：作る・止める／戻す・役割の変更
   "user_create",
   "user_status_change",
   "role_change",
   // 管理者のパスワードを失くしたときに、コンテナの中のコマンドで一時のパスワードを出した（src/lib/auth/admin-reset.ts）。
   // 画面・API からは使えない。detail の via は container_cli
   "admin_password_reset",
-  // 段 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
-  // 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、段 3 で道を外すまでこの名前で記録した
+  // フェーズ 2：検査ごとのビューアの覚えの変更（detail の flag は viewer）。BFF のデータベースだけを変える。
+  // フェーズ 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の変更も、フェーズ 3 で道を外すまでこの名前で記録した
   "study_state",
-  // 段 4（docs/spec.md の 3.3〜3.5）：受け取りの記録を開いた・機器へ C-ECHO・ほかの機器へ送る（detail の phase：
+  // フェーズ 4（docs/spec.md の 3.3〜3.5）：受け取りの記録を開いた・機器へ C-ECHO・ほかの機器へ送る（detail の phase：
   // request＝Orthanc を呼ぶ前、result＝呼んだ後、done＝仕事の終わりを読んだ、reconcile＝結果不明を照らした）
   "receive_log",
   "echo",
   "send",
   // 送信一覧を開いた（送った記録を読んだ。detail の returned に、返した患者 ID と StudyInstanceUID の組）
   "send_log",
-  // 段 5：書き出し（ZIP）。削除は上の delete（detail の phase は send と同じ）
+  // フェーズ 5：書き出し（ZIP）。削除は上の delete（detail の phase は send と同じ）
   "export",
   // つなぎの鍵が替わった（鍵つきにした・SESSION_SECRET を替えた）。detail の from（前の行の keyId。鍵の無い行なら sha256）と to
   "audit_key",
@@ -292,7 +292,7 @@ export interface AuditChainOptions {
   requireAnchors?: boolean;
   /**
    * 確認した行を 1 行ずつ渡す（食い違いの見つかった行と、その後の行は渡さない）。確認した行をそのまま使い、確認した後に
-   * 再読み込みして、その間に書き換えられた行を使うことを防ぐ（HL7 の経過。src/lib/hl7/apply.ts）
+   * 再取得して、その間に書き換えられた行を使うことを防ぐ（HL7 の経過。src/lib/hl7/apply.ts）
    */
   onRow?: (row: AuditRow) => void;
 }
@@ -320,7 +320,7 @@ export type AuditChainResult =
  *   SESSION_SECRET_PREVIOUS_FILE）。知らない鍵の印の行は、確認できないので食い違いとして返す。
  * - 鍵の印が替わってよいのは、鍵が替わったことの行（audit_key）だけ。その行は、新しい鍵で書かれ、detail の from が
  *   前の行の鍵の印（鍵の無い行なら sha256）、to が自分の鍵の印と同じでなければならない。前に使い終えた鍵へは戻れない。
- *   そのため、前の鍵（漏れたかもしれない）を名乗って、取り替えの後に行を書き追加したり、取り替えの行を作ったりできない。
+ *   そのため、前の鍵（漏れたかもしれない）を名乗って、取り替えの後に行を追記したり、取り替えの行を作ったりできない。
  * - 鍵の無い行（前の版の形）は、最初の鍵つきの行より前だけで受ける。鍵つきの行の後に鍵の無い行があれば、作り直しとして返す。
  *   鍵の無い行を前から全部作り直された（鍵つきの行を消した）ときは、つなぎだけでは見つからず、先頭の控えで見つける。
  * - 先頭の控えを渡せば、控えの seq の行の hash が控えと同じか、控えより行が少なくないか（末尾の削除）も確認する

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 4 の画面の API（受け取りの記録・機器の一覧・C-ECHO・ほかの機器へ送る・送った仕事の状態。docs/spec.md の 3.3〜3.5）を、
+// フェーズ 4 の画面の API（受け取りの記録・機器の一覧・C-ECHO・ほかの機器へ送る・送った仕事の状態。docs/spec.md の 3.3〜3.5）を、
 // 検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
 // 役割ごとに許す・断る、断ったことも記録に残る、監査の行（呼ぶ前・呼んだ後・終わり。要求の ID で結ぶ）、
 // 同じ要求の ID を二度実行しない、結果不明、CSRF（Origin）、検証モードの書き込みの止め、モックでの一巡りを見る。

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 5 の画面の API（書き出し・削除。docs/spec.md の 3.5）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
+// フェーズ 5 の画面の API（書き出し・削除。docs/spec.md の 3.5）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
 // 削除は管理者のほかを断る、書き出しは役割の表（3.6）どおり、断ったことも記録に残る、監査の行（誰が・いつ・どの検査を・理由）、
 // 同じ要求の ID を二度実行しない、結果不明と照らし合わせ、CSRF（Origin）、検証モードの書き込みの止め、モックでの一巡りを見る。
 // 再認証（AUTH_MODE=local）は tests/e2e/local-auth.spec.ts で見る。
@@ -150,7 +150,7 @@ describe("書き出し（ZIP）", () => {
       expect(disposition).not.toMatch(/JP-TEST|1\.2\.826/);
       const bytes = new Uint8Array(await res.arrayBuffer());
       expect([...bytes.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
-      // 「求めた」と「流し終えた」を分けて記録し、要求の ID で結ぶ
+      // 「求めた」と「ストリーミングを終えた」を分けて記録し、要求の ID で結ぶ
       await vi.waitFor(async () => expect(detailOf(await lastAudit("export"))).toMatchObject({ phase: "result", bytes: bytes.byteLength }));
       const rows = await exportRows(detailOf(await lastAudit("export")).requestId as string);
       expect(rows.map((r) => [detailOf(r).phase, r.outcome])).toEqual([
@@ -183,7 +183,7 @@ describe("書き出し（ZIP）", () => {
 
   it("結果の行を書き終えてから本文を閉じる。結果を記録できなくても流れは止めず、BFF のログに残す", async () => {
     state.role = "admin";
-    // 本文を読み終えた時点で、もう「流し終えた」の行がある（待たずに）
+    // 本文を読み終えた時点で、もう「ストリーミングを終えた」の行がある（待たずに）
     const res = await exportZip();
     const size = (await res.arrayBuffer()).byteLength;
     expect(detailOf(await lastAudit("export"))).toMatchObject({ phase: "result", bytes: size });
@@ -202,7 +202,7 @@ describe("書き出し（ZIP）", () => {
     expect(log.mock.calls.some((c) => String(c[0]).includes("export_result_not_recorded"))).toBe(true);
   });
 
-  // 結合の試験（実の Orthanc。#30）で、実行し終えたときの結果の行が残らないと分かった（BFF のログに export_result_not_recorded）。
+  // 結合の試験（実の Orthanc。#30）で、ストリーミングを終えたときの結果の行が残らないと分かった（BFF のログに export_result_not_recorded）。
   // 結果は答えを返した後に書くので、その時には要求の headers() を読めない。要求の間に送り元を取っておき、結果の記録に渡す
   it("流し終えた・切られたときの結果の行は、答えを返した後（要求の外）でも残り、送り元も要求の時のもの", async () => {
     state.role = "admin";
@@ -418,7 +418,7 @@ describe("削除", () => {
     }
   });
 
-  /** 消す直前の再読み込み（2 回目の引き当て）で止めておき、その間にほかの操作を挟む */
+  /** 消す直前の再取得（2 回目の引き当て）で止めておき、その間にほかの操作を挟む */
   async function pausedDelete(confirmToken: string) {
     const { getBackend } = await import("@/lib/backend");
     const backend = getBackend();
@@ -574,7 +574,7 @@ describe("削除：違う検査を消さない", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ patientId: "JP-TEST-0004", patientName: "試験 髙子", studyDate: "20260410", seriesCount: 1, instanceCount: 4 });
-    // 要約の生年月日・性別は、一覧の行の値でなく Orthanc から再読み込みした値
+    // 要約の生年月日・性別は、一覧の行の値でなく Orthanc から再取得した値
     expect(body).toMatchObject({ patientBirthDate: "19600715", patientSex: "F" });
     const { openDeleteConfirm } = await import("@/lib/pacs-ops");
     const { getBackend } = await import("@/lib/backend");
@@ -732,7 +732,7 @@ describe("削除：違う検査を消さない", () => {
     vi.spyOn(backend, "studyInfo").mockImplementation(async (id) => {
       const info = await real(id);
       calls += 1;
-      // 2 回目（消す直前の再読み込み）だけ、版が替わった形
+      // 2 回目（消す直前の再取得）だけ、版が替わった形
       return info && (calls >= 2 ? { ...info, version: "changed-later" } : info);
     });
     const spy = vi.spyOn(backend, "deleteStudy");

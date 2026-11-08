@@ -4,7 +4,7 @@
 
 - 決定（2026-10-25）：画面の値の修正を2種類に分ける。患者の属性（患者 ID・氏名・生年月日・性別）と受付番号の訂正は、IHE の PIR と同じく Study・Series・SOP Instance UID を保つ。HL7 の更新が持つ `Keep`・`Force`・元の置き換えの形を使い回す。画像の中身が変わる訂正（検査日など）は、今のまま新しい UID を作る。
 - 原典は IHE RAD TF-2 Rev. 23.0（2025-08-08）の 4.14.4.1.3・4.16.4.2.3・4.17.4.2.3・4.13.4.3・4.12、IHE RAD TF-1 Rev. 23.0 の Case 6（4.3.1・4.4.6）。要点は `docs/spec.md` の 3.5 に書いた。
-- HL7 による患者情報の更新（`openspec/changes/archive/2026-10-24-add-hl7-patient-update-receiver/design.md` と `openspec/changes/add-pir-case6-procedure-update/design.md`。以下「HL7 の設計」）は、UID を保つ書き換え・付け替えの印・元の画像の指定の削除・書き換えの後の確認・結果不明の照らし合わせを持つ。
+- HL7 による患者情報の更新（`openspec/changes/archive/2026-10-24-add-hl7-patient-update-receiver/design.md` と `openspec/changes/add-pir-case6-procedure-update/design.md`。以下「HL7 の設計」）は、UID を保つ書き換え・付け替えの印・元の画像の指定による削除・書き換えの後の確認・結果不明の照らし合わせを持つ。
 - 書き込みの操作の共通の決まり（役割・CSRF・ロック中の 423・要求の ID・呼ぶ前と後の監査の記録・結果不明・照らし合わせ・再認証）は `docs/spec.md` の 3.5 にあり、送信・削除が使っている。
 
 ## Goals / Non-Goals
@@ -18,8 +18,8 @@
 **Non-Goals:**
 
 - 送った先の機器に、直した値を知らせること（HL7 の転送・自動の再送信）。送った先を直すのは施設の運用。
-- 他の施設のデータを自施設の患者 ID に書き換えて取り込む形（`docs/spec.md` の 3.5 の取り込み。段 6 の別の PR で、この change の部品を使って決める）。
-- 結合と分割（段なし）。
+- 他の施設のデータを自施設の患者 ID に書き換えて取り込む形（`docs/spec.md` の 3.5 の取り込み。フェーズ 6 の別の PR で、この change の部品を使って決める）。
+- 結合と分割（フェーズなし）。
 
 ## Decisions
 
@@ -91,6 +91,6 @@ Orthanc は、同じ患者 ID の下に同じ UID の画像を1件しか持て�
 
 ## Migration Plan
 
-- 実装は段 6 の中の1つのまとまりとして出す（AGENTS.md の PR の単位）。HL7 の部品の切り出しを先の PR にし、HL7 の試験が全部通ることを確認してから、値の修正の PR を出す。
+- 実装はフェーズ 6 の中の1つのまとまりとして出す（AGENTS.md の PR の単位）。HL7 の部品の切り出しを先の PR にし、HL7 の試験が全部通ることを確認してから、値の修正の PR を出す。
 - データベースは変えない（監査の記録の `detail` に入れる）。
 - 戻すときは前の版に戻す。属性の訂正で直した値は Orthanc に残る（監査の記録の前の値で、手で戻せる）。

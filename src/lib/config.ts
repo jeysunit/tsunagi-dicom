@@ -6,7 +6,7 @@ import { parseInstanceTags } from "@/lib/instance-tags";
 // 設定の読み込み（docs/spec.md の 2.1。正本は .env.example）。
 // 足りない・誤った値があれば、どの変数かを並べて ConfigError を投げる。値そのものは文言に出さない（秘密を漏らさない）。
 
-/** Orthanc 専用（docs/spec.md の 0）。汎用の DICOMweb（dicomweb）は段 3 で外した */
+/** Orthanc 専用（docs/spec.md の 0）。汎用の DICOMweb（dicomweb）はフェーズ 3 で外した */
 export type BackendKind = "orthanc";
 export type AuthMode = "local" | "oidc" | "dev";
 
@@ -19,7 +19,7 @@ export interface AppConfig {
     username?: string;
     password?: string;
     /**
-     * 書く資格情報（BACKEND_WRITE_USERNAME・BACKEND_WRITE_PASSWORD。段 4）。Orthanc への書き込みの操作（POST）に使う。
+     * 書く資格情報（BACKEND_WRITE_USERNAME・BACKEND_WRITE_PASSWORD。フェーズ 4）。Orthanc への書き込みの操作（POST）に使う。
      * 無ければ読む資格情報で書く（試しの環境のため。患者の情報を置く環境では分けることが施設の必須。
      * docs/security-and-maintenance.md の 4.1）
      */
@@ -328,7 +328,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     problem("BACKEND_USERNAME", "パスワードがあるときは必須");
   }
 
-  // 書く資格情報（段 4。docs/security-and-maintenance.md の 4.1）。名前とパスワードは組で渡す
+  // 書く資格情報（フェーズ 4。docs/security-and-maintenance.md の 4.1）。名前とパスワードは組で渡す
   const bothWritePasswords = e.BACKEND_WRITE_PASSWORD !== undefined && e.BACKEND_WRITE_PASSWORD_FILE !== undefined;
   const writePassword = secret("BACKEND_WRITE_PASSWORD", e.BACKEND_WRITE_PASSWORD, e.BACKEND_WRITE_PASSWORD_FILE);
   const writePasswordFileFailed = e.BACKEND_WRITE_PASSWORD_FILE !== undefined && writePassword === undefined;
@@ -352,7 +352,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
   if (e.AUTH_MODE === "oidc") {
     problem("AUTH_MODE", "oidc はまだ無い（段 4 で作る）。いまは local（アプリの利用者）と開発用の dev（モックだけ）が動く");
   } else if (e.AUTH_MODE === "dev" && !e.BACKEND_MOCK) {
-    // 段 1a〜1b の決まり（docs/spec.md の 4）。実の画像サーバーには local を使う
+    // フェーズ 1a〜1b の決まり（docs/spec.md の 4）。実の画像サーバーには local を使う
     problem("AUTH_MODE", "dev は BACKEND_MOCK=true のときだけ起動する。実の画像サーバーには local を使う");
   }
 

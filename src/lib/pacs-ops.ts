@@ -73,7 +73,7 @@ export async function unresolvedRequests(
 }
 
 /**
- * 削除：「求めた」を記録してから DELETE を送るまでの上限の時間。その間の手順（引き当てと再読み込み）は時間切れで止まるので、
+ * 削除：「求めた」を記録してから DELETE を送るまでの上限の時間。その間の手順（引き当てと再取得）は時間切れで止まるので、
  * これを過ぎて「送る」の行（dispatch）が無い要求は、もう送られない（送る直前の確認で断る）
  */
 export const DELETE_DISPATCH_DEADLINE_MS = 2 * 60_000;
@@ -86,7 +86,7 @@ export const IMPORT_DISPATCH_DEADLINE_MS = 2 * 60_000;
 
 /**
  * 取り込み：「求めた」を記録してから、結果の行を書き終えるまでの上限の時間の見込み。Orthanc へ送る時間切れ（5 分。
- * src/lib/backend/http.ts の IMPORT_TIMEOUT_MS）・保存した値の再読み込み・違ったときに消す時間を追加して余裕を見た値。
+ * src/lib/backend/http.ts の IMPORT_TIMEOUT_MS）・保存した値の再取得・違ったときに消す時間を追加して余裕を見た値。
  * 結果の行が無い要求は、これを過ぎるまで管理者も手で解かない（元の処理がまだ動いているかもしれない）。
  * 送る前の要求は、これより前に IMPORT_DISPATCH_DEADLINE_MS を過ぎるので、解いた後に送り出すことはない
  */
@@ -263,7 +263,7 @@ export function openDeleteConfirm(token: string, sessionSecret: string, now = Da
 }
 
 /**
- * 値の修正の確認画面で見せたもの（段 6）。見せた利用者・URL の StudyInstanceUID・選んだ検査（Orthanc の中の ID）・
+ * 値の修正の確認画面で見せたもの（フェーズ 6）。見せた利用者・URL の StudyInstanceUID・選んだ検査（Orthanc の中の ID）・
  * 種類と範囲と、見せた状態の印（state。直す検査の全部の画像の UID の組と値・直す値・替え先の患者の値から作る SHA-256）。
  * 状態の全部を token に入れると、検査の多い患者で大きくなるので、印にする。書き換える直前に、いまの状態から同じ印を作り、
  * 違えば書き換えずに断る

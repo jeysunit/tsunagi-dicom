@@ -39,17 +39,17 @@ Accept: application/dicom+json, application/json
 NumberOfStudyRelatedSeries `00201206`・NumberOfStudyRelatedInstances `00201208`）を求めるもの。
 上の `dicom-web/studies.json` は `includefield` 無しでコピーしたので、**StudyDescription（`00081030`）が入っていない**
 （モックの一覧の「検査の記述」の列は空になる）。合成の値を手で追加することはせず（コピーと要求の対応が崩れるため）、
-**段 2 で、BFF と同じ要求でコピーし直す**。
+**フェーズ 2 で、BFF と同じ要求でコピーし直す**。
 
 ### 中継（WADO-RS）の見本
 
 BFF の中継はビューアが画像を取る道（WADO-RS の読み取り）だけを通す（`docs/spec.md` の 3.2）。
 WADO-RS の応答（`metadata`・frames など）の見本はまだ無いので、モックの中継は宛先を確認したうえで 404 を返す。
-ただしサムネイル（`thumbnail`・`rendered`）は、コピーのある1枚（`rest/instances/{id}/preview.png`）の検査・シリーズ・画像に限り、その絵を返す（段 2。一覧と詳細のパネルの代表のサムネイルの試験のため）。`Accept: image/png` には PNG、`image/jpeg` と Accept の無い要求には JPEG（`preview.jpg`）を返す（求めた型と違う型を返さない。2026-10-21）。
+ただしサムネイル（`thumbnail`・`rendered`）は、コピーのある1枚（`rest/instances/{id}/preview.png`）の検査・シリーズ・画像に限り、その絵を返す（フェーズ 2。一覧と詳細のパネルの代表のサムネイルの試験のため）。`Accept: image/png` には PNG、`image/jpeg` と Accept の無い要求には JPEG（`preview.jpg`）を返す（求めた型と違う型を返さない。2026-10-21）。
 上の QIDO-RS のコピーは、画面の API（検索）のモックに使う。詳細のパネルのシリーズの並びは、QIDO-RS のコピーが1件の検査の分しか無いので、
 REST のコピー（`rest/studies`・`rest/series`）から組み立てる（`src/lib/backend/mock.ts`）。
 
-## 手で作った見本（`made/`。段 4）
+## 手で作った見本（`made/`。フェーズ 4）
 
 `made/` の中は、**実の Orthanc の応答のコピーではない**。受け取りの記録・機器・C-ECHO・送るのモックのために、
 Orthanc Book（REST API の「Tracking changes」「Sending resources to remote modalities」と、

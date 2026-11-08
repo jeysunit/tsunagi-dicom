@@ -62,7 +62,7 @@ export interface StudyListResult {
 }
 
 /**
- * インポートの印のある検査（Orthanc のラベル。段 6）。読めなければ印を出さずに一覧を出す（印は補いの情報で、一覧を止めない）。
+ * インポートの印のある検査（Orthanc のラベル。フェーズ 6）。読めなければ印を出さずに一覧を出す（印は補いの情報で、一覧を止めない）。
  * 古い Orthanc（ラベルの無い 1.12.0 より前）でも同じ
  */
 async function importedUids(deps: ListDeps): Promise<Set<string>> {

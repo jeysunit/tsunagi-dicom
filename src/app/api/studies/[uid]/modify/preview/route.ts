@@ -13,7 +13,7 @@ import { signModifyConfirm } from "@/lib/pacs-ops";
 import { CorrectionRefused, readCurrent, readSnapshot } from "@/lib/study-correction";
 import { Kind, OrthancId, pendingContent, UNRESOLVED, Values } from "../shared";
 
-// 値の修正の確認画面（docs/spec.md の 3.5。段 6）。直す検査（患者の属性の訂正では同じ患者 ID の全部の検査）・直す項目の
+// 値の修正の確認画面（docs/spec.md の 3.5。フェーズ 6）。直す検査（患者の属性の訂正では同じ患者 ID の全部の検査）・直す項目の
 // 前と後の値・患者 ID の付け替えでは替え先の患者の値を Orthanc から読んで返し、見せた状態を token に結ぶ（./route.ts が照らす）。
 // 直す値は患者の情報なので、URL に載せず本文で受ける（POST。Orthanc には書かない）。
 // 同じ StudyInstanceUID の検査が複数あれば、選ぶための要点を添えて 409 を返す（画面は orthancId を添えて開き直す）。
@@ -88,7 +88,7 @@ export async function POST(request: Request, { params }: Context) {
         if (e.reason === "ambiguous") {
           await audit(session, { action: "view_study", studyInstanceUid: uid, detail: { via: "modify_preview_candidates" } });
         }
-        // 付け替え先の患者と値が違う断りも、実行の段の断りと同じく残す。患者の値（入力も付け替え先も）は入れない
+        // 付け替え先の患者と値が違う断りも、実行のステップの断りと同じく残す。患者の値（入力も付け替え先も）は入れない
         if (e.reason === "target_mismatch") {
           await audit(session, { action: "modify", outcome: "denied", studyInstanceUid: uid, detail: { reason: e.reason, via: "preview" } });
         }

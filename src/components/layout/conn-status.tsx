@@ -53,7 +53,7 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
     return () => window.clearInterval(timer);
   }, [load]);
 
-  // 開く直前に、ボタンの真下（右端をそろえて）へ置き、状態を再読み込みする。popover は最前面の層に出るので、位置は自分で決める
+  // 開く直前に、ボタンの真下（右端をそろえて）へ置き、状態を再取得する。popover は最前面の層に出るので、位置は自分で決める
   useEffect(() => {
     const popover = popoverRef.current;
     const button = buttonRef.current;
@@ -81,7 +81,7 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
   const view = state.kind === "ready" ? state.view : undefined;
   const targets = view?.modalities?.map((m) => m.id) ?? [];
 
-  // 登録された接続先すべてに、つながるかの確認（C-ECHO）をかけ、終わったら状態を再読み込みする。接続先の頁の「全部を接続確認」と同じ要求
+  // 登録された接続先すべてに、つながるかの確認（C-ECHO）をかけ、終わったら状態を再取得する。接続先の頁の「全部を接続確認」と同じ要求
   async function checkAll() {
     if (targets.length === 0) return;
     // 再描画の前に素早く 2 回押されても 1 回だけ実行する（state は描画まで替わらないので ref で塞ぐ）

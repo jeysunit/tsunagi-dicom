@@ -84,7 +84,7 @@ test.describe("部品の寸法", () => {
     await page.goto("/modalities");
     const all = page.getByTestId("echo-all");
     await expect(all).toBeVisible();
-    // 表の上の操作は小さいボタン（.btn-sm 28px）。標準（32px）は受け取りの「読み直す」
+    // 表の上の操作は小さいボタン（.btn-sm 28px）。標準（32px）は受け取りの「再読み込み」
     expect(await styleOf(all, ["height", "borderTopLeftRadius", "boxShadow", "borderTopWidth"])).toEqual({
       height: "28px",
       borderTopLeftRadius: "4px",

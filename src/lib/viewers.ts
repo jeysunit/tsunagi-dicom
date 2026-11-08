@@ -3,7 +3,7 @@ import type { ModalityGroup } from "@/lib/modalities";
 
 // ビューアの部品（ViewerAdapter。docs/spec.md の 3.2）。設定で URL が与えられたものだけを出す。
 // ビューアは BFF の中継（/api/dicom-web）から画像を取るように、ビューアの側で設定する（中継の住所はビューアの設定）。
-// ここでは、検査を開く URL だけを作る。Weasis（weasis://）は段 4 の後なので、まだ出さない。
+// ここでは、検査を開く URL だけを作る。Weasis（weasis://）はフェーズ 4 の後なので、まだ出さない。
 
 export const VIEWER_IDS = ["ohif", "stone", "volview", "dicomweb"] as const;
 export type ViewerId = (typeof VIEWER_IDS)[number];

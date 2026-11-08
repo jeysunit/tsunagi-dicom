@@ -12,7 +12,7 @@
 
 - [x] 3.1 A40 と ORM の受理で `ack` の行に覚えを入れる
 - [x] 3.2 `Backend` に `studyIsStable` を追加し（`http.ts`・モック）、`tests/unit/hl7-http-backend.test.ts` で確認する
-- [x] 3.3 `src/lib/hl7/sweep.ts` に見回り（design.md の 15）を書き、確認を同じ StudyInstanceUID の全部の検査で行うようにする。`tests/unit/helpers/fake-orthanc.ts` の画像ごとの Orthanc で、`tests/unit/hl7-case6.test.ts` に、書き換える場面と書き換えない場面（別の患者・覚えに無い検査・期限の外・2 段・先が決まらない・氏名の違い・同じ UID の別の患者・届き終えていない・最中に届いた・止まっていた間に届いた・結果不明・検証モード・同時に届く）を追加する
+- [x] 3.3 `src/lib/hl7/sweep.ts` に見回り（design.md の 15）を書き、確認を同じ StudyInstanceUID の全部の検査で行うようにする。`tests/unit/helpers/fake-orthanc.ts` の画像ごとの Orthanc で、`tests/unit/hl7-case6.test.ts` に、書き換える場面と書き換えない場面（別の患者・覚えに無い検査・期限の外・2 ステップ・先が決まらない・氏名の違い・同じ UID の別の患者・届き終えていない・最中に届いた・止まっていた間に届いた・結果不明・検証モード・同時に届く）を追加する
 - [x] 3.4 `POST /api/hl7/sweep` と、受け口の定期の呼び出しを追加し、`tests/unit/hl7-sweep-route.test.ts` で token・設定の無いとき・重ねない呼び出し・誤りの続く BFF を確認する
 - [x] 3.5 取り違えの経路を塞ぐ（design.md の 15.1・15.3・15.4）。A40 で書き換えた検査は統合した先に残っているときだけ使う（人の書き戻しを統合し直さない）、画像の患者 ID を確認する、HL7 の行を鍵つきの値とつなぎで確認する（`tests/unit/hl7-history.test.ts`）、`KeepSource: false` をやめて元の画像を指定して消す（`Backend.deleteStudyInstances`）。結合の試験（`tests/integration/orthanc.spec.ts` の 19）で、本物の Orthanc に書き換えの最中に画像を送る
 - [x] 3.6 付け替えの印（design.md の 15.4）。`deploy/orthanc/tsunagi-lock.lua` の `ReceivedCStoreInstanceFilter` で、印のある検査と同じ StudyInstanceUID の C-STORE を `0xA700` で断る。`Backend` に `lockStudy`・`unlockStudy`・`studyInstanceOrigins` を追加し（`http.ts`・モック）、`apply.ts` で患者 ID の変わる書き換えの前に印を付け、期限を延ばし、終わったら・失敗したら外す。元を消す前に `ModifiedFrom` を確認する。開発の一式と結合の試験の Orthanc に `LuaScripts`・`UserMetadata` を追加する。`tests/unit/hl7-lock.test.ts`・`hl7-http-backend.test.ts` と、結合の試験の 19（最中の C-STORE は断られ、印が外れた後の送り直しは保存される。REST で届いた画像は残り部分反映）・20（Lua が印の間だけ断る）・21（`ModifiedFrom` が合わなければ元を消さない）で確認する

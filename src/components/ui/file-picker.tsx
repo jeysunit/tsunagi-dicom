@@ -53,7 +53,7 @@ export type ImportOutcome = { ok: true; note?: string } | { ok: false; reason: s
  */
 export type ResolveResult = { ok: true } | { ok: false; message: string };
 
-/** 結果を行の状態にコピーする。結果不明の行は、確認して記録するための指定を持つ（届いたか分からない行には無い） */
+/** 結果を行の状態にコピーする。結果不明の行は、確認して記録するための識別子を持つ（届いたか分からない行には無い） */
 const stateOf = (o: ImportOutcome): Pick<PickItem, "state" | "reason" | "resolve"> =>
   o.ok ? { state: "ok", reason: o.note ?? "", resolve: undefined } : { state: o.unknown ? "uk" : "ng", reason: o.reason, resolve: o.unknown ? o.resolve : undefined };
 
@@ -145,7 +145,7 @@ export function FilePicker({
   /** 結果不明の知らせの最後の 1 文（確認を頼む先）。初期値は「管理者に確かめを頼んでください。」。管理者には空を渡す */
   unknownHelp?: string;
   /**
-   * 結果不明の行を確認して記録する（確認できる利用者＝管理者にだけ渡す）。渡すと、結果の後、指定（要求の ID と検査の UID）を
+   * 結果不明の行を確認して記録する（確認できる利用者＝管理者にだけ渡す）。渡すと、結果の後、識別子（要求の ID と検査の UID）を
    * 持つ結果不明の行に「確認」を出し、押すと一覧の下に確認の欄を開く。渡さなければ「確認」は出さない
    */
   resolveUnknown?: (target: ResolveTarget, outcome: "success" | "failed", note: string) => Promise<ResolveResult>;
@@ -431,7 +431,7 @@ export function FilePicker({
   const done = c.ok + c.ng + c.unknown;
   const notice = phase === "done" ? resultNotice(c, unknownHelp) : null;
   const showDrop = items.length === 0 || idle;
-  // 開いている確認の欄の行（指定を持つ結果不明の行だけ。ほかに変わっていたら欄は出さない）
+  // 開いている確認の欄の行（識別子を持つ結果不明の行だけ。ほかに変わっていたら欄は出さない）
   const resolveItemNow = (() => {
     const row = resolving ? items.find((i) => i.id === resolving.id) : undefined;
     return row && isResolvable(row) ? row : undefined;

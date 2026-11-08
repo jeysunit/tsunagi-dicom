@@ -76,7 +76,7 @@ DCMTK の土台（Debian）は Dependabot が週に1回、更新の PR を出す
 
 試験の中で測った Orthanc の実の振る舞い（メタデータの名前・`/changes` の上限・仕事の状態の移り方・`ErrorCode`）は、`test-results/integration/observations.json` に書き出し、CI の記録にも `[itest-observation]` の行で出す（名前・数・状態・誤りの番号と文言だけ。資格情報とホスト名は出さない）。結果は [`round-trip-test.md`](round-trip-test.md) の「実測で決めること」にコピーする。
 
-## 実行し方
+## 実行方法
 
 CI では、PR ごとに `.github/workflows/integration.yml` の仕事（`結合の試験（Orthanc・DCMTK のコンテナ）`）が流れる。いまは必須のチェックにしていない。
 
@@ -92,7 +92,7 @@ node tests/integration/run.mjs
 ```
 
 - 使うポート：BFF 3104、Orthanc の HTTP 18042（`ITEST_ORTHANC_HTTP_PORT` で替えられる）、入口 18043。どれも 127.0.0.1 だけ。
-- 失敗したときは、`run.mjs` がコンテナの記録（`docker compose logs`）を出してから片付ける。画面のコピーと手がかりは `test-results/integration/`（CI の成果物には、測った値の `observations.json` と画面のコピーだけを上げる）。
+- 失敗したときは、`run.mjs` がコンテナの記録（`docker compose logs`）を出してから片付ける。スクリーンショットと手がかりは `test-results/integration/`（CI の成果物には、測った値の `observations.json` とスクリーンショットだけを上げる）。
 - CI では、`run.mjs` が作った値を GitHub Actions の伏せ字（`::add-mask::`）に登録してから試験を実行する（失敗した操作の記録に、入力した値が出ても伏せ字になる）。手元で実行したときの出力は伏せない（手元の画面にだけ出る）。
 - trace と HTML の報告は作らない。入力した値（試験だけの管理者のパスワード）と通信の中身が残り、CI の成果物として外に出るため。
 - 監査の記録は、`/api/audit/verify` のつなぎに加えて、試験の BFF のデータベース（`.e2e/itest/itest.db`）を読むだけで開き、送る・削除・書き出しの要求ごとに「求めた」「結果」「終わり」の行が要求の ID で結ばれていることを照らす（`tests/integration/support/audit-db.ts`）。
@@ -104,7 +104,7 @@ node tests/integration/run.mjs
 
 - `tests/flow/run.mjs` が `docker/dev/up.sh` で一式を立て、`tests/flow/flow.spec.ts` を実行し、片付ける（`FLOW_KEEP=1` なら残す）。compose のプロジェクトは `tsunagi-flow`、ポートは画面 13000・DICOM 14242・DTG の Web 画面 18180・ris-emulator の Web 画面 18181 で、手元で使っている開発用の一式（`tsunagi-dev`）とは volume もポートも分ける。
 - 確認すること：Orthanc の REST（8042）がホストに公開されていない。内部ネットワーク `backend` が `internal: true` で、tsunagi-dicom と Orthanc だけが入る。ホストに公開した DICOM（4242）に C-ECHO が通る。ris-emulator は Web 画面（8081）だけを 127.0.0.1 に公開し、MWL（11112）は公開しない。DTG の CLI で送った架空の患者が受信一覧に出て、tsunagi-dicom から storescp へ送信すると、同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。ris-emulator の CLI で作った予約を、DTG がワークリスト（MWL）で取得して撮り、Orthanc へ送ると、tsunagi-dicom の検査の一覧に、予約の StudyInstanceUID・受付番号・患者 ID で出る。
-- CI の記録に `[flow]` の行で、各段の画像の数を出す。
+- CI の記録に `[flow]` の行で、各ステップの画像の数を出す。
 
 ```sh
 npm ci

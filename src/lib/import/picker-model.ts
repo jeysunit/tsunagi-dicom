@@ -12,7 +12,7 @@ import { formatCount, formatSize, type PreviewTags } from "@/lib/import/dicom-pr
  */
 export type PickState = "check" | "wait" | "run" | "ok" | "ng" | "uk" | "ex" | "cx";
 
-/** 結果不明の行を確認して記録するときに BFF へ渡す指定（インポートの要求の ID と、その検査の Study Instance UID） */
+/** 結果不明の行を確認して記録するときに BFF へ渡す識別子（インポートの要求の ID と、その検査の Study Instance UID） */
 export interface ResolveTarget {
   requestId: string;
   studyInstanceUid: string;
@@ -33,7 +33,7 @@ export interface PickItem<F = File> {
   /** 除外（利用者が外した） */
   off: boolean;
   tags: PreviewTags | null;
-  /** 結果不明の行を管理者が確認して記録するための指定。BFF に届いた要求だけが持つ（届いたか分からない行には無い） */
+  /** 結果不明の行を管理者が確認して記録するための識別子。BFF に届いた要求だけが持つ（届いたか分からない行には無い） */
   resolve?: ResolveTarget;
   /** 結果不明の行を管理者が確認して記録した行（札は成功か失敗。結果の知らせに「うち K 件は管理者が確認」と数える） */
   confirmed?: boolean;
@@ -174,7 +174,7 @@ function ngText(c: PickCounts): string {
 
 /**
  * 終わったときの知らせ（区画の上）。kind は Notice の種類、alert は失敗か結果不明があるとき。
- * 管理者が記録した行を含むときは silent（role を付けない）：記録のときに読み上げの領域が 1 回伝えるので、知らせでは再読み込みしない。
+ * 管理者が記録した行を含むときは silent（role を付けない）：記録のときに読み上げの領域が 1 回伝えるので、知らせでは再度読み上げない。
  * 失敗の文は「理由は各行の状態」で止める（理由が「もう画像サーバーにある」のときは、選び直しても入らないため）
  */
 export function resultNotice(c: PickCounts, unknownHelp = UNKNOWN_HELP): { kind: "ok" | "warn" | "err"; text: string; alert: boolean; silent?: true } {
@@ -261,7 +261,7 @@ export function addedMessage(fresh: readonly PickItem<unknown>[], duplicates: nu
   return `${formatCount(fresh.length)} 件を追加しました。${ex ? `対象外 ${formatCount(ex)} 件。` : ""}${dup}合計 ${formatCount(all.length)} 件・${formatSize(total)}。`;
 }
 
-/** 確認できる行（結果不明で、BFF に届いた要求の指定を持つ）。「確認」のボタンを出す行 */
+/** 確認できる行（結果不明で、BFF に届いた要求の識別子を持つ）。「確認」のボタンを出す行 */
 export const isResolvable = (i: PickItem<unknown>): i is PickItem<unknown> & { resolve: ResolveTarget } => i.state === "uk" && !i.off && !!i.resolve;
 
 /** 結果不明の理由の句を替える先（確認して記録した行の、札の下の 1 句） */
@@ -273,7 +273,7 @@ export const RESOLVE_UNREACHABLE_MESSAGE = "サーバーに接続できません
 /** 確認内容の欄の誤り（空・空白だけ） */
 export const NOTE_REQUIRED = "確認内容を入力してください。";
 
-/** 確認して記録したあと：その行の札を成功か失敗に替える。指定は外し、札の下の 1 句は「管理者が確認」にする */
+/** 確認して記録したあと：その行の札を成功か失敗に替える。識別子は外し、札の下の 1 句は「管理者が確認」にする */
 export function resolveItem<F>(items: readonly PickItem<F>[], id: number, outcome: "success" | "failed"): PickItem<F>[] {
   return items.map((i) => {
     if (i.id !== id || !isResolvable(i)) return i;

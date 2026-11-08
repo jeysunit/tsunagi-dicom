@@ -24,7 +24,7 @@ import {
   type RequestRow,
 } from "@/lib/pacs-ops";
 
-// 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ（study.delete）、理由を必須、再認証の後（AUTH_MODE=local）。
+// 検査の削除（docs/spec.md の 3.5。フェーズ 5）。管理者だけ（study.delete）、理由を必須、再認証の後（AUTH_MODE=local）。
 // 書き込みの操作の共通の決まり（3.5）を通す：CSRF・検証モードの止め・呼ぶ前の記録（記録できなければ消さない）・
 // 呼んだ後の記録・要求の ID で二度実行しない・答えが分からなければ結果不明。
 // **違う検査を消さない**：
@@ -56,7 +56,7 @@ async function assertReauth(session: Session) {
 
 type Target = { kind: "ok"; info: OrthancStudyInfo } | { kind: "not_found" } | { kind: "ambiguous"; count: number } | { kind: "mismatch" };
 
-/** URL の UID から、消してよい検査をちょうど1つ引く（Orthanc から再読み込みする） */
+/** URL の UID から、消してよい検査をちょうど1つ引く（Orthanc から再取得する） */
 async function resolveTarget(backend: Backend, uid: string): Promise<Target> {
   const ids = await backend.lookupStudyIds(uid);
   if (ids.length === 0) return { kind: "not_found" };
@@ -158,7 +158,7 @@ export async function POST(request: Request, { params }: Context) {
     const result = (outcome: "success" | "failed" | "unknown", extra: Record<string, unknown> = {}) =>
       audit(session, { action: "delete", outcome, patientId: info.patientId, studyInstanceUid: uid, detail: { requestId, phase: "result", ...extra } });
 
-    // 消す直前に、もう一度 Orthanc から再読み込みして確認する（記録の間に、検査が替わっていないこと）。読めなければ消さずに失敗として残す
+    // 消す直前に、もう一度 Orthanc から再取得して確認する（記録の間に、検査が替わっていないこと）。読めなければ消さずに失敗として残す
     let again: Target;
     try {
       again = await resolveTarget(backend, uid);

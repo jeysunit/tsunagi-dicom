@@ -8,12 +8,12 @@ import { getBackend } from "@/lib/backend";
 import { BackendError } from "@/lib/backend/types";
 import { assertWriteAllowed } from "@/lib/pacs-ops";
 
-// 書き出し（ZIP。docs/spec.md の 3.5。段 5）。検査の画像の全部を、Orthanc の /studies/{id}/archive から受けて、そのまま実行する。
+// 書き出し（ZIP。docs/spec.md の 3.5。フェーズ 5）。検査の画像の全部を、Orthanc の /studies/{id}/archive から受けて、そのままストリーミングする。
 // ZIP は患者の情報を含んだまま施設の外へ持ち出せる形になるので：
 // - 役割（study.export）を確認し、検証モードでは DEV_ALLOW_WRITE=true のときだけ通す。
 // - このアプリの画面（同じ origin）からの要求だけを受ける（ほかのサイトから落とさせない）。
 // - 落とす前に記録し（記録できなければ渡さない）、Orthanc が断れば失敗を記録する。
-// - ファイルの名前に患者の情報を入れない。BFF には残さない（実行するだけ）。
+// - ファイルの名前に患者の情報を入れない。BFF には残さない（中継するだけ）。
 
 type Context = { params: Promise<{ uid: string }> };
 
@@ -44,9 +44,9 @@ export async function GET(request: Request, { params }: Context) {
     }
     const patientId = info.patientId;
 
-    // 取る前に「求めた」を記録する（記録できなければ渡さない）。結果（実行し終えた・途中で切れた）は別の行に残し、要求の ID で結ぶ
+    // 取る前に「求めた」を記録する（記録できなければ渡さない）。結果（ストリーミングを終えた・途中で切れた）は別の行に残し、要求の ID で結ぶ
     const requestId = randomUUID();
-    // 結果の行は、答えを返した後（実行し終えた・切られたとき）に書く。そのときは要求の headers() を読めないので、
+    // 結果の行は、答えを返した後（ストリーミングを終えた・切られたとき）に書く。そのときは要求の headers() を読めないので、
     // 送り元は要求の間に取っておき、どの行にも同じ値を渡す
     const source = await auditSource();
     const record = (outcome: "success" | "failed", phase: "request" | "result", extra: Record<string, unknown> = {}) =>
@@ -84,9 +84,9 @@ export async function GET(request: Request, { params }: Context) {
 type ExportRecorder = (outcome: "success" | "failed", phase: "result", extra?: Record<string, unknown>) => Promise<unknown>;
 
 /**
- * 本文を実行しながら、終わり方を記録する：実行し終えた（success・bytes）、Orthanc の側で切れた・時間切れ（failed・interrupted）、
+ * 本文をストリーミングしながら、終わり方を記録する：ストリーミングを終えた（success・bytes）、Orthanc の側で切れた・時間切れ（failed・interrupted）、
  * ブラウザの側で切った（failed・cancelled）。結果の行を書き終えてから、本文を閉じる・誤りにする（書き終える前にプロセスが
- * 止まって「求めた」だけが残る間を狭める）。もう実行し始めているので、記録できなくても流れは止めない（BFF のログに残す）
+ * 止まって「求めた」だけが残る間を狭める）。もうストリーミングを始めているので、記録できなくても流れは止めない（BFF のログに残す）
  */
 function watchedBody(source: ReadableStream<Uint8Array>, record: ExportRecorder): ReadableStream<Uint8Array> {
   const reader = source.getReader();

@@ -5,7 +5,7 @@ import { BUILTIN_MODALITY_DEFAULTS, type ViewerId } from "@/lib/viewers";
 
 // ビューアの覚え（docs/spec.md の 3.2）：検査ごとに覚えたビューアと、モダリティごとの既定のビューア。
 // BFF のデータベースに持つ（画面の設定で、画像サーバーには書かない）。
-// 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）は段 3 で外した（docs/spec.md の 0）。
+// フェーズ 2 の検査の状態の印（検像・読影・緊急・ブックマーク）はフェーズ 3 で外した（docs/spec.md の 0）。
 
 /** 画面に出す、検査ごとのビューアの覚え */
 export interface ViewerMemoryView {

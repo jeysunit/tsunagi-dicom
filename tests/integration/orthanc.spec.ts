@@ -468,7 +468,7 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
   ).toHaveLength(1);
   // 削除 B：求めた → 送る直前（dispatch）→ 結果
   expect(trailsOf("delete", B)).toEqual([["request:success", "dispatch:success", "result:success"]]);
-  // 書き出し A：求めた → 実行し終えた
+  // 書き出し A：求めた → ストリーミングを終えた
   // 書き出しの結果の行は、10 で見る
   // C-ECHO：つながった・つながらないの両方が、送り先の名前つきで残る
   const echoes = rows.filter((r) => r.action === "echo" && r.detail.modality === ITEST.scp.id).map((r) => r.detail.connected);
@@ -479,7 +479,7 @@ test("9 監査のつなぎ：/api/audit/verify が ok で、試験の操作の�
 // どちらも期待は緩めない（docs/round-trip-test.md の「実測で決めること」）
 test("10 書き出しの結果が記録に残り、サムネイルがブラウザの Accept のまま中継から画像で返る", async () => {
   const { page } = admin;
-  // 書き出し：実行し終えた「結果」の行（求めた行と要求の ID で結ぶ）
+  // 書き出し：ストリーミングを終えた「結果」の行（求めた行と要求の ID で結ぶ）
   const exportTrail = [...requestTrails(readAudit(), "export", A.studyInstanceUid).values()];
   observe("audit.exportTrail", exportTrail);
   expect.soft(exportTrail, "書き出しの結果の行が記録されていない").toEqual([["request:success", "result:success"]]);
@@ -1302,7 +1302,7 @@ test("21 HL7 A40：書き換えた画像が元を消す前に REST で同じ UID
   expect((await orthanc(`studies/${oldId}/metadata/TsunagiLock`)).status).toBe(404);
 });
 
-// ── 段 6：患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction） ──
+// ── フェーズ 6：患者・検査の値の修正（docs/spec.md の 3.5。openspec/changes/archive/2026-11-05-add-study-value-correction） ──
 
 /** 管理者でログインし直し、再認証（パスワード）を済ませて、画面の書き込みの API を呼ぶ形を返す */
 async function correctionSession(browser: Browser) {

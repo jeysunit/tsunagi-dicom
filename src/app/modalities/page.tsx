@@ -9,7 +9,7 @@ import { getConfig } from "@/lib/config";
 import { allowlistFor, modalityView, type ModalityView } from "@/lib/fields";
 import { loadFailed } from "@/lib/ui-text";
 
-// 機器の頁（docs/spec.md の 3.3。段 4）。Orthanc に登録された受け元・送り先の機器の一覧と、つながるかの確認（C-ECHO）。
+// 機器の頁（docs/spec.md の 3.3。フェーズ 4）。Orthanc に登録された受け元・送り先の機器の一覧と、つながるかの確認（C-ECHO）。
 // 住所（Host・Port）は、許可の一覧に含まれた役割にだけ出す（既定では管理者だけ）。
 export const metadata = { title: "接続先" };
 

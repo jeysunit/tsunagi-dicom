@@ -3,7 +3,7 @@ import type { AppConfig } from "@/lib/config";
 import { dicomFile } from "./helpers/dicom-file";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 6 のインポート（docs/spec.md の 3.5 の「取り込み」）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
+// フェーズ 6 のインポート（docs/spec.md の 3.5 の「取り込み」）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
 // 大きさの上限と DICOM でないものを Orthanc へ渡す前に断る、断ったことも記録に残る、呼ぶ前と後の監査の行（要求の ID で結ぶ）、
 // 同じ要求の ID を二度実行しない、結果不明と照らし合わせ、CSRF（Origin）、検証モードの書き込みの止め、
 // インポートした検査が検査一覧で分かる（imported）を見る。

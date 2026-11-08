@@ -11,8 +11,8 @@ import { checkContent } from "@/lib/study-correction";
 import { visible } from "../../../../../../../hl7-receiver/visible";
 import { contentUnresolved, requestDetail } from "../shared";
 
-// 結果の分からない・部分反映の中身の訂正を、管理者が手で解く（docs/spec.md の 3.5。段 6）。管理者だけ（pacs.reconcile）。
-// 書き換えと同じ列の中で、要求の記録を再読み込み（実行中の要求とは重ならない）、Orthanc の仕事がまだ動いていれば解かない。
+// 結果の分からない・部分反映の中身の訂正を、管理者が手で解く（docs/spec.md の 3.5。フェーズ 6）。管理者だけ（pacs.reconcile）。
+// 書き換えと同じ列の中で、要求の記録を再取得し（実行中の要求とは重ならない）、Orthanc の仕事がまだ動いていれば解かない。
 // 作るはずだった検査（BFF が決めた StudyInstanceUID）を Orthanc で探し直し、管理者が書いた確認内容と一緒に記録に追加する
 // （作られて値が合えば成功、それ以外は失敗）。Orthanc には書き込みを求めない。
 // 属性の訂正の結果不明・部分反映は、HL7 の書き換えと同じ部品の行なので、/api/hl7/resolve で書き換えの ID を指定して解く。

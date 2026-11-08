@@ -7,7 +7,7 @@ import { MODALITY_GROUPS } from "@/lib/modalities";
 import { modalityDefaults, setModalityDefault } from "@/lib/viewer-memory";
 import { VIEWER_IDS } from "@/lib/viewers";
 
-// モダリティごとの既定のビューア（docs/spec.md の 3.2「選び方の3段」の3）。管理の画面で変える（viewer.defaults）。
+// モダリティごとの既定のビューア（docs/spec.md の 3.2「選び方の3つのレベル」の3）。管理の画面で変える（viewer.defaults）。
 // 変更と、設定の変更としての監査の記録を1つの transaction で書く。権限の無い役割は、断ったことを記録して 403。
 
 const SETTING = "modality_viewer_default";

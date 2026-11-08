@@ -3,7 +3,7 @@ import type { AppConfig } from "@/lib/config";
 import { dicomFile } from "./helpers/dicom-file";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 6 のインポートの、管理者が手で解く道（POST /api/studies/{uid}/import/resolve。docs/spec.md の 3.5「取り込み」）と、
+// フェーズ 6 のインポートの、管理者が手で解く道（POST /api/studies/{uid}/import/resolve。docs/spec.md の 3.5「取り込み」）と、
 // 状態の確認（GET /api/import）を照らし合わせの役割（管理者）にも開いたことを確認する。
 // 解けるのは管理者だけ（一般は断り、断ったことも記録に残る）・CSRF（Origin）・確認内容が必須・結果の行の無い要求は決めた時間を
 // 過ぎるまで解かない・「成功」は画像があると読めたときだけ・解いた後は同じ検査のインポートが止まらない、を見る。
@@ -170,7 +170,7 @@ describe("インポートの結果不明を管理者が手で解く", () => {
     const count = (await rowsOf(requestId)).length;
     expect((await resolve(STUDY_MISMATCH, { requestId, outcome: "failed", note: "試験" }, "http://evil.example")).status).toBe(403);
     expect((await rowsOf(requestId)).length).toBe(count);
-    // 確認内容が無い・結果の指定が無い・違う検査の URL は断る
+    // 確認内容が無い・結果の識別子が無い・違う検査の URL は断る
     expect((await resolve(STUDY_MISMATCH, { requestId, outcome: "failed", note: " " })).status).toBe(400);
     expect((await resolve(STUDY_MISMATCH, { requestId, note: "試験" })).status).toBe(400);
     expect((await resolve(STUDY, { requestId, outcome: "failed", note: "試験" })).status).toBe(404);

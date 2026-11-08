@@ -13,7 +13,7 @@ const Body = z.object({
   password: z.string().max(MAX_PASSWORD_LENGTH * 4),
 });
 
-// ログイン（利用者名とパスワード）。合えば、TOTP の入力・登録・パスワードの変更の段か、ログインしたセッションを開く。
+// ログイン（利用者名とパスワード）。合えば、TOTP の入力・登録・パスワードの変更のステップか、ログインしたセッションを開く。
 // まだセッションが無いので、CSRF の対策は SameSite と Origin の確認。
 // ログインし直したら、このブラウザがいま持っているセッション（cookie の token）を消す。
 // パスワードの確認が混んでいれば 503 と Retry-After（src/lib/auth/hash-limiter.ts）。

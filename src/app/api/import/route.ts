@@ -14,7 +14,7 @@ import { can } from "@/lib/auth/roles";
 import { pendingAttribute, pendingContent } from "../studies/[uid]/modify/shared";
 import { cleanupTarget, parse, requestFile } from "./shared";
 
-// インポート（docs/spec.md の 3.5 の「取り込み」。段 6）。DICOM のファイル 1 つを、本文のバイトのまま受けて Orthanc へ入れる
+// インポート（docs/spec.md の 3.5 の「取り込み」。フェーズ 6）。DICOM のファイル 1 つを、本文のバイトのまま受けて Orthanc へ入れる
 // （POST /instances）。画面は複数のファイルを 1 つずつ送る（BFF が持つのは 1 つのファイルの分のメモリだけ）。
 // 書き込みの操作の共通の決まり（3.5）を通す：役割（study.import）・CSRF・検証モードの書き込みの止め・呼ぶ前の記録
 // （記録できなければ呼ばない）・呼んだ後の記録・要求の ID で二度実行しない・答えが分からなければ結果不明。

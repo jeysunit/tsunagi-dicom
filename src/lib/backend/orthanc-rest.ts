@@ -17,7 +17,7 @@ import {
 const ORTHANC_ID = /^[0-9a-f]{8}(-[0-9a-f]{8}){4}$/;
 export const isOrthancId = (v: unknown): v is string => typeof v === "string" && ORTHANC_ID.test(v);
 
-/** Orthanc に登録した機器の名前（Orthanc の中の ID）。URL の段に入れるので、字を絞る */
+/** Orthanc に登録した機器の名前（Orthanc の中の ID）。URL のセグメントに入れるので、字を絞る */
 const MODALITY_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 export const isModalityName = (v: unknown): v is string => typeof v === "string" && MODALITY_NAME.test(v);
 

@@ -179,7 +179,7 @@ test("押している間の手応え：ボタンは影を持たず 1px 沈み、
   await page.mouse.up();
   await page.getByTestId("modality-all").click();
 
-  // 共通のボタン（受け取りの「読み直す」。前は詳細の「UID」のボタンで確認していた。#57）も同じ手応え。
+  // 共通のボタン（受け取りの「再読み込み」。前は詳細の「UID」のボタンで確認していた。#57）も同じ手応え。
   // 枠のボタンの地は白（明るい地の上で、押せる物の形に見せる）
   await page.goto("/received");
   const reload = page.getByTestId("received-reload");

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 2 の画面の API（検査の詳細・すべての値・状態・ビューアの覚え・ビューアで開く・モダリティの既定）を、
+// フェーズ 2 の画面の API（検査の詳細・すべての値・状態・ビューアの覚え・ビューアで開く・モダリティの既定）を、
 // 検証モード（AUTH_MODE=dev）のセッションから通して確認する。役割ごとの操作の権限・許可の一覧・監査の記録を見る。
 
 const state = vi.hoisted(() => ({

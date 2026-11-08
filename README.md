@@ -95,7 +95,7 @@ flowchart LR
 - **ビューアの選び分け**：OHIF Viewer・Stone Web Viewer・VolView など、設定で与えたビューアから選んで開く。検査ごと・モダリティごとに既定を覚える。ビューアは、このアプリの中継（読み取りだけ）から画像を取る。
 - **受け取ったものを見る**：Orthanc が受け取った検査を、いつ・どの機器から（AE タイトル）・何件で、新しい順に並べる。受け元・送り先の機器の一覧と、つながるかの確認（C-ECHO）もある。
 - **ほかの機器へ送る**：検査の詳細から、Orthanc に登録された機器を選んで送り、終わるまでの状態を見せる。答えが分からないときは送り直さず、「結果が分からない」と出す。
-- **書き出しと削除**：検査の画像の全部を ZIP で落とせる（ファイルの名前に患者の情報を入れない）。削除は管理者だけで、理由を必須にし、確認画面と再認証（パスワードだけ。一度通れば `REAUTH_MINUTES` の間は聞き直さない）を挟む。確認画面に出すのは Orthanc から再読み込みした値で、確認した後に検査が変わったときや、同じ UID の検査が2つあるときは消さない。
+- **書き出しと削除**：検査の画像の全部を ZIP で落とせる（ファイルの名前に患者の情報を入れない）。削除は管理者だけで、理由を必須にし、確認画面と再認証（パスワードだけ。一度通れば `REAUTH_MINUTES` の間は聞き直さない）を挟む。確認画面に出すのは Orthanc から再取得した値で、確認した後に検査が変わったときや、同じ UID の検査が2つあるときは消さない。
 - **ログインと役割**：利用者のログイン（パスワードと、二要素の認証の TOTP。削除の前の再認証はパスワードだけ、利用者の管理の前の再認証は TOTP も求める）、役割（管理者と一般の2つ。一般は普段使う機能の全部、管理者はそれに加えて削除・ユーザー管理・システムの設定）、役割ごとに見える項目とできる操作の制限。一般の画面には、管理者だけの画面と操作を出さない。ログインの一時停止、画面のロック、利用者の棚卸しの画面もある。
 - **監査の記録**：検索・詳細の表示・ビューアで開いたこと・画像の取得・受け取りの記録を開いたこと・C-ECHO・送る（求めた・結果・終わり）・書き出し・削除（理由）を記録する。記録はハッシュでつなぎ、書き換えを見つけられる。
 - **画面**：明るい地を既定にし、暗い地に切り替えられる。画面は日本語だけ。
@@ -224,7 +224,7 @@ git push origin vX.Y.Z
 
 push すると Image が走り、CI が通ってからイメージを出して、digest に署名する。**同じ版のタグは出し直せない**（上書きしない）。直すなら新しい `Z` の版を出す。
 
-**署名の確認。** 出したイメージの digest には、GitHub Actions の OIDC による cosign の鍵の要らない署名が付いている。配備の前に、digest を調べて確認する：
+**署名の検証。** 出したイメージの digest には、GitHub Actions の OIDC による cosign の鍵の要らない署名が付いている。配備の前に、digest を調べて確認する：
 
 ```sh
 docker buildx imagetools inspect ghcr.io/jeysunit/tsunagi-dicom:vX.Y.Z   # 出てくる Digest を使う
@@ -233,7 +233,7 @@ cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-版のタグのイメージだけを受け入れるなら、`--certificate-identity-regexp` の代わりに `--certificate-identity https://github.com/jeysunit/tsunagi-dicom/.github/workflows/image.yml@refs/tags/vX.Y.Z` で、その版の workflow が署名したことまで確認する。
+版のタグのイメージだけを受け入れるなら、`--certificate-identity-regexp` の代わりに `--certificate-identity https://github.com/jeysunit/tsunagi-dicom/.github/workflows/image.yml@refs/tags/vX.Y.Z` で、その版の workflow が署名したことまで検証する。
 
 **古いイメージの片付け**（`.github/workflows/image-cleanup.yml`、週に1回、月曜 06:41 UTC）：
 
@@ -253,15 +253,15 @@ cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
 
 ## 作る側の資料（決まりの在り処）
 
-開発の段階と、各段の完了の線は [`docs/spec.md`](docs/spec.md) の「6. 段階」にある。
+開発のフェーズと、各フェーズの完了の線は [`docs/spec.md`](docs/spec.md) の「6. フェーズ」にある。
 
 | 文書 | 中身 |
 |---|---|
-| [`docs/spec.md`](docs/spec.md) | 仕様（目的と使う場面・原則・技術の構成・機能・段階・既知の制約） |
+| [`docs/spec.md`](docs/spec.md) | 仕様（目的と使う場面・原則・技術の構成・機能・フェーズ・既知の制約） |
 | [`docs/guideline-mapping.md`](docs/guideline-mapping.md) | 第7.0版 システム運用編の節ごとの対応表と、電子保存の三原則ごとの対応 |
 | [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | セキュリティと保守の方針（システム構成図・通信の一覧・秘密の保存先・記録・版と支える期間・使い終えるときの片付け） |
 | [`docs/round-trip-test.md`](docs/round-trip-test.md) | 開発用の compose（Orthanc・検査装置の試験用のソフト・storescp）での往復の試験の手順 |
-| [`docs/integration-test.md`](docs/integration-test.md) | 本物の Orthanc と DCMTK のコンテナでの結合の試験（CI で毎回実行する。手元での実行し方） |
+| [`docs/integration-test.md`](docs/integration-test.md) | 本物の Orthanc と DCMTK のコンテナでの結合の試験（CI で毎回実行する。手元での実行方法） |
 | [`SECURITY.md`](SECURITY.md) | 脆弱性の報告の窓口と支える版 |
 | [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | 氏名の形の試験の一覧（機械的に読めるコピーは `tests/fixtures/patient-names.json`） |
 | [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、架空の患者の応答の見本と、その置き換えの規則 |

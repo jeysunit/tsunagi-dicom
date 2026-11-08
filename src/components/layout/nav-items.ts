@@ -18,13 +18,13 @@ export interface NavAccess {
   canManageUsers: boolean;
   canEditViewerDefaults: boolean;
   account: boolean;
-  /** 受け取りの記録（段 4） */
+  /** 受け取りの記録（フェーズ 4） */
   canViewReceived?: boolean;
   /** 送った記録（送信一覧） */
   canViewSent?: boolean;
-  /** 機器の一覧と確認（段 4） */
+  /** 機器の一覧と確認（フェーズ 4） */
   canCheckModalities?: boolean;
-  /** インポート（段 6）。役割に加えて、検証モードで書き込みを止めていないとき */
+  /** インポート（フェーズ 6）。役割に加えて、検証モードで書き込みを止めていないとき */
   canImport?: boolean;
 }
 

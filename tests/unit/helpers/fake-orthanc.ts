@@ -14,7 +14,7 @@ export interface FakeOrthanc {
   unstable: Set<string>;
   /**
    * 次の書き換えの仕事の結果（既定は Success。partial は 1 枚だけ書き換えて Success）。beforeModify は仕事が画像を
-   * 読んだ後に呼ぶ（最中に届いた画像を作る）。wholeStudyDelete は、次の画像の削除で指定に関わらず検査ごと消す
+   * 読んだ後に呼ぶ（最中に届いた画像を作る）。wholeStudyDelete は、次の画像の削除で、どの画像を指定しても検査ごと消す
    * （画像の削除を誤る Orthanc）。beforeDelete は削除の前（ファイルの印を見る前）、duringDelete は印を見た後で消す前に
    * 呼ぶ（届き直しを作る）。changesFail は次の変更の記録の読み取りを結果不明で失敗させ、deleteFailAfter は次の削除を
    * その枚数だけ消した後に結果不明で止める（時間切れ・一部だけの削除）
@@ -130,7 +130,7 @@ export function createFakeOrthanc(): FakeOrthanc {
     async studyIsStable(id: string) {
       return !fake.unstable.has(id);
     },
-    // 値の修正（段 6）の試験のため：検査の要点（画像の値から作る。検査日・検査名・版は持たない）
+    // 値の修正（フェーズ 6）の試験のため：検査の要点（画像の値から作る。検査日・検査名・版は持たない）
     async studyInfo(id: string) {
       const found = fake.instances.filter(i => idOf(i) === id);
       if (!found.length) {

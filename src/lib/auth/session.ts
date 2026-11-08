@@ -149,7 +149,7 @@ export async function audit(session: Session, fields: AuditFields, source?: Audi
 export type AuditSource = ReturnType<typeof sourceFromHeaders>;
 
 /**
- * 送り元を、要求の間に読んで取っておく。答えを返した後に書く記録（書き出しを実行し終えたとき）では headers() を読めない
+ * 送り元を、要求の間に読んで取っておく。答えを返した後に書く記録（書き出しのストリーミングを終えたとき）では headers() を読めない
  * （Next.js は要求の外の headers() を失敗にする）ので、要求の間に取った値を audit の source に渡す
  */
 export async function auditSource(): Promise<AuditSource> {

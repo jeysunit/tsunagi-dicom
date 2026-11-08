@@ -20,7 +20,7 @@ import { loadFailed } from "@/lib/ui-text";
 // 後の絞り込み・ビューアの覚えの変更は画面（TanStack Query）が画面の API から取る。
 // 項目は役割の許可の一覧で絞ったもの（src/lib/fields.ts）。
 
-// 根の頁は根の layout と同じ段なので、layout の title.template が当たらない。題名を全部書く
+// 根の頁は根の layout と同じ階層なので、layout の title.template が当たらない。題名を全部書く
 export const metadata = { title: { absolute: "検査一覧 - tsunagi-dicom" } };
 
 export default async function HomePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -59,7 +59,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </>
     );
   }
-  // 頁を開いたことは手動の検索（自動更新の再読み込みを認める基準の条件として覚える。src/lib/search-trigger.ts）
+  // 頁を開いたことは手動の検索（自動更新の再取得を認める基準の条件として覚える。src/lib/search-trigger.ts）
   resolveSearchTrigger(session, filterToSearchParams(filter).toString(), null);
   await audit(session, searchAuditFields("page", result.returned, result.facetAudit));
 

@@ -11,7 +11,7 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 ## 原則
 
 1. **色は状態にだけ使う。** 藍は選択・主な操作・リンクだけで、正常や異常の意味を持たせない。状態は赤・黄・緑と灰で示す。
-2. **面の区別は地の濃淡で付ける。** 白・F6・EE・E2 の 4 段。線は細く、影は確認の窓のように浮くものにだけ付ける。
+2. **面の区別は地の濃淡で付ける。** 白・F6・EE・E2 の 4 段階。線は細く、影は確認の窓のように浮くものにだけ付ける。
 3. **要約から詳細へ。** 件数と状態を上に、明細を下に置く。一覧の上に件数、選んだ行の下に詳細。
 4. **患者バナーはどの画面でも同じ位置・同じ並び。** 氏名（かな）・患者ID・生年月日と性別・受付番号・検査日時・モダリティと検査名の順。患者のある画面は必ず見出しの下に置く。
 5. **主な操作は 1 画面に 1 つ。** 見出しの行の右端か、入力の画面の操作の行の右端に置く。一覧の右に開く詳細は、Study UID の下の操作の行に置く（menu.md）。危険な操作は間をあけ、確認の窓を挟む。
@@ -72,4 +72,4 @@ ui-kit のコピーは製品の側で直さない。`globals.css` の値はこ�
 | 確認の窓 | `src/components/ui/confirm-dialog.tsx` | あり。標準の `dialog`（showModal）を使う。いまはロックの画面のログアウトと、ユーザー管理（役割の変更・無効にする・二要素認証のリセット）が使う |
 | 入力欄 | `src/components/ui/input.tsx` | あり |
 | 待ちの印 | `src/components/ui/pending.tsx` | あり |
-| ファイルを選ぶ部品 | `src/components/ui/file-picker.tsx`（数え方と文言は `src/lib/import/picker-model.ts`、頭の読み取りは `src/lib/import/dicom-preview.ts`） | 部品はある（ui-kit 1.2.6）。使う画面（段 6 のインポート）は次の PR から |
+| ファイルを選ぶ部品 | `src/components/ui/file-picker.tsx`（数え方と文言は `src/lib/import/picker-model.ts`、頭の読み取りは `src/lib/import/dicom-preview.ts`） | 部品はある（ui-kit 1.2.6）。使う画面（フェーズ 6 のインポート）は次の PR から |

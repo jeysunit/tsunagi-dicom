@@ -2,7 +2,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from "@pla
 import { totpAt, totpStep } from "../../src/lib/auth/totp";
 import { E2E_ADMIN, LOCAL_BASE_URL } from "../../playwright.config";
 
-// AUTH_MODE=local（段 1b）：ログイン・パスワードの規則・TOTP・ログインの一時停止・画面のロック・利用者の棚卸し・役割。
+// AUTH_MODE=local（フェーズ 1b）：ログイン・パスワードの規則・TOTP・ログインの一時停止・画面のロック・利用者の棚卸し・役割。
 // サーバーは LOGIN_LOCK_THRESHOLD=3・LOGIN_LOCK_MINUTES=1・SCREEN_LOCK_MINUTES=1・MFA_REQUIRED=true（playwright.config.ts）。
 // SCREEN_UNLOCK_REQUIRE_TOTP は既定（false：画面のロックはパスワードだけで解く。true のときは単体の試験で見る）。
 // 頁の流れが前の試験の結果に依るので、順に実行する。
@@ -15,10 +15,10 @@ const ADMIN_PASSWORD = "Kq7v-Changed-4zx9";
 const DOCTOR = { username: "e2e-doctor", initial: "Rb6w-Init-Pass-8mz2", password: "Mz3t-Own-Pass-8vb7" };
 const LOCKED = { username: "e2e-locked", initial: "Hp2n-Init-Pass-5tw1" };
 
-/** 利用者ごとに、最後に使った TOTP の段（サーバーは同じ段・前の段の使い回しを断る） */
+/** 利用者ごとに、最後に使った TOTP のステップ（サーバーは同じステップ・前のステップの使い回しを断る） */
 const lastStep = new Map<string, number>();
 
-/** まだ使っていない段の確認の番号。サーバーが受ける窓（いまの段の ±1）に入るまで待つ */
+/** まだ使っていないステップの確認の番号。サーバーが受ける窓（いまのステップの ±1）に入るまで待つ */
 async function nextCode(secret: string): Promise<string> {
   for (;;) {
     const now = totpStep(Date.now());
@@ -69,7 +69,7 @@ async function changeOwnPassword(page: Page, password: string) {
 async function patientValues(page: Page): Promise<string[]> {
   const row = page.getByTestId("study-table").locator("tbody tr[data-study-uid]").first();
   const values = [
-    // 列：検査日時・患者 ID・氏名…（src/components/studies/study-browser.tsx。サムネイルの列は 1 行の一覧で、状態の列は段 3 で外した）
+    // 列：検査日時・患者 ID・氏名…（src/components/studies/study-browser.tsx。サムネイルの列は 1 行の一覧で、状態の列はフェーズ 3 で外した）
     (await row.locator("td").nth(1).innerText()).trim(),
     (await row.getByTestId("patient-name").innerText()).trim(),
     (await row.getAttribute("data-study-uid")) ?? "",
@@ -186,7 +186,7 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
 
   // 利用者の管理は大事な操作なので、BFF が再認証を求める。違うパスワードでは通らない。
   // 削除の再認証はパスワードだけ（2026-10-20）だが、利用者の管理は TOTP を登録した管理者には認証コードも求める
-  // （パスワードとセッションだけで管理者を作り追加させない。docs/spec.md の 3.6）
+  // （パスワードとセッションだけで管理者を作成させない。docs/spec.md の 3.6）
   const reauth = page.getByRole("form", { name: "再認証" });
   await expect(reauth).toBeVisible();
   await reauth.locator('input[name="password"]').fill("wrong-Pass-1x");
@@ -293,7 +293,7 @@ test("役割ごとにできる操作：一般は検査と画像を見られ、�
   const relay = await page.request.get(`/api/dicom-web/studies/${STUDY}/series/1.2.826.0.1.3680043.8.498.1/metadata`);
   expect(relay.status()).toBe(404);
   expect((await relay.json()).error).toBe("見本に無い");
-  // 中継は検索を返さない（段 1a の決まりのまま）
+  // 中継は検索を返さない（フェーズ 1a の決まりのまま）
   expect((await page.request.get("/api/dicom-web/studies")).status()).toBe(404);
 
   expect((await page.request.get("/api/audit/verify")).status()).toBe(403);
@@ -719,7 +719,7 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
   await deaf.close();
 });
 
-// 段 5（検査の件数が 8 であることを見るほかの試験の後に置く。モックの Orthanc の中で1件を消すため）
+// フェーズ 5（検査の件数が 8 であることを見るほかの試験の後に置く。モックの Orthanc の中で1件を消すため）
 test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と再認証つきで消す（確かめの画面は Orthanc から読み直した値）", async ({ browser }) => {
   test.setTimeout(120_000);
   // 新しくログインしたセッション（まだ再認証していない）で実行し、削除の前に必ず再認証を求められることを見る
@@ -742,7 +742,7 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   const file = await download;
   expect(file.suggestedFilename()).toMatch(/^study-[0-9a-f]{8}\.zip$/);
 
-  // 削除：確認画面（Orthanc から再読み込みした要点）→ 理由 → 再認証 → 消えた
+  // 削除：確認画面（Orthanc から再取得した要点）→ 理由 → 再認証 → 消えた
   await page.getByTestId("delete-open").click();
   const panel = page.getByTestId("delete-panel");
   await expect(panel.getByTestId("delete-confirm")).toContainText("JP-TEST-0003");
@@ -760,7 +760,7 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await reauth.getByLabel("パスワード").fill(ADMIN_PASSWORD);
   await reauth.getByRole("button", { name: "認証して削除" }).click();
-  // 消えると一覧を再読み込み、その行（と詳細）は消える
+  // 消えると一覧を再取得し、その行（と詳細）は消える
   await expect(page.getByTestId("study-count")).toHaveText("7");
   await expect(page.locator(`tr[data-study-uid="${target}"]`)).toHaveCount(0);
   // 消したことは、一覧の上の知らせで示す（行も詳細も消えるため。docs/spec.md の 3.5・UX のレビューの H6）
@@ -779,7 +779,7 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await fresh.context.close();
 });
 
-// 共有の管理者のセッションは、操作の無い時間が SCREEN_LOCK_MINUTES を越えるとロックされる。段 6 のように長い試験を挟む前に使い終える
+// 共有の管理者のセッションは、操作の無い時間が SCREEN_LOCK_MINUTES を越えるとロックされる。フェーズ 6 のように長い試験を挟む前に使い終える
 test("ログアウトすると、セッションは使えない", async () => {
   const { page } = admin;
   await page.goto("/");
@@ -788,7 +788,7 @@ test("ログアウトすると、セッションは使えない", async () => {
   expect((await page.request.get("/api/studies")).status()).toBe(401);
 });
 
-// 段 6（段 5 の後に置く。モックの Orthanc の中で氏名を直し、検査を1件追加するため）
+// フェーズ 6（フェーズ 5 の後に置く。モックの Orthanc の中で氏名を直し、検査を1件追加するため）
 test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を保って直し、検査情報修正は直した検査を新しく作る（理由と再認証つき）", async ({ browser }) => {
   test.setTimeout(120_000);
   const fresh = await newPage(browser);
@@ -927,7 +927,7 @@ function dicomBytes(o: { sop: string; study: string; patientId: string }): Buffe
   ]);
 }
 
-// 段 6（段 5 の後に置く。段 5 で消した検査のファイルを入れ直す。モックの Orthanc は、見本の検査のファイルだけを受ける）
+// フェーズ 6（フェーズ 5 の後に置く。フェーズ 5 で消した検査のファイルを入れ直す。モックの Orthanc は、見本の検査のファイルだけを受ける）
 test("段 6：インポートは左のナビから開き、選んだファイルを 1 件ずつ送り、行の札に成功・失敗・対象外を出す。入れた検査は一覧で「インポート」と分かる", async ({ browser }, testInfo) => {
   test.setTimeout(120_000);
   const fresh = await newPage(browser);
@@ -940,7 +940,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await totp.getByRole("button", { name: "認証" }).click();
   await expect(page).toHaveURL(/\/$/);
 
-  // 段 5 で消した検査（JP-TEST-0003）。同じ組の 2 つのファイルで入れ直す
+  // フェーズ 5 で消した検査（JP-TEST-0003）。同じ組の 2 つのファイルで入れ直す
   const deleted = "1.2.826.0.1.3680043.8.498.74370219478963110549339491256573063606";
   await expect(page.locator(`tr[data-study-uid="${deleted}"]`)).toHaveCount(0);
 
@@ -1050,7 +1050,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   );
   await page.screenshot({ path: testInfo.outputPath("import-1280-unknown.png"), fullPage: true });
 
-  // 結果不明を管理者が確認して記録する（parts.md の「結果不明を確認する」）。「確認」は指定を持つ結果不明の行だけ
+  // 結果不明を管理者が確認して記録する（parts.md の「結果不明を確認する」）。「確認」は識別子を持つ結果不明の行だけ
   const unknownRow = rows.first();
   const resolvePanel = page.getByTestId("import-resolve");
   await expect(resolvePanel).toHaveCount(0);

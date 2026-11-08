@@ -2,7 +2,7 @@ import type { ImportOutcome, ResolveResult } from "@/components/ui/file-picker";
 import { handleAuthStatus } from "@/lib/client/api";
 import { RESOLVE_UNREACHABLE_MESSAGE, type ResolveTarget } from "@/lib/import/picker-model";
 
-// インポートの画面（docs/spec.md の 3.5「取り込み」。段 6）が、選んだファイルを 1 件ずつ BFF へ送る。
+// インポートの画面（docs/spec.md の 3.5「取り込み」。フェーズ 6）が、選んだファイルを 1 件ずつ BFF へ送る。
 // 本文はファイルのバイトのまま（POST /api/import）。要求の ID は x-request-id、まとめて選んだ組は x-import-batch・
 // x-import-index（1 から）・x-import-total。答えが分からなければ、同じ要求の ID で状態を 1 回確認する（GET ?requestId=…）。
 // 結果は、ファイルを選ぶ部品の 1 件の結果（成功・失敗・結果不明）にコピーする。BFF の誤りの文は、最初の 1 文を理由の 1 句にする。
@@ -57,7 +57,7 @@ export function outcomeOf(answer: Answer): ImportOutcome | null {
  * 結果不明の理由は、いつも同じ 1 句にする（行ごとに語を変えない。BFF の文は記録と状態の確認の側に残る）
  */
 export function checkedOutcomeOf(answer: Answer | null, sent: "reached" | "unreachable", target?: ResolveTarget): ImportOutcome {
-  // 結果不明の行は、BFF に届いた要求（検査の UID が分かる）だけ、管理者が確認して記録するための指定を持つ
+  // 結果不明の行は、BFF に届いた要求（検査の UID が分かる）だけ、管理者が確認して記録するための識別子を持つ
   const unknown: ImportOutcome = { ok: false, unknown: true, reason: UNKNOWN_REASON, ...(target ? { resolve: target } : {}) };
   // 確認も読めない：送った要求が届いたかも分からないので、通信が切れたときも結果不明にする（失敗と言い切らない）
   if (!answer || answer.status < 200 || answer.status >= 300) return unknown;
@@ -138,7 +138,7 @@ export async function importFile(
 export const RESOLVE_FAILED_MESSAGE = "記録できませんでした。時間をおいて、やり直してください";
 
 /**
- * 結果不明の行を、管理者が確認して成功か失敗として記録する（POST /api/studies/{uid}/import/resolve。BFF は画像サーバーを再読み込み、
+ * 結果不明の行を、管理者が確認して成功か失敗として記録する（POST /api/studies/{uid}/import/resolve。BFF は画像サーバーを再取得し、
  * 成功は画像があるときだけ記録する）。記録できなかったときは BFF の誤りの文（何が起きたか・なぜか・次にすること）を返す。
  * ログインが切れた（401）・画面がロックされた（423）ときは onAuth を呼ぶ
  */

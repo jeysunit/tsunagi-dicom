@@ -50,12 +50,12 @@ import {
 // - シリーズは Orthanc の REST のコピー（rest/series・rest/studies）から組み立てる（QIDO-RS のコピーは1件の検査の分しか無いため）。
 // - 中継（WADO-RS の読み取り）は、サムネイル（thumbnail・rendered）だけ、コピーのある1枚の画像（rest/instances/{id}/preview.png）を返す。
 //   ほかの宛先は、確認したうえで 404 を返す。
-// - 段 4：受け取りの記録・機器・C-ECHO・送るは、Orthanc Book の形に合わせて手で作った見本（tests/fixtures/orthanc/made）と、
+// - フェーズ 4：受け取りの記録・機器・C-ECHO・送るは、Orthanc Book の形に合わせて手で作った見本（tests/fixtures/orthanc/made）と、
 //   このプロセスの記憶の中の仕事（job）で返す。送ると、仕事は読むたびに Pending → Running → Success（機器 offline へは Failure）と進む。
 //   機器 offline は C-ECHO に答えない。
-// - 段 5：書き出しは、画像の本体を入れない小さな ZIP を返す。削除は、このプロセスの記憶の中で検査を隠す（見本のファイルは変えない。
+// - フェーズ 5：書き出しは、画像の本体を入れない小さな ZIP を返す。削除は、このプロセスの記憶の中で検査を隠す（見本のファイルは変えない。
 //   消した検査は、検索・詳細・受け取りの記録・引き当て・中継のどれにも出さない）。
-// - 段 6：インポートは、見本の検査（消した検査を含む）の StudyInstanceUID のファイルだけを受け、その検査を出し直して印を付ける
+// - フェーズ 6：インポートは、見本の検査（消した検査を含む）の StudyInstanceUID のファイルだけを受け、その検査を出し直して印を付ける
 //   （このプロセスの記憶の中だけ。画像の本体は持たない）。
 // - 画像単位の DICOM タグ（2026-10-21）：シリーズの中の画像は REST のコピーの Instances の並びから作る。画像のコピーが1枚しか無いので、
 //   ほかの画像の SOPInstanceUID と値は、Orthanc の ID から決まる合成の値にする（instanceDatasetOf）。
@@ -80,7 +80,7 @@ const mockUpdates = (updatesHolder[UPDATES_KEY] ??= new Map<string, { id: string
 
 const orthancNow = (d = new Date()) => d.toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 
-/** モックで消した検査（StudyInstanceUID。段 5）。このプロセスの記憶の中だけで、見本のファイルは変えない */
+/** モックで消した検査（StudyInstanceUID。フェーズ 5）。このプロセスの記憶の中だけで、見本のファイルは変えない */
 const DELETED_KEY = Symbol.for("tsunagi-dicom.mock-deleted");
 const deletedHolder = globalThis as typeof globalThis & { [DELETED_KEY]?: Set<string> };
 const mockDeleted = (deletedHolder[DELETED_KEY] ??= new Set<string>());
@@ -93,7 +93,7 @@ const testHolder = globalThis as typeof globalThis & {
 const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new Map(), revision: 0 });
 
 /**
- * 中身の訂正で作った検査（新しい StudyInstanceUID → 元の検査と直した値。段 6）。このプロセスの記憶の中だけ。
+ * 中身の訂正で作った検査（新しい StudyInstanceUID → 元の検査と直した値。フェーズ 6）。このプロセスの記憶の中だけ。
  * 元の検査の値をコピー、StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID を新しくした形で、検索・引き当て・詳細に出す
  */
 const COPIES_KEY = Symbol.for("tsunagi-dicom.mock-copies");
@@ -731,7 +731,7 @@ export function createMockBackend(): Backend {
       mockDeleted.add(study.MainDicomTags.StudyInstanceUID ?? "");
     },
 
-    // 段 6：インポート。モックは画像の本体を持たないので、見本の検査（消した検査を含む）の StudyInstanceUID のファイルだけを受け、
+    // フェーズ 6：インポート。モックは画像の本体を持たないので、見本の検査（消した検査を含む）の StudyInstanceUID のファイルだけを受け、
     // その検査を出し直す（消した検査を入れ直す形）。ほかの検査のファイルは、Orthanc が受けなかった形（BackendError）にする
     async importInstance(file: Uint8Array) {
       const header = readDicomFileHeader(file);

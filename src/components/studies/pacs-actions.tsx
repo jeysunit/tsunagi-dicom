@@ -11,7 +11,7 @@ import { SendPanel, type SendActivity } from "@/components/studies/send-panel";
 import type { StudyView } from "@/lib/fields";
 import { cn } from "@/lib/utils";
 
-// 詳細のパネルの PACS の操作（docs/spec.md の 3.4・3.5）：送る（段 4）・書き出し（段 5）・値の修正（段 6）・削除（段 5。管理者だけ）。
+// 詳細のパネルの PACS の操作（docs/spec.md の 3.4・3.5）：送る（フェーズ 4）・書き出し（フェーズ 5）・値の修正（フェーズ 6）・削除（フェーズ 5。管理者だけ）。
 // 役割に許された操作だけのボタンを 1 行に並べ、押した操作の画面をその下に出す（1 つずつ）。
 // 行が替わったら、呼ぶ側が key に検査の UID を付けて作り直す（別の検査を送らない・消さないように）。
 // 画面の言葉は docs/spec.md の 2.2（送信・エクスポート（ZIP）・削除…）。
@@ -25,7 +25,7 @@ export function PacsActions({
   study: StudyView;
   screen: ScreenInfo;
   onDeleted: (study: StudyView) => void;
-  /** 値を修正できたあと（一覧と詳細を再読み込みする） */
+  /** 値を修正できたあと（一覧と詳細を再取得する） */
   onModified?: () => void;
   /** 操作の行の先頭に置く物（主の「開く」。詳細の操作は 1 行にそろえる） */
   leading?: React.ReactNode;
@@ -61,7 +61,7 @@ export function PacsActions({
         )}
         {screen.can.send && open !== "send" && activity && <SendBadge activity={activity} />}
         {screen.can.export && (
-          // 書き出しは、BFF が記録してから ZIP を実行する（同じ origin の画面からの要求だけを受ける）
+          // 書き出しは、BFF が記録してから ZIP をストリーミングする（同じ origin の画面からの要求だけを受ける）
           <a
             href={`/api/studies/${encodeURIComponent(uid)}/export`}
             download
@@ -73,7 +73,7 @@ export function PacsActions({
           </a>
         )}
         {screen.can.modify && (
-          // 患者情報修正・検査情報修正（段 6）。窓の中で2つに分ける（操作の行の副は 3 つまで。docs/design-system/menu.md）
+          // 患者情報修正・検査情報修正（フェーズ 6）。窓の中で2つに分ける（操作の行の副は 3 つまで。docs/design-system/menu.md）
           <Button ref={modifyOpenRef} type="button" size="sm" variant="outline" aria-expanded={open === "modify"} aria-controls={modifyId} data-testid="modify-open" onClick={() => toggle("modify")}>
             <PencilLine aria-hidden />
             修正…

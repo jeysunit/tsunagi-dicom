@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// 段 4 の画面（docs/spec.md の 3.3・3.4）：受け取りの記録・機器の一覧と C-ECHO・送る。
+// フェーズ 4 の画面（docs/spec.md の 3.3・3.4）：受け取りの記録・機器の一覧と C-ECHO・送る。
 // 検証モード（AUTH_MODE=dev）とモックの Orthanc に対して実行する。この試験のサーバーは DEV_ALLOW_WRITE=false（既定）なので、
 // 送る操作は止まることを確認する。送るの一巡りは、AUTH_MODE=local のサーバー（tests/e2e/local-auth.spec.ts）で確認する。
 
@@ -117,7 +117,7 @@ test("受信一覧の絞り込み：送信元 AE・検索で絞り、前に開�
   await expect(page.getByTestId("received-empty")).toHaveText("該当する受信履歴はありません");
   await page.getByTestId("received-search").fill("");
 
-  // 再読み込み：画面の API から再読み込みする（頁は再読み込みしない）。新しく届いた行（答えに追加した合成の行）が出て新着になり、
+  // 再読み込み：画面の API から再取得する（頁は再読み込みしない）。新しく届いた行（答えに追加した合成の行）が出て新着になり、
   // ほかの行の新着の印は、開いている間は前に開いた時刻のまま
   await page.route("**/api/receive-log?**", async (route) => {
     const res = await route.fetch();

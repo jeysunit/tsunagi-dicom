@@ -46,9 +46,9 @@ model AuditLog {
   @@index([occurredAt])
   @@index([patientId])
   @@index([studyInstanceUid])
-  // 書き込みの操作の要求の ID を、決めた期間の中の同じ操作の行だけから探すため（src/lib/pacs-ops.ts。段 4）
+  // 書き込みの操作の要求の ID を、決めた期間の中の同じ操作の行だけから探すため（src/lib/pacs-ops.ts。フェーズ 4）
   @@index([action, occurredAt])
-  // 書き込みの操作の、同じ検査の要求（解いていない結果不明の要求）を、期間で切らずに探すため（src/lib/pacs-ops.ts。段 5）
+  // 書き込みの操作の、同じ検査の要求（解いていない結果不明の要求）を、期間で切らずに探すため（src/lib/pacs-ops.ts。フェーズ 5）
   @@index([action, studyInstanceUid])
 }
 
@@ -74,7 +74,7 @@ model User {
   // TOTP の秘密（AES-256-GCM で暗号化。鍵は SESSION_SECRET から HKDF で導く。src/lib/auth/sealed-field.ts）
   totpSecretEnc      String?
   totpEnabledAt      DateTime?
-  // 最後に受け入れた TOTP の時間の段（30 秒ごと）。同じ段・前の段の使い回しを断る
+  // 最後に受け入れた TOTP の時間のステップ（30 秒ごと）。同じステップ・前のステップの使い回しを断る
   totpLastStep       Int?
   // ログインの一時停止（第7.0版 14 遵守事項⑥(6)）
   failedLoginCount   Int       @default(0)
@@ -123,7 +123,7 @@ model Session {
   @@index([expiresAt])
 }
 
-// 利用者ごとの画面の設定（段 2。docs/spec.md の 2）。いまは地の色（明るい地・暗い地）だけ。
+// 利用者ごとの画面の設定（フェーズ 2。docs/spec.md の 2）。いまは地の色（明るい地・暗い地）だけ。
 // actorId は監査の記録の「誰が」と同じ値（AUTH_MODE=local は利用者名、検証モードは dev）。
 model UserPreference {
   actorId   String   @id
@@ -132,8 +132,8 @@ model UserPreference {
   updatedAt DateTime
 }
 
-// 検査ごとに覚えたビューア（段 2。docs/spec.md の 3.2）。変えた人と時刻は監査の記録（study_state。flag は viewer）にも残す。
-// 段 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の表は、段 3 で外した（migration 20261020000000_remove_study_state）。
+// 検査ごとに覚えたビューア（フェーズ 2。docs/spec.md の 3.2）。変えた人と時刻は監査の記録（study_state。flag は viewer）にも残す。
+// フェーズ 2 の検査の状態の印（検像・読影・緊急・ブックマーク）の表は、フェーズ 3 で外した（migration 20261020000000_remove_study_state）。
 model StudyViewer {
   studyInstanceUid String   @id
   // 検査ごとに覚えたビューア（src/lib/viewers.ts の ID）。null は覚えが無い（モダリティの既定で開く）

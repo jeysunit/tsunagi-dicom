@@ -34,7 +34,7 @@ export class HistoryTampered extends BackendUnknownError {
 const WRITE_ACTIONS: readonly AuditAction[] = ["hl7", "modify"];
 /**
  * 監査の一本のつなぎから、書き換えの経過を古い順に読む（design.md §13）。つなぎの全部を確認（行の action を書き換えて
- * 書き換えの行を隠されても見つける）、確認した行のうち書き換えの操作の行だけを返す（確認した後に再読み込みしない。design.md §15.1）。
+ * 書き換えの行を隠されても見つける）、確認した行のうち書き換えの操作の行だけを返す（確認した後に再取得しない。design.md §15.1）。
  * 覚え（remember）を持つ行は鍵つきだけを受ける。合わない行があれば投げる。
  */
 export async function history(): Promise<HistoryRow[]> {
@@ -48,7 +48,7 @@ export async function history(): Promise<HistoryRow[]> {
   } catch (e) {
     throw new HistoryTampered(0, e instanceof Error ? e.message : "先頭の控えを読めない");
   }
-  // 鍵の無い行は、つなぎの決まりで最初の鍵つきの行より前だけに受ける（後ろに書き追加された鍵の無い行は、偽の照らし
+  // 鍵の無い行は、つなぎの決まりで最初の鍵つきの行より前だけに受ける（後ろに追記された鍵の無い行は、偽の照らし
   // 合わせ（manual）でありうる）。覚えを持つ行は、その前の部分でも鍵つきだけを受ける（鍵を持たない者でも作れるため）
   const rows: StoredAuditRow[] = [];
   const chain = await verifyAuditChain(db, 1000, {
@@ -558,7 +558,7 @@ async function writeStudy(
   // 患者 ID の変わる書き換えは、後で元の画像を消すので、書き換えの前のファイルの印を残す（design.md §15.4）
   const sourceFiles = lock ? await backend.studyInstanceFiles(id) : undefined;
   // 照合（planStudy）の後・印を付ける前に、同じ UID の画像が別の値で置き換わっていれば、その画像を照合していない。
-  // 印を付けた後（C-STORE はもう入らない）に再読み込み、照合した画像と同じでなければ書き換えない
+  // 印を付けた後（C-STORE はもう入らない）に再取得し、照合した画像と同じでなければ書き換えない
   if (lock && !sameInstances(await backend.studyInstanceTags(id), before)) {
     throw new BackendError("書き換えの前に検査の画像が変わった");
   }

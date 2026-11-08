@@ -124,7 +124,7 @@ async function enrolledUser(ctx: AuthContext, clock: Clock, username = "tanaka",
   const s2 = await sessionOf(ctx.db, first.token);
   const done = await confirmEnrollment(ctx, s2.session, s2.user, totpAt(secret, clock.t));
   expect(done.stage).toBe("active");
-  // 次の TOTP は次の段で（使い回しは断る）
+  // 次の TOTP は次のステップで（使い回しは断る）
   clock.advance(30_000);
   // ログインし終えたら、新しい token のセッションに替わる
   return { secret, token: done.rotated!.token };
@@ -172,7 +172,7 @@ describe("ログインと二要素（TOTP）", () => {
     expect((await resolveSession(ctx, second.token)).kind).toBe("pending");
     const done = await submitTotp(ctx, pending.session, pending.user, totpAt(secret, clock.t));
     expect(done.stage).toBe("active");
-    // 途中の段の token は使えなくなり、新しい token・CSRF の token のセッションに替わる
+    // 途中のステップの token は使えなくなり、新しい token・CSRF の token のセッションに替わる
     expect(done.rotated!.token).not.toBe(second.token);
     expect((await resolveSession(ctx, second.token)).kind).toBe("anonymous");
     const rotated = await resolveSession(ctx, done.rotated!.token);
@@ -386,7 +386,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     await unlockScreen(ctx, s.session, s.user, { password: PASSWORD, code: "000000" });
     expect((await resolveSession(ctx, token)).kind).toBe("active");
 
-    // 正しい番号を添えても、確認せず、使った段を進めない
+    // 正しい番号を添えても、確認せず、使ったステップを進めない
     const before = (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep;
     const s2 = await sessionOf(db, token);
     await lockScreen(ctx, s2.session, s2.user, "manual");
@@ -532,7 +532,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
   });
 
   // 期待の変更：前は「既定でも、ログインと再認証の TOTP は求める」。再認証は TOTP を求めなくなった（2026-10-20）ので、
-  // ログインは TOTP を求め、再認証はパスワードだけで通り、送られた番号は確認しない（使った段にも数えない）ことを見る
+  // ログインは TOTP を求め、再認証はパスワードだけで通り、送られた番号は確認しない（使ったステップにも数えない）ことを見る
   it("ログインは TOTP を求め、認証コードを添えない再認証はパスワードだけで通る（番号を確かめず、使った段にも数えない）", async () => {
     const { ctx, db, clock } = await setup();
     const { secret, token } = await enrolledUser(ctx, clock);
@@ -978,8 +978,8 @@ describe("レビューと安全の確かめで直したこと", () => {
     expect(slept[0] ?? 0).toBe(known);
   });
 
-  // 期待の変更：前は「パスワードと TOTP で通る」の1段だけ。削除の再認証はパスワードだけになり（2026-10-20）、利用者の管理は
-  // TOTP を登録した管理者には TOTP まで求める（パスワードとセッションだけで管理者を作り追加させない。docs/spec.md の 3.6）
+  // 期待の変更：前は「パスワードと TOTP で通る」の1ステップだけ。削除の再認証はパスワードだけになり（2026-10-20）、利用者の管理は
+  // TOTP を登録した管理者には TOTP まで求める（パスワードとセッションだけで管理者を作成させない。docs/spec.md の 3.6）
   it("再認証：削除はパスワードだけで通り、利用者の管理は TOTP まで求める。REAUTH_MINUTES（5 分）の間は聞き直さず、過ぎたら切れる", async () => {
     const { ctx, db, clock } = await setup();
     const { secret, token } = await enrolledUser(ctx, clock, "admin1", "admin");
@@ -1284,7 +1284,7 @@ describe("独立のレビューの指摘で直したこと", () => {
     const { secret } = await enrolledUser(ctx, clock);
     const r = await login(ctx, "tanaka", PASSWORD);
     const stale = await sessionOf(db, r.token);
-    // 前後の段の番号はどちらも受ける窓に入る（使い回しの確認は段ごとなので、別の段なら通る）
+    // 前後のステップの番号はどちらも受ける窓に入る（使い回しの確認はステップごとなので、別のステップなら通る）
     expect((await submitTotp(ctx, stale.session, stale.user, totpAt(secret, clock.t))).stage).toBe("active");
     const activeBefore = await db.session.count({ where: { userId: stale.user.id, stage: "active" } });
     await expect(submitTotp(ctx, stale.session, stale.user, totpAt(secret, clock.t + 30_000))).rejects.toMatchObject({

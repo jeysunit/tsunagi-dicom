@@ -126,8 +126,8 @@ function UidLine({ label, uid, testId = "uid-line" }: { label: string; uid: stri
 }
 
 /**
- * 操作ログに残る読み取り（DICOM タグ）の取り方：出すたびに必ず BFF から再読み込み（権限の確認と操作ログを通す）、
- * 再読み込みしている間と失敗したときは、前に読んだ中身を出さない。行を離れたら残さない（詳細の取り方と同じ）
+ * 操作ログに残る読み取り（DICOM タグ）の取り方：出すたびに必ず BFF から再取得し（権限の確認と操作ログを通す）、
+ * 再取得している間と失敗したときは、前に読んだ中身を出さない。行を離れたら残さない（詳細の取り方と同じ）
  */
 const AUDITED_READ = { staleTime: 0, gcTime: 0 } as const;
 
@@ -430,7 +430,7 @@ export function StudyDetailPanel({
   row: StudyView;
   screen: ScreenInfo;
   onChanged: () => void;
-  /** 削除が終わったとき（一覧の上に知らせを出し、一覧を再読み込みする） */
+  /** 削除が終わったとき（一覧の上に知らせを出し、一覧を再取得する） */
   onDeleted?: (study: StudyView) => void;
   /** false の間は詳細を取らない（矢印のキーで通り過ぎる行の「詳細を開いた」記録を量産しないため。一覧の行の値だけで描く） */
   fetchEnabled?: boolean;
@@ -451,9 +451,9 @@ export function StudyDetailPanel({
   const data = fetchEnabled && !detail.isFetching ? detail.data : undefined;
   const failed = fetchEnabled && detail.isError;
   // 詳細が届くまでは一覧の行の値で描き、届いたら詳細の値にする。
-  // 覚えたビューアの値は、覚えを変えたあと再読み込みする一覧の行の値を優先する
+  // 覚えたビューアの値は、覚えを変えたあと再取得する一覧の行の値を優先する
   const study: StudyView = { ...row, ...data?.study, ...definedViewerOf(row) };
-  // 覚えを変えたら一覧を再読み込みする（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
+  // 覚えを変えたら一覧を再取得する（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
   const changed = onChanged;
   // 画像の場所・タグ（権限のある役割だけ）
   const tagsShown = screen.can.allValues && uid !== "";

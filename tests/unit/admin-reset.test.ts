@@ -120,7 +120,7 @@ describe("管理者のパスワードを戻す", () => {
     expect((await resolveSession(ctx, token)).kind).toBe("anonymous");
     // 古いパスワードは通らない
     await expect(login(ctx, "admin1", OLD_PASSWORD)).rejects.toMatchObject({ status: 401 });
-    // 一時のパスワードは通り、TOTP の段を経て、パスワードの変更の段になる
+    // 一時のパスワードは通り、TOTP のステップを経て、パスワードの変更のステップになる
     const next = await login(ctx, "admin1", TEMP_PASSWORD);
     expect(next.stage).toBe("totp");
     const pending = await sessionOf(db, next.token);

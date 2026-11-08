@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 // TOTP（RFC 6238。HMAC-SHA1・6 桁・30 秒）。アプリのログインの二要素（第7.0版 14 遵守事項⑤・14.1.1 表14-1）。
-// 時計のずれのために、前後1つの段（±30 秒）まで受け入れる。使った段は利用者ごとに覚え、同じ段・前の段を断る
+// 時計のずれのために、前後1つのステップ（±30 秒）まで受け入れる。使ったステップは利用者ごとに覚え、同じステップ・前のステップを断る
 // （src/lib/auth/users.ts の totpLastStep）。
 // 試験（Playwright）からも読むので、server-only を付けない。
 
@@ -69,8 +69,8 @@ export function totpAt(secretBase32: string, nowMs: number): string {
 }
 
 /**
- * 入力の値が、いまの段の前後1つまでのどれかに合えば、その段を返す。合わなければ null。
- * lastStep（前に受け入れた段）以下の段は受け入れない（使い回しを断る）。
+ * 入力の値が、いまのステップの前後1つまでのどれかに合えば、そのステップを返す。合わなければ null。
+ * lastStep（前に受け入れたステップ）以下のステップは受け入れない（使い回しを断る）。
  */
 export function verifyTotp(
   secretBase32: string,

@@ -178,7 +178,7 @@ function declarations(text: string, selector: string, prefix: RegExp): Record<st
 }
 
 // ui-kit のコピー（3 製品で同じ値）。コピーは直さず、globals.css をこれに合わせる。
-// 文字の大きさ・余白・角は Tailwind の段（text-xs・p-3・rounded-md など）で書くので、ここでは比べない（docs/design-system/tokens.md の 2〜4）
+// 文字の大きさ・余白・角は Tailwind のスケール（text-xs・p-3・rounded-md など）で書くので、ここでは比べない（docs/design-system/tokens.md の 2〜4）
 describe("ui-kit の tokens.css と globals.css", () => {
   const kit = readFileSync("docs/design-system/ui-kit/tokens.css", "utf8");
   const COLOR = /^--color-/;

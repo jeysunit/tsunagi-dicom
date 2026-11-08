@@ -26,7 +26,7 @@ export const e2eEnv = {
   // 監査の記録の先頭の控え（/api/audit/verify は、控えと照らせないと ok にしない）。scripts/e2e-server.mjs が起動の前に消す
   AUDIT_ANCHOR_FILE: path.resolve(".e2e/audit-anchors.jsonl"),
   TZ: "Asia/Tokyo",
-  // ビューアの選び分けの試験（段 2）。例の名前だけ。画面の試験は BFF の移り先を控えるだけで、この宛先へは通信しない
+  // ビューアの選び分けの試験（フェーズ 2）。例の名前だけ。画面の試験は BFF の移り先を控えるだけで、この宛先へは通信しない
   VIEWER_OHIF_URL: "https://viewer.example.org/ohif",
   VIEWER_STONE_URL: "https://viewer.example.org/stone",
   PUBLIC_DICOMWEB_URL: "https://pacs.example.org/dicom-web",

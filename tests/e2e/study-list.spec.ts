@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// 段 2 の検査の一覧（docs/spec.md の 3.1・3.2）：すぐ絞れる見出し・詳細のパネル・ビューアの選び分けと記憶。
+// フェーズ 2 の検査の一覧（docs/spec.md の 3.1・3.2）：すぐ絞れる見出し・詳細のパネル・ビューアの選び分けと記憶。
 // 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して実行する。ビューアの覚えは試験のデータベースに残るので、
 // 変えた覚えは同じ試験の中で戻し、順に実行する。
 
@@ -267,8 +267,8 @@ test("詳細のパネル：行のクリックで開き、見出しの要点と�
   // バナーの項目は、見出しの並び（氏名・患者ID・生年月日・受付番号・検査日時・モダリティ）のとおり
   const labels = await banner.locator("dt").allTextContents();
   expect(labels).toEqual(["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"]);
-  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は 2〜3 段に折り返す（字体で折り返しの数が変わる。CI の機では 3 段で 144px だった）。
-  // 前は「バナー（氏名とかなの 2 行）と UID の 1 行で 96px 以内」だった。いまは、バナーは 3 段まで（150px 以内）、UID の行は
+  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は 2〜3 行に折り返す（字体で折り返しの数が変わる。CI の機では 3 行で 144px だった）。
+  // 前は「バナー（氏名とかなの 2 行）と UID の 1 行で 96px 以内」だった。いまは、バナーは 3 行まで（150px 以内）、UID の行は
   // 折り返しても 4 行まで（80px 以内）を確認する（「検査の情報」は含めない）
   expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(150);
   expect((await detail.getByTestId("study-uid").boundingBox())!.height).toBeLessThanOrEqual(80);
@@ -482,7 +482,7 @@ test("左右に分ける：狭い画面では一覧だけを出し、行を選�
   await expect(pane).toBeFocused();
   // 背後の絞り込みの帯と一覧（左右に分けた場所の左）が inert
   await expect(page.locator("[data-split-root] [inert]")).toHaveCount(2);
-  // 段 3 で詳細の状態のボタンを外し、詳細の中の止まり先が減った。前の「Tab を 6 回」は、詳細の中の止まり先の数に
+  // フェーズ 3 で詳細の状態のボタンを外し、詳細の中の止まり先が減った。前の「Tab を 6 回」は、詳細の中の止まり先の数に
   // 頼っていたので、詳細の中の止まり先の数だけ Tab を送って詳細の中に留まること、さらに送っても一覧の行に出ないことに分けた
   const stops = await pane.evaluate(
     (el) => el.querySelectorAll("button:not([disabled]), a[href], input, [tabindex]:not([tabindex='-1'])").length,
@@ -644,7 +644,7 @@ test("詳細を見せるときは必ず記録が残る：A→B→A と戻って�
 });
 
 test("ビューアの覚えを変えても、詳細は取り直さず、「詳細を開いた」の記録は増えない", async ({ page }) => {
-  // 段 2 では検査の状態の印で確認していた。段 3 で状態の印を外したので、同じく一覧だけを再読み込みするビューアの覚えで確認する
+  // フェーズ 2 では検査の状態の印で確認していた。フェーズ 3 で状態の印を外したので、同じく一覧だけを再取得するビューアの覚えで確認する
   await asRole(page, "一般");
   const gets: string[] = [];
   page.on("request", (req) => {
@@ -657,7 +657,7 @@ test("ビューアの覚えを変えても、詳細は取り直さず、「詳�
   await menu.click();
   await page.getByRole("menuitem", { name: "この検査は Stone で開く" }).click();
   // 覚えは、詳細のビューアの部品に出る（期待の変更：詳細を開いている間、一覧の列は詰めた形で、行にビューアの部品は無い。2026-10-25）。
-  // 一覧の行の値を再読み込みした結果が詳細に届いていること（覚えが替わった）を、ここで確認する
+  // 一覧の行の値を再取得した結果が詳細に届いていること（覚えが替わった）を、ここで確認する
   const remembered = page.getByTestId("study-detail").getByTestId("remembered-viewer");
   await expect(remembered).toHaveText("この検査: Stone");
   await page.waitForTimeout(500);
@@ -720,7 +720,7 @@ test("ビューア：▶ と、ダブルクリックで既定のビューアを�
     () => row(page).getByTestId("open-default").click(),
     `https://viewer.example.org/ohif/viewer?StudyInstanceUIDs=${STUDY}`,
   );
-  // 氏名のセル（段 3 で状態の列を外したので 3 番目）
+  // 氏名のセル（フェーズ 3 で状態の列を外したので 3 番目）
   await expectOpened(page, () => row(page).locator("td").nth(2).dblclick(), /viewer\.example\.org\/ohif\/viewer/);
 
   const after = await (await page.request.get("/api/audit/verify")).json();
@@ -894,7 +894,7 @@ test("1 行の一覧：1280×720 の画面で、見える行が前（2 行）よ
 
 test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は title。詳細のパネルでは切らない", async ({ page }) => {
   const long = "とても長い検査の記述".repeat(20);
-  // 絞り込みで再読み込みしたときの一覧の応答を、記述の長いものに替える（画面の API の形は変えない）
+  // 絞り込みで再取得したときの一覧の応答を、記述の長いものに替える（画面の API の形は変えない）
   await page.route("**/api/studies?*", async (route) => {
     const res = await route.fetch();
     const body = (await res.json()) as { studies: Record<string, unknown>[] };
@@ -902,10 +902,10 @@ test("1 行の一覧：1 行に収まらない値は `…` で切り、全文は
     await route.fulfill({ response: res, json: body });
   });
   await asRole(page, "一般");
-  await page.getByTestId("date-all").click(); // 押し直しでは再読み込みしない
+  await page.getByTestId("date-all").click(); // 押し直しでは再取得しない
   await page.getByTestId("modality-CT").click();
   await expect(rows(page).first()).toBeVisible();
-  // モダリティと検査の記述のセル（段 3 で状態の列を外し、2026-10-21 に受付番号の列を追加し、年齢の列を外したので 8 番目）
+  // モダリティと検査の記述のセル（フェーズ 3 で状態の列を外し、2026-10-21 に受付番号の列を追加し、年齢の列を外したので 8 番目）
   const cell = rows(page).first().locator("td").nth(7);
   await expect(cell).toHaveAttribute("title", new RegExp(long));
   expect(await cell.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
@@ -1204,7 +1204,7 @@ test("詳細：受付番号はバナーに常に出し、英字氏名・紹介�
   // 和暦は患者バナーの生年月日に並べるので、「検査の情報」には置かない
   await expect(info).not.toContainText("1960/07/15");
   await expect(info.getByTestId("detail-counts")).toHaveText(/シリーズ \/ 画像\s*1 \/ 4/);
-  // 「検査の情報」は、右の残りの幅で折り返しても 3 段（80px）以内。見出し全体は、バナー（3 段で 150px）・UID（60px）・検査の情報（80px）の合計に収まる
+  // 「検査の情報」は、右の残りの幅で折り返しても 3 行（80px）以内。見出し全体は、バナー（3 行で 150px）・UID（60px）・検査の情報（80px）の合計に収まる
   expect((await info.boundingBox())!.height).toBeLessThanOrEqual(80);
   expect(await head.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(150 + 60 + 80 + 12);
 });
@@ -1244,8 +1244,8 @@ test("詳細の見出しは患者バナー：氏名・かな・患者 ID・生�
   await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click();
   const banner = page.getByTestId("detail-banner").getByRole("region", { name: "患者" });
   await expect(banner).toContainText("JP-TEST-0004");
-  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は氏名の右と下の 2 段に
-  // 折り返す。前は 1280px の幅で氏名と同じ段に並び 64px 以内だった。いまは 3 段（150px 以内）まで（字体で段の数が変わる）
+  // 期待の変更（左右に分ける。2026-10-25）：詳細は一覧の右の残りの幅（1280px の画面で 450px ほど）に出るので、バナーの項目は氏名の右と下の 2 行に
+  // 折り返す。前は 1280px の幅で氏名と同じ行に並び 64px 以内だった。いまは 3 行（150px 以内）まで（字体で行の数が変わる）
   expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(150);
   // 下のシリーズのサムネイルが、同じ画面に見えている（詳細の場所の中。スクロールしなくても）
   const pane = (await page.getByTestId("detail-pane").boundingBox())!;
@@ -1310,7 +1310,7 @@ test("詳細の「検査のタグ」：Study UID の横のボタンで開け閉�
 
 // 移した試験：前は「DICOM タグ」の画像単位で、シリーズと画像を選ぶ欄から確認していた（2026-10-21）。
 // 画像ごとの値はサムネイルから開く画像の場所へまとめた（change series-instance-tags）ので、同じ確認（画像を替えると値が替わり、
-// 前の値が残らず、戻しても再読み込みする）を、サムネイルから開く流れで行う
+// 前の値が残らず、戻しても再取得する）を、サムネイルから開く流れで行う
 test("サムネイルを押すと、下に画像の場所を開く：画像の一覧（番号の順）と、選んだ画像の SOPInstanceUID・主なタグ（タグ名つき）。画像を替えると値が替わる", async ({ page }) => {
   await asRole(page, "一般");
   await row(page).click();
@@ -1361,7 +1361,7 @@ test("サムネイルを押すと、下に画像の場所を開く：画像の�
   const second = (await sopLine.textContent())!;
   await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(second);
   await expect(table).not.toContainText(first);
-  // 前の画像に戻しても、覚えた中身を出さずに再読み込みする（読むたびに権限の確認と操作ログを通す）
+  // 前の画像に戻しても、覚えた中身を出さずに再取得する（読むたびに権限の確認と操作ログを通す）
   await list.getByRole("option", { name: "#1" }).click();
   await expect(table.locator('tr[data-tag="0008,0018"]')).toContainText(first);
   expect(tagReads.filter((u) => u.includes(`/instances/${first}/tags`))).toHaveLength(2);
@@ -1574,7 +1574,7 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   const NEW_UID = "1.2.826.0.1.3680043.8.498.999999999";
   let arrived = false;
   let listReads = 0;
-  // 一覧の答えを止めておく（再読み込みの途中の画面を確認するため）
+  // 一覧の答えを止めておく（再取得の途中の画面を確認するため）
   let hold: Promise<void> | null = null;
   let release = () => {};
   const listUrls: string[] = [];
@@ -1594,7 +1594,7 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   await page.goto("/");
   await expect(rows(page)).toHaveCount(8);
   await expect(page.getByTestId("list-refresh")).toHaveText("自動更新（30秒）");
-  // 開いたときに版を 1 回読む（サーバーが一覧を取る前に読んだ版と同じなので、一覧は再読み込みしない）
+  // 開いたときに版を 1 回読む（サーバーが一覧を取る前に読んだ版と同じなので、一覧は再取得しない）
   await expect.poll(() => versionReads).toBe(1);
   expect(listReads).toBe(0);
 
@@ -1613,24 +1613,24 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   // ここでは差し込む側を見るので、行を押した後にポインタを件数の行へ移す。待つ側は下の別の試験で見る）
   await page.getByTestId("study-count").hover();
 
-  // 30 秒たつと版を読む。版が変わらなければ、一覧は再読み込みしない（検索も監査の記録も増やさない）
+  // 30 秒たつと版を読む。版が変わらなければ、一覧は再取得しない（検索も監査の記録も増やさない）
   await page.clock.fastForward(30_000);
   await expect.poll(() => versionReads).toBe(2);
   expect(listReads).toBe(0);
 
-  // 版が変わると一覧を再読み込み、新しい検査が先頭に出る。選んだ行・詳細・見ていた行の位置はそのまま
+  // 版が変わると一覧を再取得し、新しい検査が先頭に出る。選んだ行・詳細・見ていた行の位置はそのまま
   version += 1;
   arrived = true;
   hold = new Promise<void>((resolve) => (release = resolve));
   // 前の版の読み（上の 2 回目）が画面の側でまだ終わっていないと、その間に来た間隔の知らせは、重なった読みとして
-  // 捨てられる（混んだ環境で、一覧の再読み込みが始まらなかった）。一覧の再読み込みが始まるまで、間隔を 1 つずつ進める
+  // 捨てられる（混んだ環境で、一覧の再取得が始まらなかった）。一覧の再取得が始まるまで、間隔を 1 つずつ進める
   await expect
     .poll(async () => {
       if (listReads === 0) await page.clock.fastForward(30_000);
       return listReads;
     })
     .toBe(1);
-  // 再読み込みの途中（待ちの印を出す 0.3 秒を過ぎても）：細い帯・薄い行・件数の「—」を出さない
+  // 再取得の途中（待ちの印を出す 0.3 秒を過ぎても）：細い帯・薄い行・件数の「—」を出さない
   await page.clock.runFor(1_000);
   await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
   await expect(page.getByTestId("progress-bar")).toHaveCount(0);
@@ -1640,7 +1640,7 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   release();
   await expect(rows(page)).toHaveCount(9);
   expect(listReads).toBe(1);
-  // 自動更新の再読み込みには refresh=auto を付ける（監査の記録に trigger: "auto" が残る）
+  // 自動更新の再取得には refresh=auto を付ける（監査の記録に trigger: "auto" が残る）
   expect(new URL(listUrls[0]!).searchParams.get("refresh")).toBe("auto");
   await expect(rows(page).first()).toHaveAttribute("data-study-uid", NEW_UID);
   await expect(page.getByTestId("study-count")).toHaveText("9");
@@ -1648,7 +1648,7 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   await expect(page.getByTestId("study-detail")).toHaveAttribute("data-study-uid", uid);
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   expect(Math.abs((await page.locator(`tr[data-study-uid="${uid}"]`).boundingBox())!.y - rowTop)).toBeLessThanOrEqual(2);
-  // 自動更新の再読み込みでは、古い行を薄くしない
+  // 自動更新の再取得では、古い行を薄くしない
   await expect(page.locator("tbody[data-dim]")).toHaveCount(0);
 
   // 版を読めなければ、自動更新が止まっていることを出す。読めるようになれば戻る
@@ -1672,7 +1672,7 @@ test("自動更新：30 秒ごとに一覧の版を読み、変わったとき�
   await setVisibility("visible");
   await expect.poll(() => versionReads).toBeGreaterThan(hiddenFrom);
 
-  // 利用者が絞り込みを替えた再読み込みには、refresh=auto を付けない
+  // 利用者が絞り込みを替えた再取得には、refresh=auto を付けない
   // 答えが返るまで待つ（差し替えの途中で試験を終えない）
   const ct = page.waitForResponse((r) => r.url().includes("/api/studies?") && r.url().includes("modality=CT"));
   await page.getByTestId("modality-CT").click();
@@ -1715,7 +1715,7 @@ test("自動更新：ポインタが一覧の上にある間とキーを押し�
   await expect(first).toHaveAttribute("aria-selected", "true");
   const top = (await first.boundingBox())!.y;
 
-  // 版が変わり、一覧は再読み込みする（新着の数を出すため）が、行は差し込まない。押そうとしている行の位置は動かない
+  // 版が変わり、一覧は再取得する（新着の数を出すため）が、行は差し込まない。押そうとしている行の位置は動かない
   version += 1;
   arrived = 1;
   await expect
@@ -1810,7 +1810,7 @@ test("自動更新の差し込みを待つかは、答えが届いた時に決�
   await page.goto("/");
   await expect(rows(page)).toHaveCount(8);
 
-  // 1. 再読み込みを始めた時はポインタが一覧の外。答えが届く前にポインタを一覧へ移すと、差し込まずに待つ
+  // 1. 再取得を始めた時はポインタが一覧の外。答えが届く前にポインタを一覧へ移すと、差し込まずに待つ
   await page.getByTestId("study-count").hover();
   version += 1;
   arrived = 1;
@@ -1837,7 +1837,7 @@ test("自動更新の差し込みを待つかは、答えが届いた時に決�
   await rows(page).nth(2).hover();
   version += 1;
   arrived = 2;
-  // 版の変わりを読ませる（一覧の再読み込みは、待っている絞り込みの要求の答えを待つ形になり、要求は増えないことがある）
+  // 版の変わりを読ませる（一覧の再取得は、待っている絞り込みの要求の答えを待つ形になり、要求は増えないことがある）
   const before = versionReads;
   await expect
     .poll(async () => {
@@ -1847,7 +1847,7 @@ test("自動更新の差し込みを待つかは、答えが届いた時に決�
     .toBeGreaterThan(before);
   gate = null;
   open();
-  // CT は見本で 6 件。再読み込みの答えには、届いた 2 件を追加している
+  // CT は見本で 6 件。再取得の答えには、届いた 2 件を追加している
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await expect(rows(page)).toHaveCount(8);
   await expect(page.getByTestId("list-new")).toHaveCount(0);

@@ -6,7 +6,7 @@ import { computeFacets } from "@/lib/study-list";
 
 // 見出しごとの件数（BFF が数える。docs/spec.md の 3.1）。各件数は「その見出しを押したあとの一覧の件数」と同じ。
 // 許可の一覧に含まれていない項目の件数は、キーごと出さない（原則 8）。
-// 段 3 で検査の状態の見出しを外したので、件数は検査日とモダリティだけ。
+// フェーズ 3 で検査の状態の見出しを外したので、件数は検査日とモダリティだけ。
 
 const today = { year: 2026, month: 10, day: 19 };
 const ALL_FIELDS: readonly string[] = STUDY_FIELDS;

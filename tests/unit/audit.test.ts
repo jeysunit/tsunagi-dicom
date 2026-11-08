@@ -140,8 +140,8 @@ describe("監査の記録", () => {
         .filter(([, v]) => typeof v === "function")
         .map(([k]) => k)
         .sort();
-      // appendAuditWith は、BFF のデータベースの変更と記録の1行の追記を、1つの transaction で書くもの（段 2）。
-      // appendAuditIf は、同じ並びの中で「もう書いてあれば書かない」を確認してから追記するもの（段 4）。
+      // appendAuditWith は、BFF のデータベースの変更と記録の1行の追記を、1つの transaction で書くもの（フェーズ 2）。
+      // appendAuditIf は、同じ並びの中で「もう書いてあれば書かない」を確認してから追記するもの（フェーズ 4）。
       // 記録の行は追記するだけで、更新・削除はしない
       // computeAuditMac・computeAuditHash は hash の計算だけで、データベースに書かない
       expect(functions).toEqual(["appendAudit", "appendAuditIf", "appendAuditWith", "computeAuditHash", "computeAuditMac", "verifyAuditChain"]);
@@ -634,7 +634,7 @@ describe("鍵つきにする前の行からの移り方と、鍵の取り替え"
   });
 });
 
-/** 鍵を持つ者の真似：末尾に1行を、その鍵で書き追加する（trigger は外してある前提） */
+/** 鍵を持つ者の真似：末尾に1行を、その鍵で追記する（trigger は外してある前提） */
 async function forgeAppend(db: Db, key: ReturnType<typeof deriveAuditKey>, extra: Partial<AuditRow> = {}) {
   const last = await db.auditLog.findFirstOrThrow({ orderBy: { seq: "desc" } });
   const base = {

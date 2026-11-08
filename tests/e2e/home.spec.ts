@@ -270,7 +270,7 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
       });
       expect(res.status(), method).toBe(405);
       expect(res.headers()["allow"]).toBe("GET, HEAD");
-      // 段 4 で書き込みの操作（送る）が画面の API にできたので、文言を「中継では受けない」に変えた
+      // フェーズ 4 で書き込みの操作（送る）が画面の API にできたので、文言を「中継では受けない」に変えた
       expect((await res.json()).error).toContain("書き込みは中継では受けない");
     }
 

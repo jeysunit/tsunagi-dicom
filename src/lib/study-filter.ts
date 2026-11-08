@@ -92,7 +92,7 @@ export const ADVANCED_KEYS = [
   ["desc", "studyDescription"],
 ] as const satisfies readonly (readonly [keyof StudyFilter, keyof StudyView])[];
 
-/** 既定は全期間（段 1 の一覧と同じ見え方。新しい順に上限まで） */
+/** 既定は全期間（フェーズ 1 の一覧と同じ見え方。新しい順に上限まで） */
 export const DEFAULT_FILTER: StudyFilter = { date: "all" };
 
 type Params = URLSearchParams | Record<string, string | string[] | undefined>;

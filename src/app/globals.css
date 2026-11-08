@@ -23,11 +23,11 @@
   --color-border-input: #7a7a7a;
   /* 一覧の行の hover などの、地との差の小さい色（選んだ行の地より薄く） */
   --color-muted: #eeeeee;
-  /* 検索の条件の帯など、muted より一段濃い地 */
+  /* 検索の条件の帯など、muted より 1 段階濃い地 */
   --color-muted-strong: #e2e2e2;
   /* 押せる物（枠のボタン・枠の無いボタン・絞り込み）の hover の地。白い地・控えめな地と見分けられる差にする（docs/spec.md の 2.3） */
   --color-hover: #e2e2e2;
-  /* 押している間の地（hover より一段濃く） */
+  /* 押している間の地（hover より 1 段階濃く） */
   --color-pressed: #d2d2d2;
   /* 選んだ行の地（主の色の薄い地。左の縦線は主の色） */
   --color-selected: #ededf9;
@@ -38,7 +38,7 @@
   --color-primary-foreground: #ffffff;
   /* ボタンの地の hover（白い字との対比を下げないよう、濃くする） */
   --color-primary-hover: #3b3ea3;
-  /* ボタンの地の、押している間（hover より一段濃く） */
+  /* ボタンの地の、押している間（hover より 1 段階濃く） */
   --color-primary-active: #2f3288;
   /* リンク・強調の文字 */
   --color-link: #4b4fbf;

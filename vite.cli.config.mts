@@ -26,7 +26,7 @@ export default defineConfig({
     minify: false,
     rollupOptions: {
       input: { "reset-admin-password": fileURLToPath(new URL("./src/cli/reset-admin-password-main.ts", import.meta.url)) },
-      // 分けた塊も .mjs にする（/app/package.json に "type": "module" が無く、.js だと再読み込みの警告が出る）
+      // 分けた塊も .mjs にする（/app/package.json に "type": "module" が無く、.js だと再パースの警告が出る）
       output: { format: "esm", entryFileNames: "[name].mjs", chunkFileNames: "[name]-[hash].mjs" },
     },
   },

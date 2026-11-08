@@ -60,7 +60,7 @@ test("並べ替えても、件数・選んだ行・詳細は変わらない。�
 
 test("上限に届いたとき（件数が「以上」）は、並べ替えが読んだ範囲の中だけと分かる注記を出す。最初の並びでは出さない", async ({ page }) => {
   await asGeneral(page);
-  // 画像サーバーの答えが上限に届いた形にする（件数が「以上」）。絞り込みを替えて再読み込みさせる
+  // 画像サーバーの答えが上限に届いた形にする（件数が「以上」）。絞り込みを替えて再取得させる
   await page.route("**/api/studies?*", async (route) => {
     const res = await route.fetch();
     const body = await res.json();

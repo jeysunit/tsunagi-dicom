@@ -1,6 +1,6 @@
 # 往復の試験の手順（受信 → 表示 → 送信）
 
-段 4（[`spec.md`](spec.md) の 3.3・3.4）の機能を、開発用の compose（`docker/dev/compose.yaml`）で確認する手順。開発用の compose は、配る compose（`deploy/compose.yaml`。Orthanc とセットで導入する形）の tsunagi-dicom と Orthanc に、試験用の RIS [ris-emulator](https://github.com/jeysunit/ris-emulator)（検査の予約を作り、ワークリスト（MWL）で返す）、検査装置の試験用のソフト [dicom-test-generator](https://github.com/jeysunit/dicom-test-generator)（DTG。送信元）と DCMTK の storescp（送信先）を追加したもの。
+フェーズ 4（[`spec.md`](spec.md) の 3.3・3.4）の機能を、開発用の compose（`docker/dev/compose.yaml`）で確認する手順。開発用の compose は、配る compose（`deploy/compose.yaml`。Orthanc とセットで導入する形）の tsunagi-dicom と Orthanc に、試験用の RIS [ris-emulator](https://github.com/jeysunit/ris-emulator)（検査の予約を作り、ワークリスト（MWL）で返す）、検査装置の試験用のソフト [dicom-test-generator](https://github.com/jeysunit/dicom-test-generator)（DTG。送信元）と DCMTK の storescp（送信先）を追加したもの。
 クラウドの開発環境はモックだけで試す（`tests/unit/pacs-routes.test.ts`・`tests/e2e/pacs.spec.ts`・`tests/e2e/local-auth.spec.ts`）。CI では、モックの試験に加えて次の2つを実行する（`.github/workflows/integration.yml`）。
 
 - **結合の試験**（[`integration-test.md`](integration-test.md)）：この手順の 1〜7・9 を、dicom-test-generator の代わりに DCMTK の storescu で、試験の中で立てた Orthanc のコンテナに対して実行する。
@@ -60,7 +60,7 @@ tsunagi-dicom と Orthanc の間は内部ネットワーク `backend`（`interna
 - tsunagi-dicom：この作業ツリーを `origin/main` に早送りする。main 以外のブランチ・detached HEAD にいるときは、切り替えずに止まる（「main 以外の枝（…）にいるので立て直さない」。最後の 1 行は `結果=失敗（段：枝の確かめ。…）`）。毎晩の立て直しは main にいる専用の作業ツリーで実行する。未コミットの変更・追跡していないファイル・origin/main より進んだ commit があるときも、作らずに止まる。`TSUNAGI_IMAGE` を渡したときは、早送りもイメージの作成もしない。
 - DTG と ris-emulator：main の commit を `git ls-remote` で決める（`DTG_GIT_REF`・`RIS_GIT_REF` に commit を渡してあれば、それを使う）。
 - 3つのイメージを先に作り、通ってから `docker compose up -d --build` で立て直す。作るところで失敗したら、動いているコンテナには触れない。
-- volume と secrets は消さない（`down -v`・`volume rm` を使わない）。secrets の保存先に、compose が読む 7 つのファイル（`session_secret.txt`・`backend_password.txt`・`initial_admin_password.txt`・`orthanc-users.json`・`dtg_web_password.txt`・`ris_web_password.txt`・`hl7_receiver_token.txt`）が1つでも無いときは、コンテナに触れる前に「secrets の保存先に <名前> が無い」で止まる（存在だけを見る。値は読まない。先に `up.sh` を実行する。保存先を替えているときは `TSUNAGI_DEV_SECRETS_DIR` を渡す）。
+- volume と secrets は消さない（`down -v`・`volume rm` を使わない）。secrets の保存先に、compose が読む 7 つのファイル（`session_secret.txt`・`backend_password.txt`・`initial_admin_password.txt`・`orthanc-users.json`・`dtg_web_password.txt`・`ris_web_password.txt`・`hl7_receiver_token.txt`）が1つでも無いときは、コンテナに触れる前に「secrets の置き場（…）に <名前> が無い」で止まる（存在だけを見る。値は読まない。先に `up.sh` を実行する。保存先を替えているときは `TSUNAGI_DEV_SECRETS_DIR` を渡す）。
 - 最後の 1 行に、3つの版と結果を出す。例：`refresh: tsunagi-dicom=abc1234 dtg=ddddddd ris=rrrrrrr 結果=成功`。
 
 ポートは環境変数で替えられる：`TSUNAGI_HTTP_PORT`（既定 3000）・`ORTHANC_DICOM_PORT`（既定 4242）・`DEV_DTG_WEB_PORT`（DTG の Web 画面。既定 18080）・`DEV_RIS_WEB_PORT`（ris-emulator の Web 画面。既定 18081。利用者 `ris`）・`DEV_PORTAL_PORT`（3つの画面へのリンクだけの入口のページ。既定 80）。どれもホストの 127.0.0.1 だけで待ち受ける。ris-emulator の MWL（11112）はホストに公開しない。
@@ -128,7 +128,7 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 - H7：照合の後に、同じ StudyInstanceUID へ仮の患者 ID・氏名のまま 2 枚（新しいシリーズ）を追加で送った。受け口の見回し（60 秒ごと）の後、一覧には同じ StudyInstanceUID の検査が 1 件だけ、正式な患者 ID・受付番号で、画像は 4 枚（照合した 2 枚と追加の 2 枚）で出て、仮の患者 ID の検査は残らなかった。追加を送ってから一覧にまとまるまで、試験の 6 全体で 1.6 分かかった（見回しの間隔と、Orthanc が画像を安定と見るまでの時間）。
 - H8：照合で作った予約に CA を送ると AA。検査も画像も（2 枚）残り、受付番号だけが外れた。同じ取消をもう一度送っても AA で、検査は変わらなかった。
 
-## 実測で決めること（段 4 の残り）
+## 実測で決めること（フェーズ 4 の残り）
 
 ### 結合の試験で測った結果（2026-10-20）
 
@@ -170,7 +170,7 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 | SpecificCharacterSet が `\ISO 2022 IR 87` の画像の WADO-RS の `metadata` | 氏名は `Alphabetic` が `ITEST^HANAKO`、`Ideographic` が `試験^花子`、`Phonetic` が `しけん^はなこ`。検査名は `頭部単純`。どれも Unicode に直して返した。`00080005` の値は `["ISO 2022 IR 87"]`（先頭の空の値を落とした 1 つ） | BFF は文字コードを読み替えず、受けた文字をそのまま返す前提と合う。答えのコピーは `tests/fixtures/orthanc/dicom-web/iso2022-instance-metadata.json` |
 | WADO-RS の `metadata` のファイルのメタ情報（転送構文 (0002,0010)） | 入っていなかった | 既定の主なタグに入れていない前提と合う。施設が `INSTANCE_TAGS` に追加すると、値は「—」になる |
 
-### 値の修正（段 6）で測った結果（2026-10-25）
+### 値の修正（フェーズ 6）で測った結果（2026-10-25）
 
 同じ版の Orthanc（26.9.1。Orthanc 1.13.0）を相手に、結合の試験の 23〜25 と、手元で立てた使い捨ての Orthanc（`OverwriteInstances` の無いもの）で測った。
 
@@ -178,7 +178,7 @@ ris-emulator の 3006b30（ORM の CA を送れる版。#32 のマージ）、DT
 |---|---|---|
 | `/system` の設定の値 | `OverwriteInstances`（真偽）・`OverwriteInstancesMode`（`Always`／`Never`）・`UserMetadata`（名前と番号。`TsunagiLock` は 1024）を返す | 属性の訂正の前に、この2つで設定を確認し、無ければ断る（[`spec.md`](spec.md) の 3.5） |
 | `OverwriteInstances` の無い Orthanc での `Keep` の書き換え | 仕事を作らずに 400。`Details` に `OverwriteInstances` が要ることが書かれる。画像は変わらない | 前もって `/system` で断るので、この答えには行き着かない（行き着いても、書き換えなかった失敗として残る） |
-| 患者 ID を変えない属性の訂正で置き換えた画像のメタデータ | `ReceptionDate` は書き換えの時刻、`RemoteAET` は空、`Origin` は `RestApi` になり、`CalledAET` は無くなる（前は `DicomProtocol` と、送ってきた側の AE タイトル） | 受信一覧では、直した検査が先頭に、送信元 AE 無し・`RestApi` で出る。直し方は段 6 の別の PR で決める（[`spec.md`](spec.md) の 3.5） |
+| 患者 ID を変えない属性の訂正で置き換えた画像のメタデータ | `ReceptionDate` は書き換えの時刻、`RemoteAET` は空、`Origin` は `RestApi` になり、`CalledAET` は無くなる（前は `DicomProtocol` と、送ってきた側の AE タイトル） | 受信一覧では、直した検査が先頭に、送信元 AE 無し・`RestApi` で出る。直し方はフェーズ 6 の別の PR で決める（[`spec.md`](spec.md) の 3.5） |
 | `Keep` の無い書き換え（中身の訂正）で `Replace` に StudyInstanceUID を渡したとき | 渡した UID の検査ができ、SeriesInstanceUID と SOPInstanceUID は新しくなる。元の検査は残る。仕事の `Content.ID` は新しい検査の ID | BFF が UID を決め、結果不明のときもその UID で探して照らす |
 
 ### 結合の試験で測った、文字の集合の組み合わせ（2026-10-25）
@@ -201,7 +201,7 @@ C-FIND の答えは、6 通りとも `SpecificCharacterSet` が `ISO_IR 100` で
 結合の試験の 10 で見つけ、PR #33 で直した（いまは結合の試験の 10 が緑）。
 
 - **サムネイルが出なかった。** 一覧と詳細の `<img>` がブラウザの既定の Accept（`image/avif,image/webp,…,image/*,*/*;q=0.8`）のまま中継（`/api/dicom-web/…/thumbnail`）を通ると、DICOMweb のプラグインは 400（`Unsupported MIME type in WADO-RS rendered frame`）を返していた。`Accept: image/jpeg` なら 200 で JPEG を返す。モックはサムネイルの見本の PNG を Accept に依らず返すので、モックの試験では見えなかった。直し方：中継が `thumbnail`・`rendered` の要求に限って、Orthanc へ送る Accept を BFF が決める。
-- **書き出しの「結果」の行が操作ログに残らなかった。** ZIP は流れ切るが、操作ログには「求めた」の行だけが残り、BFF のログに `export_result_not_recorded` が出ていた。本文を実行し終えたときに書く記録（`src/app/api/studies/[uid]/export/route.ts` の `watchedBody`）が、`audit()` の中で要求のヘッダー（`headers()`）を読むが、応答を返した後なので読めずに失敗していた。直し方：送信元をルートの中で先に読んでおき、実行し終えたときはそれを使って書く。
+- **書き出しの「結果」の行が操作ログに残らなかった。** ZIP は流れ切るが、操作ログには「求めた」の行だけが残り、BFF のログに `export_result_not_recorded` が出ていた。本文のストリーミングを終えたときに書く記録（`src/app/api/studies/[uid]/export/route.ts` の `watchedBody`）が、`audit()` の中で要求のヘッダー（`headers()`）を読むが、応答を返した後なので読めずに失敗していた。直し方：送信元をルートの中で先に読んでおき、ストリーミングを終えたときはそれを使って書く。
 
 ### まだ測っていないこと
 
@@ -209,4 +209,4 @@ C-FIND の答えは、6 通りとも `SpecificCharacterSet` が `ISO_IR 100` で
 - `/changes` が 1 回に返す数の上限（1000 件を超えたとき）。
 - 施設の環境に近い Orthanc（データベースの差し替え・入口のリバースプロキシ・TLS）での、上の結果の違い。
 
-結果は、段 4 の PR に書く（どの Orthanc の版で、何が期待どおりで、何が違ったか）。施設の内部の名前・住所は書かない。
+結果は、フェーズ 4 の PR に書く（どの Orthanc の版で、何が期待どおりで、何が違ったか）。施設の内部の名前・住所は書かない。
