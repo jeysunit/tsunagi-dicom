@@ -5,7 +5,7 @@
 - [x] 1.1 `src/lib/config.ts` に `INSTANCE_TAGS` を追加し、`screen.instanceTags`（8 桁の大文字の 16 進の配列）にする。未設定・空は既定の 25 のタグ（design.md の 5）、3 つの書き方・大文字と小文字・空白の区切りを受け、形の誤り・重なり・100 個を超える数を `ConfigError` で断る。`tests/unit/config.test.ts` に spec の「出すタグの一覧の設定」の 4 つの場面を追加し、`npx vitest run tests/unit/config.test.ts` が通ることを確認する
 - [x] 1.2 `.env.example` の「画面」に `INSTANCE_TAGS=""` と、書き方の 1 行の例を追加し、`docs/spec.md` の 2.1 の「画面」の行に同じ要点を追加する。空の値が未設定と同じに扱われること（`tests/unit/config.test.ts`）を確認する
 
-## 2. 値の組み立てとタグ名
+## 2. 値の整形とタグ名
 
 - [x] 2.1 `src/lib/all-values.ts` に、設定のタグを設定の順に選び出す関数を追加する（画像に無いタグは `vr: ""`・`value: null`）。1024 文字を超える値は先頭の 1024 文字（符号位置で数え、サロゲートの組を割らない）と `length` を返す（値の全部の `…/values` にも同じく適用する）。`tests/unit/instance-tags.test.ts` に、順・無いタグ・設定に無いタグが入らないこと・5000 文字の値・絵文字を含む値の切り方・バイナリ（VR の 7 つと InlineBinary・BulkDataURI）・SQ・PN・HTML の形の値の試験を追加して通す
 - [x] 2.2 タグ名の表（既定の 25 と、患者・検査・シリーズの主なタグの日本語の名前。訳は design.md の 7）を `src/lib/instance-tags.ts` に追加し、表に無いタグ・私的タグはタグ名を空にする。既定の 25 のタグがすべて日本語の名前を持つことと、用語集にある言葉（画像番号・検査名・シリーズ名・氏名・患者ID・受付番号）と紹介医がそのまま使われていることを試験で確認する
