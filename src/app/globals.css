@@ -4,7 +4,7 @@
  * 設計の値（design tokens）。色と文字の値はここ1か所で持つ（docs/spec.md の 2「画面の見た目の基準」）。
  * - 文字を読む画面は明るい地を既定にし、暗い地に切り替えられる（利用者ごとに覚える。<html data-theme>）。
  * - 画像のサムネイルの並びは、まわりだけ暗い地にする（その部品に data-theme="dark" を付ける）。
- * - 文字と地の対比は WCAG 2.2 の AA（4.5:1）以上（tests/unit/design-tokens.test.ts で確かめる）。
+ * - 文字と地の対比は WCAG 2.2 の AA（4.5:1）以上（tests/unit/design-tokens.test.ts で確認する）。
  * - 基準の文字は 14px（0.875rem）、行間 1.5。
  */
 

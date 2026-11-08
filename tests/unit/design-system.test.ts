@@ -9,14 +9,14 @@ import { PatientBanner } from "@/components/ui/patient-banner";
 import { Select } from "@/components/ui/select";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 
-// 画面のデザインシステム（docs/design-system）を機械で守る検査。
+// 画面のデザインシステム（docs/design-system）を自動で守る検査。
 // 1. 色の直書き（#hex・rgb() など・Tailwind の色名）を、トークンを定義する所以外で落とす（例外は理由つきの一覧）
 // 2. docs/design-system/tokens.md の色の表が、src/app/globals.css の値と一致する
 // 3. 部品（状態の札・件数の行・患者バナー）の決まり
 
 const css = readFileSync("src/app/globals.css", "utf8");
 
-/** 色の直書きを許す場所の一覧。載せるのは理由があるものだけ。理由が消えたら一覧から外す（使われない例外は落とす） */
+/** 色の直書きを許す場所の一覧。含めるのは理由があるものだけ。理由が消えたら一覧から外す（使われない例外は落とす） */
 const EXCEPTIONS: { file: string; match: string; reason: string }[] = [
   {
     file: "src/components/auth/totp-enrollment.tsx",
@@ -133,7 +133,7 @@ describe("色の直書き", () => {
 function cssTokens(selector: string): Record<string, string> {
   const start = css.indexOf(`${selector} {`);
   const body = css.slice(start, css.indexOf("}", start));
-  // 値は 6 桁の #hex に限る（別の書き方に替えたら、この検査が拾えなくなるので、数えて確かめる）
+  // 値は 6 桁の #hex に限る（別の書き方に替えたら、この検査が拾えなくなるので、数えて確認する）
   const decls = [...body.matchAll(/--color-([a-z-]+):\s*([^;]+);/g)];
   for (const d of decls) expect(d[2]!.trim(), `--color-${d[1]}`).toMatch(/^#[0-9a-fA-F]{6}$/);
   return Object.fromEntries(decls.map((d) => [d[1]!, d[2]!.trim().toLowerCase()]));
@@ -177,7 +177,7 @@ function declarations(text: string, selector: string, prefix: RegExp): Record<st
   );
 }
 
-// ui-kit の写し（3 製品で同じ値）。写しは直さず、globals.css をこれに合わせる。
+// ui-kit のコピー（3 製品で同じ値）。コピーは直さず、globals.css をこれに合わせる。
 // 文字の大きさ・余白・角は Tailwind の段（text-xs・p-3・rounded-md など）で書くので、ここでは比べない（docs/design-system/tokens.md の 2〜4）
 describe("ui-kit の tokens.css と globals.css", () => {
   const kit = readFileSync("docs/design-system/ui-kit/tokens.css", "utf8");

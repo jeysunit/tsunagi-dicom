@@ -15,13 +15,13 @@ import { tagRowsText, type CopyableTagRow, type CopyFormat } from "@/lib/client/
 import { cn } from "@/lib/utils";
 
 // DICOM タグの表（タグ・タグ名・VR・値）の本体。行を選べる（docs/design-system/components.md の「タグの表」）：
-// - 選び方：クリックで 1 行、Shift で範囲、Ctrl（Mac は Cmd）で足す・外す。矢印のキーで動いた行を選び（Shift で範囲）、
-//   Space で足す・外す、Ctrl／Cmd + A で全部、Esc で外す。選んだ行は `selected` の地と左 3px の線（一覧の表と同じ）。
-// - 写す：表の上の「コピー」と Ctrl／Cmd + C は「全部の列」（タグ・タグ名・VR・値）。選んだ行の上で右クリック（またはメニューのキー・
+// - 選び方：クリックで 1 行、Shift で範囲、Ctrl（Mac は Cmd）で追加する・外す。矢印のキーで動いた行を選び（Shift で範囲）、
+//   Space で追加する・外す、Ctrl／Cmd + A で全部、Esc で外す。選んだ行は `selected` の地と左 3px の線（一覧の表と同じ）。
+// - コピーする：表の上の「コピー」と Ctrl／Cmd + C は「全部の列」（タグ・タグ名・VR・値）。選んだ行の上で右クリック（またはメニューのキー・
 //   Shift + F10）で出るメニューは「全部の列」「タグと値」「値だけ」。中身は 1 行 1 タグのタブ区切り（src/lib/client/tag-copy.ts）。
-// - 表の上の 28px の行は常に出し、「n 行を選択」と「コピー」（件数つき）を置く（選びの有無で表を動かさない）。写した知らせもここに出す。
+// - 表の上の 28px の行は常に出し、「n 行を選択」と「コピー」（件数つき）を置く（選びの有無で表を動かさない）。コピーした知らせもここに出す。
 // - 浮くメニューは標準の popover に任せる（暗幕・Esc で閉じる動きを自前で書かない）。
-// 行を読み直したら（表が出し直されたら）選びは捨てる。TagTable が読み込み中は表を出さないので、そのたびにここが作り直される。
+// 行を再読み込みしたら（表が出し直されたら）選びは捨てる。TagTable が読み込み中は表を出さないので、そのたびにここが作り直される。
 
 interface MenuPosition {
   x: number;
@@ -39,8 +39,8 @@ const MENU_HEIGHT = MENU_ITEMS.length * 28 + 10;
 const NOTICE_MS = 2500;
 
 /**
- * copyTag：その行の値の右に、値を写すボタンを置く（画像の場所の表の (0008,0018) SOPInstanceUID。1 行目に固定した行）。
- * 写したら、表の上の行に知らせを出す（読み上げにも知らせる）
+ * copyTag：その行の値の右に、値をコピーするボタンを置く（画像の場所の表の (0008,0018) SOPInstanceUID。1 行目に固定した行）。
+ * コピーしたら、表の上の行に知らせを出す（読み上げにも知らせる）
  */
 export function TagGrid({ rows, copyTag }: { rows: readonly CopyableTagRow[]; copyTag?: string }) {
   const [selection, setSelection] = useState<RowSelection>(EMPTY_SELECTION);
@@ -89,7 +89,7 @@ export function TagGrid({ rows, copyTag }: { rows: readonly CopyableTagRow[]; co
     setNotice(ok ? `${count} 行をコピーしました` : "コピーできませんでした");
   }
 
-  /** 固定した行の値だけを写す（行の選びは変えない） */
+  /** 固定した行の値だけをコピーする（行の選びは変えない） */
   async function copyValue(row: CopyableTagRow) {
     const label = row.tag === "0008,0018" ? "SOPInstanceUID" : (row.name ?? row.tag);
     try {
@@ -100,7 +100,7 @@ export function TagGrid({ rows, copyTag }: { rows: readonly CopyableTagRow[]; co
     }
   }
 
-  /** 選んだ行を、形式を指して写す（選びが空なら動いている行） */
+  /** 選んだ行を、形式を指してコピーする（選びが空なら動いている行） */
   async function copyRows(format: CopyFormat) {
     const rowsToCopy = picked.length > 0 ? picked : rows[active] ? [rows[active]] : [];
     try {
@@ -111,7 +111,7 @@ export function TagGrid({ rows, copyTag }: { rows: readonly CopyableTagRow[]; co
     }
   }
 
-  /** メニューの項目：メニューを閉じ、フォーカスを行へ戻してから写す */
+  /** メニューの項目：メニューを閉じ、フォーカスを行へ戻してからコピーする */
   function copyFromMenu(format: CopyFormat) {
     setMenu(null);
     menuRef.current?.hidePopover();
@@ -151,7 +151,7 @@ export function TagGrid({ rows, copyTag }: { rows: readonly CopyableTagRow[]; co
   return (
     <div
       onCopy={(e) => {
-        // 文字を選んで写すとき（ドラッグで選んだ文字がある）は、ブラウザの動きに任せる
+        // 文字を選んでコピーするとき（ドラッグで選んだ文字がある）は、ブラウザの動きに任せる
         const text = window.getSelection();
         if (picked.length === 0 || (text && !text.isCollapsed)) return;
         e.clipboardData.setData("text/plain", tagRowsText(picked));
@@ -257,7 +257,7 @@ export function TagGrid({ rows, copyTag }: { rows: readonly CopyableTagRow[]; co
                       className="ml-1 h-6 align-middle"
                       aria-label={`${row.tag === "0008,0018" ? "SOPInstanceUID" : (row.name ?? row.tag)}をコピー`}
                       data-testid="tag-value-copy"
-                      // 写すボタンは行を選ぶ操作にしない
+                      // コピーするボタンは行を選ぶ操作にしない
                       onClick={(e) => {
                         e.stopPropagation();
                         void copyValue(row);

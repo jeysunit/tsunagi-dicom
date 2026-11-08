@@ -5,7 +5,7 @@ import { Field, Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/ui/pending";
 import { cn } from "@/lib/utils";
 
-// パスワードの再入力の欄（docs/design-system/parts.md の「確かめの使い分け」）。削除の確かめ・画面ロックの解除が同じ形で使う。
+// パスワードの再入力の欄（docs/design-system/parts.md の「確認の使い分け」）。削除の確認・画面ロックの解除が同じ形で使う。
 // 欄の名前は `password`、認証コードを求めるときは `code`。読み取りと送信は呼ぶ側の onSubmit が行う（FormData から読む）。
 // 誤りは欄の下の 1 行（role="alert"）。実行のボタンは右、ほかのボタン（キャンセル・ログアウト）は左に置く。
 
@@ -29,7 +29,7 @@ export function ReauthForm({
   heading?: React.ReactNode;
   /** 何のために再入力するか（1 文） */
   message?: React.ReactNode;
-  /** 認証コード（TOTP）の欄を足す */
+  /** 認証コード（TOTP）の欄を追加する */
   needsCode?: boolean;
   error?: string | null;
   /** 認証の要求を出している間 */

@@ -2,7 +2,7 @@
 # 相対のパスは、プロセスの作業ディレクトリから辿る。
 # 開発・試験の環境だけで使う。本物の患者のデータを入れない。
 #
-# tsunagi-dicom の開発の一式（docker/dev/compose.yaml）が /app/config/app_config.yaml に重ねる写し。
+# tsunagi-dicom の開発の一式（docker/dev/compose.yaml）が /app/config/app_config.yaml に重ねるコピー。
 # 元は ris-emulator の 3573572 の config/app_config.yaml で、次の 2 か所だけを替えた（ris-emulator の版を上げたら、元と見比べる）：
 # - CT の装置の AE タイトルを、DTG の AE タイトル DTG_CT01 にする（DTG のワークリストに予約が出るように）
 # - hl7.host を HL7 の受け口（hl7-receiver）にする（pir send で --host を付けずに済む）

@@ -22,7 +22,7 @@ export interface NavAccess {
   canViewReceived?: boolean;
   /** 送った記録（送信一覧） */
   canViewSent?: boolean;
-  /** 機器の一覧と確かめ（段 4） */
+  /** 機器の一覧と確認（段 4） */
   canCheckModalities?: boolean;
   /** インポート（段 6）。役割に加えて、検証モードで書き込みを止めていないとき */
   canImport?: boolean;

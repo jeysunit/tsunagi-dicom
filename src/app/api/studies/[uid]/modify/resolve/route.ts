@@ -12,16 +12,16 @@ import { visible } from "../../../../../../../hl7-receiver/visible";
 import { contentUnresolved, requestDetail } from "../shared";
 
 // 結果の分からない・部分反映の中身の訂正を、管理者が手で解く（docs/spec.md の 3.5。段 6）。管理者だけ（pacs.reconcile）。
-// 書き換えと同じ列の中で、要求の記録を読み直し（実行中の要求とは重ならない）、Orthanc の仕事がまだ動いていれば解かない。
-// 作るはずだった検査（BFF が決めた StudyInstanceUID）を Orthanc で探し直し、管理者が書いた確認内容と一緒に記録に足す
+// 書き換えと同じ列の中で、要求の記録を再読み込み（実行中の要求とは重ならない）、Orthanc の仕事がまだ動いていれば解かない。
+// 作るはずだった検査（BFF が決めた StudyInstanceUID）を Orthanc で探し直し、管理者が書いた確認内容と一緒に記録に追加する
 // （作られて値が合えば成功、それ以外は失敗）。Orthanc には書き込みを求めない。
-// 属性の訂正の結果不明・部分反映は、HL7 の書き換えと同じ部品の行なので、/api/hl7/resolve で書き換えの ID を名指しして解く。
+// 属性の訂正の結果不明・部分反映は、HL7 の書き換えと同じ部品の行なので、/api/hl7/resolve で書き換えの ID を指定して解く。
 
 type Context = { params: Promise<{ uid: string }> };
 
 const Body = z.object({
   requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
-  /** Orthanc の側（ジョブの一覧・ログなど）で、先の修正がどうなったかを確かめた内容（必須） */
+  /** Orthanc の側（ジョブの一覧・ログなど）で、先の修正がどうなったかを確認した内容（必須） */
   note: z.string().trim().min(1, "確認内容を入力してください").max(500),
 });
 
@@ -48,7 +48,7 @@ async function resolve(session: Session, uid: string, requestId: string, note: s
   }
   if (!contentUnresolved(rows)) return Response.json({ error: "この修正の結果は確定しています" }, { status: 409 });
   const backend = getBackend();
-  // Orthanc の仕事がまだ動いていれば（BFF が待ちきれずに結果不明にした後も、Orthanc は写し続けうる）、終わるまで解かない
+  // Orthanc の仕事がまだ動いていれば（BFF が待ちきれずに結果不明にした後も、Orthanc はコピー続けうる）、終わるまで解かない
   if (o.jobId) {
     const job = await backend.jobStatus(o.jobId);
     if (job && job.state !== "Success" && job.state !== "Failure") {

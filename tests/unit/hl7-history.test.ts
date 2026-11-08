@@ -12,9 +12,9 @@ import { history, HistoryTampered, processMessage } from "@/lib/hl7/apply";
 import { sweepArrivals } from "@/lib/hl7/sweep";
 import { createFakeOrthanc, type FakeOrthanc } from "./helpers/fake-orthanc";
 
-// HL7 の経過（監査の記録の HL7 の行）を、使う前に鍵つきの値と前の行とのつなぎで確かめる（design.md §15.3）。
-// 覚え（ack の remember）は見回りが画像の患者 ID を書き換える根拠なので、鍵を持たない者が書き足した・書き換えた行を
-// 使わない。本物の SQLite（migration を流したもの）に、本物の監査の書き込みで記録する。
+// HL7 の経過（監査の記録の HL7 の行）を、使う前に鍵つきの値と前の行とのつなぎで確認する（design.md §15.3）。
+// 覚え（ack の remember）は見回りが画像の患者 ID を書き換える根拠なので、鍵を持たない者が書き追加した・書き換えた行を
+// 使わない。本物の SQLite（migration を実行したもの）に、本物の監査の書き込みで記録する。
 vi.mock("@/lib/config", async (importOriginal) => (await import("./helpers/audit-config")).withAuditKey(await importOriginal()));
 const current = vi.hoisted(() => ({ db: undefined as unknown as Db }));
 vi.mock("@/lib/db", async (importOriginal) => ({
@@ -46,11 +46,11 @@ async function dropGuards(db: Db) {
   await db.$executeRawUnsafe('DROP TRIGGER "AuditLog_no_replace"');
 }
 
-/** 鍵を持たない者が、つなぎの末尾に A40 の覚えの行を書き足す（hash は鍵なしで作れる値だけ） */
+/** 鍵を持たない者が、つなぎの末尾に A40 の覚えの行を書き追加する（hash は鍵なしで作れる値だけ） */
 const forgeAck = (db: Db, remember: Record<string, unknown>, keyless = false) =>
   forgeRow(db, { event: "ack", code: "AA", remember }, keyless);
 
-/** 鍵を持たない者が、つなぎの末尾に HL7 の行を書き足す。keyless なら鍵の無い形の hash、でなければ でたらめの hash */
+/** 鍵を持たない者が、つなぎの末尾に HL7 の行を書き追加する。keyless なら鍵の無い形の hash、でなければ でたらめの hash */
 async function forgeRow(db: Db, detail: Record<string, unknown>, keyless = false) {
   const last = (await db.auditLog.findFirst({ orderBy: { seq: "desc" } }))!;
   const row = {
@@ -157,7 +157,7 @@ describe("HL7 の経過の確かめ", () => {
     expect(await processMessage(Buffer.from(a40(TEMP, "P000001")), "192.0.2.1", orthanc.backend, undefined, { ...options, jobTimeoutMs: 0 }))
       .toContain("MSA|AE|");
     const request = (await history()).find(r => r.detail?.event === "request")!;
-    // 鍵を持たない者が、人が解いたことにする行を、鍵の無い形で書き足す
+    // 鍵を持たない者が、人が解いたことにする行を、鍵の無い形で書き追加する
     await forgeRow(current.db, { event: "reconcile", writeId: request.detail?.writeId, manual: true }, true);
     await expect(history()).rejects.toThrow("鍵の無い行");
     orthanc.add({ PatientID: "ER9", StudyInstanceUID: "2.25.900" });
@@ -182,7 +182,7 @@ describe("HL7 の経過の確かめ", () => {
     orthanc.add({ PatientID: "ER9", StudyInstanceUID: "2.25.900" });
     temp(`${STUDY}.1.1`);
     expect(await send(a40(TEMP, "P000001"))).toContain("MSA|AA|");
-    // 次に送られる A40（MSH-10 を予測）を受けたことにする received と ack を、鍵の無い形で書き足す
+    // 次に送られる A40（MSH-10 を予測）を受けたことにする received と ack を、鍵の無い形で書き追加する
     const next = a40("ER9", "P000009");
     const controlId = next.split("\r")[0]!.split("|")[9];
     const bodyHash = createHash("sha256").update(Buffer.from(next)).digest("hex");

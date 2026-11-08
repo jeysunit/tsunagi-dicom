@@ -47,7 +47,7 @@ export interface OrthancJob {
 
 export const listJobs = () => orthancJson<OrthancJob[]>("jobs?expand");
 
-/** 決めた時間の中で、条件が満たされるまで読み直す */
+/** 決めた時間の中で、条件が満たされるまで再読み込みする */
 export async function waitFor<T>(what: string, read: () => Promise<T>, done: (value: T) => boolean, timeoutMs = 60_000): Promise<T> {
   const until = Date.now() + timeoutMs;
   let last: T | undefined;
@@ -56,7 +56,7 @@ export async function waitFor<T>(what: string, read: () => Promise<T>, done: (va
       last = await read();
       if (done(last)) return last;
     } catch {
-      // 読めないときは次の回に読み直す
+      // 読めないときは次の回に再読み込みする
     }
     if (Date.now() > until) throw new Error(`${what} を待ちきれなかった（最後の値：${JSON.stringify(last)?.slice(0, 500)}）`);
     await new Promise((r) => setTimeout(r, 500));

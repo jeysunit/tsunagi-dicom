@@ -133,7 +133,7 @@ describe("検査日の新しい順の上限の数を集める", () => {
     };
     const r = await collectNewestStudies(capped, 1000, undefined, TODAY);
     expect(r.complete).toBe(false);
-    // 今日の 100 件だけ（今日を読み残したまま、昨日の検査を足さない）
+    // 今日の 100 件だけ（今日を読み残したまま、昨日の検査を追加しない）
     expect(r.studies).toHaveLength(100);
     expect(r.studies.every((s) => s.studyDate === daysAgo(0))).toBe(true);
   });

@@ -8,7 +8,7 @@ import type { Db } from "@/lib/db";
 import { testDatabases } from "./helpers/test-db";
 
 // /api/audit/verify（src/app/api/audit/verify/route.ts）：先頭の控えと照らせないときは、つなぎの中に食い違いが無くても
-// ok にしない（docs/adr/0001-audit-chain-mac.md）。管理者の確かめ（requireSession）・設定・データベースだけを差し替える。
+// ok にしない（docs/adr/0001-audit-chain-mac.md）。管理者の確認（requireSession）・設定・データベースだけを差し替える。
 
 const state = vi.hoisted(() => ({
   db: undefined as unknown,
@@ -133,7 +133,7 @@ describe("/api/audit/verify：先頭の控えと照らせないときは ok に�
     // 起き直しの控えの書き出し：作らず、作らなかったことを記録に残す
     await expect(writeAuditAnchor(db, file, () => undefined)).rejects.toThrow("作らない");
     expect(await db.auditLog.findFirst({ where: { action: "audit_anchor" } })).toMatchObject({ outcome: "denied" });
-    // 記録が増えた後の書き出しでも作らない。確かめは控えと照らせないので 409
+    // 記録が増えた後の書き出しでも作らない。確認は控えと照らせないので 409
     await appendAudit(db, { actorId: "admin1", actorRole: "admin", authMode: "local", action: "login" });
     await expect(writeAuditAnchor(db, file, () => undefined)).rejects.toThrow("作り直さない");
     expect(await verify()).toMatchObject({ status: 409, body: { ok: false, reason: expect.stringContaining("先頭の控えが無い") } });

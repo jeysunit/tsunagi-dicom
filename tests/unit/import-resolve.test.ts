@@ -4,7 +4,7 @@ import { dicomFile } from "./helpers/dicom-file";
 import { testDatabases } from "./helpers/test-db";
 
 // 段 6 のインポートの、管理者が手で解く道（POST /api/studies/{uid}/import/resolve。docs/spec.md の 3.5「取り込み」）と、
-// 状態の確認（GET /api/import）を照らし合わせの役割（管理者）にも開いたことを確かめる。
+// 状態の確認（GET /api/import）を照らし合わせの役割（管理者）にも開いたことを確認する。
 // 解けるのは管理者だけ（一般は断り、断ったことも記録に残る）・CSRF（Origin）・確認内容が必須・結果の行の無い要求は決めた時間を
 // 過ぎるまで解かない・「成功」は画像があると読めたときだけ・解いた後は同じ検査のインポートが止まらない、を見る。
 
@@ -42,7 +42,7 @@ const STUDY = "1.2.826.0.1.3680043.8.498.37441995708659611703386240683600654012"
 const PATIENT = "JP-TEST-0004";
 const STUDY_MISMATCH = "1.2.826.0.1.3680043.8.498.12580196157444326238324642149044327503";
 const STUDY_CLEANUP = "1.2.826.0.1.3680043.8.498.73812431209939638312153431926357964288";
-// 記録だけに足す要求の検査（Orthanc には無い）
+// 記録だけに追加する要求の検査（Orthanc には無い）
 const STUDY_RECORDED = "1.2.826.0.1.3680043.8.498.11111111111111111111111111111111111111";
 const ORIGIN = "http://127.0.0.1:3000";
 const dbs = testDatabases("tsunagi-import-resolve-");
@@ -127,7 +127,7 @@ async function storedPatientDiffers() {
     return info && { ...info, patientId: "JP-TEST-0099" };
   });
 }
-/** ほかの利用者の取り込みの行を、記録にだけ足す（結果の行は phases で選ぶ） */
+/** ほかの利用者の取り込みの行を、記録にだけ追加する（結果の行は phases で選ぶ） */
 async function recordedImport(phases: readonly ("request" | "result")[], actorId = "someone") {
   const { appendAudit } = await import("@/lib/audit");
   const requestId = crypto.randomUUID();
@@ -170,7 +170,7 @@ describe("インポートの結果不明を管理者が手で解く", () => {
     const count = (await rowsOf(requestId)).length;
     expect((await resolve(STUDY_MISMATCH, { requestId, outcome: "failed", note: "試験" }, "http://evil.example")).status).toBe(403);
     expect((await rowsOf(requestId)).length).toBe(count);
-    // 確認内容が無い・結果の名指しが無い・違う検査の URL は断る
+    // 確認内容が無い・結果の指定が無い・違う検査の URL は断る
     expect((await resolve(STUDY_MISMATCH, { requestId, outcome: "failed", note: " " })).status).toBe(400);
     expect((await resolve(STUDY_MISMATCH, { requestId, note: "試験" })).status).toBe(400);
     expect((await resolve(STUDY, { requestId, outcome: "failed", note: "試験" })).status).toBe(404);
@@ -220,7 +220,7 @@ describe("インポートの結果不明を管理者が手で解く", () => {
     expect(label).not.toHaveBeenCalled();
   });
 
-  /** 「求めた」を記録した後、Orthanc へ送る前（「送る」の行を足す前）で、その要求の処理を止めておく */
+  /** 「求めた」を記録した後、Orthanc へ送る前（「送る」の行を追加する前）で、その要求の処理を止めておく */
   async function pausedBeforeDispatch(file: Uint8Array) {
     const requestId = crypto.randomUUID();
     let release!: () => void;

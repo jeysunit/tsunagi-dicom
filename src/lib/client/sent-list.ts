@@ -53,7 +53,7 @@ export function statusCounts(items: readonly SentView[]): Record<SentStatus | "a
   return out;
 }
 
-/** 読んだ行にある送信先（選択の欄の選択肢）。選んでいる送信先は、読み直して消えても残す */
+/** 読んだ行にある送信先（選択の欄の選択肢）。選んでいる送信先は、再読み込みして消えても残す */
 export function destinations(items: readonly SentView[], selected: string): string[] {
   return [...new Set([...items.map((i) => i.destination ?? ""), selected].filter(Boolean))].sort();
 }
@@ -86,7 +86,7 @@ export function sentStudyHref(item: SentView): string | null {
 
 /**
  * 札の隣（詳細）に出す文：なぜか＋次にすること（docs/design-system/writing.md。札が事象を言うので繰り返さない）。
- * 結果不明は、成功とも失敗とも書かず、確かめる対象と、それまでできないことを書く
+ * 結果不明は、成功とも失敗とも書かず、確認する対象と、それまでできないことを書く
  */
 export function sentStatusNote(item: SentView): string {
   const to = item.destination || "送信先";

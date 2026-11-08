@@ -14,11 +14,11 @@ import { formatBirthLine, formatDateTimeIn, formatSlashDate } from "@/lib/format
 import { cn } from "@/lib/utils";
 
 // ほかの機器へ送る（docs/spec.md の 3.4。段 4）。詳細のパネルの「送信」から、登録された機器を選び、
-// 確かめの画面（検査と送り先を2行の表に並べる）を通して送る。送ったあとは、Orthanc の仕事の状態を終わるまで読んで出す。
-// 書き込みの要求は自分で送り直さない。答えが分からなければ「結果不明」と要求の ID を出し、送り直さずに確かめる道だけを出す。
-// 送信を受け付けた後は、同じ確かめの画面から重ねて送らない：実行のボタンを外して「閉じる」だけを出す（2026-10-20。UX のレビューの H7）。
+// 確認画面（検査と送り先を2行の表に並べる）を通して送る。送ったあとは、Orthanc の仕事の状態を終わるまで読んで出す。
+// 書き込みの要求は自分で送り直さない。答えが分からなければ「結果不明」と要求の ID を出し、送り直さずに確認する道だけを出す。
+// 送信を受け付けた後は、同じ確認画面から重ねて送らない：実行のボタンを外して「閉じる」だけを出す（2026-10-20。UX のレビューの H7）。
 // 手応え（2026-10-21。承認者の指摘）：押した直後から、待ちの印つきの状態の枠を出す（0.3 秒を待たない）。送っている間は進みの帯と
-// 「閉じても送信は続きます」、終わったら印つきの完了・失敗の枠と「再送信…」（新しい要求の ID で、確かめの画面に戻る）を出す。
+// 「閉じても送信は続きます」、終わったら印つきの完了・失敗の枠と「再送信…」（新しい要求の ID で、確認画面に戻る）を出す。
 // 閉じた後も、送信の状態は「送信」のボタンの横に出す（呼ぶ側の PacsActions。onStatus）。
 // 画面の言葉は docs/spec.md の 2.2 の用語集から選ぶ。
 
@@ -42,7 +42,7 @@ type Phase =
   | { kind: "job"; requestId: string; token: string; target: Target; job: JobView | null; readError?: string }
   /** 結果不明。照らし合わせが済むまで、この画面からは送り直させない（BFF の側でも断る） */
   | { kind: "unknown"; requestId: string; checkError?: string }
-  /** 照らし合わせで結果が分かった（管理者が確かめた・確かめの道で分かった）。resend は再送してよいとき */
+  /** 照らし合わせで結果が分かった（管理者が確認した・確認の道で分かった）。resend は再送してよいとき */
   | { kind: "settled"; text: string; resend: boolean }
   | { kind: "error"; text: string };
 
@@ -146,7 +146,7 @@ export function SendPanel({
     if (outcome === "accepted" && typeof result.data.job === "string") {
       setPhase({ kind: "job", requestId, token: result.data.job, target: to, job: null });
     } else if (result.status === 409 && Array.isArray(pending) && typeof pending[0] === "string") {
-      // 同じ検査を同じ送り先へ送った、結果の分からない要求がある：そちらを確かめる
+      // 同じ検査を同じ送り先へ送った、結果の分からない要求がある：そちらを確認する
       setPhase({ kind: "unknown", requestId: pending[0] });
     } else if (outcome === "unknown" || result.status === 0 || result.status >= 500 || (outcome === undefined && result.ok)) {
       // 答えが届かない・中で失敗した（BFF や手前の入口の 5xx）・答えを読めない：Orthanc は送ったかもしれないので結果不明
@@ -166,12 +166,12 @@ export function SendPanel({
       else if (r.outcome === "delivered") setPhase({ kind: "settled", text: "送信済み（管理者が確認）", resend: false });
       else setPhase({ kind: "unknown", requestId });
     } catch (e) {
-      // 確かめの通信が失敗しても、結果不明のまま要求の ID と確かめの道を残す
+      // 確認の通信が失敗しても、結果不明のまま要求の ID と確認の道を残す
       setPhase({ kind: "unknown", requestId, checkError: (e as Error).message });
     }
   }
 
-  /** 管理者が送り先で確かめた結果を、記録に足す（照らし合わせ） */
+  /** 管理者が送り先で確認した結果を、記録に追加する（照らし合わせ） */
   async function resolve(requestId: string, delivered: boolean, note: string) {
     const result = await postJson(`/api/studies/${encodeURIComponent(uid)}/send/resolve`, { requestId, delivered, note }, screen.csrfToken);
     if (result.ok) {
@@ -185,15 +185,15 @@ export function SendPanel({
 
   // 結果不明の間・送っている間は送れない（新しい要求の ID で重ねて送らない）
   const inFlight = phase.kind === "sending" || phase.kind === "unknown" || (phase.kind === "job" && !isDone(phase.job));
-  // 送信を受け付けた後（終わった後も）は、同じ画面から重ねて送らない。送信先を選び直すと、新しい送信の確かめの画面に戻る
+  // 送信を受け付けた後（終わった後も）は、同じ画面から重ねて送らない。送信先を選び直すと、新しい送信の確認画面に戻る
   const sent = phase.kind !== "idle" && phase.kind !== "error";
-  // 終わった後は「再送信…」で確かめの画面に戻せる（送信完了・送信失敗・再送できると分かったとき）
+  // 終わった後は「再送信…」で確認画面に戻せる（送信完了・送信失敗・再送できると分かったとき）
   const canResend = (phase.kind === "job" && isDone(phase.job)) || (phase.kind === "settled" && phase.resend);
   // Orthanc が送信を受け付けた後（ジョブの段）は、閉じても送信は続く（結果不明のときは、その知らせの中に次にすることを出す）。
   // 受け付けの前（送信を開始している間）は閉じさせない：断られた（400・403・409 など）ときに、その知らせを見せるため
   const continuesNote = phase.kind === "job" && !isDone(phase.job);
 
-  /** 閉じる：送り終えた・断られた画面は片付ける（開き直すと新しい送信の確かめの画面）。送っている間・結果不明の間は残す */
+  /** 閉じる：送り終えた・断られた画面は片付ける（開き直すと新しい送信の確認画面）。送っている間・結果不明の間は残す */
   function close() {
     if (!inFlight) setPhase({ kind: "idle" });
     onClose();
@@ -228,7 +228,7 @@ export function SendPanel({
                     disabled={inFlight}
                     onChange={(e) => {
                       setTarget(e.target.value);
-                      // 送信先を選び直したら、新しい送信の確かめの画面に戻る
+                      // 送信先を選び直したら、新しい送信の確認画面に戻る
                       if (!inFlight) setPhase({ kind: "idle" });
                     }}
                     data-testid="send-modality"
@@ -240,7 +240,7 @@ export function SendPanel({
                     ))}
                   </Select>
                 </label>
-                {/* 確かめの画面：送る検査と送り先を2行の表に並べる */}
+                {/* 確認画面：送る検査と送り先を2行の表に並べる */}
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
                   <dt className="text-xs text-label">送信する検査</dt>
                   <dd>
@@ -284,7 +284,7 @@ export function SendPanel({
               onCancel={close}
               extra={
                 canResend && (
-                  // 確かめの画面に戻す（送るのは、そこで「送信する」を押したとき。新しい要求の ID になる）
+                  // 確認画面に戻す（送るのは、そこで「送信する」を押したとき。新しい要求の ID になる）
                   <Button type="button" size="sm" variant="outline" onClick={() => setPhase({ kind: "idle" })} data-testid="send-again">
                     <RotateCcw aria-hidden />
                     再送信…
@@ -347,7 +347,7 @@ function SendStatus({
   instanceCount: number | null | undefined;
   onCheck: (requestId: string) => void;
   onReread: () => void;
-  /** 管理者だけ：送り先で確かめた結果を記録に足す */
+  /** 管理者だけ：送り先で確認した結果を記録に追加する */
   onResolve?: (requestId: string, delivered: boolean, note: string) => void;
 }) {
   if (phase.kind === "idle") return null;
@@ -430,7 +430,7 @@ function SendStatus({
   );
 }
 
-/** 結果不明：要求の ID と確かめの道を出し続ける。管理者には、送り先で確かめた結果を記録に足す道も出す */
+/** 結果不明：要求の ID と確認の道を出し続ける。管理者には、送り先で確認した結果を記録に追加する道も出す */
 function UnknownStatus({
   requestId,
   checkError,

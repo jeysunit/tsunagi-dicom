@@ -20,15 +20,15 @@ import { tagName } from "@/lib/instance-tags";
 import { cn } from "@/lib/utils";
 
 // 詳細のパネル（docs/spec.md の 3.1）。一覧の下の場所に出す。行を選ぶと、動きの遅れ無しに替わる（一覧の行の値ですぐ描き、
-// シリーズの並びは画面の API から後で足す）。
+// シリーズの並びは画面の API から後で追加する）。
 // 見出しは、3 製品で共通の患者バナー（docs/design-system/components.md。2026-10-25 に、氏名などを数行に並べる形から替えた）。
 // バナーの並び：氏名（かな）・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名。
 // 値の無い項目は省く。受付番号だけは、無いときも「受付番号 —」を出す（無いこと自体が照合の手がかりになる）。
-// 英字氏名・紹介医・Study ID・シリーズ数と画像数は、バナーに足さず、UID の行の下の「検査の情報」に項目名と値の対で並べる
+// 英字氏名・紹介医・Study ID・シリーズ数と画像数は、バナーに追加せず、UID の行の下の「検査の情報」に項目名と値の対で並べる
 // （タブに隠さない。前のタブは中身が数行で空白が大きかった）。
 // その下に、シリーズのサムネイルを横に 1 列（横にスクロール。まわりだけ暗い地）。DICOM の値を見る権限のある役割では、
 // サムネイルを押すと、その下にシリーズの画像の場所（画像の一覧と、画像ごとのタグ）を開く。もう一度押すと閉じる。
-// UID は開け閉めせず、バナーの下に StudyInstanceUID、画像の場所の見出しに SeriesInstanceUID を、写すボタンつきで出す
+// UID は開け閉めせず、バナーの下に StudyInstanceUID、画像の場所の見出しに SeriesInstanceUID を、コピーするボタンつきで出す
 // （2026-10-24。前は下に「UID」と「DICOM タグ」のボタンがあり、画像の場所と役割が重なっていた。#57）。検査単位のタグ（要約）は、
 // 画像に関わらないので、Study UID の横の「検査のタグ」のボタンで、見出しの下に開け閉めする。値は `…` で切らずに折り返す。UID は行の幅いっぱいに、小さく等幅で出す。
 
@@ -38,7 +38,7 @@ export interface StudyDetailData {
 }
 
 export const detailKey = (uid: string) => ["study", uid] as const;
-// UID は画像サーバーから来た値なので、path に入れるときは符号化する（BFF の側でも形を確かめる）
+// UID は画像サーバーから来た値なので、path に入れるときは符号化する（BFF の側でも形を確認する）
 export const fetchDetail = (uid: string) => getJson<StudyDetailData>(`/api/studies/${encodeURIComponent(uid)}`);
 
 /** 「検査の情報」の 1 つの升（項目名と値）。値が無い項目も渡し、「—」で場所を残す */
@@ -50,7 +50,7 @@ interface InfoRow {
 }
 
 /**
- * 「検査の情報」（docs/design-system/parts.md の `.finfo`）：バナーに足さない、毎回は見ない値。
+ * 「検査の情報」（docs/design-system/parts.md の `.finfo`）：バナーに追加しない、毎回は見ない値。
  * 3 列×2 行（各行 40px）に、英字氏名・紹介医・Study ID・シリーズ数と画像数の順で置く（5 つ目と 6 つ目の升は空ける）。
  * 値の無い項目も詰めずに「—」（検査を替えても、同じ項目が同じ位置にある）
  */
@@ -73,8 +73,8 @@ function StudyInfo({ rows }: { rows: readonly InfoRow[] }) {
 const COPIED_MS = 1500;
 
 /**
- * StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID：0.75rem・等幅・控えめの色で折り返して出し、写すボタンを値のすぐ右に置く。
- * 値そのものを押しても写せる（文字をドラッグで選んだときは写さない）。写したら、値の地を一瞬 selected にして「コピーしました」を出す
+ * StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID：0.75rem・等幅・控えめの色で折り返して出し、コピーするボタンを値のすぐ右に置く。
+ * 値そのものを押しても写せる（文字をドラッグで選んだときはコピーしない）。コピーしたら、値の地を一瞬 selected にして「コピーしました」を出す
  */
 function UidLine({ label, uid, testId = "uid-line" }: { label: string; uid: string; testId?: string }) {
   const [done, setDone] = useState(false);
@@ -92,9 +92,9 @@ function UidLine({ label, uid, testId = "uid-line" }: { label: string; uid: stri
   return (
     <div className="flex items-baseline gap-2" data-testid={testId}>
       <span className="shrink-0 text-xs text-label">{label}</span>
-      {/* 写すボタンは値のすぐ右（行の右端に離さない）。長い UID が折り返すときは、最後の行の末尾に付く */}
+      {/* コピーするボタンは値のすぐ右（行の右端に離さない）。長い UID が折り返すときは、最後の行の末尾に付く */}
       <span className="min-w-0">
-        {/* 値を押して写すのはマウスの近道（キーボードは隣のボタン）なので、読み上げには出さない */}
+        {/* 値を押してコピーするのはマウスの近道（キーボードは隣のボタン）なので、読み上げには出さない */}
         <code
           role="presentation"
           className={cn("cursor-copy rounded-sm font-mono text-[0.75rem] break-all text-label", done && "bg-selected")}
@@ -126,8 +126,8 @@ function UidLine({ label, uid, testId = "uid-line" }: { label: string; uid: stri
 }
 
 /**
- * 操作ログに残る読み取り（DICOM タグ）の取り方：出すたびに必ず BFF から読み直し（権限の確かめと操作ログを通す）、
- * 読み直している間と失敗したときは、前に読んだ中身を出さない。行を離れたら残さない（詳細の取り方と同じ）
+ * 操作ログに残る読み取り（DICOM タグ）の取り方：出すたびに必ず BFF から再読み込み（権限の確認と操作ログを通す）、
+ * 再読み込みしている間と失敗したときは、前に読んだ中身を出さない。行を離れたら残さない（詳細の取り方と同じ）
  */
 const AUDITED_READ = { staleTime: 0, gcTime: 0 } as const;
 
@@ -157,7 +157,7 @@ function TagTable<T>({
   pick: (body: T) => TagRow[];
   testId: string;
   className?: string;
-  /** 画像の場所の表：選んだ画像の SOPInstanceUID。(0008,0018) の行を 1 行目に固定し、その行に写すボタンを置く */
+  /** 画像の場所の表：選んだ画像の SOPInstanceUID。(0008,0018) の行を 1 行目に固定し、その行にコピーするボタンを置く */
   sop?: string;
 }) {
   const query = useQuery({ queryKey, queryFn: () => getJson<T>(url), ...AUDITED_READ });
@@ -344,7 +344,7 @@ function SeriesImages({
               </li>
             ))}
           </ul>
-          {/* 画像の UID は表の上に出さず、タグの表の 1 行目の (0008,0018) に固定する（写すボタンはその行。docs/design-system/parts.md の `.uidrow`） */}
+          {/* 画像の UID は表の上に出さず、タグの表の 1 行目の (0008,0018) に固定する（コピーするボタンはその行。docs/design-system/parts.md の `.uidrow`） */}
           <div className="min-w-0 space-y-1">
             {readSop === "" ? (
               <p className="p-2">
@@ -430,7 +430,7 @@ export function StudyDetailPanel({
   row: StudyView;
   screen: ScreenInfo;
   onChanged: () => void;
-  /** 削除が終わったとき（一覧の上に知らせを出し、一覧を読み直す） */
+  /** 削除が終わったとき（一覧の上に知らせを出し、一覧を再読み込みする） */
   onDeleted?: (study: StudyView) => void;
   /** false の間は詳細を取らない（矢印のキーで通り過ぎる行の「詳細を開いた」記録を量産しないため。一覧の行の値だけで描く） */
   fetchEnabled?: boolean;
@@ -451,9 +451,9 @@ export function StudyDetailPanel({
   const data = fetchEnabled && !detail.isFetching ? detail.data : undefined;
   const failed = fetchEnabled && detail.isError;
   // 詳細が届くまでは一覧の行の値で描き、届いたら詳細の値にする。
-  // 覚えたビューアの値は、覚えを変えたあと読み直す一覧の行の値を優先する
+  // 覚えたビューアの値は、覚えを変えたあと再読み込みする一覧の行の値を優先する
   const study: StudyView = { ...row, ...data?.study, ...definedViewerOf(row) };
-  // 覚えを変えたら一覧を読み直す（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
+  // 覚えを変えたら一覧を再読み込みする（詳細は取り直さない。取り直すと「詳細を開いた」の記録が二重になる）
   const changed = onChanged;
   // 画像の場所・タグ（権限のある役割だけ）
   const tagsShown = screen.can.allValues && uid !== "";
@@ -472,7 +472,7 @@ export function StudyDetailPanel({
   // 患者バナー（氏名・かな・患者ID・生年月日と年齢・性別・受付番号・検査日時・モダリティと検査名）。値の無い項目も「—」で場所を残す
   // 生年月日は西暦の後ろの括弧に元号と年・満年齢（検査日の時点）。和暦は帯に並べ、「検査の情報」には置かない
   const birth = birthParts(study.patientBirthDate, study.studyDate);
-  // 「検査の情報」：バナーに足さない値。値の無い項目も「—」で場所を残す
+  // 「検査の情報」：バナーに追加しない値。値の無い項目も「—」で場所を残す
   const counts = study.seriesCount == null && study.instanceCount == null ? "" : `${study.seriesCount ?? "—"} / ${study.instanceCount ?? "—"}`;
   const infoRows: InfoRow[] = [
     { label: "英字氏名", value: study.patientNameAlphabetic, testId: "detail-alphabetic" },
@@ -581,7 +581,7 @@ export function StudyDetailPanel({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div className="-mt-1.5 min-w-0 flex-1 basis-96 space-y-0.5 border-l-[3px] border-ring pl-2" data-testid="detail-head">
           <StudyInfo rows={infoRows} />
-          {/* 検査の UID（写すボタンつき）と、その横の「検査のタグ」。前は下の「UID」のボタンの中にあった（#57） */}
+          {/* 検査の UID（コピーするボタンつき）と、その横の「検査のタグ」。前は下の「UID」のボタンの中にあった（#57） */}
           {uid && (
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">

@@ -11,7 +11,7 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
-    # イメージの中で migration を流す Prisma の CLI。直下の prisma と同じ版にそろえる
+    # イメージの中で migration を実行する Prisma の CLI。直下の prisma と同じ版にそろえる
     directory: /docker/prisma-cli
     schedule:
       interval: weekly

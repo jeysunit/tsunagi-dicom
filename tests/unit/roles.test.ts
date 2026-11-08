@@ -20,7 +20,7 @@ const GENERAL: Permission[] = [
   "study.import",
 ];
 const EXPECTED: Record<Role, Permission[]> = {
-  // 管理者：一般の全部に加えて、削除・ユーザー管理・システムの設定・照らし合わせ・監査の確かめ
+  // 管理者：一般の全部に加えて、削除・ユーザー管理・システムの設定・照らし合わせ・監査の確認
   admin: [...GENERAL, "audit.verify", "user.manage", "viewer.defaults", "pacs.reconcile", "study.delete"],
   general: GENERAL,
 };

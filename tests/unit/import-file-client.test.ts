@@ -13,7 +13,7 @@ import {
 } from "@/lib/client/import-file";
 
 // インポートの画面が 1 件ずつ送る働き（docs/spec.md の 3.5「取り込み」）：送る要求の形と、BFF の答えを部品の結果
-// （成功・失敗・結果不明）に写す規則。結果不明を成功・失敗に数えない（成功とも失敗とも書かない）。
+// （成功・失敗・結果不明）にコピーする規則。結果不明を成功・失敗に数えない（成功とも失敗とも書かない）。
 
 const BATCH = { id: "6f1c2b9e-3d4a-4b5c-8d6e-7f8091a2b3c4", index: 2, total: 5 };
 const REQ = "0b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e";
@@ -69,7 +69,7 @@ describe("答えを結果に写す", () => {
       unknown: true,
       reason: UNKNOWN_REASON,
     });
-    // 確かめも読めない：送った要求が届いたかも分からないので、どちらも結果不明（失敗と言い切らない）
+    // 確認も読めない：送った要求が届いたかも分からないので、どちらも結果不明（失敗と言い切らない）
     expect(checkedOutcomeOf(null, "reached")).toEqual({ ok: false, unknown: true, reason: UNKNOWN_REASON });
     expect(checkedOutcomeOf({ status: 500, data: {} }, "reached")).toEqual({ ok: false, unknown: true, reason: UNKNOWN_REASON });
     expect(checkedOutcomeOf(null, "unreachable")).toEqual({ ok: false, unknown: true, reason: UNKNOWN_REASON });
@@ -132,7 +132,7 @@ describe("1 件を送る", () => {
       expect(seen).toEqual([status]);
       expect(calls).toHaveLength(1);
     }
-    // 確かめ（GET）で切れたときも呼ぶ。結果は結果不明
+    // 確認（GET）で切れたときも呼ぶ。結果は結果不明
     const seen: number[] = [];
     const { fetcher } = fakeFetch([{ status: 202, body: { outcome: "unknown" } }, { status: 401, body: { error: "x" } }]);
     await expect(importFile(new Blob([]), BATCH, "t", fetcher, () => REQ, (s) => seen.push(s))).resolves.toEqual({ ok: false, unknown: true, reason: UNKNOWN_REASON });
@@ -165,7 +165,7 @@ describe("1 件を送る", () => {
     }) as unknown as typeof fetch;
     await expect(importFile(new Blob([]), BATCH, "t", fetcher, () => REQ)).resolves.toEqual({ ok: true });
     expect(calls).toEqual(["/api/import", `/api/import?requestId=${REQ}`]);
-    // 確かめの本文も読めなければ結果不明（成功とも失敗とも数えない）
+    // 確認の本文も読めなければ結果不明（成功とも失敗とも数えない）
     const broken = (async () => new Response("<html>", { status: 200 })) as unknown as typeof fetch;
     await expect(importFile(new Blob([]), BATCH, "t", broken, () => REQ)).resolves.toMatchObject({ ok: false, unknown: true });
   });

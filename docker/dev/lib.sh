@@ -1,8 +1,8 @@
-# up.sh と refresh.sh が読み込む共通の決まり（単独では流さない）。
+# up.sh と refresh.sh が読み込む共通の決まり（単独では実行しない）。
 #
-# secrets の置き場：TSUNAGI_DEV_SECRETS_DIR で替えられる（既定は docker/dev/secrets）。
+# secrets の保存先：TSUNAGI_DEV_SECRETS_DIR で替えられる（既定は docker/dev/secrets）。
 # 作業ツリーの外の専用のディレクトリ（例 ~/.config/tsunagi-dev/secrets。~/.config そのものは指さない）に置くと、
-# 作業ツリーを消してもパスワードが消えない。~ で始まる値は $HOME に展開する。相対のパスは、流した場所から数える。
+# 作業ツリーを消してもパスワードが消えない。~ で始まる値は $HOME に展開する。相対のパスは、実行した場所から数える。
 
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$here/../.." && pwd)
@@ -16,7 +16,7 @@ case $secrets in
   /*) ;;
   *) secrets="$PWD/$secrets" ;;
 esac
-# $HOME・$HOME/.config・/ そのものは置き場にしない（秘密のファイルを広い場所に撒かない。専用のディレクトリを指す）。
+# $HOME・$HOME/.config・/ そのものは保存先にしない（秘密のファイルを広い場所に撒かない。専用のディレクトリを指す）。
 # 書いたままの値と、実体（シンボリックリンクを辿った値）の両方を、末尾のスラッシュを除いて照らす
 secrets_home=${HOME:-}
 secrets_real=$(CDPATH='' cd -P -- "$secrets" 2> /dev/null && pwd) || secrets_real=$secrets
@@ -32,7 +32,7 @@ for candidate in "$secrets" "$secrets_real"; do
     fi
   done
 done
-# compose.yaml・hl7.override.yaml・deploy/compose.yaml の secrets の file: が、同じ置き場を指すようにする
+# compose.yaml・hl7.override.yaml・deploy/compose.yaml の secrets の file: が、同じ保存先を指すようにする
 TSUNAGI_DEV_SECRETS_DIR=$secrets
 TSUNAGI_SECRETS_DIR=$secrets
 export TSUNAGI_DEV_SECRETS_DIR TSUNAGI_SECRETS_DIR

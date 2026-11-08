@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// モダリティを複数選んで絞る（docs/spec.md の 3.1）。検証モード（AUTH_MODE=dev）とモックのバックエンドに対して流す。
+// モダリティを複数選んで絞る（docs/spec.md の 3.1）。検証モード（AUTH_MODE=dev）とモックのバックエンドに対して実行する。
 
 async function asGeneral(page: Page) {
   await page.goto("/");
@@ -86,7 +86,7 @@ test("DOC・SR は一覧の上の見出しに出さず、詳細条件の中で�
   await expect(panel.getByTestId("modality-DOC")).toBeVisible();
   await expect(panel.getByTestId("modality-SR")).toBeVisible();
 
-  // CT に SR を足すと、CT または SR の検査（上の CT の見出しも押したまま）
+  // CT に SR を追加すると、CT または SR の検査（上の CT の見出しも押したまま）
   await page.getByTestId("modality-CT").click();
   await panel.getByTestId("modality-SR").click();
   await expect(page.getByTestId("modality-CT")).toHaveAttribute("aria-pressed", "true");

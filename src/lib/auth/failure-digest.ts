@@ -47,7 +47,7 @@ export class FailureDigest {
     return out.sort((a, b) => a.windowStart - b.windowStart);
   }
 
-  /** 書けなかった分を戻す（その間に足された同じ鍵の分と合わせる） */
+  /** 書けなかった分を戻す（その間に追加された同じ鍵の分と合わせる） */
   restore(entries: DigestEntry[]): void {
     for (const entry of entries) this.merge(entry);
   }

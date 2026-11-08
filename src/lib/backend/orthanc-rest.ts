@@ -11,7 +11,7 @@ import {
 
 // Orthanc の REST の応答の読み取り（docs/spec.md の 3.3・3.4）。実の Orthanc（http.ts）とモック（mock.ts）で同じものを使う。
 // 形は Orthanc Book（REST API の「Tracking changes」「Sending resources to remote modalities」「Performing C-Echo」、
-// 「Advanced features of the REST API」の Jobs）に合わせた。応答の値はそのまま信じず、形を確かめてから使う。
+// 「Advanced features of the REST API」の Jobs）に合わせた。応答の値はそのまま信じず、形を確認してから使う。
 
 /** Orthanc の中の ID（SHA-1 を 8 字ずつ 5 つに分けたもの） */
 const ORTHANC_ID = /^[0-9a-f]{8}(-[0-9a-f]{8}){4}$/;
@@ -308,7 +308,7 @@ export function singleStudyId(ids: readonly string[]): string | null {
   return ids[0]!;
 }
 
-/** /studies/{id} から、消す前の確かめに使う要点と版（LastUpdate） */
+/** /studies/{id} から、消す前の確認に使う要点と版（LastUpdate） */
 export function studyInfoFromRest(json: unknown): OrthancStudyInfo | null {
   const s = obj(json);
   if (!isOrthancId(s.ID)) return null;

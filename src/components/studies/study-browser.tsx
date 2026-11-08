@@ -186,7 +186,7 @@ function FilterBar({
   // 一覧の上に出さないモダリティ（DOC・SR）も詳細条件の数に入れる（閉じていても、絞っていることが分かるように）
   const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0) + DETAIL_GROUPS.filter((g) => filter.modalities?.includes(g)).length;
   const [more, setMore] = useState(conditions > 0);
-  /** モダリティの見出し 1 つ。押すと、その群を足す・外す（複数選べる。どれかに合う検査を出す。全部外すと「すべて」） */
+  /** モダリティの見出し 1 つ。押すと、その群を追加する・外す（複数選べる。どれかに合う検査を出す。全部外すと「すべて」） */
   const modalityChip = (m: ModalityGroup) => (
     <Chip
       key={m}
@@ -369,7 +369,7 @@ function FilterBar({
               ))}
             </Select>
           </label>
-          {/* 一覧の上のモダリティの見出しに無い群（文書・レポート）。上の見出しと同じ選びに足される */}
+          {/* 一覧の上のモダリティの見出しに無い群（文書・レポート）。上の見出しと同じ選びに追加される */}
           <span className="flex items-center gap-1.5">
             <span className="shrink-0 text-xs text-label">モダリティ</span>
             <Segmented label="モダリティ（文書・レポート）">{DETAIL_GROUPS.map(modalityChip)}</Segmented>
@@ -462,8 +462,8 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
 }
 
 /**
- * 一覧を読み直しても、見ていた行の位置を保つ（docs/spec.md の 3.1 の自動更新）。スクロールしているときは、見えている先頭の行を
- * 印にし、読み直した後に同じ行が同じ高さに来るように戻す（新しい検査が上に足されても、見ていた行が動かない）。
+ * 一覧を再読み込みしても、見ていた行の位置を保つ（docs/spec.md の 3.1 の自動更新）。スクロールしているときは、見えている先頭の行を
+ * 印にし、再読み込みした後に同じ行が同じ高さに来るように戻す（新しい検査が上に追加されても、見ていた行が動かない）。
  * いちばん上にいるときは保たない（新しい検査が上に出て、目に入る）。絞り込みを替えた（listKey が替わった）ときは、印を捨てる
  */
 function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: readonly StudyView[], listKey: string) {
@@ -484,7 +484,7 @@ function useScrollAnchor(ref: React.RefObject<HTMLDivElement | null>, studies: r
   useLayoutEffect(() => {
     const box = ref.current;
     const a = anchor.current;
-    // 同じ絞り込みの読み直し（自動更新など）のときだけ戻す
+    // 同じ絞り込みの再読み込み（自動更新など）のときだけ戻す
     if (box && a && a.key === listKey) {
       const row = box.querySelector<HTMLElement>(`tbody > tr[data-study-uid="${CSS.escape(a.uid)}"]`);
       const top = box.getBoundingClientRect().top + (box.querySelector("thead")?.getBoundingClientRect().height ?? 0);
@@ -799,11 +799,11 @@ function StudyRows({
 
 /**
  * 一覧の自動更新（docs/spec.md の 3.1）。seconds ごとに一覧の版（/api/studies/version。Orthanc の変更の記録の番号）を読み、
- * 版が変わったときだけ一覧を読み直す（変わらなければ検査の検索をしない）。選んだ行・スクロール・開いている詳細はそのまま
- * （詳細は読み直さない。「詳細を開いた」の記録を増やさない）。この読み直しの間は待ちの印を出さない（quiet）。
+ * 版が変わったときだけ一覧を再読み込みする（変わらなければ検査の検索をしない）。選んだ行・スクロール・開いている詳細はそのまま
+ * （詳細は再読み込みしない。「詳細を開いた」の記録を増やさない）。この再読み込みの間は待ちの印を出さない（quiet）。
  * タブを隠している間は読まず、戻ったらすぐ読む。seconds が 0 なら何もしない。
- * 読み直しの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）。
- * hooks.tick は版を読むたび（読み直しの前）に、hooks.beforeAuto は一覧を読み直す直前に、hooks.afterAuto は答えが届いた後
+ * 再読み込みの要求を出す間は autoRef を true にし、一覧の要求に `refresh=auto` を付けさせる（監査の記録に trigger: "auto" が残る）。
+ * hooks.tick は版を読むたび（再読み込みの前）に、hooks.beforeAuto は一覧を再読み込みする直前に、hooks.afterAuto は答えが届いた後
  * （読めなかったときも）に呼ぶ（行の差し込みを待つかを決める。Browser）
  */
 function useListRefresh(
@@ -829,7 +829,7 @@ function useListRefresh(
       hooks.current.beforeAuto();
       autoRef.current = true;
       try {
-        // 開いていない絞り込みの一覧は古い印だけを付け、いま出している一覧を読み直す
+        // 開いていない絞り込みの一覧は古い印だけを付け、いま出している一覧を再読み込みする
         await queryClient.invalidateQueries({ queryKey: ["studies"], refetchType: "none" });
         const done = queryClient.refetchQueries({ queryKey: ["studies"], type: "active" }, { throwOnError: true });
         // 要求を出した後に戻す（同じ時に利用者が絞り込みを替えた要求には付けない）
@@ -837,7 +837,7 @@ function useListRefresh(
         await done;
         base.current = next;
       } catch {
-        // 一覧を読めなかったときは、誤りを一覧の上に出し、版を進めない（次の間隔で読み直す）
+        // 一覧を読めなかったときは、誤りを一覧の上に出し、版を進めない（次の間隔で再読み込みする）
       } finally {
         autoRef.current = false;
         setQuiet(false);
@@ -917,7 +917,7 @@ function Browser({
   const list = useQuery({
     queryKey: listKey(filter),
     queryFn: ({ signal }) => {
-      // 自動更新の読み直しには refresh=auto を付ける（監査の記録で、利用者の検索と分けて追えるように）
+      // 自動更新の再読み込みには refresh=auto を付ける（監査の記録で、利用者の検索と分けて追えるように）
       const query = new URLSearchParams(params);
       if (autoRefreshRef.current) query.set("refresh", "auto");
       const qs = query.toString();
@@ -928,19 +928,19 @@ function Browser({
     placeholderData: (previous) => previous,
   });
 
-  // 絞り込みを頁の URL に写す（頁は読み直さない）
+  // 絞り込みを頁の URL にコピーする（頁は再読み込みしない）
   useEffect(() => {
     const url = params ? `/?${params}` : "/";
     if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState(null, "", url);
   }, [params]);
 
   // 自動更新の行の差し込みを待つ（docs/spec.md の 3.1）：ポインタが一覧の上にある間と、一覧の中でキーを押してから 3 秒の間は、
-  // 読み直した一覧を出さず、読み直す前の一覧（held）を出したままにする。押す直前に行がずれて、隣の検査を選ばないように。
+  // 再読み込みした一覧を出さず、再読み込みする前の一覧（held）を出したままにする。押す直前に行がずれて、隣の検査を選ばないように。
   // 新しい行は件数の行の「新着 n 件」で知らせ、押すか、待つ理由が無くなった後の次の版の読み取りで出す。
   // 選んだ行は StudyInstanceUID で持つので、差し込んだ後も同じ検査を選んだまま
   const hold = useRef({ pointer: false, keyAt: Number.NEGATIVE_INFINITY });
   const [held, setHeld] = useState<{ key: string; data: StudyListData } | null>(null);
-  /** 出していない新しい行（新着）と、出したままの消えた行の数。行の出入りが無い読み直し（画像の枚数が増えただけなど）は、
+  /** 出していない新しい行（新着）と、出したままの消えた行の数。行の出入りが無い再読み込み（画像の枚数が増えただけなど）は、
    * 行がずれないので、待たずに出す（null） */
   const waiting = useMemo(() => {
     if (!held || held.key !== params || !list.data || list.data === held.data) return null;
@@ -951,7 +951,7 @@ function Browser({
     return added > 0 || removed > 0 ? { added, removed } : null;
   }, [held, params, list.data]);
   const data = waiting && held ? held.data : list.data;
-  // fetching：読み直しを始める前から一覧を取っている（利用者の絞り込み・最初の読み込み。前の絞り込みの行を仮に出している間や、
+  // fetching：再読み込みを始める前から一覧を取っている（利用者の絞り込み・最初の読み込み。前の絞り込みの行を仮に出している間や、
   // 覚えている一覧を出しながら取り直している間）
   const latest = useRef({ params, shown: data, fetching: list.isFetching });
   useEffect(() => {
@@ -965,7 +965,7 @@ function Browser({
     };
     refreshHooks.current = {
       tick: release,
-      // 読み直す前に、いま出している一覧を控える（待つかどうかは、答えが届いた時に決める。読み直しの間にポインタを
+      // 再読み込みする前に、いま出している一覧を控える（待つかどうかは、答えが届いた時に決める。再読み込みの間にポインタを
       // 一覧へ移しても差し込まない）。利用者の検索の答えを待っている間は控えない（求めた結果を、古い一覧の裏に隠さない）
       beforeAuto: () => {
         const { params: key, shown, fetching } = latest.current;
@@ -1004,7 +1004,7 @@ function Browser({
   const refreshSeconds = screen.refreshSeconds ?? 0;
   const refresh = useListRefresh(refreshSeconds, initialVersion, autoRefreshRef, refreshHooks);
   // 取り直しの待ちの印（0.3 秒たってから。docs/spec.md の 2.3）：一覧の上の細い帯・古い行を薄く・件数を「—」。
-  // 自動更新の読み直しには出さない（30 秒ごとに一覧がちらつかないように）
+  // 自動更新の再読み込みには出さない（30 秒ごとに一覧がちらつかないように）
   const fetching = list.isFetching && !refresh.quiet;
   const refetching = useDelayedPending(fetching);
 
@@ -1031,7 +1031,7 @@ function Browser({
     setNotice(null);
     select(uid, how);
   };
-  /** 消したあと、フォーカスを移す行の位置（消した行の位置。一覧を読み直したら、その位置の行へ） */
+  /** 消したあと、フォーカスを移す行の位置（消した行の位置。一覧を再読み込みしたら、その位置の行へ） */
   const focusIndex = useRef<number | null>(null);
   const deleted = (study: StudyView) => {
     focusIndex.current = data?.studies.findIndex((s) => s.studyInstanceUid === study.studyInstanceUid) ?? null;

@@ -1,7 +1,7 @@
 import { argon2, randomBytes, timingSafeEqual } from "node:crypto";
 
 // パスワードのハッシュ（argon2id。第7.0版 14 遵守事項②・⑥(3)）。平文には戻せない形で持つ。
-// Node.js の node:crypto の argon2（v24.7 から）を使い、外の依存を足さない。
+// Node.js の node:crypto の argon2（v24.7 から）を使い、外の依存を追加しない。
 // 値は PHC の文字列（$argon2id$v=19$m=<KiB>,t=<回>,p=<並び>$<salt>$<hash>。base64 の = は付けない）。
 // 強さは OWASP の Password Storage Cheat Sheet の argon2id の最小の例（m=19 MiB・t=2・p=1）に合わせる。
 
@@ -47,7 +47,7 @@ export async function hashPassword(password: string, params: Argon2Params = DEFA
 const PHC = /^\$argon2id\$v=(\d+)\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
 
 /**
- * 保存したハッシュの強さの値として受ける範囲。外れた値（壊れた行・書き換えた行）は確かめに回さない
+ * 保存したハッシュの強さの値として受ける範囲。外れた値（壊れた行・書き換えた行）は確認に回さない
  * （大きすぎる値で記憶と時間を使い切らせない。小さすぎる値は強さが足りない）
  */
 export const ARGON2_PARAM_RANGE = {

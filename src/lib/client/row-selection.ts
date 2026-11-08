@@ -13,7 +13,7 @@ export const EMPTY_SELECTION: RowSelection = { selected: new Set(), anchor: null
 export interface PickModifiers {
   /** Shift：基点から押した行までの範囲を選ぶ（Ctrl／Cmd が無ければ、ほかの選びは外す） */
   range?: boolean;
-  /** Ctrl（Mac は Cmd）：押した行だけを足す・外す */
+  /** Ctrl（Mac は Cmd）：押した行だけを追加する・外す */
   toggle?: boolean;
 }
 
@@ -28,7 +28,7 @@ export function pickRow(current: RowSelection, index: number, { range = false, t
   if (range) {
     const anchor = current.anchor ?? index;
     const picked = span(anchor, index);
-    // Ctrl と Shift を同時に押したときは、いまの選びに範囲を足す（基点は変えない）
+    // Ctrl と Shift を同時に押したときは、いまの選びに範囲を追加する（基点は変えない）
     const next = toggle ? new Set([...current.selected, ...picked]) : new Set(picked);
     return { selected: next, anchor };
   }

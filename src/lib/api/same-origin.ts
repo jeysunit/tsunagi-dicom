@@ -1,5 +1,5 @@
 /**
- * このアプリの画面（同じ origin）から開いた GET の要求か。Sec-Fetch-Site を送らない古いブラウザ・道具は Origin だけで見る。
+ * このアプリの画面（同じ origin）から開いた GET の要求か。Sec-Fetch-Site を送らない古いブラウザ・ツールは Origin だけで見る。
  * ビューアで開く（/api/viewers/open）・書き出し（/api/studies/{uid}/export）のように、GET でも記録や持ち出しを伴う道に使う
  */
 export function sameOriginRequest(request: Request): boolean {

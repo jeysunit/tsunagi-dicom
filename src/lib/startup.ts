@@ -1,7 +1,7 @@
 import { ConfigError, loadConfig } from "@/lib/config";
 
 /**
- * 設定に誤りがあれば、どの変数かを出して起動を止める。AUTH_MODE=local では最初の管理者も確かめ、
+ * 設定に誤りがあれば、どの変数かを出して起動を止める。AUTH_MODE=local では最初の管理者も確認し、
  * 期限の切れたセッションを片付け、一定の間隔の片付けを始める
  */
 export async function checkConfigOrExit(): Promise<void> {

@@ -7,14 +7,14 @@
 #   画面を施設のネットワークに公開するときは、TLS を終端するリバースプロキシを前に置く（cookie は Secure）。
 # - Orthanc は DICOM のためのネットワーク dicom にも入る（ほかの機器へ送るとき、Orthanc から外へつなぐため）。
 #   Orthanc は REST も dicom の側で待ち受ける。dicom はコンテナどうしの通信を止める（enable_icc: false）ので、
-#   dicom にほかのコンテナを足しても、その中から Orthanc には届かない。
+#   dicom にほかのコンテナを追加しても、その中から Orthanc には届かない。
 # - Docker のホストの上の利用者とプロセスは、Orthanc のコンテナの IP アドレスで REST（8042）に届く（認証は要る）。
 #   ホストにログインできる人を絞る。
-# - Orthanc は登録した接続先からだけ C-STORE を受け、送り元の IP アドレスも確かめる（site.json の DicomCheckModalityHost）。
+# - Orthanc は登録した接続先からだけ C-STORE を受け、送り元の IP アドレスも確認する（site.json の DicomCheckModalityHost）。
 #   127.0.0.1 に公開したポートへのつなぎは、Docker の userland-proxy を通ると送り元が gateway の IP アドレスに変わる
 #   （docs/spec.md の 5）。
 #
-# Docker Engine 29.9.1・Docker Compose v5.6.0 と、GitHub Actions の ubuntu-24.04 の Docker で確かめた。
+# Docker Engine 29.9.1・Docker Compose v5.6.0 と、GitHub Actions の ubuntu-24.04 の Docker で確認した。
 # Docker Compose は v2.24 以上（env_file の required を使う）。
 #
 # 使い方（このフォルダで）：
@@ -28,9 +28,9 @@
 #   TSUNAGI_HTTP_BIND    画面を待ち受けるホストの IP アドレス（既定 127.0.0.1）。TSUNAGI_HTTP_PORT（既定 3000）
 #   ORTHANC_DICOM_BIND   DICOM を待ち受けるホストの IP アドレス（既定 127.0.0.1）。ORTHANC_DICOM_PORT（既定 4242）
 #   ORTHANC_SITE_CONFIG  Orthanc の AE タイトルと登録する機器（DicomModalities）の設定ファイル（既定 ./orthanc/site.json）。
-#                        施設の値は ./orthanc/site.json を写した ./orthanc/site.local.json（リポジトリに入れない）に書いて指す
+#                        施設の値は ./orthanc/site.json をコピーした ./orthanc/site.local.json（リポジトリに入れない）に書いて指す
 #   TSUNAGI_ENV_FILE     tsunagi-dicom の設定（.env.example の変数。ビューアの URL など）のファイル（既定 ./tsunagi.env。無くてよい）
-#   TSUNAGI_SECRETS_DIR  secret のファイルの置き場（既定 ./secrets）
+#   TSUNAGI_SECRETS_DIR  secret のファイルの保存先（既定 ./secrets）
 #   ORTHANC_DICOM_ICC    dicom のネットワークでコンテナどうしの通信を許すか（既定 false。開発用の compose だけが true にする）
 # 相対のパスは、このフォルダから数える。
 
@@ -57,7 +57,7 @@ services:
       INITIAL_ADMIN_PASSWORD_FILE: /run/secrets/initial_admin_password
       DATABASE_URL: file:/data/tsunagi.db
       # 監査の記録の先頭の控え（seq と hash）の追記先。データベースとは別のボリュームに置く。
-      # 同じ控えをコンテナのログ（tsunagi-dicom: audit-anchor …）にも出すので、ログを外の置き場へ送って残す（施設の運用。
+      # 同じ控えをコンテナのログ（tsunagi-dicom: audit-anchor …）にも出すので、ログを外の保存先へ送って残す（施設の運用。
       # docs/security-and-maintenance.md の 5）
       AUDIT_ANCHOR_FILE: /audit-anchors/audit-anchors.jsonl
     ports:
@@ -87,7 +87,7 @@ services:
 
   orthanc:
     # Orthanc の作り手のチーム（orthancteam）の公式のイメージ。DICOMweb のプラグイン入り。
-    # 版と digest は結合の試験（docker/test/compose.yaml）と同じに固定する。上げるときは両方を一緒に上げ、試験を流す
+    # 版と digest は結合の試験（docker/test/compose.yaml）と同じに固定する。上げるときは両方を一緒に上げ、試験を実行する
     image: orthancteam/orthanc:26.9.1@sha256:d2705f2c56547e55ce9bc2250fd22d05d326493b3f3d9fa191ecb7db8ca6b5a2
     environment:
       DICOM_WEB_PLUGIN_ENABLED: "true"
@@ -109,8 +109,8 @@ services:
     networks:
       - backend
       - dicom
-    # 起動の確かめ：REST が認証を求める（401）か。資格情報は使わない。DICOM（4242）にはつながない
-    # （AE タイトルの無い接続は、Orthanc のログに「invalid AET」として残るため）。イメージの既定の確かめは使わない
+    # 起動の確認：REST が認証を求める（401）か。資格情報は使わない。DICOM（4242）にはつながない
+    # （AE タイトルの無い接続は、Orthanc のログに「invalid AET」として残るため）。イメージの既定の確認は使わない
     healthcheck:
       test:
         - CMD
@@ -132,7 +132,7 @@ networks:
   # tsunagi-dicom の画面をホストに公開する
   web: {}
   # Orthanc の DICOM（検査装置から受ける・ほかの機器へ送る）。コンテナどうしの通信は止める
-  # （足したコンテナから Orthanc の REST に届かないように。開発用の compose だけが ORTHANC_DICOM_ICC=true にする）
+  # （追加したコンテナから Orthanc の REST に届かないように。開発用の compose だけが ORTHANC_DICOM_ICC=true にする）
   dicom:
     driver_opts:
       com.docker.network.bridge.enable_icc: "${ORTHANC_DICOM_ICC:-false}"
@@ -149,6 +149,6 @@ secrets:
 
 volumes:
   tsunagi-data:
-  # 監査の記録の先頭の控え（tsunagi-data とは別。tsunagi-data の写しを戻しても、控えは戻らない）
+  # 監査の記録の先頭の控え（tsunagi-data とは別。tsunagi-data のコピーを戻しても、控えは戻らない）
   tsunagi-audit-anchors:
   orthanc-db:

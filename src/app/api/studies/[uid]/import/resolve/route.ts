@@ -13,7 +13,7 @@ import { cleanupTarget, requestFile } from "@/app/api/import/shared";
 // 管理者だけ（pacs.reconcile）。削除の手で解く道（delete/resolve）と同じ形。
 // 状態の確認（GET /api/import）は、入ったと読めて値が合うときと、消す画像がもう無いと読めたときだけ自動で解く。
 // それ以外（見つけた画像の値がファイルと違う・消せなかった画像が残る・入ったと読めない）は結果不明のまま、同じ検査の
-// インポートを止め続けるので、管理者が Orthanc の側で確かめ、「成功」か「失敗」を名指しし、確かめた内容を書いて解く。
+// インポートを止め続けるので、管理者が Orthanc の側で確認し、「成功」か「失敗」を指定し、確認した内容を書いて解く。
 // 解くときに Orthanc を読み、画像（消す画像の ID か、「求めた」の行の SOP Instance UID）があるかを記録に残す（phase は reconcile）。
 // 「成功」は、画像があると読めたときだけ記録する。Orthanc には書き込みを求めない（印も付けない）。
 
@@ -21,9 +21,9 @@ type Context = { params: Promise<{ uid: string }> };
 
 const Body = z.object({
   requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
-  /** 管理者が確かめた結果。success：このインポートの画像が入った・failed：入っていない（入らなかったことにする） */
+  /** 管理者が確認した結果。success：このインポートの画像が入った・failed：入っていない（入らなかったことにする） */
   outcome: z.enum(["success", "failed"]),
-  /** どこで・どう確かめたか（必須） */
+  /** どこで・どう確認したか（必須） */
   note: z.string().trim().min(1, "確認内容を入力してください").max(500),
 });
 
@@ -85,7 +85,7 @@ export async function POST(request: Request, { params }: Context) {
 }
 
 /**
- * このインポートの画像が Orthanc にあるか。入れた画像を消そうとした要求は、消す画像（Orthanc の ID）を名指しで読む。
+ * このインポートの画像が Orthanc にあるか。入れた画像を消そうとした要求は、消す画像（Orthanc の ID）を指定して読む。
  * それ以外は「求めた」の行の SOP Instance UID で引き当てる（2 つ以上あれば、あるとする）。読めなければ投げる（解かない）
  */
 async function importedPresence(

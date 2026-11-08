@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-// tests/fixtures/orthanc/README.md の「置き換えの規則」と「置き換えた後の確かめ」を、試験でも見る。
+// tests/fixtures/orthanc/README.md の「置き換えの規則」と「置き換えた後の確認」を、試験でも見る。
 const root = path.resolve("tests/fixtures/orthanc");
 
 function files(dir: string): string[] {

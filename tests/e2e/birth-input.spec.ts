@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 // 検査一覧の詳細条件の生年月日の欄（docs/spec.md の 3.1「生年月日の入力」）。西暦と元号を受け、読み取り結果を欄の下に出す。
-// 検査を選ぶ前の一覧の条件なので、年齢は画面を開いた日で数える。画面の今日を 2026/10/29 に止めて確かめる。
-// 頁の URL の引数は今までどおり YYYY-MM-DD。検証モード（AUTH_MODE=dev）とモックのバックエンドに対して流す。
+// 検査を選ぶ前の一覧の条件なので、年齢は画面を開いた日で数える。画面の今日を 2026/10/29 に止めて確認する。
+// 頁の URL の引数は今までどおり YYYY-MM-DD。検証モード（AUTH_MODE=dev）とモックのバックエンドに対して実行する。
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-10-29T12:00:00+09:00"));

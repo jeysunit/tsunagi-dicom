@@ -105,11 +105,11 @@ function checkFieldShapes(segments: Message["segments"]): void {
     }
   }
 }
-/** UTF-8 と欄の形を確かめ、エスケープを戻した階層を返す（design.md §7）。 */
+/** UTF-8 と欄の形を確認し、エスケープを戻した階層を返す（design.md §7）。 */
 export function parseMessage(buffer: Buffer): ParseResult {
   let header: Header | undefined;
   try {
-    // 後ろのセグメントの UTF-8 が壊れていても、読める MSH-10 は AR に写す。
+    // 後ろのセグメントの UTF-8 が壊れていても、読める MSH-10 は AR にコピーする。
     const end = buffer.indexOf(13);
     const first = new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, end < 0 ? buffer.length : end));
     const msh = first.split("|");

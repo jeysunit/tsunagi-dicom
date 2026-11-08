@@ -10,7 +10,7 @@ import { CorrectionRefused } from "@/lib/study-correction";
 
 // 値の修正の道（./route.ts・./preview・./resolve）が共有する、本文の形・断り方・記録の読み方。
 
-/** 値の1つの欄（形の確かめは correction-fields.ts。ここでは大きさだけを絞る） */
+/** 値の1つの欄（形の確認は correction-fields.ts。ここでは大きさだけを絞る） */
 const value = z.string().max(256);
 export const Values = z
   .object(Object.fromEntries([...ATTRIBUTE_FIELDS, ...CONTENT_FIELDS].map((f) => [f, value.optional()])) as Record<CorrectionField, z.ZodOptional<z.ZodString>>)
@@ -57,7 +57,7 @@ export function refusedBy(session: Session, uid: string, requestId: string | nul
 }
 
 /**
- * 中身の訂正が、管理者の確かめを待っているか：結果が分からない（「求めた」のまま・結果不明）か、部分反映（作られた検査が
+ * 中身の訂正が、管理者の確認を待っているか：結果が分からない（「求めた」のまま・結果不明）か、部分反映（作られた検査が
  * 合わない・元が残っていない）のまま、照らし合わせの行（reconcile）が無い
  */
 export function contentUnresolved(rows: readonly RequestRow[]): boolean {
@@ -79,7 +79,7 @@ export function contentUnresolved(rows: readonly RequestRow[]): boolean {
 }
 
 /**
- * 中身の訂正を、書き換えの部品の組（event group）として残す detail。「求めた」の行に足す。結果・照らし合わせの行には
+ * 中身の訂正を、書き換えの部品の組（event group）として残す detail。「求めた」の行に追加する。結果・照らし合わせの行には
  * event と writeId を添え、書き換えの部品の unresolved が、結果不明・部分反映のあいだ、HL7 と画面の書き換えを止める
  */
 export function contentGroup(writeId: string, requestId: string, orthancId: string, uid: string) {
@@ -87,7 +87,7 @@ export function contentGroup(writeId: string, requestId: string, orthancId: stri
 }
 
 /**
- * 同じ検査の、管理者の確かめを待っている中身の訂正（結果不明・部分反映）。照らし合わせが済むまで、同じ検査の新しい値の修正を
+ * 同じ検査の、管理者の確認を待っている中身の訂正（結果不明・部分反映）。照らし合わせが済むまで、同じ検査の新しい値の修正を
  * 断るために使う
  */
 export async function pendingContent(db: Db | Tx, uid: string): Promise<string[]> {

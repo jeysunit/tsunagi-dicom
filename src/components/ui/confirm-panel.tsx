@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ActionButton } from "@/components/ui/pending";
 import { cn } from "@/lib/utils";
 
-// 確かめの欄（docs/design-system/parts.md の「確かめの使い分け」）。理由や再認証を書かせる確かめを、区画の中の欄で出す。
+// 確認欄（docs/design-system/parts.md の「確認の使い分け」）。理由や再認証を書かせる確認を、区画の中の欄で出す。
 // 並びは 対象の要約（患者バナーの縮めた形：氏名・患者ID・生年月日と性別）→ 対象の詳細 → 戻せるか → 入力欄・状態 → 操作の行。
 // 操作の行は、キャンセルを左、実行を右（確認の窓と同じ向き）。
 // 開いたらその欄が見えるまでスクロールし、最初の入力へフォーカスを移す（入力欄が遅れて出るときは focusReady で待つ）。
@@ -87,7 +87,7 @@ export function ConfirmPanel({
   );
 }
 
-/** 対象の要約：氏名・患者ID・生年月日と性別の 3 つだけ（ほかの升を足さない）。無い値は「—」 */
+/** 対象の要約：氏名・患者ID・生年月日と性別の 3 つだけ（ほかの升を追加しない）。無い値は「—」 */
 function ConfirmSummaryRow({ summary }: { summary: ConfirmSummary }) {
   const items = [
     { label: "氏名", value: summary.name, testId: "confirm-name" },

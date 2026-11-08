@@ -23,7 +23,7 @@ export interface RelayDeps {
   backend: Pick<Backend, "relayDicomweb">;
   /** いまの利用者の役割に、画像の取得（image.retrieve）が割り当てられているか（src/lib/auth/roles.ts） */
   allowed: boolean;
-  /** いまの利用者で監査の記録に1行足す */
+  /** いまの利用者で監査の記録に1行追加する */
   record: (fields: AuditFields) => Promise<unknown>;
 }
 

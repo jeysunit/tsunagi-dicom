@@ -37,7 +37,7 @@ export interface SeriesSummary {
 
 /** シリーズの中の画像（BFF の側の QIDO-RS で引く。画像単位の DICOM タグの選び先。中継からは返さない） */
 export interface InstanceSummary {
-  /** 答えにあれば、求めた検査・シリーズのものかを確かめる（無ければ空）。画面へは返さない */
+  /** 答えにあれば、求めた検査・シリーズのものかを確認する（無ければ空）。画面へは返さない */
   studyInstanceUid: string;
   seriesInstanceUid: string;
   /** 監査の記録の「どの患者」に使う（無ければ空）。画面へは返さない */
@@ -54,7 +54,7 @@ export interface InstanceSummary {
 export interface StudyQuery {
   dateFrom?: string;
   dateTo?: string;
-  // ── 詳細条件（docs/spec.md の 3.1。2026-10-21）。値は study-filter.ts で形を確かめたもの（ワイルドカードの字を含まない） ──
+  // ── 詳細条件（docs/spec.md の 3.1。2026-10-21）。値は study-filter.ts で形を確認したもの（ワイルドカードの字を含まない） ──
   /** 生年月日（DA。YYYYMMDD）。一致 */
   patientBirthDate?: string;
   /** 性別（M・F・O）。一致 */
@@ -75,7 +75,7 @@ export interface Backend {
   /**
    * UID を保つ書き換えの仕事を作る（design.md §4）。元は消さない（KeepSource は既定の true）。患者 ID が同じなら
    * OverwriteInstances で元の画像が置き換わる。患者 ID が変わると書き換えた画像は別の検査になり、元の検査も残る。
-   * 元の画像は、書き換えた画像を確かめてから deleteStudyInstances で名指しで消す（Orthanc に元を消させると、
+   * 元の画像は、書き換えた画像を確認してから deleteStudyInstances で指定して消す（Orthanc に元を消させると、
    * 書き換えの最中に同じ検査へ届いた画像も一緒に消えうるため。design.md §15）
    */
   modifyStudyKeepingUids(orthancStudyId: string, replace: Record<string, string>): Promise<{ jobId: string }>;
@@ -107,7 +107,7 @@ export interface Backend {
     orthancStudyId: string,
     instances: PatientInstance[],
     source: SourceFiles,
-    /** 1 枚を消す直前（変更の記録を読んだ後）に呼ぶ（付け替えの印が続いているかを確かめる）。投げれば、残りを消さずに投げる */
+    /** 1 枚を消す直前（変更の記録を読んだ後）に呼ぶ（付け替えの印が続いているかを確認する）。投げれば、残りを消さずに投げる */
     beforeEach?: () => Promise<void>,
   ): Promise<void>;
   /**
@@ -118,18 +118,18 @@ export interface Backend {
    */
   lockStudy(orthancStudyId: string, untilEpochSeconds: number): Promise<void>;
   /**
-   * Orthanc の時計とこの機の時計のずれが LOCK_CLOCK_TOLERANCE_MS の内かを確かめ、外か読めなければ投げる（印を外す時に、
+   * Orthanc の時計とこの機の時計のずれが LOCK_CLOCK_TOLERANCE_MS の内かを確認し、外か読めなければ投げる（印を外す時に、
    * 印の間に Orthanc の時計が進んで、Lua が印を切れたと読んだかもしれないことを見つける）
    */
   checkLockClock(): Promise<void>;
   /** 付け替えの印を外す。検査か印がもう無ければ何もしない */
   unlockStudy(orthancStudyId: string): Promise<void>;
   /**
-   * 検査の画像ごとの、写しの元の画像の ID（Orthanc のメタデータ ModifiedFrom。書き換えの写しにだけある）。
-   * 鍵は UID の組。無ければ null（書き換えの写しでない画像。写しが同じ UID の別の画像に置き換わったときも無くなる）
+   * 検査の画像ごとの、コピーの元の画像の ID（Orthanc のメタデータ ModifiedFrom。書き換えのコピーにだけある）。
+   * 鍵は UID の組。無ければ null（書き換えのコピーでない画像。コピーが同じ UID の別の画像に置き換わったときも無くなる）
    */
   studyInstanceOrigins(orthancStudyId: string): Promise<Record<string, string | null>>;
-  /** 要約では見つからない部分反映を、全画像の UID と値で確かめる（design.md §4）。 */
+  /** 要約では見つからない部分反映を、全画像の UID と値で確認する（design.md §4）。 */
   studyInstanceTags(orthancStudyId: string): Promise<PatientInstance[]>;
   /** 画像が届き終えた検査か（Orthanc の IsStable）。照合の後に届いた画像を書き換える前に見る（design.md §15）。 */
   studyIsStable(orthancStudyId: string): Promise<boolean>;
@@ -154,7 +154,7 @@ export interface Backend {
   searchInstances(studyInstanceUid: string, seriesInstanceUid: string): Promise<InstanceSummary[]>;
   /**
    * 1枚の画像の DICOM の値の全部（WADO-RS の studies/{study}/series/{series}/instances/{sop}/metadata）。無ければ null。
-   * 返す前に、答えの3つの UID が求めたものと同じかを確かめる。dicom.all_values のときだけ画面へ返す
+   * 返す前に、答えの3つの UID が求めたものと同じかを確認する。dicom.all_values のときだけ画面へ返す
    */
   instanceDataset(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string): Promise<DicomJsonDataset | null>;
   /** 検査の件数。Orthanc の /statistics で正確に数える */
@@ -166,7 +166,7 @@ export interface Backend {
   studyListVersion(): Promise<string>;
   /**
    * ビューアが画像を取る道（WADO-RS の読み取り）の中継。検索（QIDO-RS）と書き込みは通さない（docs/spec.md の 3.2）。
-   * 宛先は relay-path.ts の wadoRsTarget で確かめたもの
+   * 宛先は relay-path.ts の wadoRsTarget で確認したもの
    */
   relayDicomweb(request: RelayRequest): Promise<Response>;
 
@@ -196,13 +196,13 @@ export interface Backend {
   jobStatus(jobId: string): Promise<JobStatus | null>;
   /**
    * 終わっていない書き換えの仕事（/jobs?expand の Type が ResourceModification で、State が Success・Failure でないもの）の数。
-   * 仕事の ID が分からない書き換えを、管理者が解く前に確かめる（その仕事がまだ動いているかもしれない）
+   * 仕事の ID が分からない書き換えを、管理者が解く前に確認する（その仕事がまだ動いているかもしれない）
    */
   unfinishedModifyJobs(): Promise<number>;
 
   // ── 段 5：書き出し・削除（docs/spec.md の 3.5） ──
 
-  /** 検査の画像の全部の ZIP（/studies/{id}/archive）。本文はそのまま流す。無ければ BackendError(404) */
+  /** 検査の画像の全部の ZIP（/studies/{id}/archive）。本文はそのまま実行する。無ければ BackendError(404) */
   exportStudy(orthancStudyId: string): Promise<Response>;
   /** 検査を消す（DELETE /studies/{id}）。書き込みの操作。無ければ BackendError(404)。答えが分からなければ BackendUnknownError */
   deleteStudy(orthancStudyId: string): Promise<void>;
@@ -219,7 +219,7 @@ export interface Backend {
   /** インポートの印のある検査の StudyInstanceUID の全部（検査一覧の「インポート」の印に使う） */
   importedStudyUids(): Promise<Set<string>>;
   /**
-   * SOP Instance UID の画像が Orthanc にあれば、その画像と親の検査の Orthanc の ID（取り込む前に、もうあるかを確かめる・
+   * SOP Instance UID の画像が Orthanc にあれば、その画像と親の検査の Orthanc の ID（取り込む前に、もうあるかを確認する・
    * 結果不明のインポートを照らす）。無ければ null。同じ SOP Instance UID の画像が2つ以上ある（患者違いなど）ときは、
    * どれか1つを選ばずに BackendError(409)
    */
@@ -233,7 +233,7 @@ export interface Backend {
   instanceExists(instanceId: string): Promise<boolean>;
   /**
    * 検査の画像の SOP Instance UID の全部（GET /studies/{id}/instances）。同じ組の続きの画像を受ける前に、検査の画像が全部
-   * その組で入れたものかを確かめる。検査が無ければ空。SOP Instance UID の読めない画像があれば BackendError
+   * その組で入れたものかを確認する。検査が無ければ空。SOP Instance UID の読めない画像があれば BackendError
    */
   studyInstanceSopUids(orthancStudyId: string): Promise<string[]>;
 }
@@ -251,7 +251,7 @@ export interface ImportedInstance {
   orthancStudyId: string;
 }
 
-/** 消す前の確かめに使う、Orthanc の中の検査の要点（docs/spec.md の 3.5 の削除） */
+/** 消す前の確認に使う、Orthanc の中の検査の要点（docs/spec.md の 3.5 の削除） */
 export interface OrthancStudyInfo {
   orthancId: string;
   studyInstanceUid: string;
@@ -260,11 +260,11 @@ export interface OrthancStudyInfo {
   patientBirthDate: string;
   patientSex: string;
   studyDate: string;
-  /** 検査名と受付番号（値の修正の確かめの画面と、中身の訂正の確かめに使う） */
+  /** 検査名と受付番号（値の修正の確認画面と、中身の訂正の確認に使う） */
   studyDescription: string;
   accessionNumber: string;
   seriesCount: number;
-  /** 版（Orthanc の LastUpdate）。確かめの画面を出した後に検査が変われば、この値が変わる */
+  /** 版（Orthanc の LastUpdate）。確認画面を出した後に検査が変われば、この値が変わる */
   version: string;
 }
 
@@ -398,7 +398,7 @@ export interface SourceFiles {
   since: number;
   files: Record<string, string>;
   /**
-   * 画像ごとの Orthanc の画像の ID（鍵は files と同じ）。書き換えの写しの ModifiedFrom と照らす（design.md §15.4）。
+   * 画像ごとの Orthanc の画像の ID（鍵は files と同じ）。書き換えのコピーの ModifiedFrom と照らす（design.md §15.4）。
    * この欄の無い前の版の記録では、元を消さない
    */
   ids?: Record<string, string>;

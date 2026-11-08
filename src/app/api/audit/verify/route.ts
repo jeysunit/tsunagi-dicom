@@ -5,7 +5,7 @@ import { AuthError, requireSession } from "@/lib/auth/session";
 import { getConfig } from "@/lib/config";
 import { getDb } from "@/lib/db";
 
-// 監査の記録のつなぎを確かめる。管理者だけ（監査の検索と CSV は段 4）。
+// 監査の記録のつなぎを確認する。管理者だけ（監査の検索と CSV は段 4）。
 // AUDIT_ANCHOR_FILE に書き出した先頭の控えと照らし合わせる（docs/adr/0001-audit-chain-mac.md）。
 // 照らせないとき（控えのファイルを設定していない・読めない・無い・壊れている）は、つなぎの中に食い違いが無くても
 // ok にしない（409）。照らさずに通すと、末尾の削除と、鍵の無い形への作り直しを見落とすため

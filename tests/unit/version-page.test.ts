@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // 「バージョン情報」の頁（docs/spec.md の 2.3）：BUILD_COMMIT を渡したとき、ビルドの行に commit を全桁・等幅（13px）で出す。
-// e2e のサーバーは BUILD_COMMIT を渡さずに起動するので、頁をサーバーの側で描いて確かめる。
+// e2e のサーバーは BUILD_COMMIT を渡さずに起動するので、頁をサーバーの側で描いて確認する。
 
 vi.mock("@/lib/auth/page-session", () => ({
   pageAccess: async () => ({ kind: "ok", session: {} }),

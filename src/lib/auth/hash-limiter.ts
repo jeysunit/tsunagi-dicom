@@ -58,7 +58,7 @@ export class HashLimiter {
       this.running += 1;
     } else {
       if (this.queues[lane].length >= this.settings.queueLimit) throw new HashBusyError(lane);
-      // 枠が空いたら release が running を1つ増やしてから起こす
+      // 枠が空いたら release が running を1つ増やしてから、待っている処理を再開する
       await new Promise<void>((resolve) => this.queues[lane].push({ start: resolve }));
     }
     try {

@@ -1,4 +1,4 @@
-// DICOM タグの表で選んだ行を、写す文字にする。1 行が 1 タグ：「(0008,0020)」「タグ名」「VR」「値」をタブで区切る。
+// DICOM タグの表で選んだ行を、コピーする文字にする。1 行が 1 タグ：「(0008,0020)」「タグ名」「VR」「値」をタブで区切る。
 // 複数の行は改行でつなぐ。表計算の貼り付けでそのまま列に分かれる。
 
 export interface CopyableTagRow {
@@ -17,12 +17,12 @@ function cell(text: string): string {
   return text.replace(/[\t\r\n]+/g, " ");
 }
 
-/** 写す形式：全部の列（タグ・タグ名・VR・値）・タグと値・値だけ */
+/** コピーする形式：全部の列（タグ・タグ名・VR・値）・タグと値・値だけ */
 export type CopyFormat = "all" | "tag-value" | "value";
 
 /** 1 行：全部の列なら `(0008,0020)<TAB>検査日<TAB>DA<TAB>20261024`、タグと値なら `(0008,0020)<TAB>20261024`、値だけなら `20261024` */
 export function tagRowText(row: CopyableTagRow, format: CopyFormat = "all"): string {
-  // 切って出した値は、表に見えているとおりに写す（全体の文字数を添え、切れていることが貼り付けの先で分かるようにする）
+  // 切って出した値は、表に見えているとおりにコピーする（全体の文字数を添え、切れていることが貼り付けの先で分かるようにする）
   const value = row.value === null ? "" : `${row.value}${row.length != null ? `…（全 ${row.length} 文字）` : ""}`;
   const tag = `(${row.tag})`;
   const columns = format === "all" ? [tag, row.name ?? "", row.vr, value] : format === "tag-value" ? [tag, value] : [value];
@@ -33,7 +33,7 @@ export function tagRowText(row: CopyableTagRow, format: CopyFormat = "all"): str
 export const SOP_INSTANCE_UID_TAG = "0008,0018";
 
 /**
- * タグの表の行のうち、tag の行を 1 行目に移す。表に無いとき（「主なタグ」の設定に入っていないなど）は fallback の行を 1 行目に足す。
+ * タグの表の行のうち、tag の行を 1 行目に移す。表に無いとき（「主なタグ」の設定に入っていないなど）は fallback の行を 1 行目に追加する。
  * ほかの行の順は変えない
  */
 export function pinTagRow<T extends CopyableTagRow>(rows: readonly T[], tag: string, fallback: T): T[] {

@@ -30,12 +30,12 @@ export const AUTH_MODE_LOCAL = "local";
 export const PENDING_SESSION_MINUTES = 10;
 /** ログインしたセッションの長さの既定（操作があっても、これを過ぎたらログインし直す） */
 export const SESSION_MAX_HOURS = 12;
-/** 大事な操作の前の本人の確かめ（再認証）が効く時間の既定 */
+/** 大事な操作の前の本人の確認（再認証）が効く時間の既定 */
 export const REAUTH_MINUTES = 5;
 /**
  * サーバーの側の画面のロックの猶予。ロックはサーバーの側を正にするので、画面が最後に操作を知らせてから
  * SCREEN_LOCK_MINUTES を過ぎたら、猶予を置かずに、その要求の時点でロックする（画面の側のロックの知らせが
- * 届かなくても、読み直した頁・別のタブは BFF が中身なしで描く）。画面は操作があれば 15 秒に1回まで知らせるので、
+ * 届かなくても、再読み込みした頁・別のタブは BFF が中身なしで描く）。画面は操作があれば 15 秒に1回まで知らせるので、
  * 画面の側より最大 15 秒早くロックしうる（閉じる側）
  */
 export const SERVER_LOCK_GRACE_SECONDS = 0;
@@ -81,7 +81,7 @@ export interface AuthContext {
 
 /**
  * ログインの失敗の答えを返すまでの下限（遅らせの後、利用者を引き始めてから。実の時計で数える）。
- * パスワードの確かめ（argon2id。手元の測りで 30 ミリ秒ほど）より十分に長くし、利用者名の有無による
+ * パスワードの確認（argon2id。手元の測りで 30 ミリ秒ほど）より十分に長くし、利用者名の有無による
  * データベースの仕事の量の差（手元の測りで中央値 0.7 ミリ秒。docs/spec.md の 3.6）を答えの時間に出さない
  */
 export const LOGIN_FAILURE_FLOOR_MS = 250;
@@ -108,9 +108,9 @@ export class AuthFailure extends Error {
 /** ログインの失敗の文言は1つにする（利用者名の有無・一時停止の有無を、答えの違いで知られないように） */
 export const LOGIN_FAILED_MESSAGE =
   "ログインできませんでした。ユーザーID・パスワード・認証コードのいずれかが合いません。続けて失敗すると、しばらくログインできなくなります";
-/** 大事な操作の前に、本人の確かめが要るときの印（AuthFailure の problems） */
+/** 大事な操作の前に、本人の確認が要るときの印（AuthFailure の problems） */
 export const REAUTH_REQUIRED = "reauth_required";
-/** パスワードの確かめが混んで断ったときの文言（503） */
+/** パスワードの確認が混んで断ったときの文言（503） */
 export const HASH_BUSY_MESSAGE = "ログインが混み合っています。しばらくしてから再度お試しください";
 /** 失敗したので、ログインの途中のセッションを捨てたときの印（AuthFailure の problems。画面はログインへ戻る） */
 export const SESSION_CLOSED = "session_closed";
@@ -203,7 +203,7 @@ async function recordLoginDenied(ctx: AuthContext, actor: DigestActor, reason: s
  * ログインの試みを遅らせる（利用者名ごと・全体。src/lib/auth/rate-limit.ts）。利用者を引く前に数え、
  * 存在しない利用者名でも同じに遅らせる。断らない（ほかの人の失敗で、正しい利用者を締め出さない）。
  * 枠の中ではじめて遅らせ始めたときだけ記録に残す（利用者名は残さない）。
- * ただし、パスワードの確かめの枠と待ちの席が埋まっていれば、待たせずにすぐ 503 で断る（src/lib/auth/hash-limiter.ts）。
+ * ただし、パスワードの確認の枠と待ちの席が埋まっていれば、待たせずにすぐ 503 で断る（src/lib/auth/hash-limiter.ts）。
  * 遅らせたら throttled（その試みの失敗は、まとめて記録する）
  */
 async function throttleLogin(ctx: AuthContext, username: string): Promise<{ throttled: boolean }> {
@@ -281,10 +281,10 @@ export async function createUser(
 }
 
 // ── ログインの一時停止（第7.0版 14 遵守事項⑥(6)） ──
-// 確かめる前に「試みの枠」を1つ、原子的な更新で取る（失敗の数が決めた回数より少ないときだけ1つ増やす）。
-// 同時に多くの要求を送っても、枠を取れた要求だけが確かめに進むので、決めた回数より多くは試せない。
+// 確認する前に「試みの枠」を1つ、原子的な更新で取る（失敗の数が決めた回数より少ないときだけ1つ増やす）。
+// 同時に多くの要求を送っても、枠を取れた要求だけが確認に進むので、決めた回数より多くは試せない。
 // パスワードが合ったら（TOTP が残っていても）その枠を返し、ログイン・ロックの解除・再認証を終えたら数を0に戻す。
-// ただし、TOTP を登録した利用者の、TOTP を確かめなかったロックの解除（SCREEN_UNLOCK_REQUIRE_TOTP=false）は、
+// ただし、TOTP を登録した利用者の、TOTP を確認しなかったロックの解除（SCREEN_UNLOCK_REQUIRE_TOTP=false）は、
 // 枠を返すだけで数を0に戻さない（verifyAgain）。
 
 /** 試みの枠を取る。取れなければ（一時停止の中か、枠を使い切った）false */
@@ -341,7 +341,7 @@ async function registerFailure(
     return current !== null && current.lockedUntil !== null && current.lockedUntil > at;
   }
   // 一時停止にしたら、ログインの途中のセッションだけを閉じる。ログインし終えたセッションは閉じない
-  // （ほかの人がその利用者名で失敗を重ねても、使っている職員を締め出さない。一時停止の間は、パスワードを確かめる
+  // （ほかの人がその利用者名で失敗を重ねても、使っている職員を締め出さない。一時停止の間は、パスワードを確認する
   // 操作（ロックの解除・再認証・パスワードの変更）を断る。2026-10-18 に承認者が決めた。docs/spec.md の 3.6）
   await ctx.db.session.deleteMany({ where: { userId: user.id, stage: { not: "active" } } });
   await record(ctx, actorOf(user), {
@@ -360,7 +360,7 @@ function totpSecretOf(ctx: AuthContext, user: User): string | null {
   return user.totpSecretEnc ? openField(user.totpSecretEnc, ctx.settings.sessionSecret, user.id) : null;
 }
 
-/** TOTP を確かめ、使った段を覚える（同じ段・前の段の使い回しを断る）。合えば true */
+/** TOTP を確認し、使った段を覚える（同じ段・前の段の使い回しを断る）。合えば true */
 async function acceptTotp(ctx: AuthContext, user: User, secret: string, code: string): Promise<boolean> {
   const step = verifyTotp(secret, code, now(ctx).getTime(), user.totpLastStep);
   if (step === null) return false;
@@ -372,10 +372,10 @@ async function acceptTotp(ctx: AuthContext, user: User, secret: string, code: st
 }
 
 /**
- * ログインした利用者の、もう一度の本人の確かめ（パスワードと、登録していれば TOTP）。
+ * ログインした利用者の、もう一度の本人の確認（パスワードと、登録していれば TOTP）。
  * 画面のロックの解除・再認証・パスワードの変更に使う。回数の上限と一時停止を、ログインと同じに数える。
- * requireTotp が false なら（再認証と、画面のロックの解除で SCREEN_UNLOCK_REQUIRE_TOTP=false のとき）、TOTP は確かめず、
- * 送られた番号も使った段に数えない。TOTP を確かめたら true を返す
+ * requireTotp が false なら（再認証と、画面のロックの解除で SCREEN_UNLOCK_REQUIRE_TOTP=false のとき）、TOTP は確認せず、
+ * 送られた番号も使った段に数えない。TOTP を確認したら true を返す
  */
 async function verifyAgain(
   ctx: AuthContext,
@@ -409,10 +409,10 @@ async function verifyAgain(
     throw new AuthFailure(401, checkTotp ? "パスワードまたは認証コードが合いません" : "パスワードが合いません", locked ? ["locked"] : []);
   }
   if (checkTotp || user.totpSecretEnc === null) {
-    // 利用者が持つ確かめを全部通した（TOTP を登録していればそれも）ので、続けての失敗の数を0に戻す
+    // 利用者が持つ確認を全部通した（TOTP を登録していればそれも）ので、続けての失敗の数を0に戻す
     await resetAttempts(ctx, user);
   } else {
-    // TOTP を登録しているのに確かめなかった（パスワードだけの画面のロックの解除・再認証）。この試みの枠だけを返し、
+    // TOTP を登録しているのに確認しなかった（パスワードだけの画面のロックの解除・再認証）。この試みの枠だけを返し、
     // 前の失敗の数は残す。消すと、パスワードの変更などで TOTP の番号を試し、一時停止の手前でパスワードだけの解除を通して
     // 数を消すことを繰り返し、TOTP の試みの上限を迂回できるため（docs/spec.md の 3.6）
     await releaseAttempt(ctx, user);
@@ -458,7 +458,7 @@ export async function login(
   const username = normalizeUsername(rawUsername);
   const user = isValidUsername(username) ? await ctx.db.user.findUnique({ where: { username } }) : null;
 
-  // パスワードの確かめは、どの道でも1回だけ、ログインの枠で回す（枠と待ちの席が埋まっていれば 503）
+  // パスワードの確認は、どの道でも1回だけ、ログインの枠で回す（枠と待ちの席が埋まっていれば 503）
   const check = async <T>(fn: () => Promise<T>): Promise<T> => {
     try {
       return await limiterOf(ctx).run("login", fn);
@@ -477,7 +477,7 @@ export async function login(
   };
 
   if (!user) {
-    // 知らない利用者名でも、パスワードの確かめと同じほどの時間をかけ、同じ答えを返す。
+    // 知らない利用者名でも、パスワードの確認と同じほどの時間をかけ、同じ答えを返す。
     // 名前は、打ち間違えたパスワードであることがあるので、記録に入れない
     await check(() => burnPasswordCheck(password));
     return deny(UNKNOWN_ACTOR, "unknown_user");
@@ -505,7 +505,7 @@ export async function login(
   }
   await releaseAttempt(ctx, user);
 
-  // 平文はここでしか見られないので、ここで2つを確かめる（TOTP の段を通る利用者にも効く）：
+  // 平文はここでしか見られないので、ここで2つを確認する（TOTP の段を通る利用者にも効く）：
   // - いまの規則に合わなくなったパスワード（MFA_REQUIRED を false にしたときの 8〜12 文字など）は、本人が変える。
   // - 保存したハッシュが、いまの強さより弱ければ作り直す（混んでいれば、次のログインに回す）。
   //   作り直しは、パスワードが同時に変えられていないとき（passwordHash が読んだ値のまま）だけ書く
@@ -543,15 +543,15 @@ export async function login(
 }
 
 /**
- * セッションを開く。確かめている間にパスワードを変えた・TOTP をやり直した・止めた・一時停止にした利用者の
+ * セッションを開く。確認している間にパスワードを変えた・TOTP をやり直した・止めた・一時停止にした利用者の
  * セッションを、後から生き残らせない。
  *
  * データベースの transaction の隔たりには頼らない（Prisma の SQLite の adapter は1つのつなぎを使い、
  * transaction の途中にほかの要求の文が入りうるため。わざと取り消すと、その文まで消える）。代わりに
- * 「作ってから確かめ、違えば消す」の順にする：利用者を変える操作（止める・一時停止・TOTP のやり直し・
+ * 「作ってから確認し、違えば消す」の順にする：利用者を変える操作（止める・一時停止・TOTP のやり直し・
  * パスワードの変更）は、どれも利用者の行を変えた後にセッションを消すので、
- * - 変更が、下の確かめより前なら、確かめで見つけて、作ったセッションを消す。
- * - 変更が、下の確かめより後なら、その操作の後のセッションの削除が、作ったセッションも消す。
+ * - 変更が、下の確認より前なら、確認で見つけて、作ったセッションを消す。
+ * - 変更が、下の確認より後なら、その操作の後のセッションの削除が、作ったセッションも消す。
  * replacing を渡したら、そのセッション（ログインの途中のセッション）を先に消し、消せたとき（1件）だけ作る
  * （ほかの画面で先に進んだ・閉じた途中のセッションから、二度ログインさせない）
  */
@@ -581,7 +581,7 @@ async function openSession(
       createdAt: at,
       expiresAt,
       lastActivityAt: at,
-      // 確かめた時の認証の世代。その後にパスワードの変更・TOTP の登録・やり直しがあれば、resolveSession が使わせない
+      // 確認した時の認証の世代。その後にパスワードの変更・TOTP の登録・やり直しがあれば、resolveSession が使わせない
       credentialVersion: user.credentialVersion,
     },
   });
@@ -624,7 +624,7 @@ async function followVersion(ctx: AuthContext, session: SessionRow, from: number
 
 /**
  * 途中のセッションがまだ使える（残っていて、同じ段で、期限の前）という条件。利用者の行を変える
- * 1つの文（updateMany）の where に入れて、確かめと書き込みを分けない
+ * 1つの文（updateMany）の where に入れて、確認と書き込みを分けない
  */
 const liveSession = (session: SessionRow, user: Pick<User, "credentialVersion">, at: Date) => ({
   sessions: {
@@ -643,7 +643,7 @@ async function completeLogin(ctx: AuthContext, user: User, detail: Record<string
  * 段を進める。active になるときは、途中のセッションを消して、新しい token・CSRF の token のセッションを開く
  * （途中の段の token を、ログインした後に使い続けない）。そしてログインを記録する。
  * 途中のセッションが、もう無い・ほかの段に進んでいるときは 409（同じ途中のセッションから二度進ませない）。
- * user は、この段で確かめたときの利用者（openSession が、確かめた時のままかを見る）
+ * user は、この段で確認したときの利用者（openSession が、確認した時のままかを見る）
  */
 async function advance(
   ctx: AuthContext,
@@ -686,7 +686,7 @@ export async function submitTotp(ctx: AuthContext, session: SessionRow, user: Us
     await ctx.db.session.deleteMany({ where: { id: session.id } });
     throw new AuthFailure(401, LOGIN_FAILED_MESSAGE, locked ? ["locked", SESSION_CLOSED] : [SESSION_CLOSED]);
   }
-  // 確かめたときの利用者のままかは、advance（openSession）が見る
+  // 確認したときの利用者のままかは、advance（openSession）が見る
   return advance(ctx, session, user, user.mustChangePassword ? "change_password" : "active", { mfa: true });
 }
 
@@ -712,7 +712,7 @@ export async function startEnrollment(ctx: AuthContext, session: SessionRow, use
 }
 
 /**
- * 登録を確かめる。二要素が任意のときの、ログインした後の登録では、いまのパスワードも確かめる
+ * 登録を確認する。二要素が任意のときの、ログインした後の登録では、いまのパスワードも確認する
  * （離れた端末のセッションで、ほかの人の認証のアプリを結び付けられないように）。
  * 書くのは、まだ TOTP を登録していない（totpSecretEnc が空の）ときだけ。もう登録してあれば 409
  * （登録の途中のセッションを2つ開いて、後から登録済みの TOTP を上書きできないように）。
@@ -744,7 +744,7 @@ export async function confirmEnrollment(
     totpLastStep: step,
     updatedAt: at,
   };
-  // 確かめと書き込みを1つの文にする：まだ登録していない・有効・パスワードが読んだ時のまま・この途中の
+  // 確認と書き込みを1つの文にする：まだ登録していない・有効・パスワードが読んだ時のまま・この途中の
   // セッションがまだ使える（残っていて、同じ段で、期限の前）ときだけ書く
   // 書けたら、認証の世代を1つ上げる（ほかのセッションは、消す前でも使えなくなる）
   const res = await ctx.db.user.updateMany({
@@ -793,8 +793,8 @@ export async function changePassword(
   if (session.stage !== "change_password" && session.stage !== "active") {
     throw new AuthFailure(409, "パスワードを変更する段階ではありません");
   }
-  // ログインしたセッションでは、いまのパスワードと、登録していれば TOTP を確かめる（再認証）。
-  // 変更の段は、いまログインで確かめたところなので求めない
+  // ログインしたセッションでは、いまのパスワードと、登録していれば TOTP を確認する（再認証）。
+  // 変更の段は、いまログインで確認したところなので求めない
   if (session.stage === "active") {
     await verifyAgain(ctx, user, { password: input.currentPassword, code: input.code }, "password_change");
   }
@@ -811,7 +811,7 @@ export async function changePassword(
     mustChangePassword: false,
     updatedAt: at,
   };
-  // 確かめと書き込みを1つの文にする：有効・パスワードと TOTP の秘密と認証の世代が読んだ時のまま・この
+  // 確認と書き込みを1つの文にする：有効・パスワードと TOTP の秘密と認証の世代が読んだ時のまま・この
   // セッションがまだ使える（残っていて、同じ段で、期限の前）ときだけ変え、認証の世代を1つ上げる。
   // 世代を上げた時点で、ほかのセッション（同時に進んでいた古いパスワードのログインも）は使えなくなる
   const res = await ctx.db.user.updateMany({
@@ -838,17 +838,17 @@ export async function changePassword(
   return advance(ctx, session, updated, "active", { mfa: user.totpSecretEnc !== null, passwordChanged: true });
 }
 
-// ── 再認証（大事な操作の前の、もう一度の本人の確かめ） ──
+// ── 再認証（大事な操作の前の、もう一度の本人の確認） ──
 
 /** 利用者の管理の再認証で、TOTP も求めるときの印（AuthFailure の problems。画面は認証コードの欄を出す） */
 export const REAUTH_TOTP_REQUIRED = "reauth_totp_required";
 
 /**
- * もう一度の本人の確かめ（docs/spec.md の 3.6 の「再認証」）。確かめた時刻は、サーバーの側のこのセッションの行だけに持つ。
- * - 認証コードを添えなければ、パスワードだけで確かめる（削除などの再認証。2026-10-20 に承認者が決めた）。送られていない番号は
- *   確かめず、使った段にも数えない。TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない
+ * もう一度の本人の確認（docs/spec.md の 3.6 の「再認証」）。確認した時刻は、サーバーの側のこのセッションの行だけに持つ。
+ * - 認証コードを添えなければ、パスワードだけで確認する（削除などの再認証。2026-10-20 に承認者が決めた）。送られていない番号は
+ *   確認せず、使った段にも数えない。TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない
  *   （verifyAgain。画面のロックの解除と同じ）。
- * - 認証コードを添えれば、TOTP を登録した利用者には TOTP まで確かめ、reauthMfaAt も記す（利用者の管理の再認証）。
+ * - 認証コードを添えれば、TOTP を登録した利用者には TOTP まで確認し、reauthMfaAt も記す（利用者の管理の再認証）。
  * どちらも、ログインし終えた（active）・ロックしていないセッションだけ。ログインの途中のセッションからは通さない
  */
 export async function reauthenticate(
@@ -861,7 +861,7 @@ export async function reauthenticate(
   const withTotp = input.code !== undefined && input.code !== "" && user.totpSecretEnc !== null;
   const totp = await verifyAgain(ctx, user, withTotp ? input : { password: input.password }, "reauth", { requireTotp: withTotp });
   const at = now(ctx);
-  // 確かめた時の認証の世代と役割の世代のままのときだけ印を書く（確かめている間に、同じ利用者のパスワードの変更・TOTP の登録・
+  // 確認した時の認証の世代と役割の世代のままのときだけ印を書く（確認している間に、同じ利用者のパスワードの変更・TOTP の登録・
   // 役割の変更が先に済んでいれば、前の資格情報・前の役割で通した印を新しい状態に書かない）。ロックしていないことも条件にする。
   // 印には役割の世代を添え、使うときに今の世代と比べる（assertRecentReauth）。パスワードだけで通したときは、前の TOTP の印を
   // 消す（添える世代が1つなので、前の世代の TOTP の印を今の世代の印に見せない。パスワードだけの再認証を求めるのは、
@@ -883,7 +883,7 @@ export async function reauthenticate(
   await record(ctx, actorOf(user), { action: "reauth", outcome: "success", detail: { totp } });
 }
 
-/** 確かめた時刻が、サーバーの時計で reauthMinutes の中か（先の時刻は、時計の数秒の巻き戻りのほかは受けない） */
+/** 確認した時刻が、サーバーの時計で reauthMinutes の中か（先の時刻は、時計の数秒の巻き戻りのほかは受けない） */
 function withinReauth(ctx: AuthContext, at: number, when: Date | null, sameRole: boolean): boolean {
   // 通した時と役割の世代が違う印は使わない（前の役割の印を、格上げの後に使わせない）
   if (!when || !sameRole) return false;
@@ -895,8 +895,8 @@ function withinReauth(ctx: AuthContext, at: number, when: Date | null, sameRole:
  * 大事な操作の前に呼ぶ。設定の reauthMinutes（既定 REAUTH_MINUTES）の中に、このセッションで再認証していなければ
  * 403（problems に REAUTH_REQUIRED）。ログインの一時停止の間は、再認証の有効時間の内でも 403（problems に locked）
  * （一時停止の間は再認証を止める、という承認者の決定に合わせ、前に通した再認証も使わせない）。
- * requireTotp（利用者の管理）のときは、TOTP を登録した利用者には、TOTP まで確かめた再認証を求める（problems に
- * REAUTH_TOTP_REQUIRED も）。パスワードとセッションだけで、管理者の作り足し・役割の格上げ・ほかの管理者の TOTP の
+ * requireTotp（利用者の管理）のときは、TOTP を登録した利用者には、TOTP まで確認した再認証を求める（problems に
+ * REAUTH_TOTP_REQUIRED も）。パスワードとセッションだけで、管理者の作り追加し・役割の格上げ・ほかの管理者の TOTP の
  * やり直しをさせないため（2026-10-20 の独立レビューの指摘。docs/spec.md の 3.6）
  */
 export function assertRecentReauth(
@@ -1011,7 +1011,7 @@ export async function lockScreen(
 }
 
 /**
- * ロックを解く。既定はパスワードだけ（席を外した間の覗き見を防ぐロックで、確かめるのはログインした本人が戻ったか。
+ * ロックを解く。既定はパスワードだけ（席を外した間の覗き見を防ぐロックで、確認するのはログインした本人が戻ったか。
  * 二要素はログインで済んでいる）。SCREEN_UNLOCK_REQUIRE_TOTP=true なら、登録していれば TOTP も求める。
  * 失敗はログインの失敗と同じに数える（docs/spec.md の 3.6。2026-10-19 に承認者が決めた）
  */
@@ -1117,7 +1117,7 @@ export async function updateUser(
   const roleChanged = change.role !== undefined && change.role !== target.role;
   const statusChanged = change.status !== undefined && change.status !== target.status;
   if (roleChanged || statusChanged) {
-    // 「有効な管理者が残るか」の確かめと変更を1つの transaction にする
+    // 「有効な管理者が残るか」の確認と変更を1つの transaction にする
     // （2人の管理者が同時に互いを外しても、0 人にしない。transaction どうしは一列に並ぶ）。
     // 断るときも transaction の中で例外を投げない（取り消すと、同じつなぎに入ったほかの要求の文まで消えうるため。
     // 何も書かずに終え、外で断る）

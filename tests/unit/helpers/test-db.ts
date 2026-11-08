@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDb, type Db } from "@/lib/db";
 
-// migration（trigger を含む）を流した本物の SQLite を、試験ごとに写して使う。
+// migration（trigger を含む）を実行した本物の SQLite を、試験ごとにコピーして使う。
 
 export function testDatabases(prefix: string) {
   let dir = "";
@@ -20,7 +20,7 @@ export function testDatabases(prefix: string) {
         stdio: "pipe",
       });
     },
-    /** migration を流したデータベースの写しの URL（file:）。アプリの側（getDb）につながせる試験に使う */
+    /** migration を実行したデータベースのコピーの URL（file:）。アプリの側（getDb）につながせる試験に使う */
     freshUrl(): string {
       const file = path.join(dir, `t${++n}.db`);
       copyFileSync(template, file);

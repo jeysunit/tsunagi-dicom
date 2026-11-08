@@ -73,20 +73,20 @@ export async function unresolvedRequests(
 }
 
 /**
- * 削除：「求めた」を記録してから DELETE を送るまでの上限の時間。その間の手順（引き当てと読み直し）は時間切れで止まるので、
- * これを過ぎて「送る」の行（dispatch）が無い要求は、もう送られない（送る直前の確かめで断る）
+ * 削除：「求めた」を記録してから DELETE を送るまでの上限の時間。その間の手順（引き当てと再読み込み）は時間切れで止まるので、
+ * これを過ぎて「送る」の行（dispatch）が無い要求は、もう送られない（送る直前の確認で断る）
  */
 export const DELETE_DISPATCH_DEADLINE_MS = 2 * 60_000;
 
 /**
- * 取り込み：「求めた」を記録してから Orthanc へ送るまでの上限の時間。送る直前の確かめ（「送る」の行 dispatch を足す）で、
+ * 取り込み：「求めた」を記録してから Orthanc へ送るまでの上限の時間。送る直前の確認（「送る」の行 dispatch を追加する）で、
  * これを過ぎた要求は送らずに失敗（stale）とする（止まっていた処理が、後から送り出さない）
  */
 export const IMPORT_DISPATCH_DEADLINE_MS = 2 * 60_000;
 
 /**
  * 取り込み：「求めた」を記録してから、結果の行を書き終えるまでの上限の時間の見込み。Orthanc へ送る時間切れ（5 分。
- * src/lib/backend/http.ts の IMPORT_TIMEOUT_MS）・保存した値の読み直し・違ったときに消す時間を足して余裕を見た値。
+ * src/lib/backend/http.ts の IMPORT_TIMEOUT_MS）・保存した値の再読み込み・違ったときに消す時間を追加して余裕を見た値。
  * 結果の行が無い要求は、これを過ぎるまで管理者も手で解かない（元の処理がまだ動いているかもしれない）。
  * 送る前の要求は、これより前に IMPORT_DISPATCH_DEADLINE_MS を過ぎるので、解いた後に送り出すことはない
  */
@@ -111,7 +111,7 @@ export interface RequestOutcome {
   modality: string | null;
   /** 「求めた」の行の時刻 */
   requestedAt: Date | null;
-  /** 削除：Orthanc へ DELETE を送る直前に足す行（dispatch）があるか。あれば DELETE は送られた（かもしれない） */
+  /** 削除：Orthanc へ DELETE を送る直前に追加する行（dispatch）があるか。あれば DELETE は送られた（かもしれない） */
   dispatched: boolean;
 }
 
@@ -185,11 +185,11 @@ export async function deletedStudyStillPresent(backend: Backend, rows: readonly 
   return typeof orthancId === "string" ? (await backend.studyInfo(orthancId)) !== null : (await backend.lookupStudyIds(uid)).length > 0;
 }
 
-/** 形を確かめる前の値を記録に入れるときは、短く切る（記録を大きくさせない） */
+/** 形を確認する前の値を記録に入れるときは、短く切る（記録を大きくさせない） */
 export const clip = (value: string, max = 64) => (value.length > max ? `${value.slice(0, max)}…` : value);
 
 // ── 画面へ渡す token（AES-256-GCM。鍵は SESSION_SECRET から HKDF で、用途の名前で分けて導く） ──
-// 仕事の ID の token（送る）と、削除の確かめの token（削除）。用途ごとに、頭の字・鍵・AAD を分ける（取り違えて開けない）
+// 仕事の ID の token（送る）と、削除の確認の token（削除）。用途ごとに、頭の字・鍵・AAD を分ける（取り違えて開けない）
 
 const TOKEN_SALT = Buffer.from("tsunagi-dicom", "utf8");
 const TOKEN_KINDS = {
@@ -200,7 +200,7 @@ const TOKEN_KINDS = {
 type TokenKind = keyof typeof TOKEN_KINDS;
 /** token が使える時間（ミリ秒） */
 export const JOB_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
-/** 削除の確かめの token が使える時間。確かめの画面を出してから、これより後には消せない（もう一度確かめる） */
+/** 削除の確認の token が使える時間。確認画面を出してから、これより後には消せない（もう一度確認する） */
 export const DELETE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 
 function tokenKey(kind: TokenKind, sessionSecret: string): Buffer {
@@ -241,7 +241,7 @@ function openToken(kind: TokenKind, token: string, sessionSecret: string, now: n
   }
 }
 
-/** 削除の確かめの画面で見せた検査（Orthanc の中の ID・UID・患者 ID・版）と、見せた利用者。消す直前まで、全部が合うときだけ消す */
+/** 削除の確認画面で見せた検査（Orthanc の中の ID・UID・患者 ID・版）と、見せた利用者。消す直前まで、全部が合うときだけ消す */
 export interface DeleteConfirmPayload {
   orthancId: string;
   studyInstanceUid: string;
@@ -263,7 +263,7 @@ export function openDeleteConfirm(token: string, sessionSecret: string, now = Da
 }
 
 /**
- * 値の修正の確かめの画面で見せたもの（段 6）。見せた利用者・URL の StudyInstanceUID・選んだ検査（Orthanc の中の ID）・
+ * 値の修正の確認画面で見せたもの（段 6）。見せた利用者・URL の StudyInstanceUID・選んだ検査（Orthanc の中の ID）・
  * 種類と範囲と、見せた状態の印（state。直す検査の全部の画像の UID の組と値・直す値・替え先の患者の値から作る SHA-256）。
  * 状態の全部を token に入れると、検査の多い患者で大きくなるので、印にする。書き換える直前に、いまの状態から同じ印を作り、
  * 違えば書き換えずに断る
@@ -277,7 +277,7 @@ export interface ModifyConfirmPayload {
   state: string;
 }
 
-/** 値の修正の確かめの token が使える時間（削除と同じ） */
+/** 値の修正の確認の token が使える時間（削除と同じ） */
 export const MODIFY_CONFIRM_TTL_MS = DELETE_CONFIRM_TTL_MS;
 
 export function signModifyConfirm(payload: ModifyConfirmPayload, sessionSecret: string, now = Date.now()): string {

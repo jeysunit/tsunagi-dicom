@@ -3,12 +3,12 @@
 
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
 
-# ── 依存（better-sqlite3 を作るための道具を含む） ──
+# ── 依存（better-sqlite3 を作るためのツールを含む） ──
 FROM ${NODE_IMAGE} AS deps
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
-# Prisma の CLI が外（checkpoint.prisma.io）へ版の確かめを送らないようにする
+# Prisma の CLI が外（checkpoint.prisma.io）へ版の確認を送らないようにする
 ENV CHECKPOINT_DISABLE=1
 WORKDIR /app
 # .npmrc：allowScripts に無い install のスクリプトで止める（strict-allow-scripts）
@@ -22,10 +22,10 @@ FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 RUN npm run build
-# コンテナの中で流すコマンド（管理者のパスワードを失くしたとき。docs/security-and-maintenance.md の 4）を1つのファイルにまとめる
+# コンテナの中で実行するコマンド（管理者のパスワードを失くしたとき。docs/security-and-maintenance.md の 4）を1つのファイルにまとめる
 RUN npm run build:cli
 
-# ── 起動の時に migration を流す Prisma の CLI だけ ──
+# ── 起動の時に migration を実行する Prisma の CLI だけ ──
 FROM ${NODE_IMAGE} AS prisma-cli
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
@@ -44,7 +44,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /data /audit-anchors \
   && chown node:node /data /audit-anchors
-# CHECKPOINT_DISABLE：起動の時の prisma migrate deploy が、外へ版の確かめを送らないようにする
+# CHECKPOINT_DISABLE：起動の時の prisma migrate deploy が、外へ版の確認を送らないようにする
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     CHECKPOINT_DISABLE=1 \
@@ -66,7 +66,7 @@ COPY --from=builder /app/.next/static ./.next/static
 # docker compose exec tsunagi node cli/reset-admin-password.mjs --user <ユーザーID>（画面・API からは使えない）
 COPY --from=builder /app/dist/cli ./cli
 # コマンドが読む better-sqlite3 は、standalone が Prisma のアダプターの下に持つもの。そこへ道をつなぎ、
-# 道が切れたら（Next.js の出力の並びが変わったら）ここで作りが止まるように、動かして確かめる
+# 道が切れたら（Next.js の出力の並びが変わったら）ここで作りが止まるように、動かして確認する
 RUN mkdir -p /app/cli/node_modules \
   && ln -s ../../node_modules/@prisma/adapter-better-sqlite3/node_modules/better-sqlite3 /app/cli/node_modules/better-sqlite3 \
   && node -e "require('module').createRequire('/app/cli/x.cjs')('better-sqlite3')" \

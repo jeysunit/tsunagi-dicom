@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// 開発の一式の台本（docker/dev/up.sh・refresh.sh）：docker と git を偽物に替えて流し、
-// 環境変数の既定と上書き、secrets の置き場の切り替え、表示の分岐、立て直しの順番と失敗のときの止まり方を確かめる。
+// 開発の一式のスクリプト（docker/dev/up.sh・refresh.sh）：docker と git を偽物に替えて実行し、
+// 環境変数の既定と上書き、secrets の保存先の切り替え、表示の分岐、立て直しの順番と失敗のときの止まり方を確認する。
 // 本物の Docker・ネットワークは使わない。
 
 const repo = path.resolve(import.meta.dirname, "../..");
 const read = (p: string) => readFileSync(path.join(repo, p), "utf8");
 
-// 偽の docker：呼ばれた引数と、台本が渡した環境変数を記録する。FAKE_FAIL_ON を引数に含む呼び出しは失敗させる
+// 偽の docker：呼ばれた引数と、スクリプトが渡した環境変数を記録する。FAKE_FAIL_ON を引数に含む呼び出しは失敗させる
 const FAKE_DOCKER = `#!/bin/sh
 echo "docker $* | secrets=$TSUNAGI_DEV_SECRETS_DIR tsunagi_secrets=$TSUNAGI_SECRETS_DIR dtg=$DTG_GIT_REF ris=$RIS_GIT_REF image=$TSUNAGI_IMAGE" >> "$FAKE_LOG"
 case "$*" in
@@ -273,9 +273,9 @@ describe("文書：置き場と dc の使い方", () => {
     expect(read("docs/round-trip-test.md")).toMatch(/`dc`[^\n]*TSUNAGI_DEV_SECRETS_DIR を同じに渡す/);
   });
 
-  it("毎晩の立て直しは main にいる専用の作業ツリーで流す", () => {
-    expect(read("docs/round-trip-test.md")).toContain("毎晩の立て直しは main にいる専用の作業ツリーで流す");
-    expect(read("docker/dev/refresh.sh")).toContain("毎晩の立て直しは main にいる専用の作業ツリーで流す");
+  it("毎晩の立て直しは main にいる専用の作業ツリーで実行する", () => {
+    expect(read("docs/round-trip-test.md")).toContain("毎晩の立て直しは main にいる専用の作業ツリーで実行する");
+    expect(read("docker/dev/refresh.sh")).toContain("毎晩の立て直しは main にいる専用の作業ツリーで実行する");
   });
 });
 

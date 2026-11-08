@@ -6,8 +6,8 @@ import { isModalityName } from "@/lib/backend/orthanc-rest";
 import { BackendError } from "@/lib/backend/types";
 import { clip } from "@/lib/pacs-ops";
 
-// つながるかの確かめ（docs/spec.md の 3.3。段 4）。Orthanc から機器へ C-ECHO を送る（/modalities/{id}/echo）。
-// Orthanc の中身は変えないが、Orthanc に機器への通信をさせる操作なので、状態を変える要求と同じく CSRF を確かめる。
+// つながるかの確認（docs/spec.md の 3.3。段 4）。Orthanc から機器へ C-ECHO を送る（/modalities/{id}/echo）。
+// Orthanc の中身は変えないが、Orthanc に機器への通信をさせる操作なので、状態を変える要求と同じく CSRF を確認する。
 // 結果（つながった・つながらない）を監査の記録（echo）に残す。断った要求も残す。
 
 type Context = { params: Promise<{ id: string }> };

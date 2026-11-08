@@ -45,11 +45,11 @@ import {
 } from "@/lib/backend/types";
 
 // モックのバックエンド（BACKEND_MOCK=true）。Orthanc の形で、tests/fixtures/orthanc の合成の見本を返す
-// （Orthanc の DICOMweb のプラグインと Orthanc の REST の応答の写し）。
-// - 検査の検索は QIDO-RS の写し（dicom-web/studies.json）。件数は Orthanc の REST の /statistics の写し。
-// - シリーズは Orthanc の REST の写し（rest/series・rest/studies）から組み立てる（QIDO-RS の写しは1件の検査の分しか無いため）。
-// - 中継（WADO-RS の読み取り）は、サムネイル（thumbnail・rendered）だけ、写しのある1枚の画像（rest/instances/{id}/preview.png）を返す。
-//   ほかの宛先は、確かめたうえで 404 を返す。
+// （Orthanc の DICOMweb のプラグインと Orthanc の REST の応答のコピー）。
+// - 検査の検索は QIDO-RS のコピー（dicom-web/studies.json）。件数は Orthanc の REST の /statistics のコピー。
+// - シリーズは Orthanc の REST のコピー（rest/series・rest/studies）から組み立てる（QIDO-RS のコピーは1件の検査の分しか無いため）。
+// - 中継（WADO-RS の読み取り）は、サムネイル（thumbnail・rendered）だけ、コピーのある1枚の画像（rest/instances/{id}/preview.png）を返す。
+//   ほかの宛先は、確認したうえで 404 を返す。
 // - 段 4：受け取りの記録・機器・C-ECHO・送るは、Orthanc Book の形に合わせて手で作った見本（tests/fixtures/orthanc/made）と、
 //   このプロセスの記憶の中の仕事（job）で返す。送ると、仕事は読むたびに Pending → Running → Success（機器 offline へは Failure）と進む。
 //   機器 offline は C-ECHO に答えない。
@@ -57,7 +57,7 @@ import {
 //   消した検査は、検索・詳細・受け取りの記録・引き当て・中継のどれにも出さない）。
 // - 段 6：インポートは、見本の検査（消した検査を含む）の StudyInstanceUID のファイルだけを受け、その検査を出し直して印を付ける
 //   （このプロセスの記憶の中だけ。画像の本体は持たない）。
-// - 画像単位の DICOM タグ（2026-10-21）：シリーズの中の画像は REST の写しの Instances の並びから作る。画像の写しが1枚しか無いので、
+// - 画像単位の DICOM タグ（2026-10-21）：シリーズの中の画像は REST のコピーの Instances の並びから作る。画像のコピーが1枚しか無いので、
 //   ほかの画像の SOPInstanceUID と値は、Orthanc の ID から決まる合成の値にする（instanceDatasetOf）。
 
 /** モックの仕事（このプロセスの記憶の中だけ。Next.js が部品を分けて組んでも1つにする） */
@@ -85,7 +85,7 @@ const DELETED_KEY = Symbol.for("tsunagi-dicom.mock-deleted");
 const deletedHolder = globalThis as typeof globalThis & { [DELETED_KEY]?: Set<string> };
 const mockDeleted = (deletedHolder[DELETED_KEY] ??= new Set<string>());
 
-/** 試験のための、モックの Orthanc の中の変化（同じ UID の検査が2つある・確かめの後に検査が変わった） */
+/** 試験のための、モックの Orthanc の中の変化（同じ UID の検査が2つある・確認の後に検査が変わった） */
 const TEST_KEY = Symbol.for("tsunagi-dicom.mock-test");
 const testHolder = globalThis as typeof globalThis & {
   [TEST_KEY]?: { extraIds: Map<string, string[]>; versions: Map<string, string>; revision: number };
@@ -94,7 +94,7 @@ const mockTest = (testHolder[TEST_KEY] ??= { extraIds: new Map(), versions: new 
 
 /**
  * 中身の訂正で作った検査（新しい StudyInstanceUID → 元の検査と直した値。段 6）。このプロセスの記憶の中だけ。
- * 元の検査の値を写し、StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID を新しくした形で、検索・引き当て・詳細に出す
+ * 元の検査の値をコピー、StudyInstanceUID・SeriesInstanceUID・SOPInstanceUID を新しくした形で、検索・引き当て・詳細に出す
  */
 const COPIES_KEY = Symbol.for("tsunagi-dicom.mock-copies");
 const copiesHolder = globalThis as typeof globalThis & {
@@ -127,7 +127,7 @@ export function duplicateMockStudy(studyInstanceUid: string): void {
   mockTest.extraIds.set(studyInstanceUid, ["00000000-00000000-00000000-00000000-00000001"]);
 }
 
-/** 試験のため：検査の版（LastUpdate）を替える（確かめの画面を出した後に、検査が変わった形） */
+/** 試験のため：検査の版（LastUpdate）を替える（確認画面を出した後に、検査が変わった形） */
 export function touchMockStudy(orthancStudyId: string): void {
   mockTest.versions.set(orthancStudyId, orthancNow());
 }
@@ -207,12 +207,12 @@ const SOP_CLASS: Record<string, string> = {
   OT: "1.2.840.10008.5.1.4.1.1.7",
 };
 
-/** 写しの無い画像の SOPInstanceUID（Orthanc の ID から決まる、2.25 の形の UID。64 字に収まる） */
+/** コピーの無い画像の SOPInstanceUID（Orthanc の ID から決まる、2.25 の形の UID。64 字に収まる） */
 function syntheticUid(orthancId: string): string {
   return `2.25.${BigInt(`0x${createHash("sha256").update(orthancId).digest("hex").slice(0, 30)}`)}`;
 }
 
-/** 書き換えの元の画像の、Orthanc の ID の形の ID（UID の組から決める。写しの ModifiedFrom と照らす） */
+/** 書き換えの元の画像の、Orthanc の ID の形の ID（UID の組から決める。コピーの ModifiedFrom と照らす） */
 function mockInstanceId(key: string): string {
   return createHash("sha256").update(`instance:${key}`).digest("hex").slice(0, 40).match(/.{8}/g)!.join("-");
 }
@@ -233,8 +233,8 @@ const SERIES_TAGS: Record<string, [string, string]> = {
 const STUDY_ONLY = new Set(["00080056", "00080061", "00081190", "00201206", "00201208"]);
 
 /**
- * 1枚の画像の DICOM の値の見本（WADO-RS の metadata の形）。検査の値（QIDO-RS の写し）に、シリーズと画像の値を足す。
- * 画像の位置（ImagePositionPatient）は、写しがあればその値、無ければ画像の番号から決める（画像ごとに値が違う形の見本）
+ * 1枚の画像の DICOM の値の見本（WADO-RS の metadata の形）。検査の値（QIDO-RS のコピー）に、シリーズと画像の値を追加する。
+ * 画像の位置（ImagePositionPatient）は、コピーがあればその値、無ければ画像の番号から決める（画像ごとに値が違う形の見本）
  */
 function instanceDatasetOf(study: DicomJsonDataset, instance: MockInstance): DicomJsonDataset {
   const ds: DicomJsonDataset = {};
@@ -273,18 +273,18 @@ async function readAll<T>(dir: string): Promise<T[]> {
   return Promise.all(names.map((n) => readJson<T>("rest", dir, n)));
 }
 
-/** 写しのある、サムネイルの1枚 */
+/** コピーのある、サムネイルの1枚 */
 interface PreviewImage {
   studyInstanceUid: string;
   seriesInstanceUid: string;
   sopInstanceUid: string;
-  /** PNG の写し（同じ名前の .jpg が JPEG の写し） */
+  /** PNG のコピー（同じ名前の .jpg が JPEG のコピー） */
   file: string;
 }
 
 export function createMockBackend(): Backend {
   // 消した検査は、どの読み取りにも出さない
-  /** 見本の検査に、中身の訂正で作った検査（元の検査の値の写しに、新しい UID と直した値を入れたもの）を足す */
+  /** 見本の検査に、中身の訂正で作った検査（元の検査の値のコピーに、新しい UID と直した値を入れたもの）を追加する */
   const withCopies = (datasets: DicomJsonDataset[]) => [
     ...datasets,
     ...[...mockCopies].flatMap(([uid, copy]) => {
@@ -338,7 +338,7 @@ export function createMockBackend(): Backend {
       if (!uid) continue;
       out.set(uid, [...(out.get(uid) ?? []), s]);
     }
-    // 中身の訂正で作った検査のシリーズ：元の検査のシリーズの写しに、新しい SeriesInstanceUID を入れる
+    // 中身の訂正で作った検査のシリーズ：元の検査のシリーズのコピーに、新しい SeriesInstanceUID を入れる
     for (const [uid, copy] of mockCopies) {
       if (!studies.some((s) => s.MainDicomTags.StudyInstanceUID === uid)) continue;
       out.set(uid, (out.get(copy.sourceUid) ?? []).map((s) => ({
@@ -351,7 +351,7 @@ export function createMockBackend(): Backend {
     return out;
   }
 
-  /** シリーズの中の画像（Orthanc の REST の写しの Instances の並び）。写しのある画像はその値、ほかは ID から決まる合成の値 */
+  /** シリーズの中の画像（Orthanc の REST のコピーの Instances の並び）。コピーのある画像はその値、ほかは ID から決まる合成の値 */
   async function mockInstances(studyInstanceUid: string, seriesInstanceUid: string): Promise<MockInstance[]> {
     const series = ((await restSeriesByStudy()).get(studyInstanceUid) ?? []).find(
       (s) => s.MainDicomTags.SeriesInstanceUID === seriesInstanceUid,
@@ -360,7 +360,7 @@ export function createMockBackend(): Backend {
     const study = (await qidoStudies()).find((ds) => stringValue(ds, TAG.StudyInstanceUID) === studyInstanceUid);
     const patientId = study ? stringValue(study, TAG.PatientID) : "";
     const copied = new Map((await readAll<RestInstance>("instances")).map((i) => [i.ID, i]));
-    // 写しの無い画像の番号は、写しの画像の番号と重ならないように 1 から振る
+    // コピーの無い画像の番号は、コピーの画像の番号と重ならないように 1 から振る
     const used = new Set(series.Instances.map((id) => copied.get(id)?.MainDicomTags.InstanceNumber).filter(Boolean));
     let next = 1;
     const nextNumber = () => {
@@ -414,7 +414,7 @@ export function createMockBackend(): Backend {
     mock: true,
 
     async searchStudies(limit = STUDY_LIMIT, query?: StudyQuery) {
-      // 検査日の範囲と詳細条件は、実の Orthanc の QIDO-RS の代わりに、ここで当てる
+      // 検査日の範囲と詳細条件は、実の Orthanc の QIDO-RS の代わりに、ここで適用する
       const studies = (await qidoStudies()).map(studyFromDicomJson).filter((s) => matchesStudyQuery(s, query));
       const max = clampStudyLimit(limit);
       return { studies: sortStudiesNewestFirst(studies).slice(0, max), complete: studies.length <= max };
@@ -426,7 +426,7 @@ export function createMockBackend(): Backend {
     },
 
     async studyListVersion() {
-      // 見本の変更の記録の最後の番号に、このプロセスで消した検査の数と HL7 の更新の数を足す（消すと、実の Orthanc の Deleted の出来事と同じく進む）
+      // 見本の変更の記録の最後の番号に、このプロセスで消した検査の数と HL7 の更新の数を追加する（消すと、実の Orthanc の Deleted の出来事と同じく進む）
       const { last } = parseChanges(await readJson<unknown>("made", "changes.json"));
       return String(last + mockDeleted.size + mockTest.revision);
     },
@@ -562,7 +562,7 @@ export function createMockBackend(): Backend {
           });
       return result;
     },
-    // モックは検査を 1 件ずつしか持たないので、患者 ID が変わると元の検査を残さず新しい ID へ移す（元の画像を名指しで
+    // モックは検査を 1 件ずつしか持たないので、患者 ID が変わると元の検査を残さず新しい ID へ移す（元の画像を指定して
     // 消した後の形）。後の deleteStudyInstances は、元の検査がもう無いので何もしない
     async modifyStudyKeepingUids(id: string, replace: Record<string, string>) {
       // 実の Orthanc と同じく、OverwriteInstances が無ければ仕事を作らずに 400 で断る（2026-10-25 に実測）
@@ -597,7 +597,7 @@ export function createMockBackend(): Backend {
     async keepUidSettings() {
       return { overwriteInstances: !hl7Simulation.noOverwriteInstances, lockMetadata: !hl7Simulation.lockRefused };
     },
-    // 中身の訂正：元の検査を残し、新しい UID の検査を足す（仕事は書き換えと同じく、試験から状態を差し替えられる）
+    // 中身の訂正：元の検査を残し、新しい UID の検査を追加する（仕事は書き換えと同じく、試験から状態を差し替えられる）
     async modifyStudyNewUid(id: string, replace: Record<string, string>) {
       const study = (await restStudies()).find((s) => s.ID === id);
       if (!study) {
@@ -648,7 +648,7 @@ export function createMockBackend(): Backend {
       hl7Locks.delete(id);
       hl7LockLog.push(`unlock:${id}`);
     },
-    // モックの書き換えは検査ごと移すので、どの画像も元の画像の写しとして答える（foreignCopies で、写しでない形にする）
+    // モックの書き換えは検査ごと移すので、どの画像も元の画像のコピーとして答える（foreignCopies で、コピーでない形にする）
     async studyInstanceOrigins(id: string) {
       const key = (i: import("./types").PatientInstance) => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|");
       return Object.fromEntries((await this.studyInstanceTags(id)).map((i) =>
@@ -822,7 +822,7 @@ let hl7Simulation: {
   dispatchTimeout?: boolean;
   /** 付け替えの印を断る（Orthanc に UserMetadata が無いときの形） */
   lockRefused?: boolean;
-  /** 写しの ModifiedFrom が元の画像の ID と合わない（写しが別の画像に置き換わった形） */
+  /** コピーの ModifiedFrom が元の画像の ID と合わない（コピーが別の画像に置き換わった形） */
   foreignCopies?: boolean;
   /** Orthanc に OverwriteInstances が無い形（UID を保つ書き換えに要る設定が無い） */
   noOverwriteInstances?: boolean;

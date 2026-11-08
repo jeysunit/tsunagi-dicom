@@ -151,7 +151,7 @@ function uniform(instances: PatientInstance[], keys: (keyof PatientInstance)[]):
  * 照合（A40）の後に、仮の患者 ID のまま届いた画像を、統合した先の患者に書き換える（IHE PIR の Case 6。design.md §15）。
  * 書き換えるのは、期限の中の A40 の覚えがある仮の患者 ID の検査のうち、StudyInstanceUID がその A40 で書き換えた検査か、
  * 統合した先の患者の ORM で知らされた検査で、届き終えた（Orthanc の IsStable）ものだけ。
- * 書き方は A40 と同じ（UID を保ち、元の検査を消す。監査の記録を通し、仕事の終わりと全画像を確かめる）。
+ * 書き方は A40 と同じ（UID を保ち、元の検査を消す。監査の記録を通し、仕事の終わりと全画像を確認する）。
  */
 export async function sweepArrivals(
   backend: Backend = getBackend(),
@@ -165,7 +165,7 @@ export async function sweepArrivals(
   try {
     rows = [...await (options.readHistory ?? history)()];
   } catch (e) {
-    // 鍵つきの値・つなぎの合わない行（HistoryTampered）を含め、経過を確かめて読めなければ何も書き換えない
+    // 鍵つきの値・つなぎの合わない行（HistoryTampered）を含め、経過を確認して読めなければ何も書き換えない
     return { count: 0, skipped: 0, blocked: e instanceof Error ? e.message : "監査の記録を読めない" };
   }
   if (!await reconcile(backend, rows, audit, options)) {
@@ -243,7 +243,7 @@ export async function sweepArrivals(
         skip("統合した検査でも、統合した先の予約の検査でもない", source, uid);
         continue;
       }
-      // findStudiesByPatientId は Orthanc の検査の要約で探すので、画像ごとの患者 ID も仮の患者 ID かを確かめる
+      // findStudiesByPatientId は Orthanc の検査の要約で探すので、画像ごとの患者 ID も仮の患者 ID かを確認する
       if (!before.every(i => i.PatientID === source)) {
         skip("画像の患者 ID が仮の患者 ID と違う", source, uid);
         continue;
@@ -277,7 +277,7 @@ export async function sweepArrivals(
         skip("統合した検査が統合した先に無い（書き戻されたかもしれない）", source, uid);
         continue;
       }
-      // 同じ画像（Study・Series・SOP の UID が同じ）の送り直しは、上書きになって確かめが合わないので書き換えない
+      // 同じ画像（Study・Series・SOP の UID が同じ）の送り直しは、上書きになって確認が合わないので書き換えない
       const sent = new Set(alongside.map(i => [i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|")));
       if (before.some(i => sent.has([i.StudyInstanceUID, i.SeriesInstanceUID, i.SOPInstanceUID].join("|")))) {
         skip("統合した先の検査に同じ画像がすでにある", source, uid);
@@ -335,7 +335,7 @@ export async function sweepArrivals(
  * - 付け替えの前の患者 ID は、その検査の期限の中の付け替えの元の患者 ID の全部（装置は最初の患者 ID のまま送る）
  * - まとめる先は、同じ UID の検査がいまある患者（ちょうど1人で、元の患者でないこと）。付け替えの後の HL7 の A40 などで
  *   移った先にも追いつき、人が元の患者へ書き戻していれば（先の検査が無い）まとめない
- * - 予約（ORM）の検査には広げない。統合の前の値・同じ画像・書き戻しの確かめは、A40 の見回りと同じ
+ * - 予約（ORM）の検査には広げない。統合の前の値・同じ画像・書き戻しの確認は、A40 の見回りと同じ
  */
 async function sweepScreenArrivals(
   backend: Backend,
@@ -362,7 +362,7 @@ async function sweepScreenArrivals(
     }
     const live = list.filter(a => withinTtl(a, now));
     for (const source of [...new Set(live.map(a => a.from))]) {
-      // 前の旧い患者 ID の画像をまとめた後の形で読み直す（まとめた先の検査の画像が増えている）
+      // 前の旧い患者 ID の画像をまとめた後の形で再読み込みする（まとめた先の検査の画像が増えている）
       const ids = await backend.lookupStudyIds(uid);
       const tags = new Map<string, PatientInstance[]>();
       for (const id of ids) tags.set(id, await backend.studyInstanceTags(id));
@@ -413,7 +413,7 @@ async function sweepScreenArrivals(
           skip("付け替えた検査が付け替え先に無い（消された・書き戻されたかもしれない）", source, uid);
           continue;
         }
-        // 書き換えの前後の確かめは、同じ UID の検査の全部の画像で見るので、ほかの旧い患者 ID で届いた画像も足す
+        // 書き換えの前後の確認は、同じ UID の検査の全部の画像で見るので、ほかの旧い患者 ID で届いた画像も追加する
         const alongside = others.flatMap(other => tags.get(other)!);
         const sent = new Set(atTarget.map(instanceKey));
         if (before.some(i => sent.has(instanceKey(i)))) {

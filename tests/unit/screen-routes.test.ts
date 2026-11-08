@@ -3,7 +3,7 @@ import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
 // 段 2 の画面の API（検査の詳細・すべての値・状態・ビューアの覚え・ビューアで開く・モダリティの既定）を、
-// 検証モード（AUTH_MODE=dev）のセッションから通して確かめる。役割ごとの操作の権限・許可の一覧・監査の記録を見る。
+// 検証モード（AUTH_MODE=dev）のセッションから通して確認する。役割ごとの操作の権限・許可の一覧・監査の記録を見る。
 
 const state = vi.hoisted(() => ({
   role: undefined as string | undefined,
@@ -30,7 +30,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
 });
 
 // 一般の役割だけ、シリーズの項目を SeriesInstanceUID だけに狭める（管理者は既定）。2026-10-20 に役割を管理者と一般の2つにしたので、
-// 前の「閲覧を狭め、医師・技師で既定を見る」形を「一般を狭め、管理者で既定を見る」形にした（確かめる中身は同じ）
+// 前の「閲覧を狭め、医師・技師で既定を見る」形を「一般を狭め、管理者で既定を見る」形にした（確認する中身は同じ）
 vi.mock("@/lib/fields", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/fields")>();
   const map = { ...real.ROLE_FIELD_ALLOWLIST, general: { study: ["studyInstanceUid"] as const, series: ["seriesInstanceUid"] as const } };
@@ -286,7 +286,7 @@ describe("ビューア", () => {
     expect((await GET(new Request(`${ORIGIN}/api/viewers/open?study=javascript:1&viewer=ohif`))).status).toBe(400);
   });
 
-  // 外した確かめ：「閲覧は断ったことが残る」。閲覧の役割を無くし（2026-10-20）、検査ごとの覚えは管理者と一般の両方が使う
+  // 外した確認：「閲覧は断ったことが残る」。閲覧の役割を無くし（2026-10-20）、検査ごとの覚えは管理者と一般の両方が使う
   it("検査ごとの覚え：一般はでき、設定に無いビューア・古い版は断る", async () => {
     const { POST } = await import("@/app/api/studies/[uid]/viewer/route");
     state.role = "general";

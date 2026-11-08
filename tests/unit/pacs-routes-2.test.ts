@@ -2,9 +2,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 段 5 の画面の API（書き出し・削除。docs/spec.md の 3.5）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確かめる。
+// 段 5 の画面の API（書き出し・削除。docs/spec.md の 3.5）を、検証モード（AUTH_MODE=dev。モックの Orthanc）のセッションから通して確認する。
 // 削除は管理者のほかを断る、書き出しは役割の表（3.6）どおり、断ったことも記録に残る、監査の行（誰が・いつ・どの検査を・理由）、
-// 同じ要求の ID を二度流さない、結果不明と照らし合わせ、CSRF（Origin）、検証モードの書き込みの止め、モックでの一巡りを見る。
+// 同じ要求の ID を二度実行しない、結果不明と照らし合わせ、CSRF（Origin）、検証モードの書き込みの止め、モックでの一巡りを見る。
 // 再認証（AUTH_MODE=local）は tests/e2e/local-auth.spec.ts で見る。
 
 const state = vi.hoisted(() => ({
@@ -95,12 +95,12 @@ async function exportZip(headers: Record<string, string> = { "sec-fetch-site": "
   const { GET } = await import("@/app/api/studies/[uid]/export/route");
   return GET(new Request(`${ORIGIN}/api/studies/${uid}/export`, { headers }), uidParams(uid));
 }
-/** 確かめの画面の token（いまの役割で確かめの画面を開いた形。開けなければ形だけの値） */
+/** 確認画面の token（いまの役割で確認画面を開いた形。開けなければ形だけの値） */
 async function confirmTokenOf(uid = STUDY): Promise<string> {
   const res = await preview(uid);
   return res.ok ? ((await res.json()).confirmToken as string) : "d1.none.none.none";
 }
-/** 削除を求める。本文に confirmToken が無ければ、いま確かめの画面を開いて token を添える（確かめの画面を通った形） */
+/** 削除を求める。本文に confirmToken が無ければ、いま確認画面を開いて token を添える（確認画面を通った形） */
 async function del(body: Record<string, unknown>, origin = ORIGIN, uid = STUDY) {
   const { POST } = await import("@/app/api/studies/[uid]/delete/route");
   const withToken = "confirmToken" in body ? body : { ...body, confirmToken: await confirmTokenOf(uid) };
@@ -202,7 +202,7 @@ describe("書き出し（ZIP）", () => {
     expect(log.mock.calls.some((c) => String(c[0]).includes("export_result_not_recorded"))).toBe(true);
   });
 
-  // 結合の試験（実の Orthanc。#30）で、流し終えたときの結果の行が残らないと分かった（BFF のログに export_result_not_recorded）。
+  // 結合の試験（実の Orthanc。#30）で、実行し終えたときの結果の行が残らないと分かった（BFF のログに export_result_not_recorded）。
   // 結果は答えを返した後に書くので、その時には要求の headers() を読めない。要求の間に送り元を取っておき、結果の記録に渡す
   it("流し終えた・切られたときの結果の行は、答えを返した後（要求の外）でも残り、送り元も要求の時のもの", async () => {
     state.role = "admin";
@@ -296,7 +296,7 @@ describe("削除", () => {
   it("管理者のほかの役割には断り、Orthanc を呼ばずに、断ったことを記録する", async () => {
     const { getBackend } = await import("@/lib/backend");
     const spy = vi.spyOn(getBackend(), "deleteStudy");
-    // 役割は管理者と一般の2つ（2026-10-20）。前の医師・技師・閲覧の代わりに一般で確かめる
+    // 役割は管理者と一般の2つ（2026-10-20）。前の医師・技師・閲覧の代わりに一般で確認する
     for (const role of ["general"]) {
       state.role = role;
       const requestId = crypto.randomUUID();
@@ -370,7 +370,7 @@ describe("削除", () => {
     vi.spyOn(getBackend(), "deleteStudy").mockRejectedValueOnce(new BackendUnknownError());
     const requestId = crypto.randomUUID();
     await del({ requestId, reason: "試験" });
-    // 検査がまだあるだけでは「消えていない」と確定させない（先の DELETE が止まった・終わった証拠が無い）。記録にも足さない
+    // 検査がまだあるだけでは「消えていない」と確定させない（先の DELETE が止まった・終わった証拠が無い）。記録にも追加しない
     const early = await delStatus(requestId);
     expect(early.status).toBe(202);
     expect(await early.json()).toMatchObject({ requestId, outcome: "unknown", studyPresent: true });
@@ -384,7 +384,7 @@ describe("削除", () => {
     const blocked = await del({ requestId: crypto.randomUUID(), reason: "試験" });
     expect(blocked.status).toBe(409);
     expect((await blocked.json()).pendingRequestIds).toEqual([requestId]);
-    // 解くのは、管理者が確かめた内容を書いて手で解く操作だけ（一般は解けない）
+    // 解くのは、管理者が確認した内容を書いて手で解く操作だけ（一般は解けない）
     state.role = "general";
     expect((await resolveDelete({ requestId, note: "試験" })).status).toBe(403);
     state.role = "admin";
@@ -418,7 +418,7 @@ describe("削除", () => {
     }
   });
 
-  /** 消す直前の読み直し（2 回目の引き当て）で止めておき、その間にほかの操作を挟む */
+  /** 消す直前の再読み込み（2 回目の引き当て）で止めておき、その間にほかの操作を挟む */
   async function pausedDelete(confirmToken: string) {
     const { getBackend } = await import("@/lib/backend");
     const backend = getBackend();
@@ -450,7 +450,7 @@ describe("削除", () => {
     const { requestId, answer, release } = await pausedDelete(confirmToken);
     const res = await resolveDelete({ requestId, note: "試験" });
     expect(res.status).toBe(409);
-    // 文言は 2026-10-20 に画面の用語集（docs/spec.md の 2.2）に合わせた。確かめる中身（処理中の要求は解かない）は同じ
+    // 文言は 2026-10-20 に画面の用語集（docs/spec.md の 2.2）に合わせた。確認する中身（処理中の要求は解かない）は同じ
     expect((await res.json()).error).toContain("まだ処理中");
     release();
     expect((await answer).status).toBe(200);
@@ -555,7 +555,7 @@ describe("削除", () => {
     expect((await del({ requestId, reason: "試験" })).status).toBe(403);
     expect(detailOf((await rowsOf(requestId))[0])).toMatchObject({ reason: "dev_write_blocked" });
     state.config!.auth.devAllowWrite = true;
-    // 無い検査：確かめの画面は 404 で token を出さない。token が正しくても、引いて無ければ 404
+    // 無い検査：確認画面は 404 で token を出さない。token が正しくても、引いて無ければ 404
     expect((await preview("1.2.3")).status).toBe(404);
     const { signDeleteConfirm } = await import("@/lib/pacs-ops");
     const confirmToken = signDeleteConfirm(
@@ -574,7 +574,7 @@ describe("削除：違う検査を消さない", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ patientId: "JP-TEST-0004", patientName: "試験 髙子", studyDate: "20260410", seriesCount: 1, instanceCount: 4 });
-    // 要約の生年月日・性別は、一覧の行の値でなく Orthanc から読み直した値
+    // 要約の生年月日・性別は、一覧の行の値でなく Orthanc から再読み込みした値
     expect(body).toMatchObject({ patientBirthDate: "19600715", patientSex: "F" });
     const { openDeleteConfirm } = await import("@/lib/pacs-ops");
     const { getBackend } = await import("@/lib/backend");
@@ -614,7 +614,7 @@ describe("削除：違う検査を消さない", () => {
       expect((await del({ requestId, reason: "試験", confirmToken })).status, name).toBe(409);
       expect(detailOf((await rowsOf(requestId))[0]), name).toMatchObject({ reason: "confirm_invalid" });
     }
-    // 用途の違う token（送るの仕事の token）は、確かめの token として開けない。逆も同じ
+    // 用途の違う token（送るの仕事の token）は、確認の token として開けない。逆も同じ
     const { signJobToken, openJobToken, openDeleteConfirm } = await import("@/lib/pacs-ops");
     const job = signJobToken(
       { jobId: "0a1b2c3d-4e5f-4061-8728-394a5b6c7d8e", requestId: crypto.randomUUID(), studyInstanceUid: STUDY, modality: "dtg", actorId: "dev" },
@@ -732,7 +732,7 @@ describe("削除：違う検査を消さない", () => {
     vi.spyOn(backend, "studyInfo").mockImplementation(async (id) => {
       const info = await real(id);
       calls += 1;
-      // 2 回目（消す直前の読み直し）だけ、版が替わった形
+      // 2 回目（消す直前の再読み込み）だけ、版が替わった形
       return info && (calls >= 2 ? { ...info, version: "changed-later" } : info);
     });
     const spy = vi.spyOn(backend, "deleteStudy");
@@ -803,7 +803,7 @@ describe("HL7 の管理者による照らし合わせ", () => {
         after: tags
       }
     });
-    // 仕事の ID が無い要求は、人が確かめるまでは次の受信も止める（design.md §10）。
+    // 仕事の ID が無い要求は、人が確認するまでは次の受信も止める（design.md §10）。
     const { processMessage } = await import("@/lib/hl7/apply");
     const { readFileSync } = await import("node:fs");
     const message = readFileSync("tests/fixtures/hl7/a08.hl7", "utf8");

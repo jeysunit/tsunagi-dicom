@@ -21,7 +21,7 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 ## 決まっていること
 
 - **画面への入り口は左のナビに置く。** 上の帯のタブは使わない（[menu.md](menu.md)）。項目の名前は用語集の語（検査一覧・受信一覧・接続先など）。
-- **詳細の見出しは患者バナーに替える。** 紹介医・英字氏名・Study ID・シリーズ数と画像数はバナーに足さず、「検査の情報」に置く（和暦は生年月日の括弧の中）。
+- **詳細の見出しは患者バナーに替える。** 紹介医・英字氏名・Study ID・シリーズ数と画像数はバナーに追加せず、「検査の情報」に置く（和暦は生年月日の括弧の中）。
 - **モダリティ MR の印の色は `#9333EA`（暗い地は `#C084FC`）。**
 - **暗い外枠は使わない。** 上の帯・左のナビは `surface` の地にする。
 
@@ -29,8 +29,8 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 
 画面（`src/app`・`src/components`）を作る・直す前に、この文書を読む。
 
-- **型に無い部品は、まずこの文書と部品の実装に足す PR を出してから使う。** 画面の PR の中で、この文書に無い見た目の部品や値を作らない。
-- 色は `src/app/globals.css` のトークン（`--color-*`）で指定する。`#hex`・`rgb()`・Tailwind の色名（`bg-red-500`・`text-white` など）は書かない。足りない色は、先にトークンを足す PR を出す。検査は `tests/unit/design-system.test.ts`。例外は同じファイルの一覧に理由つきで載せる。
+- **型に無い部品は、まずこの文書と部品の実装に追加する PR を出してから使う。** 画面の PR の中で、この文書に無い見た目の部品や値を作らない。
+- 色は `src/app/globals.css` のトークン（`--color-*`）で指定する。`#hex`・`rgb()`・Tailwind の色名（`bg-red-500`・`text-white` など）は書かない。足りない色は、先にトークンを追加する PR を出す。検査は `tests/unit/design-system.test.ts`。例外は同じファイルの一覧に理由つきで含める。
 - 値を変えるときは、`tokens.md`・`globals.css`・`docs/spec.md` の 2 を同じ PR で直す。表と `globals.css` の食い違いは `tests/unit/design-system.test.ts` が落とす。
 
 ## 文書
@@ -44,11 +44,11 @@ tsunagi-dicom・ris-emulator・dicom-test-generator の画面を、同じ外枠�
 | [glossary.md](glossary.md) | 画面の言葉の決まり。語の使い分けと、3 製品をまたいだ語の対照 |
 | [parts.md](parts.md) | 部品の HTML の構造・クラス・値。`src/components/ui` に同じ構造とクラスの名前で組む |
 | [writing.md](writing.md) | 文言（誤り・知らせ・空の状態・確認の窓）の書き方 |
-| [ui-kit/](ui-kit/) | 3 製品で同じ値の写し（`tokens.css`・`icons.svg`、版は `VERSION`、指紋は `SHA256SUMS`）。`components.css` は読まないので写さない |
+| [ui-kit/](ui-kit/) | 3 製品で同じ値のコピー（`tokens.css`・`icons.svg`、版は `VERSION`、指紋は `SHA256SUMS`）。`components.css` は読まないのでコピーしない |
 | [scenarios.md](scenarios.md) | 検証のシナリオ。同じ 1 件の検査を 8 画面に通す |
 | [wireframes/](wireframes/) | 部品だけで組んだ画面の案（HTML。ブラウザで開く。データは架空） |
 
-ui-kit の写しは製品の側で直さない。`globals.css` の値はこの写しと同じにし、写した 3 つの指紋が `SHA256SUMS` と合うことと合わせて、試験で確かめる（`tests/unit/design-system.test.ts`・`tests/unit/ui-kit-copy.test.ts`）。絵は `icons.svg` の表にあるものを、`lucide-react` の同じ名前でそのまま使う。
+ui-kit のコピーは製品の側で直さない。`globals.css` の値はこのコピーと同じにし、コピーした 3 つの指紋が `SHA256SUMS` と合うことと合わせて、試験で確認する（`tests/unit/design-system.test.ts`・`tests/unit/ui-kit-copy.test.ts`）。絵は `icons.svg` の表にあるものを、`lucide-react` の同じ名前でそのまま使う。
 
 ## 部品の実装の場所
 
@@ -62,7 +62,7 @@ ui-kit の写しは製品の側で直さない。`globals.css` の値はこの�
 | 件数の行 | `src/components/ui/count-row.tsx` | あり。検査の一覧が使う |
 | 一覧の表 | `src/components/ui/table.tsx` | あり。選んだ行の見た目は検査一覧（`study-browser.tsx`）と受信一覧（`received-list.tsx`）が同じ形で持つ |
 | タグの表 | `src/components/studies/tag-grid.tsx` | あり。行の複数選択と「タグとタグ値をコピー」（計算は `src/lib/client/row-selection.ts`・`tag-copy.ts`） |
-| 状態の札 | `src/components/ui/status-badge.tsx` | あり。上の帯の接続の状態（`conn-status.tsx`）が使う。表の状態の列は、その列を足す PR から |
+| 状態の札 | `src/components/ui/status-badge.tsx` | あり。上の帯の接続の状態（`conn-status.tsx`）が使う。表の状態の列は、その列を追加する PR から |
 | 小さな印 | `src/components/ui/badge.tsx` | あり。状態でない印（標準・新着）。「インポート」は状態の札の「知らせ」（`note`）。状態は状態の札 |
 | 選択欄 | `src/components/ui/select.tsx` | あり。高さは `default` 32px・`sm` 28px、枠は `border-input`。標準の select をそのまま使う |
 | 知らせ | `src/components/ui/notice.tsx` | あり。`kind` は ok・warn・err・info。`role="alert"` は `alert` を付けた err（画面の上の誤り）だけで、ほかは `role="status"` |

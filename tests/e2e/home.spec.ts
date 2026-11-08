@@ -191,7 +191,7 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(band.getByRole("button", { name: "管理者" })).toHaveAttribute("aria-pressed", "true");
 
     const before = await (await page.request.get("/api/audit/verify")).json();
-    // モックには WADO-RS の見本が無いので 404 だが、宛先の確かめは通って画像サーバー（モック）まで届く
+    // モックには WADO-RS の見本が無いので 404 だが、宛先の確認は通って画像サーバー（モック）まで届く
     const res = await page.request.get(`/api/dicom-web/studies/${STUDY}/series/1.2.826.0.1.3680043.8.498.1/metadata`);
     expect(res.status()).toBe(404);
     expect((await res.json()).error).toBe("見本に無い");
@@ -221,7 +221,7 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
     await page.goto("/");
     const band = page.getByTestId("dev-mode-band");
 
-    // 一般では監査の確かめを使えない
+    // 一般では監査の確認を使えない
     expect((await page.request.get("/api/audit/verify")).status()).toBe(403);
 
     await band.getByRole("button", { name: "管理者" }).click();
@@ -238,7 +238,7 @@ test.describe("検証モード（AUTH_MODE=dev）", () => {
 
     const after = await (await page.request.get("/api/audit/verify")).json();
     expect(after.ok).toBe(true);
-    // 2回の切り替えと、そのたびの頁の描き直し（検索）が足されている
+    // 2回の切り替えと、そのたびの頁の描き直し（検索）が追加されている
     expect(after.checked).toBeGreaterThanOrEqual(before.checked + 2);
   });
 

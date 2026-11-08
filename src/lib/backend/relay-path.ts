@@ -8,7 +8,7 @@ import { BackendError, type Backend } from "@/lib/backend/types";
 // どれも URL の path にそのまま書ける字なので、符号化しない
 const SEGMENT = /^[A-Za-z0-9.,_-]+$/;
 
-/** 中継の path の字を確かめて、`/` でつなぐ。だめなら 400 */
+/** 中継の path の字を確認して、`/` でつなぐ。だめなら 400 */
 export function safeRelayPath(segments: string[]): string {
   if (segments.length === 0) throw new BackendError("path が空", 400);
   for (const s of segments) {
@@ -19,7 +19,7 @@ export function safeRelayPath(segments: string[]): string {
 
 /** 中継してよい WADO-RS の読み取りの宛先 */
 export interface WadoRsTarget {
-  /** `/dicom-web` より後ろの path（字は確かめ済み） */
+  /** `/dicom-web` より後ろの path（字は確認済み） */
   path: string;
   studyInstanceUid: string;
   seriesInstanceUid?: string;
@@ -103,8 +103,8 @@ const RENDERED_MEDIA_TYPE = /^((image|video|text)\/[^/]+|application\/pdf)$/;
 
 /**
  * 中継の要求の Accept が規格に合わなければ、返す状態の番号（PS3.18 8.7.5）。合えば null。
- * - Accept の無い要求は 406。ブラウザの fetch・<img> はいつも Accept を付けるので、ここでは BFF が型を決める thumbnail・rendered の道だけに当てる
- *   （ビューアの metadata・frames の取得には、BFF の側で Accept を足さず、そのまま画像サーバーへ渡す）
+ * - Accept の無い要求は 406。ブラウザの fetch・<img> はいつも Accept を付けるので、ここでは BFF が型を決める thumbnail・rendered の道だけに適用する
+ *   （ビューアの metadata・frames の取得には、BFF の側で Accept を追加せず、そのまま画像サーバーへ渡す）
  * - DICOM の media type と、画像などに変換した型が混じった Accept は 400
  */
 export function relayAcceptStatus(path: string, accept: string | null | undefined): 400 | 406 | null {
@@ -115,7 +115,7 @@ export function relayAcceptStatus(path: string, accept: string | null | undefine
 
 /**
  * query から accept（PS3.18 8.3.3.1 の Accept Query Parameter）を外す。画像サーバーへの Accept は、BFF が Accept の
- * ヘッダーで決める（relayAccept）。query の accept をそのまま渡すと、BFF が確かめていない型で答えが返る
+ * ヘッダーで決める（relayAccept）。query の accept をそのまま渡すと、BFF が確認していない型で答えが返る
  */
 export function withoutAcceptParam(search: string): string {
   if (!search.startsWith("?")) return search;
@@ -135,7 +135,7 @@ export function withoutAcceptParam(search: string): string {
   return kept.length > 0 ? `?${kept.join("&")}` : "";
 }
 
-/** Accept の中で、q が 0 より大きい形で名指しされている media type か（ワイルドカードの範囲指定は名指しにしない） */
+/** Accept の中で、q が 0 より大きい形で指定されている media type か（ワイルドカードの範囲指定は指定にしない） */
 function namesMediaType(accept: string, type: string): boolean {
   return accept.split(",").some((part) => {
     const [name, ...params] = part.split(";").map((s) => s.trim().toLowerCase());
@@ -147,7 +147,7 @@ function namesMediaType(accept: string, type: string): boolean {
 
 /**
  * 画像サーバーへ渡す Accept を決める（docs/spec.md の 3.2）。
- * `thumbnail`・`rendered` は BFF が決める：既定は `image/jpeg`、ブラウザが `image/png` を名指しし、`image/jpeg` を名指ししていないときだけ `image/png`。
+ * `thumbnail`・`rendered` は BFF が決める：既定は `image/jpeg`、ブラウザが `image/png` を指定し、`image/jpeg` を指定していないときだけ `image/png`。
  * ブラウザの `<img>` の Accept（`image/avif,…` のあとにワイルドカードの範囲が続く形）をそのまま渡すと、Orthanc の DICOMweb のプラグインは 400（Unsupported MIME type）を返す。
  * それ以外（metadata・frames・bulk など、ビューアの取得）は、ブラウザの Accept をそのまま渡す（無ければ付けない）。
  */

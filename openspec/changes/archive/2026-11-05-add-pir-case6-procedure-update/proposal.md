@@ -13,9 +13,9 @@
 
 - ORM の ORC-1 に `CA`・`DC`・`XO` を受ける。CA・DC は検査と画像を消さずに、受付番号を外す。XO は NW と同じく受付番号を入れる。
 - A40 と ORM を受理したときに、旧い患者 ID と統合した先・書き換えた検査・ORM の検査と受付番号を、監査の記録の `ack` の行に覚える。覚えは受理から 24 時間だけ使う。
-- BFF に `POST /api/hl7/sweep` を足す。`/api/hl7/messages` と同じ token で受け口だけを通し、覚えのある仮の患者 ID の検査のうち、StudyInstanceUID が覚えにあり、届き終えたものを、A40 と同じ書き方で統合した先の患者に書き換える。
+- BFF に `POST /api/hl7/sweep` を追加する。`/api/hl7/messages` と同じ token で受け口だけを通し、覚えのある仮の患者 ID の検査のうち、StudyInstanceUID が覚えにあり、届き終えたものを、A40 と同じ書き方で統合した先の患者に書き換える。
 - 受け口が `/api/hl7/sweep` を定期に呼ぶ（既定 60 秒、`HL7_SWEEP_INTERVAL_SECONDS`）。受け口が止まっていた間に届いた画像は、起き直した後の最初の呼び出しで拾う。
-- `Backend` に、検査が届き終えたか（Orthanc の `IsStable`）を読む `studyIsStable` を足す。
+- `Backend` に、検査が届き終えたか（Orthanc の `IsStable`）を読む `studyIsStable` を追加する。
 
 ## Capabilities
 

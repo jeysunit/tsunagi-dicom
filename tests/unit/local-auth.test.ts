@@ -44,7 +44,7 @@ import { totpAt } from "@/lib/auth/totp";
 import type { Db } from "@/lib/db";
 import { testDatabases } from "./helpers/test-db";
 
-// AUTH_MODE=local の中身（docs/spec.md の 3.6）を、migration を流した本物の SQLite に対して確かめる。
+// AUTH_MODE=local の中身（docs/spec.md の 3.6）を、migration を実行した本物の SQLite に対して確認する。
 // 時計は差し替える（一時停止・画面のロックの時間を待たない）。
 
 const dbs = testDatabases("tsunagi-auth-");
@@ -300,7 +300,7 @@ describe("ログインの一時停止（第7.0版 14 遵守事項⑥(6)）", () 
 
 describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
   // 2026-10-19 に承認者が決めた：既定はパスワードだけで解き、SCREEN_UNLOCK_REQUIRE_TOTP=true のときだけ TOTP も求める。
-  // この試験は、設定を true にしたときに、これまでどおりパスワードと TOTP が要ることを確かめる（期待は変えていない）
+  // この試験は、設定を true にしたときに、これまでどおりパスワードと TOTP が要ることを確認する（期待は変えていない）
   it("SCREEN_UNLOCK_REQUIRE_TOTP=true：ロックしたら、解くまでセッションはロックのまま。解くにはパスワードと TOTP が要る", async () => {
     const { ctx, db, clock } = await setup({ screenUnlockRequireTotp: true });
     const { secret, token } = await enrolledUser(ctx, clock);
@@ -321,7 +321,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     expect(actions.filter((a) => a === "screen_unlock:denied")).toHaveLength(2);
     expect(actions).toContain("screen_unlock:success");
     expect(JSON.stringify(await auditRows(db))).not.toContain(PASSWORD);
-    // 解いたことの記録に、TOTP を確かめたことを残す
+    // 解いたことの記録に、TOTP を確認したことを残す
     const unlocked = (await auditRows(db)).filter((r) => r.action === "screen_unlock" && r.outcome === "success");
     expect(unlocked.map((r) => JSON.parse(r.detail ?? "{}"))).toEqual([{ totp: true }]);
   });
@@ -386,7 +386,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     await unlockScreen(ctx, s.session, s.user, { password: PASSWORD, code: "000000" });
     expect((await resolveSession(ctx, token)).kind).toBe("active");
 
-    // 正しい番号を添えても、確かめず、使った段を進めない
+    // 正しい番号を添えても、確認せず、使った段を進めない
     const before = (await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep;
     const s2 = await sessionOf(db, token);
     await lockScreen(ctx, s2.session, s2.user, "manual");
@@ -464,11 +464,11 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     await unlockScreen(ctx, l.session, l.user, { password: PASSWORD });
     expect(await count()).toBe(1);
     // 期待の変更：前は「再認証（パスワードと TOTP）の成功で0に戻る」。再認証は TOTP を求めなくなった（2026-10-20）ので、
-    // 再認証の成功も数を消さない（画面のロックの解除と同じ。docs/spec.md の 3.6）。0に戻すのは TOTP まで確かめた成功
+    // 再認証の成功も数を消さない（画面のロックの解除と同じ。docs/spec.md の 3.6）。0に戻すのは TOTP まで確認した成功
     const a = await sessionOf(db, token);
     await reauthenticate(ctx, a.session, a.user, { password: PASSWORD });
     expect(await count()).toBe(1);
-    // TOTP まで確かめた成功（ログインした後のパスワードの変更：現在のパスワードと TOTP）で0に戻る
+    // TOTP まで確認した成功（ログインした後のパスワードの変更：現在のパスワードと TOTP）で0に戻る
     const c = await sessionOf(db, token);
     await changePassword(ctx, c.session, c.user, { currentPassword: PASSWORD, code: totpAt(secret, clock.t), newPassword: NEW_PASSWORD });
     expect(await count()).toBe(0);
@@ -498,7 +498,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     };
     const unlockWithPassword = async () => {
       const s = await sessionOf(db, token);
-      // ロックしていなくても解除の要求は確かめる（断らない）。ロックしてから送っても同じ
+      // ロックしていなくても解除の要求は確認する（断らない）。ロックしてから送っても同じ
       await lockScreen(ctx, s.session, s.user, "manual");
       const l = await sessionOf(db, token);
       await unlockScreen(ctx, l.session, l.user, { password: PASSWORD });
@@ -532,7 +532,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
   });
 
   // 期待の変更：前は「既定でも、ログインと再認証の TOTP は求める」。再認証は TOTP を求めなくなった（2026-10-20）ので、
-  // ログインは TOTP を求め、再認証はパスワードだけで通り、送られた番号は確かめない（使った段にも数えない）ことを見る
+  // ログインは TOTP を求め、再認証はパスワードだけで通り、送られた番号は確認しない（使った段にも数えない）ことを見る
   it("ログインは TOTP を求め、認証コードを添えない再認証はパスワードだけで通る（番号を確かめず、使った段にも数えない）", async () => {
     const { ctx, db, clock } = await setup();
     const { secret, token } = await enrolledUser(ctx, clock);
@@ -541,7 +541,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     await reauthenticate(ctx, s.session, s.user, { password: PASSWORD });
     expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).totpLastStep).toBe(stepBefore);
     expect((await sessionOf(db, token)).session.reauthMfaAt).toBeNull();
-    // 添えた番号は確かめる（利用者の管理の再認証）。誤れば断り、TOTP の誤りとして数える
+    // 添えた番号は確認する（利用者の管理の再認証）。誤れば断り、TOTP の誤りとして数える
     await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: "000000" })).rejects.toMatchObject({ status: 401 });
     await reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
     expect((await sessionOf(db, token)).session.reauthMfaAt).not.toBeNull();
@@ -585,7 +585,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
   });
 
   // 一時停止のときのセッションの扱いは、2026-10-18 に承認者が決めた（F3）：ログインし終えたセッションは閉じず、
-  // ログインの途中のセッションだけを閉じる。一時停止の間は、パスワードを確かめる操作（ロックの解除・再認証）を断る
+  // ログインの途中のセッションだけを閉じる。一時停止の間は、パスワードを確認する操作（ロックの解除・再認証）を断る
   it("解く失敗も一時停止に数える。一時停止の後もセッションはロックのまま残り、解除は一時停止が解けるまで断る", async () => {
     const { ctx, db, clock } = await setup({ mfaRequired: false, loginLockThreshold: 2 });
     await createUser(ctx, { username: "sato", displayName: "佐藤", role: "general", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
@@ -625,7 +625,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     // ログインの途中のセッションは閉じた
     expect(await db.session.findUnique({ where: { id: hashToken(pending.token) } })).toBeNull();
     expect((await resolveSession(ctx, pending.token)).kind).toBe("anonymous");
-    // 一時停止の間は、パスワードを確かめる操作を断る（セッションは閉じない）
+    // 一時停止の間は、パスワードを確認する操作を断る（セッションは閉じない）
     const s = await sessionOf(db, active);
     await expect(
       reauthenticate(ctx, s.session, s.user, { password: PASSWORD, code: totpAt(secret, clock.t) }),
@@ -707,7 +707,7 @@ describe("セッション", () => {
 describe("管理者の操作（棚卸し・役割）", () => {
   it("役割の変更を記録に残し、次の要求から新しい役割になる", async () => {
     const { ctx, db } = await setup({ mfaRequired: false });
-    // 役割は管理者と一般の2つ（2026-10-20）。前の閲覧→技師の変更は、一般→管理者の変更で確かめる
+    // 役割は管理者と一般の2つ（2026-10-20）。前の閲覧→技師の変更は、一般→管理者の変更で確認する
     const u = await createUser(ctx, { username: "sato", displayName: "佐藤", role: "general", password: "kq7vz2mw-long1", mustChangePassword: false }, ADMIN);
     const { token } = await login(ctx, "sato", "kq7vz2mw-long1");
     await updateUser(ctx, u.id, { role: "admin" }, { actorId: "admin1", actorRole: "admin" });
@@ -844,7 +844,7 @@ describe("レビューと安全の確かめで直したこと", () => {
     const results = await Promise.allSettled(guesses.map((g) => submitTotp(ctx, s.session, s.user, g)));
     expect(results.every((x) => x.status === "rejected")).toBe(true);
     const rows = await auditRows(db);
-    // 確かめに進んだのは決めた回数だけ。残りは一時停止として断った
+    // 確認に進んだのは決めた回数だけ。残りは一時停止として断った
     expect(rows.filter((x) => x.action === "login" && x.detail?.includes("bad_totp"))).toHaveLength(3);
     expect(rows.filter((x) => x.action === "login_lock")).toHaveLength(1);
     const user = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
@@ -979,7 +979,7 @@ describe("レビューと安全の確かめで直したこと", () => {
   });
 
   // 期待の変更：前は「パスワードと TOTP で通る」の1段だけ。削除の再認証はパスワードだけになり（2026-10-20）、利用者の管理は
-  // TOTP を登録した管理者には TOTP まで求める（パスワードとセッションだけで管理者を作り足させない。docs/spec.md の 3.6）
+  // TOTP を登録した管理者には TOTP まで求める（パスワードとセッションだけで管理者を作り追加させない。docs/spec.md の 3.6）
   it("再認証：削除はパスワードだけで通り、利用者の管理は TOTP まで求める。REAUTH_MINUTES（5 分）の間は聞き直さず、過ぎたら切れる", async () => {
     const { ctx, db, clock } = await setup();
     const { secret, token } = await enrolledUser(ctx, clock, "admin1", "admin");
@@ -997,7 +997,7 @@ describe("レビューと安全の確かめで直したこと", () => {
     expect(() => assertRecentReauth(ctx, after.session, after.user, { requireTotp: true })).toThrow(
       expect.objectContaining({ status: 403, problems: [REAUTH_REQUIRED, REAUTH_TOTP_REQUIRED] }),
     );
-    // TOTP まで確かめた再認証で、利用者の管理も通る
+    // TOTP まで確認した再認証で、利用者の管理も通る
     await reauthenticate(ctx, after.session, after.user, { password: PASSWORD, code: totpAt(secret, clock.t) });
     const mfa = await sessionOf(db, token);
     expect(() => assertRecentReauth(ctx, mfa.session, mfa.user, { requireTotp: true })).not.toThrow();
@@ -1046,7 +1046,7 @@ describe("レビューと安全の確かめで直したこと", () => {
     expect(changed.session.reauthAt).toBeNull();
     expect(changed.session.reauthMfaAt).toBeNull();
     expect(() => assertRecentReauth(ctx, changed.session, changed.user)).toThrow(AuthFailure);
-    // パスワードの変更の前に読んだ利用者（前の資格情報）で確かめても、印は書かない（並んで走った再認証が、変更の後に印を戻さない）
+    // パスワードの変更の前に読んだ利用者（前の資格情報）で確認しても、印は書かない（並んで走った再認証が、変更の後に印を戻さない）
     await expect(reauthenticate(ctx, before.session, before.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
     expect((await sessionOf(db, done.rotated!.token)).session.reauthAt).toBeNull();
   });
@@ -1062,7 +1062,7 @@ describe("レビューと安全の確かめで直したこと", () => {
     expect(after.session.reauthAt).toBeNull();
     expect(after.session.reauthMfaAt).toBeNull();
     expect(() => assertRecentReauth(ctx, after.session, after.user, { requireTotp: true })).toThrow(AuthFailure);
-    // 役割の変更の前に読んだ利用者（前の役割）で確かめても、印は書かない
+    // 役割の変更の前に読んだ利用者（前の役割）で確認しても、印は書かない
     await expect(reauthenticate(ctx, s.session, s.user, { password: PASSWORD })).rejects.toMatchObject({ status: 409 });
     expect((await sessionOf(db, token)).session.reauthAt).toBeNull();
     // 役割の変更と印の消去の間に、前の役割で通した新しい時刻の印が残っていた形（並んだ要求の隙間）を作っても、
@@ -1163,7 +1163,7 @@ describe("レビューと安全の確かめで直したこと", () => {
   });
 });
 
-/** ログインの枠の確かめが終わったところで1回止める（ほかの操作を割り込ませる試験のため） */
+/** ログインの枠の確認が終わったところで1回止める（ほかの操作を割り込ませる試験のため） */
 class PausingLimiter extends HashLimiter {
   private hold?: { reached: () => void; release: Promise<void> };
 
@@ -1284,7 +1284,7 @@ describe("独立のレビューの指摘で直したこと", () => {
     const { secret } = await enrolledUser(ctx, clock);
     const r = await login(ctx, "tanaka", PASSWORD);
     const stale = await sessionOf(db, r.token);
-    // 前後の段の番号はどちらも受ける窓に入る（使い回しの確かめは段ごとなので、別の段なら通る）
+    // 前後の段の番号はどちらも受ける窓に入る（使い回しの確認は段ごとなので、別の段なら通る）
     expect((await submitTotp(ctx, stale.session, stale.user, totpAt(secret, clock.t))).stage).toBe("active");
     const activeBefore = await db.session.count({ where: { userId: stale.user.id, stage: "active" } });
     await expect(submitTotp(ctx, stale.session, stale.user, totpAt(secret, clock.t + 30_000))).rejects.toMatchObject({
@@ -1303,7 +1303,7 @@ describe("独立のレビューの指摘で直したこと", () => {
     const r1 = await login(ctx, "tanaka", PASSWORD);
     const s1 = await sessionOf(db, r1.token);
     const activeBefore = await countActive();
-    // 止めた（セッションを消す前の、確かめとの間）
+    // 止めた（セッションを消す前の、確認との間）
     await db.user.update({ where: { id: user.id }, data: { status: "disabled" } });
     await expect(submitTotp(ctx, s1.session, s1.user, totpAt(secret, clock.t))).rejects.toMatchObject({ status: 401 });
     expect(await countActive()).toBe(activeBefore);
@@ -1329,7 +1329,7 @@ describe("独立のレビューの指摘で直したこと", () => {
 
     const pause = limiter.pauseNextLogin();
     const racing = login(ctx, "sato", SATO.password);
-    // 古いパスワードの確かめが通ったところで、ほかの画面からパスワードを変える
+    // 古いパスワードの確認が通ったところで、ほかの画面からパスワードを変える
     await pause.reached;
     clock.advance(1000);
     const s = await sessionOf(db, mine.token);
@@ -1610,7 +1610,7 @@ describe("独立のレビューの指摘で直したこと", () => {
     const locked = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
     expect(locked.lockedUntil!.getTime()).toBeGreaterThan(clock.t);
 
-    // 一時停止の間は、正しいパスワードと番号でも、どの道も確かめない
+    // 一時停止の間は、正しいパスワードと番号でも、どの道も確認しない
     clock.advance(30_000);
     await expect(login(ctx, "tanaka", PASSWORD)).rejects.toMatchObject({ status: 401 });
     const la2 = await sessionOf(db, a);
@@ -1657,7 +1657,7 @@ describe("独立のレビューの指摘で直したこと", () => {
     expect(reRight).toEqual(reWrong);
     expect(reRight).toMatchObject({ status: 503 });
     for (let i = 0; i < 20; i++) await login(ctx, "tanaka", `wrong-pass-${i}a`).catch(() => undefined);
-    // 1つも確かめていないので、数えず、一時停止にもならない
+    // 1つも確認していないので、数えず、一時停止にもならない
     const user = await db.user.findUniqueOrThrow({ where: { username: "tanaka" } });
     expect(user.failedLoginCount).toBe(0);
     expect(user.lockedUntil).toBeNull();
@@ -1665,7 +1665,7 @@ describe("独立のレビューの指摘で直したこと", () => {
 
     for (const r of releases) r();
     await Promise.all(held);
-    // 空いたら、ふつうに確かめて数える
+    // 空いたら、ふつうに確認して数える
     await expect(login(ctx, "tanaka", "wrong-pass-123")).rejects.toMatchObject({ status: 401 });
     expect((await db.user.findUniqueOrThrow({ where: { username: "tanaka" } })).failedLoginCount).toBe(1);
   });

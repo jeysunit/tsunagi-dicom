@@ -6,7 +6,7 @@ import { REMEMBER_TTL_MS, memory, ordersForChain, resolveAlias, sweepArrivals, w
 import { createFakeOrthanc, type FakeOrthanc } from "./helpers/fake-orthanc";
 
 // 照合の後に仮の患者 ID で届いた画像の書き換え（IHE PIR の Case 6）と、ORM の CA・DC・XO（design.md §15・§16）。
-// 患者の取り違えが起きない形を、画像ごとの小さな Orthanc で確かめる。
+// 患者の取り違えが起きない形を、画像ごとの小さな Orthanc で確認する。
 const A40 = readFileSync("tests/fixtures/hl7/a40.hl7").toString();
 const ORM = readFileSync("tests/fixtures/hl7/orm.hl7").toString();
 const A08 = readFileSync("tests/fixtures/hl7/a08.hl7").toString();
@@ -63,7 +63,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(result).toMatchObject({ outcome: "success", patientId: "P000001", studyInstanceUid: STUDY });
     expect(result.detail).toMatchObject({ matchesAfter: true, alongside: expect.any(Array) });
     expect(orthanc.modifyCalls.at(-1)).toMatchObject({ replace: { PatientID: "P000001", AccessionNumber: "RE1" } });
-    // 元の検査からは、書き換えた画像だけを名指しで消した
+    // 元の検査からは、書き換えた画像だけを指定して消した
     expect(orthanc.deleteCalls.at(-1)).toEqual({ id: orthanc.studyId(TEMP, STUDY), sops: [late.SOPInstanceUID] });
     // もう一度回しても何もしない
     expect(await sweep()).toEqual({ count: 0, skipped: 0 });
@@ -300,7 +300,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     await send(a40(TEMP, "P000001"));
     temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
     orthanc.next.beforeModify = () => void temp(STUDY, { SOPInstanceUID: `${STUDY}.3.1` });
-    // 書き換えた後の確かめで画像の数が合わないので、取り違えて書くより止める（人が /api/hl7/resolve で解く）
+    // 書き換えた後の確認で画像の数が合わないので、取り違えて書くより止める（人が /api/hl7/resolve で解く）
     expect(await sweep()).toMatchObject({ count: 0, blocked: "画像の一部だけが書き換わった" });
     expect(orthanc.instances.filter(i => i.PatientID === TEMP).map(i => i.SOPInstanceUID)).toEqual([`${STUDY}.3.1`]);
     expect(rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1)?.detail).toMatchObject({ partial: true });
@@ -317,7 +317,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(orthanc.instances.some(i => i.SOPInstanceUID === `${STUDY}.3.1`)).toBe(false);
     const result = rows.filter(r => r.detail?.type === "sweep" && r.detail?.event === "result").at(-1)!;
     expect(result).toMatchObject({ outcome: "failed", detail: { partial: true, arrivalsLost: true } });
-    // 書き換えを頼んだのは名指しの画像だけ
+    // 書き換えを頼んだのは指定の画像だけ
     expect(orthanc.deleteCalls.at(-1)?.sops).toEqual([`${STUDY}.2.1`]);
   });
 
@@ -327,7 +327,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
     orthanc.next.beforeModify = () => void temp(STUDY, { SOPInstanceUID: `${STUDY}.3.1` });
     orthanc.next.wholeStudyDelete = true;
-    // 消した後の写しの確かめ（ModifiedFrom の読み取り）から、読めなくなる
+    // 消した後のコピーの確認（ModifiedFrom の読み取り）から、読めなくなる
     let deleted = false;
     orthanc.next.duringDelete = () => {
       deleted = true;
@@ -355,7 +355,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     expect(rows.filter(r => r.detail?.event === "result").at(-1)).toMatchObject({ outcome: "unknown", detail: { reason: "仕事の完了を待つ時間を超えた" } });
     expect(orthanc.deleteCalls).toHaveLength(deletes);
     for (const id of orthanc.jobs.keys()) orthanc.jobs.set(id, "Success");
-    // 次の見回りの照らし合わせが、確かめてから元の画像を名指しで消し、成功として解く
+    // 次の見回りの照らし合わせが、確認してから元の画像を指定して消し、成功として解く
     expect(await sweep()).toEqual({ count: 0, skipped: 0 });
     expect(orthanc.deleteCalls.at(-1)).toEqual({ id: orthanc.studyId(TEMP, STUDY), sops: [`${STUDY}.2.1`] });
     expect(patientsOf(STUDY)).toEqual(["P000001"]);
@@ -367,7 +367,7 @@ describe("照合の後に仮の患者 ID で届いた画像", () => {
     await send(a40(TEMP, "P000001"));
     const late = temp(STUDY, { SOPInstanceUID: `${STUDY}.2.1` });
     let resent: typeof late | undefined;
-    // 仕事が写した後、元を消す前に、モダリティが同じ UID の画像を送り直す（OverwriteInstances で置き換わる）
+    // 仕事がコピーした後、元を消す前に、モダリティが同じ UID の画像を送り直す（OverwriteInstances で置き換わる）
     orthanc.next.beforeDelete = () => {
       orthanc.instances = orthanc.instances.filter(i => i !== late);
       resent = temp(STUDY, { SOPInstanceUID: late.SOPInstanceUID });

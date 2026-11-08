@@ -1,12 +1,12 @@
-// 開発用の compose の流れの試験を流す：docker/dev/up.sh で一式（tsunagi-dicom・Orthanc・ris-emulator・dicom-test-generator・storescp）を立て、
-// Playwright（tests/flow/playwright.config.ts）を流し、終わったら片付ける。
+// 開発用の compose の流れの試験を実行する：docker/dev/up.sh で一式（tsunagi-dicom・Orthanc・ris-emulator・dicom-test-generator・storescp）を立て、
+// Playwright（tests/flow/playwright.config.ts）を実行し、終わったら片付ける。
 //
 //   npm ci && npx playwright install chromium   # 先に一度
 //   node tests/flow/run.mjs                      # Docker（compose v2）が要る。tsunagi-dicom のイメージはこのリポジトリから作る
 //
 // secret のファイルは up.sh が docker/dev/secrets/（.gitignore）に作る。値は画面にも記録にも出さない。
 // compose のプロジェクトは tsunagi-flow（開発用の一式の tsunagi-dev とは別。始めと終わりに volume ごと片付ける）。
-// FLOW_KEEP=1 なら、終わってもコンテナを残す（調べるため。次に流すときは片付けてから立てる）。
+// FLOW_KEEP=1 なら、終わってもコンテナを残す（調べるため。次に実行するときは片付けてから立てる）。
 import { execFileSync, spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -15,7 +15,7 @@ const root = path.resolve(import.meta.dirname, "../..");
 process.chdir(root);
 
 const composeFile = path.join(root, "docker/dev/compose.yaml");
-// secrets の置き場は TSUNAGI_DEV_SECRETS_DIR で替えられる（up.sh と同じ。docs/round-trip-test.md）
+// secrets の保存先は TSUNAGI_DEV_SECRETS_DIR で替えられる（up.sh と同じ。docs/round-trip-test.md）
 // ~ で始まる値は $HOME に展開する（docker/dev/lib.sh と同じ）
 const rawSecretsDir = process.env.TSUNAGI_DEV_SECRETS_DIR ?? path.join(root, "docker/dev/secrets");
 const home = process.env.HOME ?? "";
@@ -53,7 +53,7 @@ const compose = (args, stdio = "inherit") => execFileSync("docker", ["compose", 
 
 let code = 1;
 try {
-  // 前の残りを片付けてから立てる（secret のファイルは残し、使い回す）。初めて流すときは、secret のファイルが無くて失敗してよい
+  // 前の残りを片付けてから立てる（secret のファイルは残し、使い回す）。初めて実行するときは、secret のファイルが無くて失敗してよい
   try {
     compose(["down", "--volumes", "--remove-orphans"], "ignore");
   } catch {

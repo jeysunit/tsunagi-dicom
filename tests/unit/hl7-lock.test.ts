@@ -7,7 +7,7 @@ import { sweepArrivals } from "@/lib/hl7/sweep";
 import { createFakeOrthanc, type FakeOrthanc } from "./helpers/fake-orthanc";
 
 // 付け替えの印（design.md §15.4）：患者 ID の変わる書き換えの前に元の検査へ印を付け、Orthanc の Lua に同じ
-// StudyInstanceUID の C-STORE を断らせる。消す前に、書き換えた画像の ModifiedFrom が元の画像の ID と同じかを確かめる。
+// StudyInstanceUID の C-STORE を断らせる。消す前に、書き換えた画像の ModifiedFrom が元の画像の ID と同じかを確認する。
 const A40 = readFileSync("tests/fixtures/hl7/a40.hl7").toString();
 const A08 = readFileSync("tests/fixtures/hl7/a08.hl7").toString();
 const TEMP = "ER2026102400";
@@ -130,7 +130,7 @@ describe("付け替えの印", () => {
       if (++calls > 1) throw new Error("synthetic renew failure");
       return lockStudy(id, until);
     });
-    // 期限 400 ミリ秒（時計の付け直しは 100 ミリ秒ごと）で、写しを確かめるのに 300 ミリ秒かかる：その間に付け直しが呼ばれて失敗する
+    // 期限 400 ミリ秒（時計の付け直しは 100 ミリ秒ごと）で、コピーを確認するのに 300 ミリ秒かかる：その間に付け直しが呼ばれて失敗する
     const origins = orthanc.backend.studyInstanceOrigins.bind(orthanc.backend);
     vi.spyOn(orthanc.backend, "studyInstanceOrigins").mockImplementation(async (id) => {
       await new Promise(r => setTimeout(r, 300));
@@ -147,7 +147,7 @@ describe("付け替えの印", () => {
 
   it("元を消す直前に印の期限が過ぎていれば（その間に C-STORE が入りえた）、付け直して続けずに部分反映で止める", async () => {
     temp();
-    // 期限 200 ミリ秒で、写しを確かめる間に BFF が 300 ミリ秒止まる（時計の付け直しも動かない）：消す直前には必ず過ぎている。
+    // 期限 200 ミリ秒で、コピーを確認する間に BFF が 300 ミリ秒止まる（時計の付け直しも動かない）：消す直前には必ず過ぎている。
     // 書き換えを始める前に切れると、書き換え自体を始めないので、止まるのは仕事の後にする
     const origins = orthanc.backend.studyInstanceOrigins.bind(orthanc.backend);
     vi.spyOn(orthanc.backend, "studyInstanceOrigins").mockImplementation(async (id) => {
@@ -254,7 +254,7 @@ describe("付け替えの印", () => {
 
   it("印の間に Orthanc の時計が進んでいれば（外す時のずれの確かめが失敗すれば）、消し終えても成功にしない", async () => {
     temp();
-    // 付ける時の確かめ（lockStudy の中）は通り、外す時の確かめだけが失敗する
+    // 付ける時の確認（lockStudy の中）は通り、外す時の確認だけが失敗する
     vi.spyOn(orthanc.backend, "checkLockClock").mockRejectedValue(new Error("synthetic clock jump"));
     expect(await send(a40(TEMP, "P000001"), { lockSettleMs: 0 })).toContain("MSA|AE|");
     expect(orthanc.deleteCalls).toHaveLength(1);
@@ -308,7 +308,7 @@ describe("付け替えの印", () => {
       while (Date.now() < stalled) {
         // 止まった BFF の代わり
       }
-      // 消した後の引き当て（消し残りと写しの確かめ・画像ごとの確かめ）が、どれも失敗する
+      // 消した後の引き当て（消し残りとコピーの確認・画像ごとの確認）が、どれも失敗する
       broken = true;
     };
     expect(await send(a40(TEMP, "P000001"), { lockTtlMs: 200, pollMs: 0, lockSettleMs: 0 })).toContain("MSA|AE|");
@@ -342,7 +342,7 @@ describe("付け替えの印", () => {
     orthanc.next.state = "Running";
     expect(await send(a40(TEMP, "P000001"), { jobTimeoutMs: 5 })).toContain("MSA|AE|");
     const source = orthanc.studyId(TEMP, STUDY);
-    // 仕事が写している間に外さない
+    // 仕事がコピーしている間に外さない
     expect(orthanc.events.filter(e => e.startsWith("unlock:"))).toEqual([]);
     expect(orthanc.locks.has(source)).toBe(true);
     const unknown = results().at(-1)!;
@@ -413,7 +413,7 @@ describe("付け替えの印", () => {
       orthanc.jobs.set(jobId, "Success");
     }
     // 照らし合わせが仕事の終わりを読んだ直後の引き当て（印を付けるかを決める）だけ、空を返す。verifyFails なら、その後の
-    // 3 回目（消すかの確かめの 2 回の後の、画像ごとの確かめ）が失敗する
+    // 3 回目（消すかの確認の 2 回の後の、画像ごとの確認）が失敗する
     const status = orthanc.backend.jobStatus.bind(orthanc.backend);
     const lookup = orthanc.backend.lookupStudyIds.bind(orthanc.backend);
     let after: number | undefined;
@@ -616,7 +616,7 @@ describe("写しの確かめ（ModifiedFrom）", () => {
     temp(STUDY, { SOPInstanceUID: `${STUDY}.1.9` });
     const origins = orthanc.backend.studyInstanceOrigins.bind(orthanc.backend);
     vi.spyOn(orthanc.backend, "studyInstanceOrigins").mockImplementationOnce(async (id) => {
-      // 写しの後に、統合した先の患者 ID・同じ値・同じ UID で、中身の違う画像が REST で届く（OverwriteInstances で置き換わる）
+      // コピーの後に、統合した先の患者 ID・同じ値・同じ UID で、中身の違う画像が REST で届く（OverwriteInstances で置き換わる）
       const copy = orthanc.instances.find(i => i.PatientID === "P000001")!;
       orthanc.restStore({ ...copy });
       return origins(id);

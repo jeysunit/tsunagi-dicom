@@ -33,7 +33,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const { session } = access;
   const params = await searchParams;
   const filter = parseFilter(params);
-  // 受信一覧の「検査一覧で表示」から開いたとき：その検査を選んだ形で開く（UID の形を確かめ、一覧にあるときだけ選ぶ。
+  // 受信一覧の「検査一覧で表示」から開いたとき：その検査を選んだ形で開く（UID の形を確認し、一覧にあるときだけ選ぶ。
   // 選ぶと、行をクリックしたときと同じく詳細を読み、「詳細を開いた」を記録する）。URL からは、開いた後に外す
   const studyUid = typeof params.studyUid === "string" && isDicomUid(params.studyUid) ? params.studyUid : undefined;
   const deps = await screenDeps(session);
@@ -59,7 +59,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </>
     );
   }
-  // 頁を開いたことは手動の検索（自動更新の読み直しを認める基準の条件として覚える。src/lib/search-trigger.ts）
+  // 頁を開いたことは手動の検索（自動更新の再読み込みを認める基準の条件として覚える。src/lib/search-trigger.ts）
   resolveSearchTrigger(session, filterToSearchParams(filter).toString(), null);
   await audit(session, searchAuditFields("page", result.returned, result.facetAudit));
 

@@ -1,7 +1,7 @@
 import { renderSVG } from "uqr";
 import { CodeForm } from "@/components/auth/auth-forms";
 
-// TOTP の登録の画面（QR と、手で入れるための秘密）。秘密は登録を確かめるまで、セッションに暗号化して置く。
+// TOTP の登録の画面（QR と、手で入れるための秘密）。秘密は登録を確認するまで、セッションに暗号化して置く。
 // QR はサーバーの側で SVG に描き、data: の画像で出す（外のサービスに秘密を渡さない）。
 export function TotpEnrollment({
   secret,

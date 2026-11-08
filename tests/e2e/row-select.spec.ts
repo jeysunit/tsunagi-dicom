@@ -3,8 +3,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 // 表の行を選ぶ（docs/design-system/components.md の「一覧の表」「タグの表」）：
 // - 受信一覧・検査一覧：クリックした行・矢印のキーで動かした行は、selected の地と左の線に替わる。読み上げには aria-selected
 // - 検査の詳細の DICOM タグの表：クリック・Shift・Ctrl／Cmd で複数選び、右クリックのメニューかキーボードで「タグとタグ値をコピー」
-// - UID の写すボタンは UID のすぐ右
-// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して流す。
+// - UID のコピーするボタンは UID のすぐ右
+// 検証モード（AUTH_MODE=dev）とモックのバックエンドに対して実行する。
 
 test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 
@@ -189,7 +189,7 @@ test("タグの表：右クリックのメニューで、選んだ行を「(タ�
   expect(await clipboard(page)).toBe(`(0008,0018)\tSOPインスタンスUID\tUI\t${sop}`);
   await expect(page.getByTestId("tag-copy-notice")).toHaveText("1 行をコピーしました");
 
-  // 複数を選んだ行の上で右クリックすると、選びを保ったまま全部を写す（改行でつなぐ）
+  // 複数を選んだ行の上で右クリックすると、選びを保ったまま全部をコピーする（改行でつなぐ）
   await tr("0020,0013").click();
   await tr("0028,0010").click({ modifiers: ["ControlOrMeta"] });
   await tr("0028,0010").click({ button: "right" });

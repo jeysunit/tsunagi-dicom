@@ -1,6 +1,6 @@
 // インポートの画面（ファイルを選ぶ部品。docs/design-system/parts.md の「ファイルを選ぶ部品」）で、選んだファイルの先頭だけを
-// ブラウザで読み、DICOM かどうかと、患者と検査の列に出す 6 つの値を取る。ブラウザの確かめは目安で、
-// 最終の確かめは BFF（src/lib/dicom-file.ts と src/app/api/import/route.ts）が行う。
+// ブラウザで読み、DICOM かどうかと、患者と検査の列に出す 6 つの値を取る。ブラウザの確認は目安で、
+// 最終の確認は BFF（src/lib/dicom-file.ts と src/app/api/import/route.ts）が行う。
 // - DICOM かどうか：128 バイトの前置きの後に "DICM"（PS3.10 の 7.1）。
 // - 読む値：患者 ID (0010,0020)・氏名 (0010,0010)・検査日 (0008,0020)・モダリティ (0008,0060)・
 //   シリーズ番号 (0020,0011)・インスタンス番号 (0020,0013)。読むのに要る転送構文 (0002,0010) と文字コード (0008,0005) も読む。
@@ -243,7 +243,7 @@ function integerString(bytes: Uint8Array | undefined): string {
 }
 
 /**
- * ファイルの先頭（HEAD_BYTES まで）から、患者と検査の列の値を読む。前置きと "DICM" は呼ぶ側が確かめてから渡す。
+ * ファイルの先頭（HEAD_BYTES まで）から、患者と検査の列の値を読む。前置きと "DICM" は呼ぶ側が確認してから渡す。
  * 頭を読めない形（Big Endian・Deflated・壊れた入れ子）は null（列は全部「—」）
  */
 export function readPreviewTags(head: Uint8Array): PreviewTags | null {

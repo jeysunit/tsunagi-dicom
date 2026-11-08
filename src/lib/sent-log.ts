@@ -26,7 +26,7 @@ import { todayIn } from "@/lib/study-filter";
 //   患者 ID と StudyInstanceUID だけを出す。どちらも役割の許可の一覧（sent・study）で絞る（原則 8）。
 // - 期間の中の送信が上限（1,000 件）を超えたら、新しい 1,000 件だけを返し、超えたことを返す。
 // - 仕事の終わり（成功・失敗）を初めて読んだときは、送った仕事の状態の道（/api/jobs/{token}）と同じく、記録（send の done）に
-//   1行だけ足す（3.4「仕事の終わりは、BFF が初めて終わりを読んだときに記録する」）。Orthanc へは書かない。
+//   1行だけ追加する（3.4「仕事の終わりは、BFF が初めて終わりを読んだときに記録する」）。Orthanc へは書かない。
 
 /** 期間の中で読む送信の上限（docs/design-system/components.md の「送受信の一覧」） */
 export const SENT_LIMIT = 1000;
@@ -220,7 +220,7 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) 
   return out;
 }
 
-/** 「求めた」の行と、その中身（要求の ID と検査の UID を確かめたもの） */
+/** 「求めた」の行と、その中身（要求の ID と検査の UID を確認したもの） */
 interface RequestEntry {
   row: AuditRow & { studyInstanceUid: string };
   detail: Record<string, unknown>;
@@ -329,8 +329,8 @@ export async function sentLogView(deps: SentLogDeps, range: SentRange): Promise<
 }
 
 /**
- * 仕事の終わり（成功・失敗）を、まだ記録に無ければ1行だけ足す（/api/jobs/{token} と同じ形。記録の並びの中で確かめる）。
- * 足した行か、先にあった終わりの行の時刻を返す
+ * 仕事の終わり（成功・失敗）を、まだ記録に無ければ1行だけ追加する（/api/jobs/{token} と同じ形。記録の並びの中で確認する）。
+ * 追加した行か、先にあった終わりの行の時刻を返す
  */
 async function recordDone(
   session: Session,

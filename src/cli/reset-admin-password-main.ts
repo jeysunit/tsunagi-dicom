@@ -2,7 +2,7 @@ import { run, type CliContext } from "@/cli/reset-admin-password";
 import { getConfig } from "@/lib/config";
 import { createDb } from "@/lib/db";
 
-// コンテナの中で流す入口（npm run build:cli が dist/cli/reset-admin-password.mjs にまとめる）。
+// コンテナの中で実行する入口（npm run build:cli が dist/cli/reset-admin-password.mjs にまとめる）。
 // 設定はサーバーと同じ環境変数から読む（SESSION_SECRET は監査の記録の鍵を導くのに使う）。
 // 設定の誤り（ConfigError）は、どの変数かを含む文のまま run が標準エラー出力に出す。
 

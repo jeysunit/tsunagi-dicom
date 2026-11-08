@@ -11,14 +11,14 @@ import { errorText, postJson, type PostResult } from "@/lib/client/post-json";
 import type { StudyView } from "@/lib/fields";
 import { formatBirthLine, formatSlashDate } from "@/lib/format/japanese-date";
 
-// 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確かめの画面：消す検査を並べ、「戻せない」ことを示し、
+// 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ。確認画面：消す検査を並べ、「戻せない」ことを示し、
 // 理由を書いてから「削除する」を押す。大事な操作なので、BFF が再認証を求めたら、パスワードを入れてから続ける（TOTP は求めない）。
-// 答えが分からなければ「結果不明」と要求の ID を出し、もう一度消さずに確かめる道（Orthanc にまだあるかを読む）だけを出す。
+// 答えが分からなければ「結果不明」と要求の ID を出し、もう一度消さずに確認する道（Orthanc にまだあるかを読む）だけを出す。
 // 検査がまだあっても「消えていない」とは確定しない。管理者（照らし合わせの役割）は、Orthanc の側で先の削除が終わっていることを
-// 確かめてから、確かめた内容を書いて手で解ける。
+// 確認してから、確認した内容を書いて手で解ける。
 
 interface Preview {
-  /** 確かめの画面で見せた検査（Orthanc の中の ID・UID・患者 ID・版）を結んだ token。消すときに添える */
+  /** 確認画面で見せた検査（Orthanc の中の ID・UID・患者 ID・版）を結んだ token。消すときに添える */
   confirmToken: string;
   patientId: string;
   patientName: string;
@@ -49,7 +49,7 @@ export function DeletePanel({
   screen: ScreenInfo;
   panelId: string;
   onClose: () => void;
-  /** 消せたあと（一覧を読み直す） */
+  /** 消せたあと（一覧を再読み込みする） */
   onDeleted: () => void;
 }) {
   const [reason, setReason] = useState("");
@@ -57,14 +57,14 @@ export function DeletePanel({
   /** 再認証の要求を送っている間 */
   const [authing, setAuthing] = useState(false);
   const uid = study.studyInstanceUid ?? "";
-  // 確かめの画面に出すのは、BFF が Orthanc から読み直した、消す検査の要点（一覧の行の値ではない）。消すときに確かめの token を添える
+  // 確認画面に出すのは、BFF が Orthanc から再読み込みした、消す検査の要点（一覧の行の値ではない）。消すときに確認の token を添える
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const fetchPreview = useCallback(() => {
     getJson<Preview>(`/api/studies/${encodeURIComponent(uid)}/delete`).then(setPreview, (e: Error) => setPreviewError(e.message));
   }, [uid]);
   useEffect(() => fetchPreview(), [fetchPreview]);
-  /** 確かめの画面を読み直す（検査が変わった・消えていなかったと分かったとき。古い token のまま押し直させない） */
+  /** 確認画面を再読み込みする（検査が変わった・消えていなかったと分かったとき。古い token のまま押し直させない） */
   function loadPreview() {
     setPreview(null);
     setPreviewError(null);
@@ -85,10 +85,10 @@ export function DeletePanel({
     } else if (result.data.outcome === "unknown" || result.status === 0 || result.status >= 500) {
       setPhase({ kind: "unknown", requestId });
     } else if (result.status === 409 && Array.isArray(result.data.pendingRequestIds) && typeof result.data.pendingRequestIds[0] === "string") {
-      // この検査に、結果の分からない先の削除がある：その要求を確かめる道を出す（新しく消し直させない）
+      // この検査に、結果の分からない先の削除がある：その要求を確認する道を出す（新しく消し直させない）
       setPhase({ kind: "unknown", requestId: result.data.pendingRequestIds[0], note: "この検査には結果未確認の削除があります" });
     } else {
-      // 409（確かめの後に検査が変わった・同じ UID の検査が2つある・結果の分からない削除がある）は、確かめの画面を読み直す
+      // 409（確認の後に検査が変わった・同じ UID の検査が2つある・結果の分からない削除がある）は、確認画面を再読み込みする
       if (result.status === 409) loadPreview();
       setPhase({ kind: "error", text: errorText(result) });
     }
@@ -150,7 +150,7 @@ export function DeletePanel({
         });
       }
     } catch (e) {
-      // 確かめられなかったときも、結果不明のまま残す（消し直す道を出さない）
+      // 確認できなかったときも、結果不明のまま残す（消し直す道を出さない）
       setPhase({ kind: "unknown", requestId, note: `確認できませんでした（${(e as Error).message}）` });
     }
   }
@@ -190,7 +190,7 @@ export function DeletePanel({
       }
       details={
         preview && (
-          // 確かめの画面：消す検査を表の形で並べ、取り消せないことを示す（docs/spec.md の 3.5）
+          // 確認画面：消す検査を表の形で並べ、取り消せないことを示す（docs/spec.md の 3.5）
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
             <dt className="text-xs text-label">削除する検査</dt>
             <dd>

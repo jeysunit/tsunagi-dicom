@@ -26,15 +26,15 @@ import {
 
 // 検査の削除（docs/spec.md の 3.5。段 5）。管理者だけ（study.delete）、理由を必須、再認証の後（AUTH_MODE=local）。
 // 書き込みの操作の共通の決まり（3.5）を通す：CSRF・検証モードの止め・呼ぶ前の記録（記録できなければ消さない）・
-// 呼んだ後の記録・要求の ID で二度流さない・答えが分からなければ結果不明。
+// 呼んだ後の記録・要求の ID で二度実行しない・答えが分からなければ結果不明。
 // **違う検査を消さない**：
 // - 消す検査は、BFF が URL の StudyInstanceUID から Orthanc で引いたものだけ（画面や本文の Orthanc の ID・患者 ID は受けない）。
 // - 引いた結果がちょうど1件で、その検査の StudyInstanceUID が要求の UID と一致すること。0件・2件以上・不一致なら消さずに断り、記録する。
-// - 確かめの画面（GET）で見せた検査（Orthanc の中の ID・UID・患者 ID・版）を、サーバーの秘密で暗号化した短い期限の token に結ぶ。
+// - 確認画面（GET）で見せた検査（Orthanc の中の ID・UID・患者 ID・版）を、サーバーの秘密で暗号化した短い期限の token に結ぶ。
 //   消すときは、その token の中身の全部が、いまの検査と一致するときだけ消す（Orthanc の中の ID は患者 ID にもよるので、
-//   同じ UID・同じ版の別の患者の検査に替わっても、ID と患者 ID で見分ける）。「求めた」を記録した後、DELETE の直前にもう一度確かめる。
+//   同じ UID・同じ版の別の患者の検査に替わっても、ID と患者 ID で見分ける）。「求めた」を記録した後、DELETE の直前にもう一度確認する。
 // 削除は送り直さない。結果不明は、検査が Orthanc に無いと読めたときだけ「消えた」と確定する。まだあっても「消えていない」とは
-// 確定しない（先の DELETE が止まった・終わった証拠が無い）。それを解くのは、管理者が状況を確かめて手で解く操作（./resolve）だけ。
+// 確定しない（先の DELETE が止まった・終わった証拠が無い）。それを解くのは、管理者が状況を確認して手で解く操作（./resolve）だけ。
 
 type Context = { params: Promise<{ uid: string }> };
 
@@ -44,7 +44,7 @@ const DELETE_REASON_MAX = 500;
 const Body = z.object({
   requestId: z.string().refine(isRequestId, "要求ID が正しくありません"),
   reason: z.string().trim().min(1, "削除理由を入力してください").max(DELETE_REASON_MAX, `削除理由は ${DELETE_REASON_MAX} 文字までです`),
-  /** 確かめの画面（GET）が返した token。見せた検査と、いまの検査が全部同じときだけ消す */
+  /** 確認画面（GET）が返した token。見せた検査と、いまの検査が全部同じときだけ消す */
   confirmToken: z.string().min(1).max(2048),
 });
 
@@ -56,7 +56,7 @@ async function assertReauth(session: Session) {
 
 type Target = { kind: "ok"; info: OrthancStudyInfo } | { kind: "not_found" } | { kind: "ambiguous"; count: number } | { kind: "mismatch" };
 
-/** URL の UID から、消してよい検査をちょうど1つ引く（Orthanc から読み直す） */
+/** URL の UID から、消してよい検査をちょうど1つ引く（Orthanc から再読み込みする） */
 async function resolveTarget(backend: Backend, uid: string): Promise<Target> {
   const ids = await backend.lookupStudyIds(uid);
   if (ids.length === 0) return { kind: "not_found" };
@@ -67,7 +67,7 @@ async function resolveTarget(backend: Backend, uid: string): Promise<Target> {
   return { kind: "ok", info };
 }
 
-/** 確かめの画面で見せた検査と、いまの検査で違う項目の名前（値は記録に入れない） */
+/** 確認画面で見せた検査と、いまの検査で違う項目の名前（値は記録に入れない） */
 function differences(shown: DeleteConfirmPayload, now: OrthancStudyInfo): string[] {
   const out: string[] = [];
   if (shown.orthancId !== now.orthancId) out.push("orthancId");
@@ -106,11 +106,11 @@ export async function POST(request: Request, { params }: Context) {
       return Response.json({ error: REFUSALS[kind].error }, { status: REFUSALS[kind].status });
     };
 
-    // 確かめの画面の token：この利用者が、この UID の検査で、期限の中に開いたもの
+    // 確認画面の token：この利用者が、この UID の検査で、期限の中に開いたもの
     const shown = openDeleteConfirm(confirmToken, getConfig().sessionSecret);
     if (!shown || shown.actorId !== session.actorId || shown.studyInstanceUid !== uid) return refuse("confirm_invalid");
 
-    // 1回目の確かめ：UID からちょうど1件・UID が一致・確かめの画面で見せた検査（ID・UID・患者 ID・版）と全部同じ
+    // 1回目の確認：UID からちょうど1件・UID が一致・確認画面で見せた検査（ID・UID・患者 ID・版）と全部同じ
     const target = await resolveTarget(backend, uid);
     if (target.kind !== "ok") return refuse(target.kind, target.kind === "ambiguous" ? { count: target.count } : {}, shown.patientId);
     const { info } = target;
@@ -158,7 +158,7 @@ export async function POST(request: Request, { params }: Context) {
     const result = (outcome: "success" | "failed" | "unknown", extra: Record<string, unknown> = {}) =>
       audit(session, { action: "delete", outcome, patientId: info.patientId, studyInstanceUid: uid, detail: { requestId, phase: "result", ...extra } });
 
-    // 消す直前に、もう一度 Orthanc から読み直して確かめる（記録の間に、検査が替わっていないこと）。読めなければ消さずに失敗として残す
+    // 消す直前に、もう一度 Orthanc から再読み込みして確認する（記録の間に、検査が替わっていないこと）。読めなければ消さずに失敗として残す
     let again: Target;
     try {
       again = await resolveTarget(backend, uid);
@@ -173,8 +173,8 @@ export async function POST(request: Request, { params }: Context) {
       return Response.json({ error: REFUSALS[why].error }, { status: REFUSALS[why].status });
     }
 
-    // DELETE を送る直前に、記録の並びの中で、自分の要求がまだ有効か（ほかで解かれていない・決めた時間の中）を確かめ、
-    // 「送る」の行（dispatch）を足す。この行の後でだけ、管理者は結果不明の削除を手で解ける（./resolve）
+    // DELETE を送る直前に、記録の並びの中で、自分の要求がまだ有効か（ほかで解かれていない・決めた時間の中）を確認し、
+    // 「送る」の行（dispatch）を追加する。この行の後でだけ、管理者は結果不明の削除を手で解ける（./resolve）
     type Dispatch = "go" | "settled" | "stale";
     const dispatch = await auditIf<Dispatch>(session, async (tx) => {
       const o = requestOutcome(await rowsOfRequest(tx, "delete", requestId, uid));
@@ -225,8 +225,8 @@ export async function POST(request: Request, { params }: Context) {
 
 /**
  * GET ?requestId=… ：同じ要求のいまの結果。結果不明なら、消したはずの検査が Orthanc にまだあるかを読む。
- *   無ければ「消えた」と記録に足す。まだあれば確定させず、結果不明のまま返す（管理者が ./resolve で解く）。
- * GET（requestId なし）：確かめの画面に出す、消す検査の要点と、確かめの token（Orthanc から読む。消すときに token を添える）
+ *   無ければ「消えた」と記録に追加する。まだあれば確定させず、結果不明のまま返す（管理者が ./resolve で解く）。
+ * GET（requestId なし）：確認画面に出す、消す検査の要点と、確認の token（Orthanc から読む。消すときに token を添える）
  */
 export async function GET(request: Request, { params }: Context) {
   try {
@@ -247,7 +247,7 @@ export async function GET(request: Request, { params }: Context) {
     if (o.outcome === "success" || o.outcome === "failed") return priorResponse(session, uid, requestId, rows, true);
     const still = await deletedStudyStillPresent(getBackend(), rows, uid);
     if (still) {
-      // 先の DELETE が止まった・終わったと言える証拠が無い（遅れて消えることがある）。確定させず、記録にも足さない
+      // 先の DELETE が止まった・終わったと言える証拠が無い（遅れて消えることがある）。確定させず、記録にも追加しない
       return Response.json(
         { requestId, outcome: "unknown", studyPresent: true, error: "検査はまだサーバーに残っています。前回の削除が完了したかは不明です" },
         { status: 202 },
@@ -274,7 +274,7 @@ async function preview(session: Session, uid: string): Promise<Response> {
   const { info } = target;
   const series = await backend.searchSeries(uid);
   const name = parsePatientName(info.patientName);
-  // 確かめの画面で患者の値を見せるので、詳細を開いたのと同じく記録する
+  // 確認画面で患者の値を見せるので、詳細を開いたのと同じく記録する
   await audit(session, { action: "view_study", patientId: info.patientId, studyInstanceUid: uid, detail: { via: "delete_preview" } });
   const confirmToken = signDeleteConfirm(
     { orthancId: info.orthancId, studyInstanceUid: info.studyInstanceUid, patientId: info.patientId, version: info.version, actorId: session.actorId },

@@ -1,11 +1,11 @@
-// 結合の試験を流す：試験の相手のコンテナ（docker/test/compose.yaml）を立て、試験だけの資格情報を作り、
-// Playwright（tests/integration/playwright.config.ts）を流し、終わったら片付ける。
+// 結合の試験を実行する：試験の相手のコンテナ（docker/test/compose.yaml）を立て、試験だけの資格情報を作り、
+// Playwright（tests/integration/playwright.config.ts）を実行し、終わったら片付ける。
 //
 //   npm run build                      # 先に一度（standalone を作る）
 //   node tests/integration/run.mjs     # Docker（compose v2）が要る
 //
 // 資格情報は試験のたびに乱数で作り、.e2e/itest/（.gitignore）にだけ置く。画面にも記録にも出さない。
-// ITEST_KEEP=1 なら、終わってもコンテナを残す（調べるため。次に流すときは作り直す）。
+// ITEST_KEEP=1 なら、終わってもコンテナを残す（調べるため。次に実行するときは作り直す）。
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -99,7 +99,7 @@ let code = 1;
 try {
   compose(["down", "--volumes", "--remove-orphans"], "ignore");
   compose(["build", "storescp"]);
-  // storescp が答えるようになってから Orthanc を起こす（compose の depends_on）。Orthanc が起きたかは下で確かめる
+  // storescp が答えるようになってから Orthanc を起動する（compose の depends_on）。Orthanc が起きたかは下で確認する
   compose(["up", "--detach", "orthanc", "storescp"]);
   await waitForOrthanc();
   code = await new Promise((resolve) => {

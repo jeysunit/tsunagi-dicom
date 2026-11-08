@@ -75,7 +75,7 @@ export interface AppConfig {
   audit: {
     /** 先頭の控えを追記するファイル（AUDIT_ANCHOR_FILE）。無ければコンテナのログ（標準出力）にだけ書く */
     anchorFile?: string;
-    /** 前に使っていた SESSION_SECRET（SESSION_SECRET_PREVIOUS_FILE）。その鍵で書いた行を確かめるためだけに使う */
+    /** 前に使っていた SESSION_SECRET（SESSION_SECRET_PREVIOUS_FILE）。その鍵で書いた行を確認するためだけに使う */
     sessionSecretPrevious: string[];
   };
   hl7ReceiverToken?: string;
@@ -123,7 +123,7 @@ const int = (fallback: number, min: number, max = Number.MAX_SAFE_INTEGER) =>
 const httpUrl = z.url({ protocol: /^https?$/, error: "http:// か https:// で始まる URL にする" });
 
 /**
- * ビューアの根の URL。検査を開く道（OHIF の `/viewer`・Stone の `/index.html`）は src/lib/viewers.ts が足すので、根に書いた値は断る
+ * ビューアの根の URL。検査を開く道（OHIF の `/viewer`・Stone の `/index.html`）は src/lib/viewers.ts が追加するので、根に書いた値は断る
  * （書くと `/ohif/viewer/viewer` を開いて 404 になる。docs/spec.md の 2.1 の表）
  */
 const viewerRoot = (route: string) =>
@@ -196,10 +196,10 @@ const envSchema = z.object({
     .refine((v) => Buffer.byteLength(v, "utf8") >= SESSION_SECRET_MIN_BYTES, "32 バイト以上の乱数にする")
     .optional(),
   SESSION_SECRET_FILE: z.string().optional(),
-  // 前に使っていた SESSION_SECRET（1 行に 1 つ）。監査の記録のうち、その鍵で書いた行を確かめるためだけに使う
+  // 前に使っていた SESSION_SECRET（1 行に 1 つ）。監査の記録のうち、その鍵で書いた行を確認するためだけに使う
   // （docs/adr/0001-audit-chain-mac.md）。セッションや token には使わない
   SESSION_SECRET_PREVIOUS_FILE: z.string().optional(),
-  // 監査の記録の先頭（seq と hash）の控えを追記するファイル（JSON Lines）。データベースとは別の置き場にする
+  // 監査の記録の先頭（seq と hash）の控えを追記するファイル（JSON Lines）。データベースとは別の保存先にする
   AUDIT_ANCHOR_FILE: z
     .string()
     .refine((v) => v.startsWith("/"), "絶対のパスにする（例：/audit-anchors/audit-anchors.jsonl）")
@@ -235,7 +235,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
     raw[key] = value === undefined || value.trim() === "" ? undefined : value;
   }
 
-  // SESSION_SECRET はファイルでも渡せるので、どちらも無いことは型の確かめの外で見る（型の誤りと一緒に並べる）
+  // SESSION_SECRET はファイルでも渡せるので、どちらも無いことは型の確認の外で見る（型の誤りと一緒に並べる）
   const sessionSecretMissing: ConfigProblem[] =
     raw.SESSION_SECRET === undefined && raw.SESSION_SECRET_FILE === undefined
       ? [{ variable: "SESSION_SECRET", message: `必須。${SESSION_SECRET_HINT}` }]
@@ -293,7 +293,7 @@ export function loadConfig(env: Env = process.env, options: LoadConfigOptions = 
   ) {
     problem("SESSION_SECRET_FILE", "32 バイト以上の乱数にする");
   }
-  // 前の SESSION_SECRET（監査の記録の確かめだけに使う）。空の行は飛ばす。どれも 32 バイト以上
+  // 前の SESSION_SECRET（監査の記録の確認だけに使う）。空の行は飛ばす。どれも 32 バイト以上
   let sessionSecretPrevious: string[] = [];
   if (e.SESSION_SECRET_PREVIOUS_FILE !== undefined) {
     try {
@@ -446,7 +446,7 @@ function dedupe(problems: ConfigProblem[]): ConfigProblem[] {
 
 let cached: AppConfig | undefined;
 
-/** process.env から一度だけ読む。起動の時の確かめは src/instrumentation.ts */
+/** process.env から一度だけ読む。起動の時の確認は src/instrumentation.ts */
 export function getConfig(): AppConfig {
   cached ??= loadConfig();
   return cached;

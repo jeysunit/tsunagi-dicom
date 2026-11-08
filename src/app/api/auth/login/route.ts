@@ -14,9 +14,9 @@ const Body = z.object({
 });
 
 // ログイン（利用者名とパスワード）。合えば、TOTP の入力・登録・パスワードの変更の段か、ログインしたセッションを開く。
-// まだセッションが無いので、CSRF の対策は SameSite と Origin の確かめ。
+// まだセッションが無いので、CSRF の対策は SameSite と Origin の確認。
 // ログインし直したら、このブラウザがいま持っているセッション（cookie の token）を消す。
-// パスワードの確かめが混んでいれば 503 と Retry-After（src/lib/auth/hash-limiter.ts）。
+// パスワードの確認が混んでいれば 503 と Retry-After（src/lib/auth/hash-limiter.ts）。
 export async function POST(request: Request) {
   try {
     assertLocalMode();

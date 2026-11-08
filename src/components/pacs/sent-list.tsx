@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 // 送信一覧の表（docs/spec.md の 3.4。送受信の一覧の送る側の形。docs/design-system/components.md・parts.md）。
 // 上から 状態の要約（押すと絞る）→ 検索の帯（期間・送信先・患者ID と氏名）→ 上限の知らせ → 件数の行 → 表 → ページ送り →
 // 選んだ行の詳細（一覧＋下に詳細）。読むだけで、書き込みの操作は置かない（再送信は検査の詳細の「送信」から）。
-// 期間を替えて「検索」を押すと BFF から読み直す。送信先・患者ID と氏名・状態は、読んだ範囲の中で絞る。
+// 期間を替えて「検索」を押すと BFF から再読み込みする。送信先・患者ID と氏名・状態は、読んだ範囲の中で絞る。
 // 行はクリックか、行に移って Enter・Space で選ぶ。矢印の上下で隣の行へ移って選ぶ。Esc で詳細を閉じる。
 
 type Period = "today" | "yesterday" | "week" | "range";
@@ -129,7 +129,7 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
     setFilter((f) => ({ ...f, destination: draft.destination, text: draft.text }));
     setPage(1);
     setLoading(true);
-    // 同じ期間でも「検索」は読み直す（新しい送信を読む）
+    // 同じ期間でも「検索」は再読み込みする（新しい送信を読む）
     setApplied((a) => ({ period: draft.period, from: draft.from, to: draft.to, round: a.round + 1 }));
   }
 

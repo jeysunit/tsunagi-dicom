@@ -6,12 +6,12 @@ import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
 
 // 開発用の compose（docker/dev/compose.yaml）の流れの試験（docs/round-trip-test.md）。
-// node tests/flow/run.mjs から流す（docker/dev/up.sh で一式を立ててから）。
+// node tests/flow/run.mjs から実行する（docker/dev/up.sh で一式を立ててから）。
 //
 // 1. 配る compose の形：Orthanc の REST（8042）がホストに出ていない。tsunagi-dicom と Orthanc だけが内部ネットワーク
 //    （internal: true）に入り、Orthanc はそれと DICOM のネットワークのほかに入らない。DICOM（4242）はホストから届く。
 //    Orthanc の守り：REST は認証なしでも、イメージの既定の利用者（orthanc:orthanc）でも 401。登録していない AE タイトルからの
-//    C-STORE は断る（DicomAlwaysAllowStore: false）。起動の確かめが DICOM につながず、ログに「invalid AET」が出ない。
+//    C-STORE は断る（DicomAlwaysAllowStore: false）。起動の確認が DICOM につながず、ログに「invalid AET」が出ない。
 // 2. 流れ：dicom-test-generator（DTG）の CLI で架空の患者を Orthanc へ送る → tsunagi-dicom の受信一覧に出る →
 //    tsunagi-dicom の「送信」で storescp へ送る → storescp に同じ StudyInstanceUID・SOPInstanceUID の画像が同じ数だけ届く。
 // 3. 予約から：ris-emulator の CLI で予約を作る → DTG がワークリスト（MWL）を取得し、その予約で撮って Orthanc へ送る →
@@ -25,7 +25,7 @@ import { expect, test, type Page } from "@playwright/test";
 //    受け口の見回し（60 秒ごと）が、追加の画像も正式な患者・受付番号に書き換え、同じ StudyInstanceUID の検査 1 件にまとまる。
 // 7. 取消の ORM（RAD-13 の CA）：5 と同じ照合の後、ris-emulator の pir send --kind orm --order-control CA を受け口が受ける →
 //    検査と画像は残り、受付番号だけが外れる。
-// 前の試験の結果に依らないが、順に流す（管理者のパスワードは 2 で変え、3 はそのパスワードでログインする）。
+// 前の試験の結果に依らないが、順に実行する（管理者のパスワードは 2 で変え、3 はそのパスワードでログインする）。
 
 test.describe.configure({ mode: "serial" });
 
@@ -239,7 +239,7 @@ test("1 配る compose の形：Orthanc の REST はホストに出ず、tsunagi
   expect(storeOut).toMatch(/storescu-exit=[1-9]/);
   const orthancLog = await compose(["logs", "--no-color", "orthanc"]);
   expect(orthancLog).toContain('Rejected Store request from remote DICOM modality with AET "FLOW_ECHO"');
-  // 起動の確かめ（healthcheck）は DICOM につながない。AE タイトルの無い接続の記録が出ていない
+  // 起動の確認（healthcheck）は DICOM につながない。AE タイトルの無い接続の記録が出ていない
   expect(orthancLog).not.toMatch(/invalid AET/i);
 });
 
@@ -469,7 +469,7 @@ test("5 照合：緊急の患者で撮る → ris-emulator の未照合に出る
   const listed = async () => (await (await page.request.get("/api/studies")).json()) as StudyList;
   await waitFor("緊急の検査が一覧に出る", listed, (body) => body.studies.some((s) => s.studyInstanceUid === exam.study_instance_uid));
 
-  // 画像ごとの SeriesInstanceUID と SOPInstanceUID の組（DICOMweb の WADO-RS の中継の metadata）。照合の前後で変わらないことを確かめる
+  // 画像ごとの SeriesInstanceUID と SOPInstanceUID の組（DICOMweb の WADO-RS の中継の metadata）。照合の前後で変わらないことを確認する
   const instanceUids = async () => {
     const res = await page.request.get(`/api/dicom-web/studies/${exam.study_instance_uid}/metadata`, { headers: { accept: "application/dicom+json" } });
     expect(res.status()).toBe(200);
@@ -529,7 +529,7 @@ type FlowStudy = {
 
 /**
  * 5 と同じ流れで、緊急の患者（仮の患者 ID）の検査を撮って送り、ris-emulator で正式な患者に照合する（A40・ORM が受理されるまで）。
- * 6・7 が、この後の動きを確かめる出発点にする。ログインは済ませておく
+ * 6・7 が、この後の動きを確認する出発点にする。ログインは済ませておく
  */
 async function emergencyReconciled(page: Page, prefix: string) {
   const suffix = Date.now().toString().slice(-8);

@@ -8,7 +8,7 @@
 #   docker/dev/up.sh
 #   TSUNAGI_IMAGE=ghcr.io/jeysunit/tsunagi-dicom:sha-xxxxxxx docker/dev/up.sh   # GHCR のイメージを使うとき
 #
-# secrets の置き場は TSUNAGI_DEV_SECRETS_DIR で替えられる（既定 docker/dev/secrets）。作業ツリーの外の専用のディレクトリ
+# secrets の保存先は TSUNAGI_DEV_SECRETS_DIR で替えられる（既定 docker/dev/secrets）。作業ツリーの外の専用のディレクトリ
 # （例 ~/.config/tsunagi-dev/secrets。~/.config そのものは指さない）に置くと、作業ツリーを消してもパスワードが消えない。
 # 立て直しは docker/dev/refresh.sh。
 # ポートは環境変数で替えられる：TSUNAGI_HTTP_PORT（既定 3000）・ORTHANC_DICOM_PORT（既定 4242）・DEV_DTG_WEB_PORT（既定 18080）・
@@ -36,7 +36,7 @@ web_password() {
       LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$length" > "$file"
       printf '\n' >> "$file"
     )
-    # コンテナの中の利用者（DTG・ris-emulator は uid 10001、tsunagi-dicom と受け口は uid 1000）が読めるようにする（置き場は 0700）
+    # コンテナの中の利用者（DTG・ris-emulator は uid 10001、tsunagi-dicom と受け口は uid 1000）が読めるようにする（保存先は 0700）
     chmod 0644 "$file"
     echo "作った：$file"
   fi

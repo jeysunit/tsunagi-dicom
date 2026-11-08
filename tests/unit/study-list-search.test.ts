@@ -3,7 +3,7 @@ import type { StudySummary } from "@/lib/backend/types";
 import { ROLE_FIELD_ALLOWLIST, type FieldAllowlistMap } from "@/lib/fields";
 import { listStudies } from "@/lib/study-list";
 
-// 横断の検索（docs/spec.md の 3.1）：患者 ID・受付番号は全体の一致、氏名は第3〜5成分まで含めて当てる（画面に出す値は姓と名のまま）。
+// 横断の検索（docs/spec.md の 3.1）：患者 ID・受付番号は全体の一致、氏名は第3〜5成分まで含めて適用する（画面に出す値は姓と名のまま）。
 
 function summary(i: number, extra: Partial<StudySummary> = {}): StudySummary {
   return {

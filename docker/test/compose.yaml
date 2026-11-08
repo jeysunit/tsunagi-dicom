@@ -2,7 +2,7 @@
 # 直に `docker compose up` せず、tests/integration/run.mjs から使う（試験だけの資格情報を作り、終わったら片付ける）。
 #
 # - orthanc：Orthanc の公式のイメージ（Orthanc の作り手のチーム orthancteam が出すもの。DICOMweb のプラグイン入り）。
-#   版と digest を固定する（26.9.1。multi-arch の digest）。上げるときは、試験を流してから、
+#   版と digest を固定する（26.9.1。multi-arch の digest）。上げるときは、試験を実行してから、
 #   docs/round-trip-test.md の「実測で決めること」の版を書き直す。
 #   設定は orthanc/orthanc.json（秘密は無い）。利用者とパスワードは、run.mjs が試験のたびに乱数で作り、secret のファイルで渡す。
 # - storescp：DCMTK の受け取る側（送り先のダミー）。tsunagi-dicom の「送信」の相手。Orthanc に itest-scp として登録してある。
@@ -30,7 +30,7 @@ services:
         target: itest-users.json
     ports:
       - "127.0.0.1:${ITEST_ORTHANC_HTTP_PORT:-18042}:8042"
-    # 起きたかは run.mjs が試験の資格情報で /system を読んで確かめる（イメージの既定の確かめは使わない）
+    # 起きたかは run.mjs が試験の資格情報で /system を読んで確認する（イメージの既定の確認は使わない）
     healthcheck:
       disable: true
     depends_on:

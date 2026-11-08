@@ -43,7 +43,7 @@ describe("検査ごとのビューアの覚え", () => {
     expect(await rememberViewer(db, "alice", STUDY, "volview", 0)).toEqual({ kind: "ok", version: 1 });
     expect(await rememberViewer(db, "bob", STUDY, "stone", 0)).toEqual({ kind: "conflict", version: 1 });
     expect((await readViewerMemory(db, [STUDY])).get(STUDY)).toEqual({ rememberedViewer: "volview", viewerVersion: 1 });
-    // 読み直した版なら通る
+    // 再読み込みした版なら通る
     expect(await rememberViewer(db, "bob", STUDY, "stone", 1)).toEqual({ kind: "ok", version: 2 });
     // 先の版（まだ無い版）も断る
     expect(await rememberViewer(db, "bob", STUDY, null, 5)).toEqual({ kind: "conflict", version: 2 });

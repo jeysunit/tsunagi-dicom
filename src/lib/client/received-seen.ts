@@ -30,7 +30,7 @@ export function latestReceivedAt(values: readonly (string | null | undefined)[])
 
 /**
  * 頁を開いたときに読んだ「前に見た受信日時」。頁を開いている間は替えない（再読み込みで新しい検査が届いても、
- * 前に開いた後のものに印を付け続ける）。頁を離れたら forgetPreviousSeen で忘れ、次に開いたときに読み直す
+ * 前に開いた後のものに印を付け続ける）。頁を離れたら forgetPreviousSeen で忘れ、次に開いたときに再読み込みする
  */
 let previous: string | null | undefined;
 

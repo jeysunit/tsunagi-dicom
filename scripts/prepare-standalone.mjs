@@ -1,4 +1,4 @@
-// next build の standalone の出力に、ブラウザへ配るファイル（.next/static・public）を写す。
+// next build の standalone の出力に、ブラウザへ配るファイル（.next/static・public）をコピーする。
 // Dockerfile と同じ並びを、手元と Playwright でも使う。
 import { cpSync, existsSync } from "node:fs";
 

@@ -38,7 +38,7 @@ describe("氏名の解析（tests/fixtures/patient-names.json）", () => {
     expect({ name: searched.name, kana: searched.kana, alphabetic: searched.alphabetic }).toEqual(
       c.search ?? { name: shown.name, kana: shown.kana, alphabetic: shown.alphabetic },
     );
-    // 表示の期待は、検索の値を足しても変わらない
+    // 表示の期待は、検索の値を追加しても変わらない
     expect({ name: shown.name, kana: shown.kana }).toEqual({ name: c.name, kana: c.kana });
   });
 
@@ -57,7 +57,7 @@ describe("氏名の解析（tests/fixtures/patient-names.json）", () => {
       expect(cells[4], `${c.id} の検索のかな`).toBe(empty(c.search!.kana));
       expect(cells[5], `${c.id} の検索のローマ字`).toBe(empty(c.search!.alphabetic));
     }
-    // 表の行数も同じ（JSON に無い形を文書だけに載せない）
+    // 表の行数も同じ（JSON に無い形を文書だけに含めない）
     expect(section.split("\n").filter((line) => /^\| PN-\d+ \|/.test(line))).toHaveLength(withSearch.length);
   });
 

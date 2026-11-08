@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
-// コンテナの中で流すコマンド（src/cli）を、Node で動く 1 つのファイルにまとめる（npm run build:cli → dist/cli）。
+// コンテナの中で実行するコマンド（src/cli）を、Node で動く 1 つのファイルにまとめる（npm run build:cli → dist/cli）。
 // イメージの本体は Next.js の standalone で、src の TypeScript も `@/` の別名も無いため。
 // `@/` の中身（src/lib・src/generated）と、JavaScript の依存（zod・Prisma など）は全部取り込む。
 // standalone の /app/node_modules には、Next.js が自分の出力に取り込んだ依存が無い、または一部のファイルしか無いため。
@@ -26,7 +26,7 @@ export default defineConfig({
     minify: false,
     rollupOptions: {
       input: { "reset-admin-password": fileURLToPath(new URL("./src/cli/reset-admin-password-main.ts", import.meta.url)) },
-      // 分けた塊も .mjs にする（/app/package.json に "type": "module" が無く、.js だと読み直しの警告が出る）
+      // 分けた塊も .mjs にする（/app/package.json に "type": "module" が無く、.js だと再読み込みの警告が出る）
       output: { format: "esm", entryFileNames: "[name].mjs", chunkFileNames: "[name]-[hash].mjs" },
     },
   },

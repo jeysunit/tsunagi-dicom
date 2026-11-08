@@ -7,8 +7,8 @@ import { advancedCount, advancedQuery, blockedConditions, filterToSearchParams, 
 import { listStudies } from "@/lib/study-list";
 
 // 詳細条件（docs/spec.md の 3.1。2026-10-21）：生年月日・性別・受付番号・検査名。
-// Orthanc の QIDO-RS の条件にし（上限 1000 件の外の古い検査も引ける）、BFF でも答えを確かめる。
-// 許可の一覧に載っていない項目の条件は効かせない（原則 8）。
+// Orthanc の QIDO-RS の条件にし（上限 1000 件の外の古い検査も引ける）、BFF でも答えを確認する。
+// 許可の一覧に含まれていない項目の条件は効かせない（原則 8）。
 
 const ALL = ROLE_FIELD_ALLOWLIST.general.study;
 

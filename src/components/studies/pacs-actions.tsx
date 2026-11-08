@@ -25,7 +25,7 @@ export function PacsActions({
   study: StudyView;
   screen: ScreenInfo;
   onDeleted: (study: StudyView) => void;
-  /** 値を修正できたあと（一覧と詳細を読み直す） */
+  /** 値を修正できたあと（一覧と詳細を再読み込みする） */
   onModified?: () => void;
   /** 操作の行の先頭に置く物（主の「開く」。詳細の操作は 1 行にそろえる） */
   leading?: React.ReactNode;
@@ -61,7 +61,7 @@ export function PacsActions({
         )}
         {screen.can.send && open !== "send" && activity && <SendBadge activity={activity} />}
         {screen.can.export && (
-          // 書き出しは、BFF が記録してから ZIP を流す（同じ origin の画面からの要求だけを受ける）
+          // 書き出しは、BFF が記録してから ZIP を実行する（同じ origin の画面からの要求だけを受ける）
           <a
             href={`/api/studies/${encodeURIComponent(uid)}/export`}
             download

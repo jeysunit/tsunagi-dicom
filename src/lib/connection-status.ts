@@ -5,7 +5,7 @@ import type { FieldAllowlist } from "@/lib/fields";
 // 上の帯の「接続の状態」の材料（docs/spec.md の 3.3）。この読み取りは、相手に何も送らない（手で押す「接続確認」の C-ECHO は別の要求）。
 // - 画像サーバー（Orthanc）：機器の一覧（/modalities）を読めたか。読めなければ「失敗」
 // - HL7 の受け口：HL7_RECEIVER_TOKEN_FILE を渡してあれば「待ち受け中」（受け口はこのアプリの中の道なので、このアプリが答えていれば待っている）
-// - 接続先：直近の接続確認（監査の記録の echo）の結果。まだ確かめていない接続先は result が null で、画面は札「未確認」を出す
+// - 接続先：直近の接続確認（監査の記録の echo）の結果。まだ確認していない接続先は result が null で、画面は札「未確認」を出す
 // 返す項目は許可の一覧の connection（src/lib/fields.ts）で絞る。
 
 export type ConnectionResult = "ok" | "ng";
@@ -13,7 +13,7 @@ export type ConnectionResult = "ok" | "ng";
 export interface ConnectionTarget {
   id: string;
   aet: string;
-  /** 直近の接続確認の結果（まだ確かめていなければ null） */
+  /** 直近の接続確認の結果（まだ確認していなければ null） */
   result: ConnectionResult | null;
   /** 直近の接続確認の時刻（ISO 8601。null は未確認） */
   at: string | null;
@@ -28,7 +28,7 @@ export interface ConnectionRecord {
   /** モックのバックエンド（BACKEND_MOCK=true）につないでいる */
   mock: boolean;
 }
-/** 画面の API が返す形（許可の一覧に載った項目だけ） */
+/** 画面の API が返す形（許可の一覧に含まれた項目だけ） */
 export type ConnectionView = Partial<Omit<ConnectionRecord, "modalities">> & {
   modalities?: (Omit<ConnectionTarget, "aet"> & { aet?: string })[];
 };
@@ -37,7 +37,7 @@ export type ConnectionView = Partial<Omit<ConnectionRecord, "modalities">> & {
 const ECHO_LOOKBACK_ROWS = 20;
 
 /**
- * 監査の記録から、登録された接続先ごとに直近の接続確認（echo）の結果を読む。断った要求（denied）は確かめていないので数えない。
+ * 監査の記録から、登録された接続先ごとに直近の接続確認（echo）の結果を読む。断った要求（denied）は確認していないので数えない。
  * 接続先ごとに探すので、ほかの接続先の確認がどれだけ続いても、その接続先の直近の結果は消えない
  */
 export async function lastEchoResults(db: Pick<Db, "auditLog">, ids: readonly string[]): Promise<Map<string, { result: ConnectionResult; at: Date }>> {
@@ -58,7 +58,7 @@ export async function lastEchoResults(db: Pick<Db, "auditLog">, ids: readonly st
           continue;
         }
         if (detail.modality !== id) continue;
-        // connected が付くのは Orthanc の答えを読めたとき。付かない failed は、確かめそのものが失敗した（失敗として数える）
+        // connected が付くのは Orthanc の答えを読めたとき。付かない failed は、確認そのものが失敗した（失敗として数える）
         latest.set(id, { result: row.outcome === "success" && detail.connected === true ? "ok" : "ng", at: row.occurredAt });
         return;
       }

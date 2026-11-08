@@ -1,7 +1,7 @@
 #!/bin/sh
-# deploy/compose.yaml の secret のファイルを、乱数で作る。あるファイルは書き換えない（何度流してもよい）。
+# deploy/compose.yaml の secret のファイルを、乱数で作る。あるファイルは書き換えない（何度実行してもよい）。
 #
-#   deploy/init-secrets.sh [置き場]      # 既定は deploy/secrets
+#   deploy/init-secrets.sh [保存先]      # 既定は deploy/secrets
 #
 # 作るもの（値は画面にも記録にも出さない）：
 #   session_secret.txt          tsunagi-dicom の SESSION_SECRET（64 字）
@@ -9,9 +9,9 @@
 #   orthanc-users.json          Orthanc の RegisteredUsers（tsunagi と、上と同じパスワード）
 #   initial_admin_password.txt  tsunagi-dicom の最初の管理者（admin）のパスワード。最初のログインで変える
 #
-# 置き場は、この台本で新しく作ったときだけ、作った利用者だけが開ける（0700）にする。もとからあるディレクトリの権限は
+# 保存先は、このスクリプトで新しく作ったときだけ、作った利用者だけが開ける（0700）にする。もとからあるディレクトリの権限は
 # 変えない。group か others に開いている（mode & 077 が 0 でない）ときは、何も作らずに止まる（承知のうえで続けるときだけ
-# ALLOW_INSECURE_SECRETS_DIR=1 を付ける。警告を出して続ける）。外の置き場は専用のディレクトリを指す（~/.config そのものを指さない）。
+# ALLOW_INSECURE_SECRETS_DIR=1 を付ける。警告を出して続ける）。外の保存先は専用のディレクトリを指す（~/.config そのものを指さない）。
 # ファイルは、コンテナの中の root でない利用者（tsunagi-dicom は uid 1000）が読めるように 0644 にする。
 set -eu
 

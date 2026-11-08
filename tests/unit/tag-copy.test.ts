@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pinTagRow, tagRowsText, tagRowText } from "@/lib/client/tag-copy";
 
-// DICOM タグの表で選んだ行を写す文字（1 行 1 タグ。タグ・タグ名・VR・値をタブで区切る）
+// DICOM タグの表で選んだ行をコピーする文字（1 行 1 タグ。タグ・タグ名・VR・値をタブで区切る）
 
 describe("tagRowText", () => {
   it("タグを括弧で囲み、タグ名・VR・値をタブで区切る", () => {

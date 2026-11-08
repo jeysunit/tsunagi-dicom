@@ -39,11 +39,11 @@ export function availableViewers(viewers: AppConfig["viewers"]): ViewerInfo[] {
 const trim = (url: string) => url.replace(/\/+$/, "");
 
 /**
- * 検査を開く URL。UID は呼ぶ側で形を確かめたもの（数字と `.`）だけを渡す。設定に URL が無いビューアは null。
+ * 検査を開く URL。UID は呼ぶ側で形を確認したもの（数字と `.`）だけを渡す。設定に URL が無いビューアは null。
  * - OHIF v3：`/viewer?StudyInstanceUIDs=`
  * - Stone Web Viewer：`/index.html?study=`
- * - VolView：`?urls=[…]`（中継の WADO-RS の検査の URL を渡す。実の VolView で確かめる前の形。PR を参照）
- * - DICOMweb：研究の道具に渡す `PUBLIC_DICOMWEB_URL` の検査の URL（このアプリの監査の外）
+ * - VolView：`?urls=[…]`（中継の WADO-RS の検査の URL を渡す。実の VolView で確認する前の形。PR を参照）
+ * - DICOMweb：研究のツールに渡す `PUBLIC_DICOMWEB_URL` の検査の URL（このアプリの監査の外）
  */
 export function viewerUrl(
   id: ViewerId,

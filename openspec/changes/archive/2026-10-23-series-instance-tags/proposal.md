@@ -17,7 +17,7 @@
 - 画像の場所は「主なタグ」（設定の一覧）と「すべてのタグ」（その画像の値の全部）を切り替えられる。既定は「主なタグ」。
 - **BREAKING（画面）** 「DICOM タグ」の中の「検査単位（要約）・画像単位」の切り替えを外し、「DICOM タグ」は検査単位（要約）だけにする。
   画像単位の値の全部は、サムネイルから開く画像の場所の「すべてのタグ」で見る（同じ役目の場所を2つ持たない）。
-- 画面の API に、選んだ画像の設定のタグだけを返す道（`GET /api/studies/{uid}/series/{series}/instances/{sop}/tags`）を足す。
+- 画面の API に、選んだ画像の設定のタグだけを返す道（`GET /api/studies/{uid}/series/{series}/instances/{sop}/tags`）を追加する。
   画像の並びと値の全部は、いまの画面の API（`…/instances`・`…/instances/{sop}/values`）をそのまま使う。
 - 長い値は、画面の API が 1 つの値を 1024 文字で切り、全体の文字数を添えて返す。バイナリの値は中身を返さず「（バイナリ）」と出す。
 - 使う権限は、いまの画像単位の DICOM タグと同じ「すべての DICOM の値を見る」（`dicom.all_values`）。
@@ -36,9 +36,9 @@
 ## Impact
 
 - 画面：`src/components/studies/study-detail.tsx`（サムネイルの並び・「DICOM タグ」の切り替え）と、新しい画像の場所の部品
-- 画面の API：`src/app/api/studies/[uid]/series/[series]/instances/[sop]/tags/route.ts` を足す。値の組み立て（`src/lib/all-values.ts`）に、設定のタグの選び出し・タグ名・長い値の切り方を足す
-- 設定：`src/lib/config.ts` と `.env.example` に `INSTANCE_TAGS` を足す（配布の compose は `tsunagi.env` で渡せるので変えない）
+- 画面の API：`src/app/api/studies/[uid]/series/[series]/instances/[sop]/tags/route.ts` を追加する。値の組み立て（`src/lib/all-values.ts`）に、設定のタグの選び出し・タグ名・長い値の切り方を追加する
+- 設定：`src/lib/config.ts` と `.env.example` に `INSTANCE_TAGS` を追加する（配布の compose は `tsunagi.env` で渡せるので変えない）
 - 画像サーバーへの要求：種類は増えない。画像の値は、いまと同じ WADO-RS の `metadata`（BFF の側）で読む。Orthanc の REST は使わない
-- 権限・監査：権限は足さない（`dicom.all_values`）。操作ログの `view_study` の `detail` に、出したタグの組（`set`）を足す
-- モック：画像単位の値の見本に、日本語の値（ISO 2022 IR 87 の検査を Orthanc で読んだ写し）と、長い値・バイナリの値を足す
+- 権限・監査：権限は追加しない（`dicom.all_values`）。操作ログの `view_study` の `detail` に、出したタグの組（`set`）を追加する
+- モック：画像単位の値の見本に、日本語の値（ISO 2022 IR 87 の検査を Orthanc で読んだコピー）と、長い値・バイナリの値を追加する
 - 文書：`docs/spec.md` の 2.1（設定）・2.2（用語集に「主なタグ」「すべてのタグ」「タグ名」）・3.1（詳細のパネル）、README の機能の説明

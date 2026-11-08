@@ -10,8 +10,8 @@ import { orderGroups, parseGroups, studyInGroup, type ModalityGroup } from "@/li
 // 検査の状態の見出し（未検像・検像済・未読・既読・緊急・ブックマーク）は持たない（docs/spec.md の 0）。
 // 絞り込みの値は頁の URL（?date=…）に持ち、BFF の画面の API にも同じ形で渡す。
 // 検査日と詳細条件（生年月日・性別・受付番号・検査名。2026-10-21）は画像サーバーの QIDO-RS の条件にし、
-// モダリティと横断の検索は BFF で、役割の許可の一覧で絞った後の項目に当てる（許可されていない項目では探せない。
-// 詳細条件も、許可の一覧に載っていない項目の条件は効かせない）。
+// モダリティと横断の検索は BFF で、役割の許可の一覧で絞った後の項目に適用する（許可されていない項目では探せない。
+// 詳細条件も、許可の一覧に含まれていない項目の条件は効かせない）。
 
 export const DATE_PRESETS = ["today", "yesterday", "week", "month", "all", "range"] as const;
 export type DatePreset = (typeof DATE_PRESETS)[number];
@@ -31,7 +31,7 @@ export type FacetDate = (typeof FACET_DATES)[number];
 
 /**
  * 見出しごとの件数（BFF が数える）。各見出しの件数は「それを押したあとの一覧の件数」と同じ
- * （ほかの見出しと横断の検索は、いまの値のまま）。役割の許可の一覧に載っていない項目の見出しは、キーごと無い
+ * （ほかの見出しと横断の検索は、いまの値のまま）。役割の許可の一覧に含まれていない項目の見出しは、キーごと無い
  */
 export interface StudyFacets {
   date?: Partial<Record<FacetDate, number>>;
@@ -159,7 +159,7 @@ export function advancedCount(filter: StudyFilter): number {
 }
 
 /**
- * 付いている詳細条件のうち、許可の一覧に載っていない項目のもの（URL の名前）。
+ * 付いている詳細条件のうち、許可の一覧に含まれていない項目のもの（URL の名前）。
  * これがあれば、一覧は条件を外して広げずに 0 件にする（study-list.ts。隠した項目で探せないように。原則 8）
  */
 export function blockedConditions(filter: StudyFilter, fields: readonly string[]): string[] {
@@ -167,7 +167,7 @@ export function blockedConditions(filter: StudyFilter, fields: readonly string[]
 }
 
 /**
- * 詳細条件を、画像サーバーへ渡す条件にする。許可の一覧に載っていない項目の条件は渡さない
+ * 詳細条件を、画像サーバーへ渡す条件にする。許可の一覧に含まれていない項目の条件は渡さない
  * （そのときは blockedConditions があるので、一覧は 0 件にする）
  */
 export function advancedQuery(filter: StudyFilter, fields: readonly string[]): StudyQuery {
@@ -257,7 +257,7 @@ const NAME_FIELDS = [
 
 /**
  * 検索にだけ使う氏名（第3〜5成分まで含めた値）。画面の API には返さないので、行の object に結びつけて持つ
- * （StudyView には載せない。許可の一覧の項目でもない）
+ * （StudyView には含めない。許可の一覧の項目でもない）
  */
 const searchNames = new WeakMap<StudyView, ParsedPatientName>();
 
@@ -270,7 +270,7 @@ export function attachSearchNames(view: StudyView, patientName: unknown): void {
  * 許可の一覧で絞った後の1行が、モダリティ・横断の検索に合うか。
  * 項目が許可されていない（view に無い）ときは、その項目では合わない（隠した項目では探せない）。
  * 患者 ID・受付番号は全体の一致、氏名（漢字・かな・英字）と検査の記述は含むか。氏名は、画面に出す値（姓と名）でなく、
- * 第3〜5成分（ミドル・接頭・接尾）まで含めた値で当てる。項目が許可されている氏名の値だけを使う
+ * 第3〜5成分（ミドル・接頭・接尾）まで含めた値で適用する。項目が許可されている氏名の値だけを使う
  */
 export function matchesFilter(view: StudyView, filter: StudyFilter): boolean {
   // 選んだ群のどれかに合えば合う（複数選んだときは「または」）

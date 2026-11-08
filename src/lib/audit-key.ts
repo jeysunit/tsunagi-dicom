@@ -6,7 +6,7 @@ import { getConfig } from "@/lib/config";
 // 鍵は SESSION_SECRET から HKDF-SHA256 で導く（用途の名前 info で、セッション・token・TOTP の秘密の鍵と分ける）。
 // データベースのファイルには鍵を置かない。鍵を持たない者は、行を書き換えても hash（HMAC-SHA256）を作り直せない。
 // 行には鍵の印（keyId）を持たせる。SESSION_SECRET を替えた後も、前の値を SESSION_SECRET_PREVIOUS_FILE で渡せば、
-// 前の鍵で書いた行を確かめられる。
+// 前の鍵で書いた行を確認できる。
 
 const SALT = Buffer.from("tsunagi-dicom", "utf8");
 const INFO = "tsunagi-dicom/audit-chain/v1";
@@ -22,7 +22,7 @@ export interface AuditKey {
 export interface AuditKeyring {
   /** 新しい行に使う鍵（いまの SESSION_SECRET から導いたもの） */
   current: AuditKey;
-  /** 確かめに使える鍵（いまのものと、前に使っていたもの） */
+  /** 確認に使える鍵（いまのものと、前に使っていたもの） */
   byId: ReadonlyMap<string, AuditKey>;
   /**
    * 鍵の古さの順（小さいほど古い）。SESSION_SECRET_PREVIOUS_FILE の行の順（上が古い）で、いまの鍵がいちばん新しい。

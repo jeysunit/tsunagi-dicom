@@ -3,7 +3,7 @@ import { normalizeForSearch } from "@/lib/study-filter";
 
 // 検査の一覧の列見出しでの並べ替え（docs/spec.md の 3.1）。
 // 並べ替えるのは、画像サーバーから読んだ検査（上限 1000 件。STUDY_LIMIT）の中だけ。画像サーバーへは並びを求めない。
-// 値の無い行（許可の一覧に載っていない項目を含む）は、昇順でも降順でも最後に置く。同じ値の行は、読んだ順（検査日の新しい順）のまま。
+// 値の無い行（許可の一覧に含まれていない項目を含む）は、昇順でも降順でも最後に置く。同じ値の行は、読んだ順（検査日の新しい順）のまま。
 
 export const SORT_KEYS = ["date", "id", "accession", "name", "kana", "birth", "sex", "desc"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];

@@ -5,7 +5,7 @@ import { E2E_ADMIN, LOCAL_BASE_URL } from "../../playwright.config";
 // AUTH_MODE=local（段 1b）：ログイン・パスワードの規則・TOTP・ログインの一時停止・画面のロック・利用者の棚卸し・役割。
 // サーバーは LOGIN_LOCK_THRESHOLD=3・LOGIN_LOCK_MINUTES=1・SCREEN_LOCK_MINUTES=1・MFA_REQUIRED=true（playwright.config.ts）。
 // SCREEN_UNLOCK_REQUIRE_TOTP は既定（false：画面のロックはパスワードだけで解く。true のときは単体の試験で見る）。
-// 頁の流れが前の試験の結果に依るので、順に流す。
+// 頁の流れが前の試験の結果に依るので、順に実行する。
 
 test.describe.configure({ mode: "serial" });
 test.use({ baseURL: LOCAL_BASE_URL });
@@ -78,11 +78,11 @@ async function patientValues(page: Page): Promise<string[]> {
   return values;
 }
 
-/** 頁の HTML（描画の元のデータを含む）に、患者の値が無い（読み直しの後） */
+/** 頁の HTML（描画の元のデータを含む）に、患者の値が無い（再読み込みの後） */
 async function expectNoPatientValues(page: Page, values: string[]) {
   await expect
     .poll(async () => {
-      // 読み直しの途中は頁を読めないことがあるので、そのときは次の回に見直す
+      // 再読み込みの途中は頁を読めないことがあるので、そのときは次の回に見直す
       const html = await page.content().catch(() => null);
       return html === null ? ["(読み直しの途中)"] : values.filter((v) => html.includes(v));
     })
@@ -171,7 +171,7 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
   await page.goto("/admin/users");
   const table = page.getByTestId("user-table");
   const adminRow = table.locator(`tr[data-username="${E2E_ADMIN.username}"]`);
-  // 画面の言葉は docs/spec.md の 2.2（登録あり→設定済み・まだ無い→—・利用者を作る→ユーザーの追加・本人の確かめ→再認証など）
+  // 画面の言葉は docs/spec.md の 2.2（登録あり→設定済み・まだ無い→—・利用者を作る→ユーザーの追加・本人の確認→再認証など）
   await expect(adminRow).toContainText("設定済み");
   await expect(adminRow.getByTestId("last-login")).not.toHaveText("—");
 
@@ -186,7 +186,7 @@ test("利用者の棚卸し：一覧に最後のログインを出し、管理�
 
   // 利用者の管理は大事な操作なので、BFF が再認証を求める。違うパスワードでは通らない。
   // 削除の再認証はパスワードだけ（2026-10-20）だが、利用者の管理は TOTP を登録した管理者には認証コードも求める
-  // （パスワードとセッションだけで管理者を作り足させない。docs/spec.md の 3.6）
+  // （パスワードとセッションだけで管理者を作り追加させない。docs/spec.md の 3.6）
   const reauth = page.getByRole("form", { name: "再認証" });
   await expect(reauth).toBeVisible();
   await reauth.locator('input[name="password"]').fill("wrong-Pass-1x");
@@ -289,7 +289,7 @@ test("役割ごとにできる操作：一般は検査と画像を見られ、�
   await expect(page.getByRole("link", { name: "ユーザー管理" })).toHaveCount(0);
 
   expect((await page.request.get("/api/studies")).status()).toBe(200);
-  // 中継は役割の確かめを通り、モック（WADO-RS の見本が無い）まで届く
+  // 中継は役割の確認を通り、モック（WADO-RS の見本が無い）まで届く
   const relay = await page.request.get(`/api/dicom-web/studies/${STUDY}/series/1.2.826.0.1.3680043.8.498.1/metadata`);
   expect(relay.status()).toBe(404);
   expect((await relay.json()).error).toBe("見本に無い");
@@ -348,12 +348,12 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   await page.goto("/received?period=range&from=2026-10-17&to=2026-10-17");
   await expect(page.getByTestId("received-row").first()).toContainText("DTG_SCU");
 
-  // 送り先を確かめる（C-ECHO）
+  // 送り先を確認する（C-ECHO）
   await page.goto("/modalities");
   await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
   await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText(/成功\s*\d{2}:\d{2}:\d{2}$/);
 
-  // 送る：詳細のパネルの「送る」から、確かめの画面を通して送り、仕事の終わりまで出す
+  // 送る：詳細のパネルの「送る」から、確認画面を通して送り、仕事の終わりまで出す
   await page.goto("/");
   await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
   await page.getByTestId("send-open").click();
@@ -371,7 +371,7 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   // 結果には送信先と時刻を出す（前は「送った」だけ）
   await expect(panel.getByTestId("send-status")).toHaveText(/^送信完了：dtg（DTG_SCP） へ \d+ 画像（\d{2}:\d{2}:\d{2}）$/);
   await expect(panel.getByTestId("send-submit")).toHaveCount(0);
-  // 閉じて開き直すと、新しい送信の確かめの画面になる
+  // 閉じて開き直すと、新しい送信の確認画面になる
   await panel.getByTestId("send-close").click();
   // 閉じたら、開いたボタンへフォーカスが戻る（body に落ちない）
   await expect(page.getByTestId("send-open")).toBeFocused();
@@ -386,7 +386,7 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
   });
   expect(noToken.status()).toBe(403);
 
-  // 記録：受け取りの記録・C-ECHO・送る（呼ぶ前・呼んだ後・終わり）が足され、つなぎは壊れていない
+  // 記録：受け取りの記録・C-ECHO・送る（呼ぶ前・呼んだ後・終わり）が追加され、つなぎは壊れていない
   const after = await (await page.request.get("/api/audit/verify")).json();
   expect(after.ok).toBe(true);
   expect(after.checked).toBeGreaterThanOrEqual(before.checked + 5);
@@ -394,7 +394,7 @@ test("段 4：管理者が受け取りの記録で届いた検査を見て、機
 
 test("詳細の操作の行：開く・送信・エクスポートが同じ行の左から並び、削除は同じ行の右端に離れる", async () => {
   const { page } = admin;
-  // 1 行に収まる幅で確かめる（狭い詳細では、入りきらない削除が次の行の右端へ折り返す。字体で収まる幅が変わるため、行数は確かめない）
+  // 1 行に収まる幅で確認する（狭い詳細では、入りきらない削除が次の行の右端へ折り返す。字体で収まる幅が変わるため、行数は確認しない）
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/");
   await page.locator(`tr[data-study-uid="${STUDY}"]`).click();
@@ -454,7 +454,7 @@ test("送信の手応え：押した直後から状態の枠、送っている�
   await expect(badge).toHaveText("送信中");
   await expect(badge).toHaveText("送信完了", { timeout: 15_000 });
 
-  // 開き直すと結果が出て、「再送信…」で確かめの画面に戻る（送るのは「送信する」を押したとき）
+  // 開き直すと結果が出て、「再送信…」で確認画面に戻る（送るのは「送信する」を押したとき）
   await page.getByTestId("send-open").click();
   await expect(panel.getByTestId("send-status")).toHaveAttribute("data-state", "Success");
   await expect(panel.getByTestId("send-continues")).toHaveCount(0);
@@ -538,7 +538,7 @@ test("画面のロック：操作の無い時間が続いたら画面をぼか�
   await expect(page.getByTestId("study-count")).toHaveCount(0);
   await expect(page.getByTestId("study-table")).toHaveCount(0);
   await expectHeaderLocked(page);
-  // 頁を読み直すので、頁の HTML（描画の元のデータ・RSC の payload を含む）にも患者の値が残らない
+  // 頁を再読み込みするので、頁の HTML（描画の元のデータ・RSC の payload を含む）にも患者の値が残らない
   await expectNoPatientValues(page, patient);
   const lockCsrf=(await lockRequest).headers()["x-csrf-token"]!;
   expect((await page.request.post("/api/hl7/resolve", {
@@ -605,8 +605,8 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   await admin.page.goto("about:blank");
   const page = await admin.context.newPage();
   // ここまでの試験で、管理者は画面のロックの解除でパスワードを誤っている。パスワードだけのロックの解除と再認証は、TOTP を
-  // 確かめないので、成功しても失敗の数を消さない（docs/spec.md の 3.6）。この試験の誤りで閾値（3回）に近づきすぎないよう、
-  // 先に TOTP まで確かめるログインをし直して、数を0に戻す
+  // 確認しないので、成功しても失敗の数を消さない（docs/spec.md の 3.6）。この試験の誤りで閾値（3回）に近づきすぎないよう、
+  // 先に TOTP まで確認するログインをし直して、数を0に戻す
   await page.goto("/");
   await page.getByRole("button", { name: "ログアウト" }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -635,7 +635,7 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   expect((await fresh.request.get("/api/studies")).status()).toBe(423);
   await fresh.close();
 
-  // 読み直しても、中身なしで描く（頁の HTML に患者の値が無い）
+  // 再読み込みしても、中身なしで描く（頁の HTML に患者の値が無い）
   await page.reload();
   await expect(page.getByTestId("screen-lock")).toBeVisible();
   await expectNoPatientValues(page, patient);
@@ -650,7 +650,7 @@ test("画面のロック：ロックの知らせ（POST）を落としても、�
   await lock.getByLabel("パスワード").fill(ADMIN_PASSWORD);
   await lock.getByRole("button", { name: "ロック解除" }).click();
   await expect(page.getByTestId("study-count")).toHaveText("8");
-  // 解いたらロックの印は消え、読み直しても中身が出る
+  // 解いたらロックの印は消え、再読み込みしても中身が出る
   await page.reload();
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await page.close();
@@ -664,7 +664,7 @@ test("画面のロック：ロックの POST が届かず頁を読み直して�
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await expect(page.getByTestId("current-user")).toContainText("e2e-admin（管理者）");
 
-  // POST を落とすので、頁は読み直されない（読み直した頁は BFF が利用者を渡さず、この確かめにならない）
+  // POST を落とすので、頁は再読み込みされない（再読み込みした頁は BFF が利用者を渡さず、この確認にならない）
   await page.route("**/api/auth/lock", (route) => route.abort("internetdisconnected"));
   await page.getByRole("button", { name: "画面ロック", exact: true }).click();
   const lock = page.getByTestId("screen-lock");
@@ -705,7 +705,7 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
 
   await page.getByRole("button", { name: "画面ロック", exact: true }).click();
   await expect(page.getByTestId("screen-lock")).toBeVisible();
-  // 知らせは届かないが、BFF の状態の確かめ（423）で閉じる
+  // 知らせは届かないが、BFF の状態の確認（423）で閉じる
   await expect(deaf.getByTestId("screen-lock")).toBeVisible({ timeout: 30_000 });
   await expectNoPatientValues(deaf, patient);
 
@@ -722,7 +722,7 @@ test("画面のロック：ほかのタブの知らせを取りこぼしても�
 // 段 5（検査の件数が 8 であることを見るほかの試験の後に置く。モックの Orthanc の中で1件を消すため）
 test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と再認証つきで消す（確かめの画面は Orthanc から読み直した値）", async ({ browser }) => {
   test.setTimeout(120_000);
-  // 新しくログインしたセッション（まだ再認証していない）で流し、削除の前に必ず再認証を求められることを見る
+  // 新しくログインしたセッション（まだ再認証していない）で実行し、削除の前に必ず再認証を求められることを見る
   const fresh = await newPage(browser);
   const { page } = fresh;
   await submitLogin(page, E2E_ADMIN.username, ADMIN_PASSWORD);
@@ -742,7 +742,7 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   const file = await download;
   expect(file.suggestedFilename()).toMatch(/^study-[0-9a-f]{8}\.zip$/);
 
-  // 削除：確かめの画面（Orthanc から読み直した要点）→ 理由 → 再認証 → 消えた
+  // 削除：確認画面（Orthanc から再読み込みした要点）→ 理由 → 再認証 → 消えた
   await page.getByTestId("delete-open").click();
   const panel = page.getByTestId("delete-panel");
   await expect(panel.getByTestId("delete-confirm")).toContainText("JP-TEST-0003");
@@ -760,13 +760,13 @@ test("段 5：管理者が書き出し（ZIP）を落とし、検査を理由と
   await expect(page.getByTestId("study-count")).toHaveText("8");
   await reauth.getByLabel("パスワード").fill(ADMIN_PASSWORD);
   await reauth.getByRole("button", { name: "認証して削除" }).click();
-  // 消えると一覧を読み直し、その行（と詳細）は消える
+  // 消えると一覧を再読み込み、その行（と詳細）は消える
   await expect(page.getByTestId("study-count")).toHaveText("7");
   await expect(page.locator(`tr[data-study-uid="${target}"]`)).toHaveCount(0);
   // 消したことは、一覧の上の知らせで示す（行も詳細も消えるため。docs/spec.md の 3.5・UX のレビューの H6）
   await expect(page.getByTestId("list-notice")).toContainText("検査を削除しました（JP-TEST-0003");
 
-  // 一度通れば REAUTH_MINUTES（既定 5 分）の間は聞き直さない：続けて消すときは、理由と確かめの画面だけ
+  // 一度通れば REAUTH_MINUTES（既定 5 分）の間は聞き直さない：続けて消すときは、理由と確認画面だけ
   await page.locator("tbody > tr[data-study-uid]").first().click();
   await page.getByTestId("delete-open").click();
   const second = page.getByTestId("delete-panel");
@@ -788,7 +788,7 @@ test("ログアウトすると、セッションは使えない", async () => {
   expect((await page.request.get("/api/studies")).status()).toBe(401);
 });
 
-// 段 6（段 5 の後に置く。モックの Orthanc の中で氏名を直し、検査を1件足すため）
+// 段 6（段 5 の後に置く。モックの Orthanc の中で氏名を直し、検査を1件追加するため）
 test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を保って直し、検査情報修正は直した検査を新しく作る（理由と再認証つき）", async ({ browser }) => {
   test.setTimeout(120_000);
   const fresh = await newPage(browser);
@@ -805,11 +805,11 @@ test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を�
   const uid = (await rows.last().getAttribute("data-study-uid"))!;
   await page.locator(`tr[data-study-uid="${uid}"]`).click();
 
-  // 患者情報修正：氏名（漢字）を直す → 確認（前と後の値・当てる範囲）→ 理由 → 再認証 → 修正しました
+  // 患者情報修正：氏名（漢字）を直す → 確認（前と後の値・適用する範囲）→ 理由 → 再認証 → 修正しました
   await page.getByTestId("modify-open").click();
   const panel = page.getByTestId("modify-panel");
   await expect(panel.getByRole("tab", { name: "患者情報修正" })).toHaveAttribute("aria-selected", "true");
-  // 確かめの欄の決まり（docs/design-system/parts.md）：開いたら最初の入力へフォーカス、キャンセルは左・実行は右、閉じたら開いたボタンへフォーカスを戻す
+  // 確認欄の決まり（docs/design-system/parts.md）：開いたら最初の入力へフォーカス、キャンセルは左・実行は右、閉じたら開いたボタンへフォーカスを戻す
   await expect(panel.getByTestId("modify-PatientID")).toBeFocused();
   const cancelBox = (await panel.getByRole("button", { name: "キャンセル" }).first().boundingBox())!;
   const checkBox = (await panel.getByTestId("modify-attribute-check").boundingBox())!;
@@ -820,7 +820,7 @@ test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を�
   await page.getByTestId("modify-open").click();
 
   // 生年月日の欄は西暦と元号を受け、読み取り結果をその検査の検査日で数えて欄の下に出す（docs/spec.md の 3.1「生年月日の入力」）。
-  // 確かめの画面へは YYYYMMDD で送る。確かめた後に欄を元の値へ戻し、下の氏名の修正には混ぜない
+  // 確認画面へは YYYYMMDD で送る。確認した後に欄を元の値へ戻し、下の氏名の修正には混ぜない
   const birth = panel.getByTestId("modify-PatientBirthDate");
   await expect(birth).toHaveAttribute("type", "text");
   await expect(birth).toHaveAttribute("inputmode", "text");
@@ -884,7 +884,7 @@ test("段 6：患者情報修正は同じ患者IDの検査の氏名を UID を�
   await fresh.context.close();
 });
 
-/** インポートの試験の SOP Instance UID の頭（合成。見本の検査の UID は 64 字あり、後ろに足すと UI の上限 64 字を超える。PS3.5 6.2） */
+/** インポートの試験の SOP Instance UID の頭（合成。見本の検査の UID は 64 字あり、後ろに追加すると UI の上限 64 字を超える。PS3.5 6.2） */
 const IMPORT_UID = "1.2.826.0.1.3680043.8.498.9905";
 
 /** 試験のための合成の DICOM のファイル（PS3.10 の形。画素は入れない。値は合成で、実の患者のデータではない） */
@@ -1026,7 +1026,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(rows.first()).toContainText("同じ画像または検査がもう画像サーバーにあります");
 
   // 結果不明の札の出し方（画面だけを見る。BFF の答えを、画像サーバーの答えが分からなかった形に置き換える。
-  // BFF の結果不明の扱いそのものは tests/unit/import-route.test.ts）：状態を 1 回確かめ、決まらなければ結果不明
+  // BFF の結果不明の扱いそのものは tests/unit/import-route.test.ts）：状態を 1 回確認し、決まらなければ結果不明
   let checks = 0;
   await page.route("**/api/import*", async (route) => {
     const unknown = { outcome: "unknown", studyInstanceUid: deleted, error: "インポートの結果を確認できません。状態を確認してください" };
@@ -1050,7 +1050,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   );
   await page.screenshot({ path: testInfo.outputPath("import-1280-unknown.png"), fullPage: true });
 
-  // 結果不明を管理者が確認して記録する（parts.md の「結果不明を確認する」）。「確認」は名指しを持つ結果不明の行だけ
+  // 結果不明を管理者が確認して記録する（parts.md の「結果不明を確認する」）。「確認」は指定を持つ結果不明の行だけ
   const unknownRow = rows.first();
   const resolvePanel = page.getByTestId("import-resolve");
   await expect(resolvePanel).toHaveCount(0);
@@ -1176,7 +1176,7 @@ test("画面のロック：ロックの画面からログアウトでき、確�
   // ここまでは、ログアウトしていない（ロックの BFF の状態が 423 のまま）
   await expect.poll(async () => (await page.request.get("/api/studies")).status()).toBe(423);
 
-  // 読み直したロックの画面（BFF が中身なしで描いた頁）からも出られる（CSRF の token が頁に渡っている）
+  // 再読み込みしたロックの画面（BFF が中身なしで描いた頁）からも出られる（CSRF の token が頁に渡っている）
   await page.reload();
   await expect(lock).toBeVisible();
   // 同じブラウザのほかのタブ：ロックの画面で、まだ BFF に届いていないロックの覚えを持っている

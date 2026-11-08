@@ -122,7 +122,7 @@ function TableRow({
         "border-b border-border align-middle",
         tall ? "h-10" : "h-7",
         selectable && "cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-        // 選んだ行：地 selected-strong と最初のセルの左 3px の線。hover の地（muted）は選んだ行に当てない。
+        // 選んだ行：地 selected-strong と最初のセルの左 3px の線。hover の地（muted）は選んだ行に適用しない。
         // 線の色は ring（明るい地では primary と同じ値。暗い地でも地との対比 3:1 以上を保つ。docs/spec.md の 2.1）
         selected ? "bg-selected-strong [&>td:first-child]:shadow-[inset_3px_0_0_var(--color-ring)]" : "hover:bg-muted",
         className,

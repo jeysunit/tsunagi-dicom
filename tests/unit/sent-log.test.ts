@@ -3,7 +3,7 @@ import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
 // 送信一覧（docs/spec.md の 3.4）：監査の記録の送信の行と Orthanc の仕事から、期間の中の送信を新しい順に返す読むだけの画面の API。
-// 期間の読み方・上限・状態の対応・役割ごとに許す・断る（断ったことも記録に残る）・許可の一覧に載っていない項目は返らない、を見る。
+// 期間の読み方・上限・状態の対応・役割ごとに許す・断る（断ったことも記録に残る）・許可の一覧に含まれていない項目は返らない、を見る。
 
 const state = vi.hoisted(() => ({
   role: undefined as string | undefined,
@@ -30,7 +30,7 @@ vi.mock("@/lib/config", async (importOriginal) => {
   return { ...real, getConfig: () => state.config! };
 });
 
-// 既定の割り当てでは send.view を断る役割が無い（管理者と一般の両方に許す）ので、断る道は割り当てを替えて確かめる
+// 既定の割り当てでは send.view を断る役割が無い（管理者と一般の両方に許す）ので、断る道は割り当てを替えて確認する
 vi.mock("@/lib/auth/roles", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/auth/roles")>();
   return {
@@ -200,7 +200,7 @@ describe("送信一覧の画面の API", () => {
       ["unknown", "failed", "sent"],
     ]);
 
-    // 仕事の終わりを初めて読んだので、終わりの記録を1行だけ足した（次に読んでも足さない）
+    // 仕事の終わりを初めて読んだので、終わりの記録を1行だけ追加した（次に読んでも追加しない）
     await sentLog();
     const done = (await (await db()).auditLog.findMany({ where: { action: "send", detail: { contains: `"phase":"done"` } } })).map(detailOf);
     expect(done.filter((d) => d.requestId === ok.requestId)).toEqual([expect.objectContaining({ via: "send_log", state: "Success" })]);

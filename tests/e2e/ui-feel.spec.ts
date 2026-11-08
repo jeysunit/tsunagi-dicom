@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // 画面の振る舞いの決まり（docs/spec.md の 2.3・3.1。2026-10-20 の画面の見直し）：
 // 今いる頁の印と頁ごとのタブの題名、押せる物の手応え（カーソル・hover・押している間）、選んだ行の見分け、
-// 一覧の列（患者 ID・生年月日・性別を切らない）。検証モード（AUTH_MODE=dev）とモックに対して流す。
+// 一覧の列（患者 ID・生年月日・性別を切らない）。検証モード（AUTH_MODE=dev）とモックに対して実行する。
 
 test.describe.configure({ mode: "serial" });
 
@@ -135,7 +135,7 @@ test("押せる物：カーソルは指の形、押せないときは禁止の�
   await more.hover();
   await expect.poll(() => more.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(before);
 
-  // 押せないボタン：禁止の形のカーソル（globals.css の1か所の決まり。頁に押せないボタンを1つ置いて確かめる）
+  // 押せないボタン：禁止の形のカーソル（globals.css の1か所の決まり。頁に押せないボタンを1つ置いて確認する）
   const cursor = await page.evaluate(() => {
     const b = document.createElement("button");
     b.disabled = true;
@@ -179,7 +179,7 @@ test("押している間の手応え：ボタンは影を持たず 1px 沈み、
   await page.mouse.up();
   await page.getByTestId("modality-all").click();
 
-  // 共通のボタン（受け取りの「読み直す」。前は詳細の「UID」のボタンで確かめていた。#57）も同じ手応え。
+  // 共通のボタン（受け取りの「読み直す」。前は詳細の「UID」のボタンで確認していた。#57）も同じ手応え。
   // 枠のボタンの地は白（明るい地の上で、押せる物の形に見せる）
   await page.goto("/received");
   const reload = page.getByTestId("received-reload");
@@ -265,7 +265,7 @@ test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に�
     await new Promise((r) => setTimeout(r, 1500));
     await route.continue();
   });
-  // 旧：MR を押すと CT から MR に替わった（2 件）→ 新：モダリティは複数選べて押すと足される（CT と MR で 8 件）。
+  // 旧：MR を押すと CT から MR に替わった（2 件）→ 新：モダリティは複数選べて押すと追加される（CT と MR で 8 件）。
   // 取り直しが要るよう、まだ読んでいない組み合わせにする
   await page.getByTestId("modality-MR").click();
   await expect(page.getByTestId("progress-bar")).toBeVisible();
@@ -278,7 +278,7 @@ test("待ちの表示：0.3 秒たっても終わらなければ一覧の上に�
   await page.unroute("**/api/studies?*");
 });
 
-// 画面の言葉は docs/spec.md の 2.2 の用語集から選ぶ。用語集で「使わない言い方」とした言葉が、画面に出ていないことを確かめる。
+// 画面の言葉は docs/spec.md の 2.2 の用語集から選ぶ。用語集で「使わない言い方」とした言葉が、画面に出ていないことを確認する。
 // 前の役割の名前のうち「医師」は、見本の紹介医の名前（試験 医師）に含まれるので、ここでは見ない（検証モードの帯に無いことは
 // tests/e2e/home.spec.ts で見る）
 const RETIRED_WORDS = [

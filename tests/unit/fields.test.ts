@@ -18,7 +18,7 @@ import { listStudies } from "@/lib/study-list";
 
 // 役割ごとの許可の一覧（docs/spec.md 原則 8）。
 // モック（Orthanc・DICOMweb）と、実の画像サーバーの形（Orthanc・DICOMweb。手元の HTTP のサーバーで代える）のどれでも、
-// 許可の一覧に無い項目が画面の API（src/lib/study-list.ts）から返らないことを確かめる。
+// 許可の一覧に無い項目が画面の API（src/lib/study-list.ts）から返らないことを確認する。
 
 const studies = JSON.parse(readFileSync("tests/fixtures/orthanc/dicom-web/studies.json", "utf8")) as Record<
   string,
@@ -66,7 +66,7 @@ const BACKENDS: [string, () => Backend][] = [
 
 /**
  * 一般の役割だけ、許可の一覧を狭めた割り当て（2026-10-20 に役割を管理者と一般の2つにしたので、前の「閲覧」を狭める形を
- * 「一般」を狭める形に、前の「医師」で見ていた「ほかの役割の見え方は変わらない」を「管理者」で見る形にした。確かめる中身は同じ）
+ * 「一般」を狭める形に、前の「医師」で見ていた「ほかの役割の見え方は変わらない」を「管理者」で見る形にした。確認する中身は同じ）
  */
 const NARROW: FieldAllowlistMap = {
   ...ROLE_FIELD_ALLOWLIST,

@@ -2,8 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { AppConfig } from "@/lib/config";
 import { testDatabases } from "./helpers/test-db";
 
-// 検査の一覧の画面の API（src/app/api/studies/route.ts）を、検証モード（AUTH_MODE=dev）のセッションから通して確かめる。
-// 閲覧の役割の許可の一覧だけを狭め、載っていない項目が返らず、ほかの役割の見え方が変わらないことを見る（原則 8）。
+// 検査の一覧の画面の API（src/app/api/studies/route.ts）を、検証モード（AUTH_MODE=dev）のセッションから通して確認する。
+// 閲覧の役割の許可の一覧だけを狭め、含まれていない項目が返らず、ほかの役割の見え方が変わらないことを見る（原則 8）。
 
 const state = vi.hoisted(() => ({
   role: undefined as string | undefined,
@@ -136,7 +136,7 @@ describe("検査の一覧の画面の API と、役割の許可の一覧", () =>
     expect(Object.keys(auto.detail).filter((k) => k !== "trigger").sort()).toEqual(Object.keys(manual.detail).sort());
     expect({ outcome: auto.row.outcome, actorRole: auto.row.actorRole }).toEqual({ outcome: manual.row.outcome, actorRole: manual.row.actorRole });
 
-    // 条件が直前の手動の検索と違う名乗りは、手動として扱う（自動の読み直しは、同じ条件の読み直しに限る）
+    // 条件が直前の手動の検索と違う名乗りは、手動として扱う（自動の再読み込みは、同じ条件の再読み込みに限る）
     const other = await get("?modality=CT&refresh=auto");
     expect(other.detail).not.toHaveProperty("trigger");
     expect(Array.isArray(other.detail.returned)).toBe(true);
