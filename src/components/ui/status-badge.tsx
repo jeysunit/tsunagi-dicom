@@ -1,7 +1,7 @@
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 
-// 状態の札（docs/design-system/parts.md の「状態の札」。部品集の `.st`）。12px・高さ 20px・角 3px・枠 1px。
+// 状態バッジ（docs/design-system/parts.md の「状態バッジ」。部品集の `.st`）。12px・高さ 20px・角 3px・枠 1px。
 // 文字と形の印を必ず持ち、色は枠と印だけに付ける（文字は本文の色）。色だけで状態を伝えない。状態でないもの（モダリティなど）には使わない。
 // 種類の名前は parts.md の `data-k` と同じ（3 製品で 1 つ）。語は呼ぶ側が表のとおりに渡す。
 const KINDS = {

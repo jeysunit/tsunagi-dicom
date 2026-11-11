@@ -22,7 +22,7 @@ interface Answer {
 /** 答えにある検査の UID（BFF が記録に残した要求だけが返す）。無ければ空 */
 const studyUidOf = (answer: Answer | null): string => (typeof answer?.data.studyInstanceUid === "string" ? answer.data.studyInstanceUid : "");
 
-/** 画像サーバーにもうあった画像（Orthanc の AlreadyStored）の、成功の札の下の 1 句 */
+/** 画像サーバーにもうあった画像（Orthanc の AlreadyStored）の、成功の状態バッジの下の 1 句 */
 export const ALREADY_NOTE = "もう画像サーバーにありました";
 /** 答えが分からないときの理由の 1 句 */
 export const UNKNOWN_REASON = "画像サーバーに入ったか分かりません";
@@ -30,7 +30,7 @@ export const UNKNOWN_REASON = "画像サーバーに入ったか分かりませ�
 export const UNREACHABLE_REASON = "サーバーに接続できませんでした";
 const FAILED_REASON = "インポートできませんでした";
 
-/** BFF の誤りの文の最初の 1 文（理由の 1 句。札の下の狭い場所に出す）。無ければ代わりの句 */
+/** BFF の誤りの文の最初の 1 文（理由の 1 句。状態バッジの下の狭い場所に出す）。無ければ代わりの句 */
 export function reasonOf(error: unknown, fallback: string): string {
   if (typeof error !== "string") return fallback;
   const first = error.split("。")[0]!.trim();

@@ -12,7 +12,7 @@ import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 // 画面のデザインシステム（docs/design-system）を自動で守る検査。
 // 1. 色の直書き（#hex・rgb() など・Tailwind の色名）を、トークンを定義する所以外で落とす（例外は理由つきの一覧）
 // 2. docs/design-system/tokens.md の色の表が、src/app/globals.css の値と一致する
-// 3. 部品（状態の札・件数の行・患者バナー）の決まり
+// 3. 部品（状態バッジ・件数の行・患者バナー）の決まり
 
 const css = readFileSync("src/app/globals.css", "utf8");
 
@@ -219,7 +219,7 @@ describe("ui-kit の tokens.css と globals.css", () => {
 const badge = (kind: StatusKind, text: string) => createElement(StatusBadge, { kind, children: text });
 
 describe("部品", () => {
-  it("状態の札：どの種類も、文字と印（読み上げない）を持ち、色は枠と印に付く", () => {
+  it("状態バッジ：どの種類も、文字と印（読み上げない）を持ち、色は枠と印に付く", () => {
     // 種類の名前は部品集の parts.md の data-k と同じ（plan・run・wait・check・done・ok・listen・cancel・stop・ng・unknown・note）
     const kinds: StatusKind[] = ["plan", "run", "wait", "check", "done", "ok", "listen", "cancel", "stop", "ng", "unknown", "note"];
     for (const kind of kinds) {
@@ -231,7 +231,7 @@ describe("部品", () => {
     }
   });
 
-  it("状態の札：取消は文字に取り消し線を引かず（灰と「—」で示す）、結果不明は破線", () => {
+  it("状態バッジ：取消は文字に取り消し線を引かず（灰と「—」で示す）、結果不明は破線", () => {
     const canceled = renderToStaticMarkup(badge("cancel", "取消"));
     expect(canceled).not.toContain("line-through");
     expect(canceled).toContain("取消");
@@ -239,7 +239,7 @@ describe("部品", () => {
     expect(renderToStaticMarkup(badge("unknown", "結果不明"))).toContain("border-dashed");
   });
 
-  it("状態の札：待ち受け中（listen）は ● success、確認中（check）は ◔ warning。高さ 20px・角 3px・12px", () => {
+  it("状態バッジ：待ち受け中（listen）は ● success、確認中（check）は ◔ warning。高さ 20px・角 3px・12px", () => {
     const listen = renderToStaticMarkup(badge("listen", "待ち受け中"));
     expect(listen).toContain("●");
     expect(listen).toContain("border-success");
@@ -270,7 +270,7 @@ describe("部品", () => {
     let count = 0;
     for (const file of sourceFiles("src").filter((f) => f.endsWith(".tsx"))) {
       const text = readFileSync(file, "utf8");
-      // 開きの札の中（次の `>` まで。属性の中の矢印の関数 `=>` は飛ばす）の className。
+      // 開始タグの中（次の `>` まで。属性の中の矢印の関数 `=>` は飛ばす）の className。
       // 選択欄は部品 <Select>（枠は部品の中で持つ。下の検査）を使い、素の <select> は部品の定義の中にだけ置く
       for (const m of text.matchAll(/<(select|textarea|Select)\b((?:=>|[^>])*)>/g)) {
         count += 1;
@@ -306,7 +306,7 @@ describe("部品", () => {
   const LABELS = ["患者ID", "生年月日・性別", "受付番号", "検査日時", "モダリティ・検査名"];
   const labelsOf = (html: string) => [...html.matchAll(/<dt[^>]*>([^<]*)<\/dt>/g)].map((m) => m[1]);
 
-  it("患者バナー：氏名・かな・項目をこの順に並べ、値の無い項目も項目名を残して「—」を出す。札を置ける", () => {
+  it("患者バナー：氏名・かな・項目をこの順に並べ、値の無い項目も項目名を残して「—」を出す。状態バッジを置ける", () => {
     const html = renderToStaticMarkup(
       createElement(PatientBanner, {
         layout: "r2",

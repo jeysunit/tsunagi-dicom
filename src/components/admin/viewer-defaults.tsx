@@ -9,10 +9,10 @@ import { errorText, postJson } from "@/lib/client/post-json";
 import type { ModalityGroup } from "@/lib/modalities";
 import type { ViewerInfo } from "@/lib/viewers";
 
-// モダリティごとの既定のビューア（docs/spec.md の 3.2）。選んだらすぐ保存し、欄の横に「保存しました」の札を 3 秒出す
+// モダリティごとの既定のビューア（docs/spec.md の 3.2）。選んだらすぐ保存し、欄の横に「保存しました」のバッジを 3 秒出す
 // （docs/design-system/parts.md の「保存」）。
 
-/** 「保存しました」の札を出す時間（ミリ秒） */
+/** 「保存しました」のバッジを出す時間（ミリ秒） */
 const SAVED_BADGE_MS = 3000;
 export function ViewerDefaults({
   defaults,
@@ -28,14 +28,14 @@ export function ViewerDefaults({
   const [error, setError] = useState<string | null>(null);
   /** 保存の要求を出している間の行 */
   const [saving, setSaving] = useState<ModalityGroup | null>(null);
-  /** 「保存しました」の札を出している行（3 秒） */
+  /** 「保存しました」のバッジを出している行（3 秒） */
   const [saved, setSaved] = useState<ModalityGroup | null>(null);
   const savedTimer = useRef<number | undefined>(undefined);
   const openers = viewers.filter((v) => v.kind === "open");
 
   useEffect(() => () => window.clearTimeout(savedTimer.current), []);
 
-  // 値を 1 つ替える欄なので、選んだらすぐ保存する。断られたら元の値に戻して理由を出す（札は出さない）。
+  // 値を 1 つ替える欄なので、選んだらすぐ保存する。断られたら元の値に戻して理由を出す（バッジは出さない）。
   // 結果が分からないとき（通信の失敗・5xx）は、保存済みの値を読んで照らし合わせる
   async function save(modality: ModalityGroup, viewer: string) {
     // 保存の要求を出している間は、ほかの選び直しを受けない（欄の動きを止めず、古い答えで値が戻らないようにする）
@@ -85,7 +85,7 @@ export function ViewerDefaults({
           <div key={m} className="flex items-center justify-between gap-4 px-4 py-2.5">
             <dt className="font-bold text-value">{m}</dt>
             <dd className="flex items-center gap-2">
-              {/* 札の場所は欄の左に取っておき、出入りで欄を動かさない */}
+              {/* バッジの場所は欄の左に取っておき、出入りで欄を動かさない */}
               <span className="inline-flex min-w-[6.5rem] justify-end" aria-live="polite">
                 {saved === m && <StatusBadge kind="ok">保存しました</StatusBadge>}
               </span>

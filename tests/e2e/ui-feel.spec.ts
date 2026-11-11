@@ -403,18 +403,18 @@ test("一覧の列：患者 ID・生年月日・性別は切らない（1280px �
   }
 });
 
-test("1280px の一覧：横にスクロールせず、モダリティの札が列の中に収まる。右に詳細を開いても検査日時は数字の途中で折れない", async ({ page }) => {
+test("1280px の一覧：横にスクロールせず、モダリティのバッジが列の中に収まる。右に詳細を開いても検査日時は数字の途中で折れない", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await asAdmin(page);
   await expect(rows(page)).toHaveCount(8);
   const box = page.getByTestId("study-list-scroll");
   const [client, scroll] = await box.evaluate((el) => [el.clientWidth, el.scrollWidth]);
   expect(scroll).toBeLessThanOrEqual(client);
-  // 見出し「モダリティ／検査名」は「…」で切らない（「インポート」の札が入る幅を、この列に残す）
+  // 見出し「モダリティ／検査名」は「…」で切らない（「インポート」の状態バッジが入る幅を、この列に残す）
   const descHead = page.locator("thead th").nth(7).locator("button");
   await expect(descHead).toContainText("モダリティ／検査名");
   expect(await descHead.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  // 操作の列（右端に固定）に重ならず、行の中に見えるモダリティの札
+  // 操作の列（右端に固定）に重ならず、行の中に見えるモダリティのバッジ
   const mark = rows(page).first().locator("td").nth(7).locator("span").first();
   const [markBox, actionsBox] = await Promise.all([
     mark.boundingBox(),

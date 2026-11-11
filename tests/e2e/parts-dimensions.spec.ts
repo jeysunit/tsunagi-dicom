@@ -21,7 +21,7 @@ const styleOf = (loc: Locator, props: string[]) =>
 test.describe("部品の寸法", () => {
   test.use({ viewport: { width: 1280, height: 720 } });
 
-  test("上の帯：ナビの開閉は 32px で Menu の絵、接続の状態は枠つき 32px。札は高さ 20px・角 3px", async ({ page }) => {
+  test("上の帯：ナビの開閉は 32px で Menu の絵、接続の状態は枠つき 32px。状態バッジは高さ 20px・角 3px", async ({ page }) => {
     await asAdmin(page);
     const toggle = page.getByTestId("nav-toggle");
     const box = (await toggle.boundingBox())!;
@@ -45,12 +45,12 @@ test.describe("部品の寸法", () => {
     await expect(label).toBeVisible();
     const badge = conn.locator('[data-slot="status-badge"]');
     expect(await styleOf(badge, ["height", "borderTopLeftRadius", "fontSize"])).toEqual({ height: "20px", borderTopLeftRadius: "3px", fontSize: "12px" });
-    // 「接続の状態」・札・シェブロンの順
+    // 「接続の状態」・状態バッジ・シェブロンの順
     const xs = await Promise.all([label.boundingBox(), badge.boundingBox(), conn.locator("svg").boundingBox()]);
     expect(xs[0]!.x).toBeLessThan(xs[1]!.x);
     expect(xs[1]!.x).toBeLessThan(xs[2]!.x);
 
-    // 640px 未満は文字を視覚的に隠す（名前は残る）。札とシェブロンは残る
+    // 640px 未満は文字を視覚的に隠す（名前は残る）。状態バッジとシェブロンは残る
     await page.setViewportSize({ width: 500, height: 720 });
     expect((await label.boundingBox())!.width).toBeLessThanOrEqual(1);
     await expect(conn).toHaveAccessibleName(/^接続の状態/);
@@ -74,7 +74,7 @@ test.describe("部品の寸法", () => {
     await page.getByTestId("conn-check").click();
     await expect(report).toHaveText(/^\d+ 件(すべてに接続できました。|のうち \d+ 件に接続できませんでした。)$/);
     await expect(page.getByTestId("conn-popover")).toBeVisible();
-    // 札は読み上げない：ボタンにも popover の他の場所にも aria-live を持たせない
+    // 状態バッジは読み上げない：ボタンにも popover の他の場所にも aria-live を持たせない
     expect(await page.getByTestId("conn-popover").locator("[aria-live]").count()).toBe(1);
     await expect(conn.locator("[aria-live]")).toHaveCount(0);
   });

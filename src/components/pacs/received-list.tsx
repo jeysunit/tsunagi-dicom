@@ -374,7 +374,7 @@ export function ReceivedList({
       <div className="max-h-[calc(100dvh-18rem)] min-h-40 overflow-auto rounded-md border border-border" role="region" aria-label="受信の一覧" data-testid="received-scroll">
         <table className="w-full min-w-[1000px] table-fixed border-collapse" data-testid="received-table">
           <colgroup>
-            {/* 受信日時（秒まで。「新着」の印も入る）と札・ボタンの列は、値が切れない幅にする。残りの幅はモダリティと検査名へ */}
+            {/* 受信日時（秒まで。「新着」の印も入る）と状態バッジ・ボタンの列は、値が切れない幅にする。残りの幅はモダリティと検査名へ */}
             <col style={{ width: 188 }} />
             <col style={{ width: 120 }} />
             <col style={{ width: 128 }} />

@@ -42,8 +42,8 @@ import { cn } from "@/lib/utils";
 // ファイル名とタグの値は外から来る値なので、React の文字として出す（HTML として入れない）。
 
 /**
- * 1 件の結果。成功は ok（note は札の下の 1 句。例：もう保管にあった）、失敗は ok: false と理由の 1 句。
- * 受け手の答えが分からないときは unknown: true（札「結果不明」。成功とも失敗とも数えない）
+ * 1 件の結果。成功は ok（note は状態バッジの下の 1 句。例：もう保管にあった）、失敗は ok: false と理由の 1 句。
+ * 受け手の答えが分からないときは unknown: true（状態バッジ「結果不明」。成功とも失敗とも数えない）
  */
 export type ImportOutcome = { ok: true; note?: string } | { ok: false; reason: string; unknown?: boolean; resolve?: ResolveTarget };
 
@@ -87,7 +87,7 @@ function Hourglass() {
 
 const none = <span className="label font-sans text-sm text-label">—</span>;
 
-/** 札の字の色：送らない行（対象外・除外）は warning、失敗・結果不明・中止は danger（囲み線と同じ色。行の字は通常の色のまま） */
+/** 状態バッジの字の色：送らない行（対象外・除外）は warning、失敗・結果不明・中止は danger（囲み線と同じ色。行の字は通常の色のまま） */
 const BADGE_TEXT: Partial<Record<string, string>> = { skip: "text-warning", ng: "text-danger", unknown: "text-danger", stop: "text-danger" };
 
 type FileWithPath = File & { tsunagiPath?: string };
@@ -229,7 +229,7 @@ export function FilePicker({
       return;
     }
     if (focusTarget.to === "resolve") {
-      // 行の「確認」へ（行の札が替わって「確認」が消えた・無いときは「続けて選択」へ）
+      // 行の「確認」へ（行の状態バッジが替わって「確認」が消えた・無いときは「続けて選択」へ）
       const button = rootRef.current?.querySelector<HTMLElement>(`[data-resolve-id="${focusTarget.id}"]`);
       (button ?? againButton.current)?.focus();
       return;
@@ -403,7 +403,7 @@ export function FilePicker({
     }
     if (!mounted.current || gen !== generation.current) return;
     if (!result.ok) {
-      // 欄は閉じず、入力は残す。行の札は替えない（結果不明のまま）
+      // 欄は閉じず、入力は残す。行の状態バッジは替えない（結果不明のまま）
       const message = result.message;
       setResolving((r) => (r ? { ...r, error: message, busy: false } : r));
       noteInput.current?.focus();

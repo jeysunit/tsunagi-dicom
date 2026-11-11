@@ -238,7 +238,7 @@ describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 
     expect(sortForList(list).map((i) => i.name)).toEqual(["d", "b", "a", "c", "e"]);
   });
 
-  it("札：除外は off で決まり、対象外と同じ skip（—）。確認中とインポート中は wait、待ちは plan、中止は stop", () => {
+  it("状態バッジ：除外は off で決まり、対象外と同じ skip（—）。確認中とインポート中は wait、待ちは plan、中止は stop", () => {
     const [ex, off, check, run, wait, cx] = items([{ name: "a", state: "ex" }, { name: "b", off: true }, { name: "c", state: "check" }, { name: "d", state: "run" }, { name: "e" }, { name: "f", state: "cx" }]);
     expect(badgeOf(ex!)).toEqual({ kind: "skip", label: "対象外" });
     expect(badgeOf(off!)).toEqual({ kind: "skip", label: "除外" });
@@ -273,7 +273,7 @@ describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 
     });
   });
 
-  it("結果不明（tsunagi で足した状態）：成功とも失敗とも数えず、札は unknown、並びは失敗と同じ、知らせは err で確かめる人と止まることを書く", () => {
+  it("結果不明（tsunagi で足した状態）：成功とも失敗とも数えず、状態バッジは unknown、並びは失敗と同じ、知らせは err で確かめる人と止まることを書く", () => {
     const list = items([{ name: "a", state: "ok" }, { name: "b", state: "uk", reason: "画像サーバーの答えが分かりません" }, { name: "c", state: "ng" }, { name: "d", state: "ex" }, { name: "e", off: true }]);
     const c = countItems(list);
     // 選択 ＝ 成功 ＋ 失敗 ＋ 結果不明 ＋ 中止
@@ -304,7 +304,7 @@ describe("数え方と文言（件 ＝ 対象外 ＋ 除外 ＋ 選択、選択 
     });
   });
 
-  it("結果不明を確認して記録する：名指しを持つ結果不明の行だけが確認できる。記録すると札が替わり、名指しを外し、件数を数え直す", () => {
+  it("結果不明を確認して記録する：名指しを持つ結果不明の行だけが確認できる。記録すると状態バッジが替わり、名指しを外し、件数を数え直す", () => {
     const target = { requestId: "0b7d9c1e-2f3a-4b5c-9d6e-1f2a3b4c5d6e", studyInstanceUid: "1.2.3" };
     const list = items([
       { name: "a", state: "ok" },
