@@ -6,7 +6,7 @@
 # - DCMTK：3.6.9（Debian 13 の版。Debian の安全の直し（+deb13uN）は受ける）
 #   包みの版を完全に固定すると、Debian の直しが出た時点で古い版が配られなくなり作れなくなるので、上流の版（3.6.9）までを固定する。
 #   入った版は作るときの記録に出す（dpkg-query の行）。
-FROM debian:trixie-20261020-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+FROM debian:trixie-20261104-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends 'dcmtk=3.6.9-*' \
