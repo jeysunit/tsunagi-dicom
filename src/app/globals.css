@@ -83,7 +83,7 @@
   --w-side: 360px;
 }
 
-/* 縦のスクロールバーが出入りしても、画面が左右に寄らない（ui-kit 1.2.7 の components.css と同じ値。
+/* 縦のスクロールバーが出入りしても、画面が左右に寄らない（ui-kit 1.2.8 の components.css と同じ値。
    tsunagi は components.css を読まないので、この 1 行をここに残す。docs/design-system/parts.md の「外枠」） */
 html {
   scrollbar-gutter: stable;
