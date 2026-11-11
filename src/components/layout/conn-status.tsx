@@ -11,10 +11,10 @@ import { formatDateTimeIn } from "@/lib/format/japanese-date";
 import { cn } from "@/lib/utils";
 
 // 上の帯の接続の状態（docs/design-system/parts.md の「上の帯」。部品集の `.connbtn`・`.pop`）。
-// 閉じているときは枠つき 32px のボタンの中に 「接続の状態」・全体の状態の札・シェブロン（開くと上向き）を左からこの順で置く。
+// 閉じているときは枠つき 32px のボタンの中に 「接続の状態」・全体の状態バッジ・シェブロン（開くと上向き）を左からこの順で置く。
 // 全体の語は 5 つ（確認中・接続中・一部が接続不可・未確認・確認できません）だけ。ほかの語を作らない。
 // 押すと標準の popover 属性で中身が開く（外を押す・Esc で閉じる。開け閉めは書かない）。ボタンに aria-label は付けない（見える文字が名前になる）。
-// 640px 未満は「接続の状態」の文字を視覚的に隠す（読み上げの名前は残る）。1 分ごとに替わる札は読み上げない（aria-live を付けない）。
+// 640px 未満は「接続の状態」の文字を視覚的に隠す（読み上げの名前は残る）。1 分ごとに替わる状態バッジは読み上げない（aria-live を付けない）。
 // 中身は画像サーバー・HL7 の受け口・接続先の直近の接続確認と、接続先の頁への道。状態は画面の API（/api/connection-status）から読む。
 // 読むのは頁を開いたとき・1 分ごと（頁が見えている間）・開いたとき。この読み取りは相手に何も送らない。「接続確認」を押したときだけ、接続先に C-ECHO をかける（docs/spec.md の 3.3）。
 
@@ -27,7 +27,7 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
   const [state, setState] = useState<State>({ kind: "loading" });
   const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(false);
-  // 手で押した「接続確認」の結果の文。読み上げるのはこれだけ（1 分ごとに替わる札は読み上げない）
+  // 手で押した「接続確認」の結果の文。読み上げるのはこれだけ（1 分ごとに替わる状態バッジは読み上げない）
   const [report, setReport] = useState("");
   const checkingRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -97,7 +97,7 @@ export function ConnStatus({ timeZone, csrfToken, canCheck = false }: { timeZone
       }
     });
   }
-  // 読めなかった（401・423・通信の失敗）ときは、接続先が落ちているとは言えないので「一部が接続不可」にせず別の札にする。
+  // 読めなかった（401・423・通信の失敗）ときは、接続先が落ちているとは言えないので「一部が接続不可」にせず別の状態バッジにする。
   // 読めたが全体の状態が無い（この役割には全体の状態を返さない）ときは、確認した結果を持たないので「未確認」
   const overall = state.kind === "error" ? "unknown" : state.kind === "loading" ? "loading" : (view?.overall ?? "unchecked");
 
@@ -207,7 +207,7 @@ export function checkSummary(results: Pick<PostResult, "ok" | "data">[]): string
 
 export type Overall ="loading" | "ok" | "ng" | "unchecked" | "unknown";
 
-/** 全体の状態の札。語と data-k は parts.md の表の 5 つだけ */
+/** 全体の状態バッジ。語と data-k は parts.md の表の 5 つだけ */
 export function OverallBadge({ overall }: { overall: Overall }) {
   switch (overall) {
     case "loading":
@@ -223,7 +223,7 @@ export function OverallBadge({ overall }: { overall: Overall }) {
   }
 }
 
-/** 相手ごとの 種類（dt）・名前（太字）・札・時刻（dd） */
+/** 相手ごとの 種類（dt）・名前（太字）・状態バッジ・時刻（dd） */
 function Row({ kind, name, children }: { kind: string; name: string; children: React.ReactNode }) {
   return (
     <>

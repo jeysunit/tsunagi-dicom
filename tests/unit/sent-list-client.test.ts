@@ -43,7 +43,7 @@ describe("送信一覧の画面の計算", () => {
     expect(pageSlice([], 1, 50)).toMatchObject({ page: 1, pages: 1, first: 0, last: 0, rows: [] });
   });
 
-  it("状態の語は用語集の語。失敗と結果不明には、札の隣に なぜか と次にすること を出す", () => {
+  it("状態の語は用語集の語。失敗と結果不明には、状態バッジの隣に なぜか と次にすること を出す", () => {
     expect(Object.values(SENT_STATUS_LABELS)).toEqual(["送信待ち", "送信中", "送信完了", "送信失敗", "結果不明"]);
     expect(sentStatusNote(items[0]!)).toBe("");
     expect(sentStatusNote(items[1]!)).toContain("teaching の接続確認をしてから");

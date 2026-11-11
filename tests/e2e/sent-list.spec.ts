@@ -104,7 +104,7 @@ test("送信一覧：状態の要約・上限の知らせ・件数・ページ�
   await expect(page.getByTestId("sent-row")).toHaveCount(100);
   await expect(page.getByTestId("sent-range")).toHaveText("1〜100 件目／全 120 件");
 
-  // 1 行目：受付日時は TZ（Asia/Tokyo）の時刻、状態は札（文字と印）
+  // 1 行目：受付日時は TZ（Asia/Tokyo）の時刻、状態は状態バッジ（文字と印）
   const first = page.getByTestId("sent-row").first();
   await expect(first.getByTestId("sent-at")).toHaveText("2026/10/26 08:59");
   await expect(first.getByTestId("sent-status")).toHaveText("✓送信完了");

@@ -64,7 +64,7 @@ const PAIRS: [string, string][] = [
   // 終わったことの印の文字（送信完了・接続確認の成功）
   ["success", "background"],
   ["success", "surface"],
-  // 途中のことの印（状態の札の枠と印。docs/design-system/components.md）
+  // 途中のことの印（状態バッジの枠と印。docs/design-system/components.md）
   ["warning", "background"],
   ["warning", "surface"],
 ];

@@ -36,14 +36,14 @@ test("受け取りの記録：一般は、受け取った検査を新しい順�
   await expect(page).toHaveURL(/\/received\?period=range&from=2026-10-17&to=2026-10-17$/);
   await expect(rows).toHaveCount(8);
   await expect(page.getByTestId("received-period")).toHaveText("2026/10/17〜2026/10/17・新しい順");
-  // 状態の列：見本の最初の行は落ち着く前（受信中）、ほかは受信完了。札は文字と印を持つ
+  // 状態の列：見本の最初の行は落ち着く前（受信中）、ほかは受信完了。状態バッジは文字と印を持つ
   await expect(rows.first().getByTestId("received-state")).toHaveText("◔受信中");
   await expect(rows.nth(1).getByTestId("received-state")).toHaveText("✓受信完了");
   // 見本の変更の記録の時刻 20261017T133200 は UTC。TZ=Asia/Tokyo の時刻で出す（docs/spec.md の 3.3）
   await expect(rows.first().getByTestId("received-at")).toHaveText("2026/10/17 22:32:00");
   await expect(rows.first()).toContainText("DTG_SCU");
   await expect(rows.first()).toContainText("JP-TEST-0004");
-  // 「インポート」は状態ではない知らせなので、状態の札（知らせ ◇）。検査一覧の「インポート」と同じ形
+  // 「インポート」は状態ではない知らせなので、状態バッジ（知らせ ◇）。検査一覧の「インポート」と同じ形
   await expect(page.getByTestId("received-origin")).toHaveText(["◇インポート"]);
   await expect(page.getByTestId("received-origin")).toHaveAttribute("data-k", "note");
   // 1 行は 28px ほど
@@ -228,7 +228,7 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
   await expect(rows).toHaveCount(3);
   await expect(page.getByTestId("modality-table")).not.toContainText("192.0.2.");
   await page.locator('[data-modality="dtg"]').getByTestId("echo").click();
-  // 結果は札と時刻つき（「成功 10:32:05」。失敗は札・時刻・理由の 1 句。docs/spec.md の 3.3）
+  // 結果は状態バッジと時刻つき（「成功 10:32:05」。失敗は状態バッジ・時刻・理由の 1 句。docs/spec.md の 3.3）
   await expect(page.locator('[data-modality="dtg"]').getByTestId("echo-result")).toHaveText(/成功\s*\d{2}:\d{2}:\d{2}$/);
   await expect(page.getByTestId("echo-notice")).toContainText("dtg に接続できました");
   await page.locator('[data-modality="offline"]').getByTestId("echo").click();
@@ -262,7 +262,7 @@ test("接続先：確認そのものを終えられなかったときは、接�
   await expect(page.getByTestId("echo-notice")).not.toContainText("dtg に接続できませんでした");
 });
 
-test("接続先：確認中は札を出し、その行のボタンを押せなくする。二度押しても要求は 1 回", async ({ page }) => {
+test("接続先：確認中は状態バッジを出し、その行のボタンを押せなくする。二度押しても要求は 1 回", async ({ page }) => {
   await asRole(page, "一般");
   let calls = 0;
   await page.route("**/api/modalities/dtg/echo", async (route) => {

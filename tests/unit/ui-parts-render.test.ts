@@ -39,7 +39,7 @@ describe("小さな印（Badge）", () => {
     const html = renderToStaticMarkup(createElement(Badge, { children: "新着" }));
     for (const c of ["h-5", "rounded-[3px]", "border", "border-border", "px-1.5", "text-xs", "text-label"]) expect(html).toContain(c);
     expect(html).toContain(">新着</span>");
-    // 状態の印（札の形）と主の色は使わない
+    // 状態の印（状態バッジの形）と主の色は使わない
     expect(html).not.toContain("data-k");
     expect(html).not.toContain("bg-primary");
   });
@@ -97,8 +97,8 @@ describe("接続の状態（ConnStatus）", () => {
     expect(html).toContain("接続先を開く");
   });
 
-  // 上の帯の構造（parts.md の「上の帯」。C3）：枠つき 32px のボタンの中に 「接続の状態」・札・シェブロンをこの順で置く
-  it("ボタンは 32px の枠つき。「接続の状態」・全体の札・シェブロン（絵）の順で、aria-label は付けない", () => {
+  // 上の帯の構造（parts.md の「上の帯」。C3）：枠つき 32px のボタンの中に 「接続の状態」・状態バッジ・シェブロンをこの順で置く
+  it("ボタンは 32px の枠つき。「接続の状態」・全体の状態バッジ・シェブロン（絵）の順で、aria-label は付けない", () => {
     const html = renderToStaticMarkup(createElement(ConnStatus, { timeZone: "Asia/Tokyo" }));
     const button = /<button\b[^>]*>(.*?)<\/button>/.exec(html);
     expect(button).not.toBeNull();
@@ -121,7 +121,7 @@ describe("接続の状態（ConnStatus）", () => {
     const withCheck = renderToStaticMarkup(createElement(ConnStatus, { timeZone: "Asia/Tokyo", canCheck: true }));
     expect(withCheck).toMatch(/<button[^>]*data-testid="conn-check"[^>]*>接続確認<\/button>/);
     expect(withCheck).toMatch(/<p class="sr-only" role="status" aria-live="polite"[^>]*><\/p>/);
-    // 札のあるボタンの側には aria-live を付けない（1 分ごとに替わる札は読み上げない）
+    // 状態バッジのあるボタンの側には aria-live を付けない（1 分ごとに替わる状態バッジは読み上げない）
     expect(/<button\b[^>]*popovertarget[^>]*>/i.exec(withCheck)![0]).not.toContain("aria-live");
     const without = renderToStaticMarkup(createElement(ConnStatus, { timeZone: "Asia/Tokyo" }));
     expect(without).not.toContain("接続確認</button>");

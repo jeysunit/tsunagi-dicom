@@ -761,7 +761,7 @@ test("モダリティごとの既定のビューア：管理者が管理の画�
   const ct = page.getByLabel("CT の標準のビューア");
   await expect(ct).toHaveValue("ohif");
   await ct.selectOption("stone");
-  // 期待の変更：前は「CT の標準のビューアを保存しました」の文。いまは欄の横の札「保存しました」（3 秒で消える）
+  // 期待の変更：前は「CT の標準のビューアを保存しました」の文。いまは欄の横の状態バッジ「保存しました」（3 秒で消える）
   await expect(page.getByText("保存しました")).toBeVisible();
   await expect(page.getByText("保存しました")).toHaveCount(0, { timeout: 6_000 });
 
@@ -774,13 +774,13 @@ test("モダリティごとの既定のビューア：管理者が管理の画�
   await expect(page.getByText("保存しました")).toBeVisible();
 });
 
-test("ビューア設定のすぐ保存：答えが届かないときは、保存済みの値を読んで照らし合わせる（書けていなければ戻し、書けていれば札を出す）", async ({ page }) => {
+test("ビューア設定のすぐ保存：答えが届かないときは、保存済みの値を読んで照らし合わせる（書けていなければ戻し、書けていればバッジを出す）", async ({ page }) => {
   await asRole(page, "管理者");
   await page.goto("/admin/viewers");
   const ct = page.getByLabel("CT の標準のビューア");
   await expect(ct).toHaveValue("ohif");
 
-  // 要求がサーバーに届かない：書けていないので、元の値に戻して理由を出す。札は出さない
+  // 要求がサーバーに届かない：書けていないので、元の値に戻して理由を出す。バッジは出さない
   await page.route("**/api/admin/viewer-defaults", async (route) => {
     if (route.request().method() === "POST") await route.abort();
     else await route.continue();
@@ -790,7 +790,7 @@ test("ビューア設定のすぐ保存：答えが届かないときは、保�
   await expect(ct).toHaveValue("ohif");
   await expect(page.getByText("保存しました")).toHaveCount(0);
 
-  // 書けたあとで答えが失われる：書けているので、選んだ値のまま札を出す
+  // 書けたあとで答えが失われる：書けているので、選んだ値のままバッジを出す
   await page.unroute("**/api/admin/viewer-defaults");
   await page.route("**/api/admin/viewer-defaults", async (route) => {
     if (route.request().method() === "POST") {
@@ -1117,7 +1117,7 @@ test("狭い画面では絞り込みが折り返し、横にはみ出さない",
     return { scroll: f.scrollWidth, client: f.clientWidth, page: document.documentElement.scrollWidth <= window.innerWidth };
   });
   expect(g.scroll).toBeLessThanOrEqual(g.client + 1);
-  // 上の帯の接続の状態の札が一番長い「一部が接続不可」でも、頁は横にはみ出さない
+  // 上の帯の接続の状態バッジが一番長い「一部が接続不可」でも、頁は横にはみ出さない
   await page.route("**/api/connection-status", async (route) => {
     const res = await route.fetch();
     const body = (await res.json()) as { connection?: Record<string, unknown> };

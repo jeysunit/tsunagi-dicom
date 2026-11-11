@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 
 // 患者バナー（docs/design-system/parts.md の「患者バナー（`.fb`）」・components.md の「患者バナー」）。
 // 患者のある画面の、見出しの下の同じ位置に同じ並びで置く。項目と大きさは中身で変えない。形は 2 つだけ：
-// - r2：幅 900px 未満の区画（一覧の右の詳細）。1 行目 氏名（かな）・患者ID・生年月日と性別、2 行目 札・受付番号・検査日時・モダリティと検査名。各行 40px
-// - r1：それ以外のすべて（詳細だけの画面など）。1 行に 氏名・患者ID・生年月日と性別・受付番号・検査日時・モダリティと検査名・右端に札
+// - r2：幅 900px 未満の区画（一覧の右の詳細）。1 行目 氏名（かな）・患者ID・生年月日と性別、2 行目 状態バッジ・受付番号・検査日時・モダリティと検査名。各行 40px
+// - r1：それ以外のすべて（詳細だけの画面など）。1 行に 氏名・患者ID・生年月日と性別・受付番号・検査日時・モダリティと検査名・右端に状態バッジ
 // 値の無い項目も項目名を残し、値を「—」（label の色）にする（詰めると、検査ごとに項目の位置が替わる）。
 // かなとモダリティ・検査名は 1 行で切り、全文を title に出す。氏名・患者ID・受付番号は切らない（収まらないときだけ、その行が高くなる）。
 // 和暦・紹介医・英字氏名・Study ID・シリーズ数と画像数は、バナーに追加せず「検査の情報」に置く。
@@ -29,7 +29,7 @@ export interface PatientBannerProps extends Omit<React.ComponentProps<"section">
   studyDateTime?: string;
   modalities?: readonly string[];
   studyDescription?: string;
-  /** 状態の札（保管の確認など）。r2 では 2 行目の先頭、r1 では右端 */
+  /** 状態バッジ（保管の確認など）。r2 では 2 行目の先頭、r1 では右端 */
   end?: React.ReactNode;
   /** r2：一覧の右の詳細の 2 行の形。r1：それ以外の 1 行の形 */
   layout?: "r1" | "r2";
@@ -176,7 +176,7 @@ export function PatientBanner({
             {pid}
             {birth}
           </div>
-          {/* 2 行目：札・受付番号・検査日時・モダリティと検査名 */}
+          {/* 2 行目：状態バッジ・受付番号・検査日時・モダリティと検査名 */}
           <div
             className={cn(
               "grid min-h-10 items-center gap-x-4 border-t border-border py-1",

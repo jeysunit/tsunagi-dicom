@@ -59,7 +59,7 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   });
 
-  test("上の帯：題はアプリの名前だけ（版は出さない）、接続の状態の札と標準の popover、見出しの h1", async ({ page }) => {
+  test("上の帯：題はアプリの名前だけ（版は出さない）、接続の状態バッジと標準の popover、見出しの h1", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("検査一覧");
     const header = page.getByTestId("site-header");
@@ -67,7 +67,7 @@ test.describe("共通の画面と検査の一覧（モック）", () => {
     await expect(header.getByTestId("app-version")).toHaveCount(0);
     await expect(header).not.toContainText(/\d+\.\d+\.\d+/);
     const button = header.getByRole("button", { name: /^接続の状態/ });
-    // 札は全体の状態 1 つ（接続中・一部が接続不可）。ほかの試験で接続確認が失敗していれば後者になる
+    // 状態バッジは全体の状態 1 つ（接続中・一部が接続不可）。ほかの試験で接続確認が失敗していれば後者になる
     await expect(button).toContainText(/接続中|一部が接続不可/);
     const pop = page.getByTestId("conn-popover");
     await expect(pop).toBeHidden();

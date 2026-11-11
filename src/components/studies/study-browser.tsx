@@ -405,7 +405,7 @@ function textWidth(text: string | undefined): number {
 /** 列の左右の余白（px-2）と罫線 */
 const CELL_PAD = 18;
 /**
- * モダリティ・検査の記述の列の最小の幅。見出し「モダリティ／検査名」・モダリティの札（MR など）・「インポート」の札が `…` で切れない幅。
+ * モダリティ・検査の記述の列の最小の幅。見出し「モダリティ／検査名」・モダリティのバッジ（MR など）・「インポート」の状態バッジが `…` で切れない幅。
  * 一覧がこれより狭いときは、一覧の中で横にスクロールする
  */
 const DESC_MIN = 160;
@@ -442,7 +442,7 @@ function columnsFor(studies: readonly StudyView[], showAccession: boolean, compa
     // シリーズ数／画像数（`2 / 6`）。見出し「Se/Im」が入る下限から、値に合わせる
     { key: "count", width: fit((s) => `${s.seriesCount ?? "—"} / ${s.instanceCount ?? "—"}`, 56, 120) },
     // 「開く」と「▼」を並べた分け押しのボタン（83px）に左右の余白。1280px の画面（左のナビあり・詳細を閉じた）で、
-    // モダリティの札・「インポート」の札と検査名の頭が入る幅（DESC_MIN）を残す
+    // モダリティのバッジ・「インポート」の状態バッジと検査名の頭が入る幅（DESC_MIN）を残す
     { key: "viewer", width: 104 },
   ];
   // 詳細を開いている間の詰めた形（docs/design-system/screen-types.md の「型 B の変種」）：検査日時・患者 ID・氏名・性別・モダリティと検査名。

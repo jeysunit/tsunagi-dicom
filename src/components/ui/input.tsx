@@ -54,7 +54,7 @@ function Field({
   msg?: string | null;
   msgId?: string;
   testId?: string;
-  /** 項目名の右に「必須」を出す（部品集の `.req`。赤い札にしない） */
+  /** 項目名の右に「必須」を出す（部品集の `.req`。赤いバッジにしない） */
   required?: boolean;
 }) {
   return (
