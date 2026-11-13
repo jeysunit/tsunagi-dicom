@@ -35,7 +35,7 @@ export interface PickItem<F = File> {
   tags: PreviewTags | null;
   /** 結果不明の行を管理者が確認して記録するための識別子。BFF に届いた要求だけが持つ（届いたか分からない行には無い） */
   resolve?: ResolveTarget;
-  /** 結果不明の行を管理者が確認して記録した行（札は成功か失敗。結果の知らせに「うち K 件は管理者が確認」と数える） */
+  /** 結果不明の行を管理者が確認して記録した行（状態バッジは成功か失敗。結果の知らせに「うち K 件は管理者が確認」と数える） */
   confirmed?: boolean;
 }
 
@@ -223,7 +223,7 @@ export function cancelWaiting<F>(items: readonly PickItem<F>[]): { items: PickIt
   return { items: next, cancelled };
 }
 
-/** 状態の札の種類と語（除外は off で決まる） */
+/** 状態バッジの種類と語（除外は off で決まる） */
 export function badgeOf(i: PickItem<unknown>): { kind: "plan" | "wait" | "ok" | "ng" | "unknown" | "skip" | "stop"; label: string } {
   if (i.off) return { kind: "skip", label: "除外" };
   switch (i.state) {
@@ -264,7 +264,7 @@ export function addedMessage(fresh: readonly PickItem<unknown>[], duplicates: nu
 /** 確認できる行（結果不明で、BFF に届いた要求の識別子を持つ）。「確認」のボタンを出す行 */
 export const isResolvable = (i: PickItem<unknown>): i is PickItem<unknown> & { resolve: ResolveTarget } => i.state === "uk" && !i.off && !!i.resolve;
 
-/** 結果不明の理由の句を替える先（確認して記録した行の、札の下の 1 句） */
+/** 結果不明の理由の句を替える先（確認して記録した行の、状態バッジの下の 1 句） */
 export const RESOLVED_NOTE = "管理者が確認";
 
 /** 記録を送れなかった（通信が切れた）ときの文。何が起きたか・次にすること（RESOLVE_FAILED_MESSAGE と同じ型） */
@@ -273,7 +273,7 @@ export const RESOLVE_UNREACHABLE_MESSAGE = "サーバーに接続できません
 /** 確認内容の欄の誤り（空・空白だけ） */
 export const NOTE_REQUIRED = "確認内容を入力してください。";
 
-/** 確認して記録したあと：その行の札を成功か失敗に替える。識別子は外し、札の下の 1 句は「管理者が確認」にする */
+/** 確認して記録したあと：その行の状態バッジを成功か失敗に替える。識別子は外し、状態バッジの下の 1 句は「管理者が確認」にする */
 export function resolveItem<F>(items: readonly PickItem<F>[], id: number, outcome: "success" | "failed"): PickItem<F>[] {
   return items.map((i) => {
     if (i.id !== id || !isResolvable(i)) return i;

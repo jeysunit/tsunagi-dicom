@@ -928,7 +928,7 @@ function dicomBytes(o: { sop: string; study: string; patientId: string }): Buffe
 }
 
 // フェーズ 6（フェーズ 5 の後に置く。フェーズ 5 で消した検査のファイルを入れ直す。モックの Orthanc は、見本の検査のファイルだけを受ける）
-test("段 6：インポートは左のナビから開き、選んだファイルを 1 件ずつ送り、行の札に成功・失敗・対象外を出す。入れた検査は一覧で「インポート」と分かる", async ({ browser }, testInfo) => {
+test("段 6：インポートは左のナビから開き、選んだファイルを 1 件ずつ送り、行の状態バッジに成功・失敗・対象外を出す。入れた検査は一覧で「インポート」と分かる", async ({ browser }, testInfo) => {
   test.setTimeout(120_000);
   const fresh = await newPage(browser);
   const { page } = fresh;
@@ -965,7 +965,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(rows).toHaveCount(4);
   await expect(picker.getByTestId("import-sum")).toContainText("4 件（対象外 1）");
   await expect(picker.getByTestId("import-sum")).toContainText("選択 3 件");
-  // 対象外は一覧の上に、理由と札で残す（除外のボタンは無い）
+  // 対象外は一覧の上に、理由と状態バッジで残す（除外のボタンは無い）
   await expect(rows.first()).toContainText("memo.txt");
   await expect(rows.first()).toContainText("対象外");
   await expect(rows.first()).toContainText("DICOM ファイルではありません");
@@ -1025,7 +1025,7 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(picker.getByTestId("import-formbar")).toHaveText("選択 1 件 → 成功 0・失敗 1");
   await expect(rows.first()).toContainText("同じ画像または検査がもう画像サーバーにあります");
 
-  // 結果不明の札の出し方（画面だけを見る。BFF の答えを、画像サーバーの答えが分からなかった形に置き換える。
+  // 結果不明の状態バッジの出し方（画面だけを見る。BFF の答えを、画像サーバーの答えが分からなかった形に置き換える。
   // BFF の結果不明の扱いそのものは tests/unit/import-route.test.ts）：状態を 1 回確認し、決まらなければ結果不明
   let checks = 0;
   await page.route("**/api/import*", async (route) => {
@@ -1068,14 +1068,14 @@ test("段 6：インポートは左のナビから開き、選んだファイル
   await expect(resolvePanel.getByTestId("import-resolve-input")).toBeFocused();
   await expect(unknownRow).toContainText("結果不明");
   await page.screenshot({ path: testInfo.outputPath("import-1280-resolve.png"), fullPage: true });
-  // BFF が断ったとき：欄を閉じず、欄の上に BFF の文を出し、入力と札はそのまま（この要求は BFF に記録が無いので 404）
+  // BFF が断ったとき：欄を閉じず、欄の上に BFF の文を出し、入力と状態バッジはそのまま（この要求は BFF に記録が無いので 404）
   await resolvePanel.getByTestId("import-resolve-input").fill("画像サーバーで確認した");
   await resolvePanel.getByRole("button", { name: "失敗として記録" }).click();
   await expect(resolvePanel.getByTestId("import-resolve-error")).toHaveText("この検査に、その要求ID のインポートはありません");
   await expect(resolvePanel.getByTestId("import-resolve-error")).toHaveAttribute("role", "alert");
   await expect(resolvePanel.getByTestId("import-resolve-input")).toHaveValue("画像サーバーで確認した");
   await expect(unknownRow).toContainText("結果不明");
-  // BFF が受けたとき：欄を閉じ、札は成功に替わって「管理者が確認」、件数を数え直し、知らせは結果不明の文を外す。焦点は「続けて選択」
+  // BFF が受けたとき：欄を閉じ、状態バッジは成功に替わって「管理者が確認」、件数を数え直し、知らせは結果不明の文を外す。焦点は「続けて選択」
   let resolveBody: { requestId?: unknown; outcome?: unknown; note?: unknown } | null = null;
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));

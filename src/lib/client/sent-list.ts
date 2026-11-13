@@ -5,7 +5,7 @@ import { normalizeForSearch } from "@/lib/study-filter";
 // 送信一覧の画面の計算（docs/spec.md の 3.4）。期間は BFF で読み、送信先・患者ID と氏名・状態の絞り込みとページ送りは、
 // 読んだ範囲（上限 1,000 件）の中で画面が行う（受信一覧と同じ。Orthanc へは求め直さない）。
 
-/** 状態の札の語と形（docs/spec.md の 2.2、docs/design-system/components.md の「状態の札」） */
+/** 状態バッジの語と形（docs/spec.md の 2.2、docs/design-system/components.md の「状態バッジ」） */
 export const SENT_STATUS_LABELS: Record<SentStatus, string> = {
   pending: "送信待ち",
   running: "送信中",
@@ -85,7 +85,7 @@ export function sentStudyHref(item: SentView): string | null {
 }
 
 /**
- * 札の隣（詳細）に出す文：なぜか＋次にすること（docs/design-system/writing.md。札が事象を言うので繰り返さない）。
+ * 状態バッジの隣（詳細）に出す文：なぜか＋次にすること（docs/design-system/writing.md。状態バッジが事象を言うので繰り返さない）。
  * 結果不明は、成功とも失敗とも書かず、確認する対象と、それまでできないことを書く
  */
 export function sentStatusNote(item: SentView): string {

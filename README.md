@@ -167,6 +167,8 @@ docker/dev/up.sh
 
 secret のファイルを作り（`docker/dev/secrets/`）、tsunagi-dicom のイメージをこのリポジトリから作り、一式を立ててから、開く URL とパスワードのファイルの場所を出す。ris-emulator の予約 → dicom-test-generator → Orthanc → tsunagi-dicom の受信一覧 → 送信 → storescp と実行する手順は [`docs/round-trip-test.md`](docs/round-trip-test.md) にある。
 
+`docker/dev/ris/` と `docker/dev/dtg/` の `app_config.yaml` を変えたら、`docker compose -f docker/dev/compose.yaml restart ris dtg` で該当のコンテナを再起動する。設定ファイルは読み取り専用の bind マウントで載るため、再起動しないと古い設定のまま動く。
+
 ## 試しに動かす（モック）
 
 Orthanc 無しで、架空の患者の見本（`tests/fixtures/orthanc`）を Orthanc の形で返すモックのバックエンドと、開発用の認証（`AUTH_MODE=dev`、書き込みは止める）で動かす。
