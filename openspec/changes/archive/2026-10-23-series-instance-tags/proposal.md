@@ -36,7 +36,7 @@
 ## Impact
 
 - 画面：`src/components/studies/study-detail.tsx`（サムネイルの並び・「DICOM タグ」の切り替え）と、新しい画像の場所の部品
-- 画面の API：`src/app/api/studies/[uid]/series/[series]/instances/[sop]/tags/route.ts` を追加する。値の組み立て（`src/lib/all-values.ts`）に、設定のタグの選び出し・タグ名・長い値の切り方を追加する
+- 画面の API：`src/app/api/studies/[uid]/series/[series]/instances/[sop]/tags/route.ts` を追加する。値の整形（`src/lib/all-values.ts`）に、設定のタグの選び出し・タグ名・長い値の切り方を追加する
 - 設定：`src/lib/config.ts` と `.env.example` に `INSTANCE_TAGS` を追加する（配布の compose は `tsunagi.env` で渡せるので変えない）
 - 画像サーバーへの要求：種類は増えない。画像の値は、いまと同じ WADO-RS の `metadata`（BFF の側）で読む。Orthanc の REST は使わない
 - 権限・監査：権限は追加しない（`dicom.all_values`）。操作ログの `view_study` の `detail` に、出したタグの組（`set`）を追加する
