@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=24.11.0 <25"
   },
+  "browserslist": [
+    "baseline widely available"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
