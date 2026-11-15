@@ -315,7 +315,7 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
   );
 }
 
-/** 接続先の詳細の区画（部品集の `.sec`）。題は 14px・行の高さ 20px・地 surface */
+/** 接続先の詳細の区画（デザインシステムの `.sec`）。題は 14px・行の高さ 20px・地 surface */
 function Sec({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
   return (
     <section className={cn("min-w-0 rounded-md border border-border bg-background", className)}>
