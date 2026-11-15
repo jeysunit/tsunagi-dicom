@@ -25,7 +25,7 @@ import type { Session as SessionRow, User } from "@/generated/prisma/client";
 
 export const AUTH_MODE_LOCAL = "local";
 // 下の3つは既定の値。運用に合わせて設定で変える（LOGIN_PENDING_MINUTES・SESSION_MAX_HOURS・REAUTH_MINUTES。
-// src/lib/config.ts、docs/spec.md の 2.1。2026-10-18 に承認者が決めた）
+// src/lib/config.ts、docs/spec.md の 2.1。2026-10-18 に決めた）
 /** ログインの途中（TOTP の入力・登録・パスワードの変更の待ち）のセッションの長さの既定 */
 export const PENDING_SESSION_MINUTES = 10;
 /** ログインしたセッションの長さの既定（操作があっても、これを過ぎたらログインし直す） */
@@ -342,7 +342,7 @@ async function registerFailure(
   }
   // 一時停止にしたら、ログインの途中のセッションだけを閉じる。ログインし終えたセッションは閉じない
   // （ほかの人がその利用者名で失敗を重ねても、使っている職員を締め出さない。一時停止の間は、パスワードを確認する
-  // 操作（ロックの解除・再認証・パスワードの変更）を断る。2026-10-18 に承認者が決めた。docs/spec.md の 3.6）
+  // 操作（ロックの解除・再認証・パスワードの変更）を断る。2026-10-18 に決めた。docs/spec.md の 3.6）
   await ctx.db.session.deleteMany({ where: { userId: user.id, stage: { not: "active" } } });
   await record(ctx, actorOf(user), {
     action: "login_lock",
@@ -845,7 +845,7 @@ export const REAUTH_TOTP_REQUIRED = "reauth_totp_required";
 
 /**
  * もう一度の本人の確認（docs/spec.md の 3.6 の「再認証」）。確認した時刻は、サーバーの側のこのセッションの行だけに持つ。
- * - 認証コードを添えなければ、パスワードだけで確認する（削除などの再認証。2026-10-20 に承認者が決めた）。送られていない番号は
+ * - 認証コードを添えなければ、パスワードだけで確認する（削除などの再認証。2026-10-20 に決めた）。送られていない番号は
  *   確認せず、使ったステップにも数えない。TOTP を登録した利用者の成功は、試みの枠を返すだけで、前の失敗の数を消さない
  *   （verifyAgain。画面のロックの解除と同じ）。
  * - 認証コードを添えれば、TOTP を登録した利用者には TOTP まで確認し、reauthMfaAt も記す（利用者の管理の再認証）。
@@ -894,7 +894,7 @@ function withinReauth(ctx: AuthContext, at: number, when: Date | null, sameRole:
 /**
  * 大事な操作の前に呼ぶ。設定の reauthMinutes（既定 REAUTH_MINUTES）の中に、このセッションで再認証していなければ
  * 403（problems に REAUTH_REQUIRED）。ログインの一時停止の間は、再認証の有効時間の内でも 403（problems に locked）
- * （一時停止の間は再認証を止める、という承認者の決定に合わせ、前に通した再認証も使わせない）。
+ * （一時停止の間は再認証を止める、という決定に合わせ、前に通した再認証も使わせない）。
  * requireTotp（利用者の管理）のときは、TOTP を登録した利用者には、TOTP まで確認した再認証を求める（problems に
  * REAUTH_TOTP_REQUIRED も）。パスワードとセッションだけで、管理者の作成・役割の格上げ・ほかの管理者の TOTP の
  * やり直しをさせないため（2026-10-20 の独立レビューの指摘。docs/spec.md の 3.6）
@@ -1013,7 +1013,7 @@ export async function lockScreen(
 /**
  * ロックを解く。既定はパスワードだけ（席を外した間の覗き見を防ぐロックで、確認するのはログインした本人が戻ったか。
  * 二要素はログインで済んでいる）。SCREEN_UNLOCK_REQUIRE_TOTP=true なら、登録していれば TOTP も求める。
- * 失敗はログインの失敗と同じに数える（docs/spec.md の 3.6。2026-10-19 に承認者が決めた）
+ * 失敗はログインの失敗と同じに数える（docs/spec.md の 3.6。2026-10-19 に決めた）
  */
 export async function unlockScreen(
   ctx: AuthContext,

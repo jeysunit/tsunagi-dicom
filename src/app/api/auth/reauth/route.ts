@@ -13,7 +13,7 @@ const Body = z.object({
 // 大事な操作（利用者の管理）の前の、もう一度の本人の確認（パスワードと、登録していれば TOTP）。
 // 通れば設定の REAUTH_MINUTES 分の間、大事な操作ができる。失敗はログインの失敗と同じに数える。
 // ログインの一時停止の間は断る（401、problems に locked）。ログインし終えたセッションは閉じない
-// （2026-10-18 に承認者が決めた。docs/spec.md の 3.6）。
+// （2026-10-18 に決めた。docs/spec.md の 3.6）。
 export async function POST(request: Request) {
   try {
     const state = await checkedState(request);
