@@ -18,8 +18,8 @@ import { cn } from "@/lib/utils";
 
 // 接続先の表と接続確認（docs/spec.md の 3.3。フェーズ 4）。1 件 1 行。「接続確認」で Orthanc から C-ECHO を送る。
 // 「最後の接続確認」の列は、未確認（状態バッジ。確認できる相手でまだ確認していない）・確認中（状態バッジ。その行のボタンは押せない）・成功（状態バッジと時刻）・失敗（状態バッジと時刻と理由の 1 句）。
-// 名称の行を選ぶと、表の下に接続先の詳細（設定・接続確認・受け取ったもの・送ったもの）を出す（docs/design-system/components.md の「接続先の詳細」）。
-// 受け取ったもの・送ったものは、今日の分の新しい 5 件だけ。全部は「受信一覧で全部見る」「送信一覧で全部見る」で、相手（AEタイトル）で絞った一覧を開く。
+// 名称の行を選ぶと、表の下に接続先の詳細（設定・接続確認・今日の受信・今日の送信）を出す（docs/design-system/components.md の「接続先の詳細」）。
+// 今日の受信・今日の送信は、今日の分の新しい 5 件だけ。全部は「受信一覧で全部見る」「送信一覧で全部見る」で、相手（AEタイトル）で絞った一覧を開く。
 // 画面の言葉は docs/spec.md の 2.2、文の型は docs/design-system/writing.md。
 
 interface EchoResult {
@@ -122,8 +122,8 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
     void (async () => {
       try {
         const [received, sent] = await Promise.all([
-          readPart<ReceivedView>("/api/receive-log?period=today", ctrl.signal, "受け取ったもの"),
-          readPart<SentView>("/api/sent-log?period=today", ctrl.signal, "送ったもの"),
+          readPart<ReceivedView>("/api/receive-log?period=today", ctrl.signal, "今日の受信"),
+          readPart<SentView>("/api/sent-log?period=today", ctrl.signal, "今日の送信"),
         ]);
         setLogs({ received, sent });
       } catch {
@@ -339,7 +339,7 @@ function Kv({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
-/** 接続先の詳細（表の下）。設定・接続確認・受け取ったもの・送ったもの の 4 区画を 2 列の格子で並べる（760px 以下は 1 列） */
+/** 接続先の詳細（表の下）。設定・接続確認・今日の受信・今日の送信 の 4 区画を 2 列の格子で並べる（760px 以下は 1 列） */
 function ModalityDetail({
   modality,
   showAddress,
@@ -395,7 +395,7 @@ function ModalityDetail({
         </div>
       </Sec>
       {showReceived && (
-        <Sec title="受け取ったもの" className={sections === 3 && !showSent ? span : undefined}>
+        <Sec title="今日の受信" className={sections === 3 && !showSent ? span : undefined}>
           <RecentLog
             part={logs?.received}
             rows={received?.slice(0, RECENT).map((r, i) => ({
@@ -407,9 +407,9 @@ function ModalityDetail({
             count={received?.length ?? 0}
             partial={receivedPartial}
             aside={receivedAside(received ?? [])}
-            what="受け取ったもの"
+            what="今日の受信"
             emptyText="今日の受信はありません。"
-            label={`${id} から受け取ったもの`}
+            label={`${id} の今日の受信`}
             timeZone={timeZone}
             href={`/received?aet=${aetQuery}`}
             linkText="受信一覧で全部見る"
@@ -418,7 +418,7 @@ function ModalityDetail({
         </Sec>
       )}
       {showSent && (
-        <Sec title="送ったもの" className={sections === 3 ? span : undefined}>
+        <Sec title="今日の送信" className={sections === 3 ? span : undefined}>
           <RecentLog
             part={logs?.sent}
             rows={sent?.slice(0, RECENT).map((s) => ({
@@ -430,9 +430,9 @@ function ModalityDetail({
             count={sent?.length ?? 0}
             partial={sentPartial}
             aside={sentAside(sent ?? [])}
-            what="送ったもの"
+            what="今日の送信"
             emptyText="今日の送信はありません。"
-            label={`${id} へ送ったもの`}
+            label={`${id} の今日の送信`}
             timeZone={timeZone}
             href={`/sent?aet=${aetQuery}`}
             linkText="送信一覧で全部見る"

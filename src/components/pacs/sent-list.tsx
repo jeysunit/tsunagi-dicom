@@ -331,7 +331,7 @@ export function SentList({ timeZone, limit, initialDestination = "" }: { timeZon
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={9} className="py-8">
                   <div className="flex flex-col items-center gap-1 text-center" data-testid="sent-empty">
-                    <b className="text-value">{items.length === 0 ? "この期間の送信ジョブはありません。" : "条件に合う送信ジョブはありません。"}</b>
+                    <b className="text-value">{items.length === 0 ? "この期間の送信の記録はありません。" : "条件に合う送信の記録はありません。"}</b>
                     <span className="text-label">
                       {items.length === 0 ? "期間を変えて、もう一度検索してください。" : "条件を変えるか、「条件をクリア」を押してください。"}
                     </span>

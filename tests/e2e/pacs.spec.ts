@@ -283,7 +283,7 @@ async function routeTodayLogs(page: Page) {
   );
 }
 
-test("接続先：名称の行を選ぶと表の下に詳細が出る。受け取ったもの・送ったものは今日の新しい 5 件と、相手で絞った一覧への全部見るリンク", async ({ page }) => {
+test("接続先：名称の行を選ぶと表の下に詳細が出る。今日の受信・今日の送信は今日の新しい 5 件と、相手で絞った一覧への全部見るリンク", async ({ page }) => {
   await asRole(page, "一般");
   await routeTodayLogs(page);
   await page.goto("/modalities");
@@ -296,7 +296,7 @@ test("接続先：名称の行を選ぶと表の下に詳細が出る。受け�
   await row.click();
   await expect(row).toHaveAttribute("aria-selected", "true");
   const detail = page.getByTestId("modality-detail");
-  await expect(detail.getByRole("heading")).toHaveText(["設定", "接続確認", "受け取ったもの", "送ったもの"]);
+  await expect(detail.getByRole("heading")).toHaveText(["設定", "接続確認", "今日の受信", "今日の送信"]);
   await expect(detail.getByText("DTG_SCP", { exact: true })).toBeVisible();
 
   const received = detail.getByTestId("detail-received");
@@ -315,7 +315,7 @@ test("接続先：名称の行を選ぶと表の下に詳細が出る。受け�
   await expect(row.getByTestId("echo-result")).toContainText("成功");
   await expect(page.getByTestId("echo-result")).toHaveCount(1);
 
-  // 別の行を選ぶと、その相手の詳細に替わる（受け取ったものは、その相手の分だけ）
+  // 別の行を選ぶと、その相手の詳細に替わる（今日の受信は、その相手の分だけ）
   await page.locator('[data-modality="workstation"]').click();
   await expect(detail.getByTestId("detail-received")).toContainText("今日 0 件");
   await expect(detail.getByTestId("detail-received-none")).toContainText("今日の受信はありません。");
@@ -353,7 +353,7 @@ test("接続先の詳細：上限を超えた記録は「以上」と書く。�
   await expect(row).toHaveAttribute("aria-selected", "true");
   const detail = page.getByTestId("modality-detail");
   await expect(detail.getByTestId("detail-received")).toContainText("今日 1 件以上");
-  await expect(detail.getByRole("heading")).toHaveText(["設定", "接続確認", "受け取ったもの"]);
+  await expect(detail.getByRole("heading")).toHaveText(["設定", "接続確認", "今日の受信"]);
   await expect(detail.getByTestId("detail-sent")).toHaveCount(0);
   await page.keyboard.press("ArrowDown");
   await expect(page.locator('[data-modality="offline"]')).toHaveAttribute("aria-selected", "true");

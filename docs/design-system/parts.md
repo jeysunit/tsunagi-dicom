@@ -290,19 +290,19 @@
 <div class="grid2" role="region" aria-label="DTG_CT01 の詳細">
   <section class="sec"><h2>設定</h2><div class="in"><dl class="kv"><dt>名称</dt><dd><b>DTG_CT01</b></dd><dt>種類</dt><dd>DICOM</dd><dt>AEタイトル</dt><dd><span class="mono">DTG_CT01</span></dd><dt>ホスト名:ポート番号</dt><dd><span class="mono">192.0.2.50:11113</span></dd></dl></div></section>
   <section class="sec"><h2>接続確認</h2><div class="in"><dl class="kv"><dt>最後の接続確認</dt><dd><span class="st" data-k="ok">成功</span> <span class="when">10:32:05</span></dd></dl><div class="acts"><button type="button" class="btn">接続確認</button></div></div></section>
-  <section class="sec"><h2>受け取ったもの</h2><div class="in">
+  <section class="sec"><h2>今日の受信</h2><div class="in">
     <div class="listhead"><span class="cnt">今日 <b>3</b> 件</span><span class="xs label">受信完了 2・受信中 1</span></div>
-    <div class="tbl-wrap" role="region" aria-label="DTG_CT01 から受け取ったもの" tabindex="0"><table class="tbl strong"><thead><tr><th>日時</th><th>患者ID</th><th>氏名</th><th>モダリティ・検査名</th><th>状態</th></tr></thead><tbody>…</tbody></table></div>
+    <div class="tbl-wrap" role="region" aria-label="DTG_CT01 の今日の受信" tabindex="0"><table class="tbl strong"><thead><tr><th>日時</th><th>患者ID</th><th>氏名</th><th>モダリティ・検査名</th><th>状態</th></tr></thead><tbody>…</tbody></table></div>
     <a href="/received?aet=DTG_CT01">受信一覧で全部見る</a>
   </div></section>
-  <section class="sec"><h2>送ったもの</h2><div class="in">…<a href="/sent?aet=DTG_CT01">送信一覧で全部見る</a></div></section>
+  <section class="sec"><h2>今日の送信</h2><div class="in">…<a href="/sent?aet=DTG_CT01">送信一覧で全部見る</a></div></section>
 </div>
 ```
 
 - 置き場所：接続先の表を入れた `.split-v` の `.bot`。表の行（`tr[data-row]`）を選ぶと、その相手の詳細に替わる。
 - 値（デザインシステムの `.grid2`・`.sec` と同じ）：格子は 2 列・間 12px 16px。幅 760px 以下は 1 列。区画は枠 1px `border`・角 6px・地 `background`。区画の題は 14px・行の高さ 20px・余白 8px 12px・地 `surface`・下に 1px の `border`。中身の余白は 12px 16px。
-- 区画の数は相手で替わる：設定と接続確認は全部の相手、「受け取ったもの」は受け取る相手だけ、「送ったもの」は送る相手だけ。区画が 3 つのときは、最後の区画に `class="sec span"` を付けて 2 列にまたがせる。tsunagi の接続先は全部が 4 区画。
-- 受け取ったもの・送ったもの：件数の行（`.listhead`。左に「今日 n 件」、右に状態ごとの件数）→ 表（`.tbl.strong`。日時〔時刻だけ〕・患者ID・氏名・モダリティ・検査名・状態の 5 列。新しい順の 5 件。行を選べない）→ 全部見るリンク。件数が 0 でも区画を出す（表の枠と見出しの行は出したまま、空の状態の決まりに従う）。
+- 区画の数は相手で替わる：設定と接続確認は全部の相手、「今日の受信」は受け取る相手だけ、「今日の送信」は送る相手だけ。区画が 3 つのときは、最後の区画に `class="sec span"` を付けて 2 列にまたがせる。tsunagi の接続先は全部が 4 区画。
+- 今日の受信・今日の送信：件数の行（`.listhead`。左に「今日 n 件」、右に状態ごとの件数）→ 表（`.tbl.strong`。日時〔時刻だけ〕・患者ID・氏名・モダリティ・検査名・状態の 5 列。新しい順の 5 件。行を選べない）→ 全部見るリンク。件数が 0 でも区画を出す（表の枠と見出しの行は出したまま、空の状態の決まりに従う）。
 - 全部見るリンクの先は、相手を URL に入れた受信一覧・送信一覧。パラメーターの名前は `aet`（案。未決）。受信一覧は送信元を AEタイトルで持つので、相手の詳細と一覧は AEタイトルで結ぶ。
 - 接続確認を押すと、結果の状態バッジを詳細と表の同じ行の両方で替える。読み上げは、接続の状態の popover と同じく、結果の文を `role="status"` に 1 つだけ入れる。
 
@@ -322,7 +322,7 @@
 
 - 上から `.sumrow` → `.searchband`（期間〔今日・昨日・過去7日・期間を指定〕・相手・患者ID と氏名）→ 上限の知らせ（`.notice[data-k=warn]`）→ `.listhead` → `.tbl` → `.pager`（50 件）。送る側は `.split-v` で下に詳細。
 - 列の順：日時・相手（送信先／送信元 AE）・患者ID・氏名・モダリティと検査名・画像数・状態・（送る側だけ）保管の確認・操作。
-- 期間の中の件数が 1,000 件を超えたら「受信が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。」（送る側は「送信ジョブが…」）。
+- 期間の中の件数が 1,000 件を超えたら「受信が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。」（送る側は「送信の記録が…」）。
 - 画面の題は自分の側から見た名前（「送信一覧」「受信一覧」）。区画の題は置かない。相手を URL で受けたときは、相手の欄をその相手にして開く（接続先の詳細の「全部見る」から）。
 
 ## ファイルを選ぶ部品（`.picker`。ui-kit 1.2.6）
