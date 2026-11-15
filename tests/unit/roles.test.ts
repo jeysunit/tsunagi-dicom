@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { can, DEFAULT_DEV_ROLE, isRole, PERMISSIONS, ROLE_LABELS, ROLE_PERMISSIONS, ROLES, type Permission, type Role } from "@/lib/auth/roles";
 
-// 役割ごとにできる操作（docs/spec.md の 3.6、第7.0版 14.2）。役割は管理者と一般の2つ（2026-10-20 に承認者が決めた）。
+// 役割ごとにできる操作（docs/spec.md の 3.6、第7.0版 14.2）。役割は管理者と一般の2つ（2026-10-20 に決めた）。
 // 前の医師・技師・閲覧の役割の割り当ての試験は、役割そのものを無くしたので外し、一般の割り当ての試験に替えた。
 
 // 一般：普段使う機能の全部（一覧・詳細・ビューア・受信一覧・接続確認・送信・エクスポート・DICOM タグ・ビューアの覚え・値の修正・インポート）

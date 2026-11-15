@@ -103,7 +103,7 @@ describe("HL7 の反映と監査", () => {
     expect(await send(a08.replace("P000001", study.patientId).replace("19980312", "").replace("|M\r", "|\r"))).toContain("MSA|AA|");
     expect(await backend.studyPatient(id)).toEqual({ ...before, PatientName: "TANAKA^HIROSHI=田中^博=タナカ^ヒロシ" });
   });
-  it("A08 の性別 U は、DICOM の性別を空にする（Q-2026-10-31-08）", async () => {
+  it("A08 の性別 U は、DICOM の性別を空にする", async () => {
     const study = (await backend.searchStudies()).studies.find((s) => s.patientSex)!;
     const id = (await backend.lookupStudyIds(study.studyInstanceUid))[0]!;
     const before = await backend.studyPatient(id);

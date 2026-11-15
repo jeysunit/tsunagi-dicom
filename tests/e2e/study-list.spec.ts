@@ -1091,7 +1091,7 @@ test("詳細条件：生年月日・性別・受付番号で絞る。絞った�
   await expect(panel.getByTestId("filter-accession")).toHaveValue("0004");
   // 絞った受付番号は、一覧の受付番号の列に見える
   for (const a of await rows(page).getByTestId("accession-number").allTextContents()) expect(a).toContain("0004");
-  // 紹介医の条件は持たない（2026-10-21 に承認者が外した）
+  // 紹介医の条件は持たない（2026-10-21 に外した）
   await expect(panel.getByTestId("filter-referring")).toHaveCount(0);
   await panel.getByTestId("filter-accession").fill("該当しない");
   await expect(page.getByTestId("study-count")).toHaveText("0");

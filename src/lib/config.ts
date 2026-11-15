@@ -169,11 +169,11 @@ const envSchema = z.object({
   // libuv のスレッドの溜め（既定 4 本）を、ログインした人の枠の1本とほかの仕事のために残す
   PASSWORD_HASH_CONCURRENCY: int(2, 1, 8),
   PASSWORD_HASH_QUEUE: int(32, 0, 1024),
-  // セッションの長さ（既定の値。2026-10-18 に承認者が決めた。運用に合わせて変える）
+  // セッションの長さ（既定の値。2026-10-18 に決めた。運用に合わせて変える）
   LOGIN_PENDING_MINUTES: int(10, 1, 60),
   SESSION_MAX_HOURS: int(12, 1, 24),
   REAUTH_MINUTES: int(5, 1, 60),
-  // 検査の一覧の自動更新（既定 30 秒。2026-10-21 に承認者が決めた）。0 で止める。画像サーバーへ問い合わせすぎないよう 5 秒より短くしない
+  // 検査の一覧の自動更新（既定 30 秒。2026-10-21 に決めた）。0 で止める。画像サーバーへ問い合わせすぎないよう 5 秒より短くしない
   STUDY_LIST_REFRESH_SECONDS: int(30, 0, 3600).refine((v) => v === 0 || v >= 5, "0（止める）か 5〜3600 の整数にする"),
   // 画像ごとの「主なタグ」に出すタグの番号（空白で区切る）。空なら既定の一覧（src/lib/instance-tags.ts）。誤りは loadConfig で出す
   INSTANCE_TAGS: z.string().optional(),

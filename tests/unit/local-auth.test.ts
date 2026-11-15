@@ -299,7 +299,7 @@ describe("ログインの一時停止（第7.0版 14 遵守事項⑥(6)）", () 
 });
 
 describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
-  // 2026-10-19 に承認者が決めた：既定はパスワードだけで解き、SCREEN_UNLOCK_REQUIRE_TOTP=true のときだけ TOTP も求める。
+  // 2026-10-19 に決めた：既定はパスワードだけで解き、SCREEN_UNLOCK_REQUIRE_TOTP=true のときだけ TOTP も求める。
   // この試験は、設定を true にしたときに、これまでどおりパスワードと TOTP が要ることを確認する（期待は変えていない）
   it("SCREEN_UNLOCK_REQUIRE_TOTP=true：ロックしたら、解くまでセッションはロックのまま。解くにはパスワードと TOTP が要る", async () => {
     const { ctx, db, clock } = await setup({ screenUnlockRequireTotp: true });
@@ -584,7 +584,7 @@ describe("画面のロック（第7.0版 12 遵守事項⑥）", () => {
     expect((await resolveSession(ctx, token)).kind).toBe("active");
   });
 
-  // 一時停止のときのセッションの扱いは、2026-10-18 に承認者が決めた（F3）：ログインし終えたセッションは閉じず、
+  // 一時停止のときのセッションの扱いは、2026-10-18 に決めた（F3）：ログインし終えたセッションは閉じず、
   // ログインの途中のセッションだけを閉じる。一時停止の間は、パスワードを確認する操作（ロックの解除・再認証）を断る
   it("解く失敗も一時停止に数える。一時停止の後もセッションはロックのまま残り、解除は一時停止が解けるまで断る", async () => {
     const { ctx, db, clock } = await setup({ mfaRequired: false, loginLockThreshold: 2 });

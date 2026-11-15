@@ -26,7 +26,7 @@
 # - DTG の Web 画面は 127.0.0.1:${DEV_DTG_WEB_PORT:-18080}（利用者 dtg）、ris-emulator の Web 画面は
 #   127.0.0.1:${DEV_RIS_WEB_PORT:-18081}（利用者 ris）に公開する（どちらも HTTP Basic）。MWL（ris:11112）はホストに出さない。
 # - DTG と ris-emulator の時間帯は Asia/Tokyo（Orthanc と同じ）。コンテナの既定の UTC のままだと、検査日・時刻（StudyDate・StudyTime）を
-#   UTC の時刻で書き、検査一覧の検査日時が 9 時間ずれる（2026-10-21 に承認者が見つけた）。予約の「今日」も同じ時間帯で決まる。
+#   UTC の時刻で書き、検査一覧の検査日時が 9 時間ずれる（2026-10-21 に見つけた）。予約の「今日」も同じ時間帯で決まる。
 # - 6 つのサービス（tsunagi-dicom・Orthanc は deploy/compose.yaml、ris-emulator・DTG・storescp・hl7-receiver はここ）は restart: unless-stopped。
 #   Docker が起き直したときに、一式がそろって立つ（止めたものは止めたまま）。
 # - 作るイメージの名前には compose のプロジェクトの名前（COMPOSE_PROJECT_NAME。既定は下の name の tsunagi-dev）を入れる

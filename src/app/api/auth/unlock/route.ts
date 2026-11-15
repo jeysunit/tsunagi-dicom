@@ -15,7 +15,7 @@ const Body = z.object({
 // BFF の側がロックしていないとき（画面のロックの知らせが届かなかったときなど）も、いつも確認する
 // （画面の側だけがロックしているずれで、確認せずに中身を出させない。閉じる側に倒す）。
 // ログインの一時停止の間は断る（401、problems に locked）。セッションはロックのまま残し、閉じない
-// （2026-10-18 に承認者が決めた。一時停止が解けたら、同じセッションで解ける。docs/spec.md の 3.6）。
+// （2026-10-18 に決めた。一時停止が解けたら、同じセッションで解ける。docs/spec.md の 3.6）。
 export async function POST(request: Request) {
   try {
     const state = await checkedState(request);

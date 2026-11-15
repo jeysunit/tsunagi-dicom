@@ -284,7 +284,7 @@
 
 ## ファイルを選ぶ部品（`.picker`。ui-kit 1.2.6）
 
-**DICOM のファイル・フォルダを取り込む画面は、この 1 つの区画で組む。選ぶ→件数・大きさ・患者と検査を確認する→除外（戻せる）か中止で外す→インポート、の順を変えない。** 決まりの全文（並び・数え方・列の幅・状態の語・取り消しの 3 段階・キーボードと読み上げ・焦点・理由）は、部品集 bcamp/design の `system/parts.md` の「ファイルを選ぶ部品」にあり、tsunagi はそのとおりに作る。ここには構造と、tsunagi の実装で決めたことを書く。実装は `src/components/ui/file-picker.tsx`、数え方と文言は `src/lib/import/picker-model.ts`、ブラウザでの頭の読み取りは `src/lib/import/dicom-preview.ts`。PACS の業務の画面（ログインした職員だけが開く画面）の中だけで使う（一覧に患者ID・氏名を出すため）。
+**DICOM のファイル・フォルダを取り込む画面は、この 1 つの区画で組む。選ぶ→件数・大きさ・患者と検査を確認する→除外（戻せる）か中止で外す→インポート、の順を変えない。** 決まりの全文（並び・数え方・列の幅・状態の語・取り消しの 3 段階・キーボードと読み上げ・焦点・理由）は、部品集（デザインシステム）の `system/parts.md` の「ファイルを選ぶ部品」にあり、tsunagi はそのとおりに作る。ここには構造と、tsunagi の実装で決めたことを書く。実装は `src/components/ui/file-picker.tsx`、数え方と文言は `src/lib/import/picker-model.ts`、ブラウザでの頭の読み取りは `src/lib/import/dicom-preview.ts`。PACS の業務の画面（ログインした職員だけが開く画面）の中だけで使う（一覧に患者ID・氏名を出すため）。
 
 ```html
 <section class="sec picker" aria-labelledby="pk-t" data-over="false" data-busy="false">

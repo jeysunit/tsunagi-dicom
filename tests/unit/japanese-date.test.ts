@@ -190,7 +190,7 @@ describe("一覧の表の生年月日の列（英字 1 字。半角の括弧）"
 
 describe("画面の日時の書式（docs/spec.md の 2.2）", () => {
   it("UTC の時刻を TZ の時刻にし、時を0で埋める", () => {
-    // Orthanc の変更の記録の時刻（UTC）。2026-10-20 に承認者が見た 21:00:23 は、日本時間の翌日 06:00:23
+    // Orthanc の変更の記録の時刻（UTC）。2026-10-20 に確認した 21:00:23 は、日本時間の翌日 06:00:23
     expect(formatDateTimeIn("2026-10-19T21:00:23Z", "Asia/Tokyo", { seconds: true })).toBe("2026/10/20 06:00:23");
     expect(formatDateTimeIn("2026-10-19T20:49:00Z", "Asia/Tokyo")).toBe("2026/10/20 05:49");
     expect(formatDateTimeIn("2026-10-19T20:49:00Z", "UTC")).toBe("2026/10/19 20:49");
