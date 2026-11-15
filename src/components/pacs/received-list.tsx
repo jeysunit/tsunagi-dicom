@@ -102,11 +102,14 @@ function PeriodChip({ pressed, onClick, children, testId }: { pressed: boolean; 
 export function ReceivedList({
   initial,
   initialError = null,
+  initialSource = "",
   timeZone,
   limit,
 }: {
   initial: ReceivedLogView;
   initialError?: string | null;
+  /** 開いたときの送信元 AE（URL の `aet`。接続先の詳細の「受信一覧で全部見る」から開いたとき） */
+  initialSource?: string;
   timeZone: string;
   limit: number;
 }) {
@@ -116,7 +119,7 @@ export function ReceivedList({
   const [kind, setKind] = useState<ReceivePeriodKind>(initial.period.kind);
   const [from, setFrom] = useState(initial.period.from);
   const [to, setTo] = useState(initial.period.to);
-  const [source, setSource] = useState("");
+  const [source, setSource] = useState(initialSource);
   const [text, setText] = useState("");
   const [onlyNew, setOnlyNew] = useState(false);
   const [page, setPage] = useState(0);

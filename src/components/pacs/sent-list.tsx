@@ -62,16 +62,18 @@ function query(a: Applied): string {
   return `/api/sent-log?${p}`;
 }
 
-export function SentList({ timeZone, limit }: { timeZone: string; limit: number }) {
+export function SentList({ timeZone, limit, initialDestination = "" }: { timeZone: string; limit: number; initialDestination?: string }) {
+  // 開いたときから送信先を絞る形（接続先の詳細の「送信一覧で全部見る」から開いたとき。URL の `aet` を名称にしたもの）
+  const initialFilter: SentFilter = { ...EMPTY_SENT_FILTER, destination: initialDestination };
   // 帯に入れている条件（「検索」を押すまで反映しない）と、反映した条件
   const [draft, setDraft] = useState<Applied & Pick<SentFilter, "destination" | "text">>({
     period: "today",
     from: "",
     to: "",
-    ...EMPTY_SENT_FILTER,
+    ...initialFilter,
   });
   const [applied, setApplied] = useState<Applied & { round: number }>({ period: "today", from: "", to: "", round: 0 });
-  const [filter, setFilter] = useState<SentFilter>(EMPTY_SENT_FILTER);
+  const [filter, setFilter] = useState<SentFilter>(initialFilter);
   const [data, setData] = useState<SentResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
