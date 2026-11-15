@@ -62,16 +62,18 @@ function query(a: Applied): string {
   return `/api/sent-log?${p}`;
 }
 
-export function SentList({ timeZone, limit }: { timeZone: string; limit: number }) {
+export function SentList({ timeZone, limit, initialDestination = "" }: { timeZone: string; limit: number; initialDestination?: string }) {
+  // 開いたときから送信先を絞る形（接続先の詳細の「送信一覧で全部見る」から開いたとき。URL の `aet` を名称にしたもの）
+  const initialFilter: SentFilter = { ...EMPTY_SENT_FILTER, destination: initialDestination };
   // 帯に入れている条件（「検索」を押すまで反映しない）と、反映した条件
   const [draft, setDraft] = useState<Applied & Pick<SentFilter, "destination" | "text">>({
     period: "today",
     from: "",
     to: "",
-    ...EMPTY_SENT_FILTER,
+    ...initialFilter,
   });
   const [applied, setApplied] = useState<Applied & { round: number }>({ period: "today", from: "", to: "", round: 0 });
-  const [filter, setFilter] = useState<SentFilter>(EMPTY_SENT_FILTER);
+  const [filter, setFilter] = useState<SentFilter>(initialFilter);
   const [data, setData] = useState<SentResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -329,7 +331,7 @@ export function SentList({ timeZone, limit }: { timeZone: string; limit: number 
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={9} className="py-8">
                   <div className="flex flex-col items-center gap-1 text-center" data-testid="sent-empty">
-                    <b className="text-value">{items.length === 0 ? "この期間の送信ジョブはありません。" : "条件に合う送信ジョブはありません。"}</b>
+                    <b className="text-value">{items.length === 0 ? "この期間の送信の記録はありません。" : "条件に合う送信の記録はありません。"}</b>
                     <span className="text-label">
                       {items.length === 0 ? "期間を変えて、もう一度検索してください。" : "条件を変えるか、「条件をクリア」を押してください。"}
                     </span>

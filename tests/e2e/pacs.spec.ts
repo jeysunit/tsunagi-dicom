@@ -251,6 +251,127 @@ test("接続先：一般は名称と AE タイトルを見て接続確認がで�
   await expect(page.locator('[data-modality="offline"]').getByTestId("echo-why")).toContainText("ホスト名・ポート番号・AEタイトルを確認して");
 });
 
+/** 接続先の詳細の試験用に、今日の受信・送信を 7 件ずつ返す（新しい順）。dtg（AE: DTG_SCP）との間の記録 */
+async function routeTodayLogs(page: Page) {
+  const at = (n: number) => `2026-11-16T0${n}:30:00+09:00`;
+  const study = (n: number) => ({
+    patientId: `P00010${n}`,
+    patientName: `試験 ${n}郎`,
+    modalities: ["CT"],
+    studyDescription: "胸部 単純",
+    studyInstanceUid: `1.2.3.${n}`,
+  });
+  const days = [7, 6, 5, 4, 3, 2, 1];
+  await page.route(/\/api\/receive-log\?/, (route) =>
+    route.fulfill({
+      json: {
+        items: days.map((n) => ({ receivedAt: at(n), remoteAet: "DTG_SCP", receiveState: n === 7 ? "receiving" : "received", study: study(n) })),
+        period: { kind: "today", from: "2026-11-16", to: "2026-11-16" },
+        overLimit: false,
+        complete: true,
+      },
+    }),
+  );
+  await page.route(/\/api\/sent-log\?/, (route) =>
+    route.fulfill({
+      json: {
+        items: days.map((n) => ({ requestId: `req-${n}`, requestedAt: at(n), destination: "dtg", destinationAet: "DTG_SCP", status: "sent", study: study(n) })),
+        truncated: false,
+        limit: 1000,
+      },
+    }),
+  );
+}
+
+test("接続先：名称の行を選ぶと表の下に詳細が出る。今日の受信・今日の送信は今日の新しい 5 件と、相手で絞った一覧への全部見るリンク", async ({ page }) => {
+  await asRole(page, "一般");
+  await routeTodayLogs(page);
+  await page.goto("/modalities");
+  // 画面の題と同じ語の区画の題・説明の文は置かない
+  await expect(page.getByRole("heading", { name: "接続先の一覧" })).toHaveCount(0);
+  await expect(page.getByText("登録・変更は Orthanc の設定で行います")).toHaveCount(0);
+  await expect(page.getByTestId("modality-detail")).toHaveCount(0);
+
+  const row = page.locator('[data-modality="dtg"]');
+  await row.click();
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  const detail = page.getByTestId("modality-detail");
+  await expect(detail.getByRole("heading")).toHaveText(["設定", "接続確認", "今日の受信", "今日の送信"]);
+  await expect(detail.getByText("DTG_SCP", { exact: true })).toBeVisible();
+
+  const received = detail.getByTestId("detail-received");
+  await expect(received).toContainText("今日 7 件");
+  await expect(received).toContainText("受信完了 6・受信中 1");
+  await expect(received.getByTestId("detail-received-row")).toHaveCount(5);
+  await expect(received.getByTestId("detail-received-all")).toHaveAttribute("href", "/received?aet=DTG_SCP");
+  const sent = detail.getByTestId("detail-sent");
+  await expect(sent).toContainText("今日 7 件");
+  await expect(sent.getByTestId("detail-sent-row")).toHaveCount(5);
+  await expect(sent.getByTestId("detail-sent-all")).toHaveAttribute("href", "/sent?aet=DTG_SCP");
+
+  // 接続確認：詳細のボタンで確認すると、表の同じ行も同じ状態バッジに替わる（読み上げの領域は表の行の 1 つだけ）
+  await detail.getByTestId("detail-echo").click();
+  await expect(detail.getByTestId("detail-echo-result")).toContainText("成功");
+  await expect(row.getByTestId("echo-result")).toContainText("成功");
+  await expect(page.getByTestId("echo-result")).toHaveCount(1);
+
+  // 別の行を選ぶと、その相手の詳細に替わる（今日の受信は、その相手の分だけ）
+  await page.locator('[data-modality="workstation"]').click();
+  await expect(detail.getByTestId("detail-received")).toContainText("今日 0 件");
+  await expect(detail.getByTestId("detail-received-none")).toContainText("今日の受信はありません。");
+});
+
+test("接続先の詳細の「全部見る」：受信一覧は送信元 AE を、送信一覧は送信先を、その相手に絞って開く", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.goto("/received?aet=DTG_SCP");
+  await expect(page.getByTestId("received-source")).toHaveValue("DTG_SCP");
+  await page.goto("/sent?aet=DTG_SCP");
+  await expect(page.getByTestId("sent-destination")).toHaveValue("dtg");
+  // 登録に無い AE タイトルは絞らない
+  await page.goto("/sent?aet=UNKNOWN_AET");
+  await expect(page.getByTestId("sent-destination")).toHaveValue("");
+  await expect(page.getByTestId("sent-aet-unresolved")).toContainText("UNKNOWN_AET");
+});
+
+test("接続先の詳細：上限を超えた記録は「以上」と書く。権限が無い区画は出さない。キーボードで行を選べる", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.route(/\/api\/receive-log\?/, (route) =>
+    route.fulfill({
+      json: {
+        items: [{ receivedAt: "2026-11-16T09:30:00+09:00", remoteAet: "DTG_SCP", receiveState: "received", study: { patientId: "P1", patientName: "試験 太郎" } }],
+        period: { kind: "today", from: "2026-11-16", to: "2026-11-16" },
+        overLimit: true,
+        complete: true,
+      },
+    }),
+  );
+  await page.route(/\/api\/sent-log\?/, (route) => route.fulfill({ status: 403, json: { error: "この操作は許可されていません" } }));
+  await page.goto("/modalities");
+  const row = page.locator('[data-modality="dtg"]');
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  const detail = page.getByTestId("modality-detail");
+  await expect(detail.getByTestId("detail-received")).toContainText("今日 1 件以上");
+  await expect(detail.getByRole("heading")).toHaveText(["設定", "接続確認", "今日の受信"]);
+  await expect(detail.getByTestId("detail-sent")).toHaveCount(0);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator('[data-modality="offline"]')).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("modality-detail")).toHaveCount(0);
+});
+
+test("ブラウザのタブ：題は「画面名 - システム名」、アイコンは SVG（形と色の値は案）", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.goto("/modalities");
+  await expect(page).toHaveTitle("接続先 - tsunagi-dicom");
+  const href = await page.locator('link[rel="icon"]').first().getAttribute("href");
+  expect(href).toMatch(/\/icon\.svg/);
+  const res = await page.request.get(href!);
+  expect(res.status()).toBe(200);
+  expect(res.headers()["content-type"]).toContain("image/svg+xml");
+});
+
 test("接続先：確認そのものを終えられなかったときは、接続できなかったと書かない", async ({ page }) => {
   await asRole(page, "一般");
   await page.route("**/api/modalities/dtg/echo", (route) => route.abort());

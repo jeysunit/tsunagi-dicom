@@ -53,7 +53,7 @@ describe("送信一覧の画面の計算", () => {
   });
 
   it("上限の知らせと、検査一覧で表示の移り先", () => {
-    expect(sentLimitNotice(1000)).toBe("送信ジョブが 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。");
+    expect(sentLimitNotice(1000)).toBe("送信の記録が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。");
     expect(sentStudyHref(items[0]!)).toBe("/?q=P1&studyUid=1.2.3");
     expect(sentStudyHref({ study: {} })).toBeNull();
   });

@@ -81,9 +81,16 @@
 <nav class="sidenav" aria-label="ページ">
   <p class="nav-g">業務</p>
   <a class="nav-i" href="/" aria-current="page"><svg class="ic">…</svg><span class="t">検査一覧</span></a>
+  <p class="nav-g">送受信</p>
   <a class="nav-i" href="/received"><svg class="ic">…</svg><span class="t">受信一覧</span><span class="cnt">2</span></a>
+  <a class="nav-i" href="/sent"><svg class="ic">…</svg><span class="t">送信一覧</span></a>
+  <a class="nav-i" href="/modalities"><svg class="ic">…</svg><span class="t">接続先</span></a>
+  <p class="nav-g">管理</p>
+  <a class="nav-i" href="/version"><svg class="ic">…</svg><span class="t">バージョン情報</span></a>
 </nav>
 ```
+
+- 群は「業務」「送受信」「管理」（3 製品で同じ名前・同じ順）。項目は tsunagi が 業務＝検査一覧／送受信＝受信一覧・送信一覧・接続先／管理＝ビューア設定・ユーザー管理・個人設定・バージョン情報。画面の題は項目と同じ語。絵は 受信一覧＝`i-inbox`・送信一覧＝`i-send`・接続先＝`i-device`。
 
 - 幅 208px（閉じると 56px で、`.t`・`.cnt`・`.nav-g` を隠す）。項目 32px、角 4px。現在地は `aria-current="page"`・地 `selected`・左 3px の `ring`（`primary` ではない）・太字。
 - クラスの名前は `.nav-g`・`.nav-i` に 1 つ（`.nav-group`・`.nav-item` は使わない）。
@@ -272,15 +279,51 @@
 
 ## 接続先の表（`.conn`）
 
-- 区画 `.sec` に `<h2 class="hd">` と右の「すべて接続確認」（副）、登録できる製品だけ「追加」。表 `.tbl.conn`：名称・種類（DICOM／HL7）・AEタイトル（HL7 は「—」）・ホスト名:ポート番号・最後の接続確認（`td.res`）・操作。
-- 結果：未確認「—」／確認中 `<span class="st" data-k="check">確認中</span>`＋その行のボタンを `disabled`／成功 `ok`「成功」＋時刻／失敗 `ng`「失敗」＋時刻＋`<span class="why">理由の 1 句</span>`（応答がありません・接続を断られました・AEタイトルが合いません・ホスト名を引けません）。押した直後は区画の上に知らせ（何が起きたか・なぜか・次にすること）。表の列が「なぜか」だけで「次にすること」を持たないのは writing.md の狭い場所の決まりの例外で、次にすることは知らせの側に書く。
+- 種類が 1 つの画面（tsunagi・dicom-test-generator）は、区画 `.sec` を置かず、見出しの行 `.pagehead .acts` に「すべて接続確認」（副）と、登録できる製品だけ「追加」を置き、その下に表 `.tbl.conn` と詳細を `.split-v`（上 `.top` に表、下 `.bot` に「接続先の詳細」）で並べる。種類で分けた区画（ris-emulator の「HL7 の送信先」「待ち受け」）は、区画 `.sec` に `<h2 class="hd">` と右の「すべて接続確認」（副）を置く。
+- 表 `.tbl.conn`：名称・種類（tsunagi は DICOM、dicom-test-generator は 送信先／ワークリスト、ris-emulator は HL7）・AEタイトル（HL7 は「—」）・ホスト名:ポート番号・最後の接続確認（`td.res`）・操作。名称を選べる表の行は `<tr data-row tabindex="0" aria-selected="false">`（選んだ行は `aria-selected="true"` で `selected-strong` の地。一覧の表と同じ）。
+- 結果：未確認（確認できる相手には状態バッジ「未確認」、手段が無い相手には素の「—」）／確認中 `<span class="st" data-k="check">確認中</span>`＋その行のボタンを `disabled`／成功 `ok`「成功」＋時刻／失敗 `ng`「失敗」＋時刻＋`<span class="why">理由の 1 句</span>`（応答がありません・接続を断られました・AEタイトルが合いません・ホスト名を引けません）。押した直後は区画の上に知らせ（何が起きたか・なぜか・次にすること）。表の列が「なぜか」だけで「次にすること」を持たないのは writing.md の狭い場所の決まりの例外で、次にすることは知らせの側に書く。
 - 待ち受けは区画「待ち受け」に `.kv`（MWL・名前・`listen`「待ち受け中」・住所）。
+
+## 接続先の詳細（conn-detail。新しい部品。CSS は足さず、既存の部品だけで組む）
+
+```html
+<div class="grid2" role="region" aria-label="DTG_CT01 の詳細">
+  <section class="sec"><h2>設定</h2><div class="in"><dl class="kv"><dt>名称</dt><dd><b>DTG_CT01</b></dd><dt>種類</dt><dd>DICOM</dd><dt>AEタイトル</dt><dd><span class="mono">DTG_CT01</span></dd><dt>ホスト名:ポート番号</dt><dd><span class="mono">192.0.2.50:11113</span></dd></dl></div></section>
+  <section class="sec"><h2>接続確認</h2><div class="in"><dl class="kv"><dt>最後の接続確認</dt><dd><span class="st" data-k="ok">成功</span> <span class="when">10:32:05</span></dd></dl><div class="acts"><button type="button" class="btn">接続確認</button></div></div></section>
+  <section class="sec"><h2>今日の受信</h2><div class="in">
+    <div class="listhead"><span class="cnt">今日 <b>3</b> 件</span><span class="xs label">受信完了 2・受信中 1</span></div>
+    <div class="tbl-wrap" role="region" aria-label="DTG_CT01 の今日の受信" tabindex="0"><table class="tbl strong"><thead><tr><th>日時</th><th>患者ID</th><th>氏名</th><th>モダリティ・検査名</th><th>状態</th></tr></thead><tbody>…</tbody></table></div>
+    <a href="/received?aet=DTG_CT01">受信一覧で全部見る</a>
+  </div></section>
+  <section class="sec"><h2>今日の送信</h2><div class="in">…<a href="/sent?aet=DTG_CT01">送信一覧で全部見る</a></div></section>
+</div>
+```
+
+- 置き場所：接続先の表を入れた `.split-v` の `.bot`。表の行（`tr[data-row]`）を選ぶと、その相手の詳細に替わる。
+- 値（デザインシステムの `.grid2`・`.sec` と同じ）：格子は 2 列・間 12px 16px。幅 760px 以下は 1 列。区画は枠 1px `border`・角 6px・地 `background`。区画の題は 14px・行の高さ 20px・余白 8px 12px・地 `surface`・下に 1px の `border`。中身の余白は 12px 16px。
+- 区画の数は相手で替わる：設定と接続確認は全部の相手、「今日の受信」は受け取る相手だけ、「今日の送信」は送る相手だけ。区画が 3 つのときは、最後の区画に `class="sec span"` を付けて 2 列にまたがせる。tsunagi の接続先は全部が 4 区画。
+- 今日の受信・今日の送信：件数の行（`.listhead`。左に「今日 n 件」、右に状態ごとの件数）→ 表（`.tbl.strong`。日時〔時刻だけ〕・患者ID・氏名・モダリティ・検査名・状態の 5 列。新しい順の 5 件。行を選べない）→ 全部見るリンク。件数が 0 でも区画を出す（表の枠と見出しの行は出したまま、空の状態の決まりに従う）。
+- 全部見るリンクの先は、相手を URL に入れた受信一覧・送信一覧。パラメーターの名前は `aet`（案。未決）。受信一覧は送信元を AEタイトルで持つので、相手の詳細と一覧は AEタイトルで結ぶ。
+- 接続確認を押すと、結果の状態バッジを詳細と表の同じ行の両方で替える。読み上げは、接続の状態の popover と同じく、結果の文を `role="status"` に 1 つだけ入れる。
+
+## 頁の題とアイコン（`<title>`・`<link rel="icon">`。アイコンの形と色の値は案）
+
+```html
+<title>受信一覧 - tsunagi-dicom</title>
+<title>[試験] 受信一覧 - tsunagi-dicom</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+```
+
+- 題は「画面名 - システム名」。環境の印は、開発・試験の環境だけ、題の先頭に「[開発]」または「[試験]」と半角の空白 1 つを付ける。本番は付けない。環境を製品へ知らせる方法が決まるまで、tsunagi-dicom は環境の印を付けない。
+- アイコンは SVG 1 つ。16×16 の角丸の四角（角 3px）に線の幅 1.6px の絵。四角の色は本番が `primary`、開発・試験が `warning`。ブラウザが暗い地のときは SVG の中の `@media (prefers-color-scheme: dark)` で、本番を `link` の暗い地の値、開発・試験を `warning` の暗い地の値、絵の線を #1B1B1B にする。値は components.md の「頁の題とアイコン」。
+- 絵の形（案）：tsunagi-dicom は 2 つの輪（中心 (6.2, 8)・(9.8, 8)、半径 3.2）。
 
 ## 送受信の一覧
 
 - 上から `.sumrow` → `.searchband`（期間〔今日・昨日・過去7日・期間を指定〕・相手・患者ID と氏名）→ 上限の知らせ（`.notice[data-k=warn]`）→ `.listhead` → `.tbl` → `.pager`（50 件）。送る側は `.split-v` で下に詳細。
 - 列の順：日時・相手（送信先／送信元 AE）・患者ID・氏名・モダリティと検査名・画像数・状態・（送る側だけ）保管の確認・操作。
-- 期間の中の件数が 1,000 件を超えたら「受信が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。」（送る側は「送信ジョブが…」）。
+- 期間の中の件数が 1,000 件を超えたら「受信が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。」（送る側は「送信の記録が…」）。
+- 画面の題は自分の側から見た名前（「送信一覧」「受信一覧」）。区画の題は置かない。相手を URL で受けたときは、相手の欄をその相手にして開く（接続先の詳細の「全部見る」から）。
 
 ## ファイルを選ぶ部品（`.picker`。ui-kit 1.2.6）
 

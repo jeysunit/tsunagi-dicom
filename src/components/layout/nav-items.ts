@@ -1,4 +1,4 @@
-// 左のナビの項目（docs/design-system/menu.md）。群は「業務」「接続」「管理」。項目の名前は docs/spec.md の 2.2 の用語集（頁の題と同じ語）。
+// 左のナビの項目（docs/design-system/menu.md）。群は「業務」「送受信」「管理」（3 製品で同じ。群の名前と項目名で同じ語を重ねない）。項目の名前は docs/spec.md の 2.2 の用語集（頁の題と同じ語）。
 // 出す項目は、役割に許された頁だけ。1 つも出せない群は出さない。
 
 export type NavIcon = "studies" | "received" | "sent" | "import" | "modalities" | "viewers" | "users" | "account" | "version";
@@ -34,15 +34,17 @@ export function buildNavGroups(nav: NavAccess): NavGroup[] {
       label: "業務",
       items: [
         { href: "/", label: "検査一覧", icon: "studies" },
-        ...(nav.canViewReceived ? [{ href: "/received", label: "受信一覧", icon: "received" as const }] : []),
-        ...(nav.canViewSent ? [{ href: "/sent", label: "送信一覧", icon: "sent" as const }] : []),
         // インポートは業務の群の最後（外から持ち込んだ画像を入れる仕事。送受信の群は、機器との DICOM の送受信と接続先）
         ...(nav.canImport ? [{ href: "/import", label: "インポート", icon: "import" as const }] : []),
       ],
     },
     {
-      label: "接続",
-      items: nav.canCheckModalities ? [{ href: "/modalities", label: "接続先", icon: "modalities" as const }] : [],
+      label: "送受信",
+      items: [
+        ...(nav.canViewReceived ? [{ href: "/received", label: "受信一覧", icon: "received" as const }] : []),
+        ...(nav.canViewSent ? [{ href: "/sent", label: "送信一覧", icon: "sent" as const }] : []),
+        ...(nav.canCheckModalities ? [{ href: "/modalities", label: "接続先", icon: "modalities" as const }] : []),
+      ],
     },
     {
       label: "管理",

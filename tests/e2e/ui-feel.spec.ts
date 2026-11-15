@@ -57,7 +57,7 @@ test("左のナビ：本文の左に幅 208px で置き、群の名前を出す�
   const mainBox = (await main.boundingBox())!;
   expect(sideBox.x + sideBox.width).toBeLessThanOrEqual(mainBox.x + 1);
   expect(Math.round(sideBox.width)).toBe(208);
-  for (const group of ["業務", "接続", "管理"]) await expect(side.getByText(group, { exact: true })).toBeVisible();
+  for (const group of ["業務", "送受信", "管理"]) await expect(side.getByText(group, { exact: true })).toBeVisible();
   // 上の帯には、画面への道を置かない
   await expect(page.locator("header").getByRole("link", { name: "受信一覧" })).toHaveCount(0);
 

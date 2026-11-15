@@ -75,6 +75,7 @@ export default async function ReceivedPage({ searchParams }: { searchParams: Pro
       <ReceivedList
         initial={{ items: log.items, overLimit: log.overLimit, complete: log.complete, period: { kind: period.kind, from: period.from, to: period.to } }}
         initialError={periodError}
+        initialSource={first(params.aet) ?? ""}
         timeZone={timeZone}
         limit={RECEIVE_LIMIT}
       />

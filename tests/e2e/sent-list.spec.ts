@@ -57,7 +57,7 @@ test("送信一覧：一般は左のナビの業務の群（受信一覧の下�
   await expect(page).toHaveTitle("送信一覧 - tsunagi-dicom");
   await expect(page.locator("main h1")).toHaveText("送信一覧");
   await expect(page.getByTestId("sent-count")).toHaveText("0");
-  await expect(page.getByTestId("sent-empty")).toContainText("この期間の送信ジョブはありません。");
+  await expect(page.getByTestId("sent-empty")).toContainText("この期間の送信の記録はありません。");
   await expect(page.getByTestId("sent-empty")).toContainText("期間を変えて、もう一度検索してください。");
   // 表の見出しの行は、空でも残す（列は 9 つ）
   await expect(page.getByTestId("sent-table").locator("thead th")).toHaveCount(9);
@@ -91,7 +91,7 @@ test("送信一覧：状態の要約・上限の知らせ・件数・ページ�
   );
   expect(order).toEqual(["sent-summary", "sent-searchband", "sent-limit", "sent-count", "sent-table", "sent-pager"]);
   // 期待の変更：先頭の「！」の文字を Lucide の印（知らせの部品）に替えたので、文だけを見る
-  await expect(page.getByTestId("sent-limit")).toHaveText("送信ジョブが 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。");
+  await expect(page.getByTestId("sent-limit")).toHaveText("送信の記録が 1,000 件を超えたため、新しい 1,000 件だけを出しています。期間を狭めてください。");
   await expect(page.getByTestId("sent-count")).toHaveText("120");
   await expect(page.getByTestId("sent-sum-all")).toContainText("120");
   await expect(page.getByTestId("sent-sum-failed")).toContainText("送信失敗24");

@@ -103,4 +103,4 @@ export function sentStatusNote(item: SentView): string {
 
 /** 1,000 件を超えたときの知らせ（docs/design-system/components.md の「送受信の一覧」） */
 export const sentLimitNotice = (limit: number) =>
-  `送信ジョブが ${limit.toLocaleString("en-US")} 件を超えたため、新しい ${limit.toLocaleString("en-US")} 件だけを出しています。期間を狭めてください。`;
+  `送信の記録が ${limit.toLocaleString("en-US")} 件を超えたため、新しい ${limit.toLocaleString("en-US")} 件だけを出しています。期間を狭めてください。`;
