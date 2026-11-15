@@ -330,6 +330,35 @@ test("接続先の詳細の「全部見る」：受信一覧は送信元 AE を�
   // 登録に無い AE タイトルは絞らない
   await page.goto("/sent?aet=UNKNOWN_AET");
   await expect(page.getByTestId("sent-destination")).toHaveValue("");
+  await expect(page.getByTestId("sent-aet-unresolved")).toContainText("UNKNOWN_AET");
+});
+
+test("接続先の詳細：上限を超えた記録は「以上」と書く。権限が無い区画は出さない。キーボードで行を選べる", async ({ page }) => {
+  await asRole(page, "一般");
+  await page.route(/\/api\/receive-log\?/, (route) =>
+    route.fulfill({
+      json: {
+        items: [{ receivedAt: "2026-11-16T09:30:00+09:00", remoteAet: "DTG_SCP", receiveState: "received", study: { patientId: "P1", patientName: "試験 太郎" } }],
+        period: { kind: "today", from: "2026-11-16", to: "2026-11-16" },
+        overLimit: true,
+        complete: true,
+      },
+    }),
+  );
+  await page.route(/\/api\/sent-log\?/, (route) => route.fulfill({ status: 403, json: { error: "この操作は許可されていません" } }));
+  await page.goto("/modalities");
+  const row = page.locator('[data-modality="dtg"]');
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  const detail = page.getByTestId("modality-detail");
+  await expect(detail.getByTestId("detail-received")).toContainText("今日 1 件以上");
+  await expect(detail.getByRole("heading")).toHaveText(["設定", "接続確認", "受け取ったもの"]);
+  await expect(detail.getByTestId("detail-sent")).toHaveCount(0);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator('[data-modality="offline"]')).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("modality-detail")).toHaveCount(0);
 });
 
 test("ブラウザのタブ：題は「画面名 - システム名」、アイコンは SVG（形と色の値は案）", async ({ page }) => {

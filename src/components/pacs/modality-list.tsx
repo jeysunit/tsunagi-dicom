@@ -43,7 +43,7 @@ interface Notice {
 const RECENT = 5;
 
 /** 今日の記録の読み込み。許されない役割（403）は、その区画を出さない。それ以外の失敗は区画に誤りを出す */
-type Part<T> = { items: T[] } | { forbidden: true } | { failed: string };
+type Part<T> = { items: T[]; partial: boolean } | { forbidden: true } | { failed: string };
 
 interface TodayLogs {
   received: Part<ReceivedView>;
@@ -52,8 +52,9 @@ interface TodayLogs {
 
 async function readPart<T>(url: string, signal: AbortSignal, what: string): Promise<Part<T>> {
   try {
-    const body = await getJson<{ items: T[] }>(url, signal);
-    return { items: body.items };
+    const body = await getJson<{ items: T[]; overLimit?: boolean; complete?: boolean; truncated?: boolean }>(url, signal);
+    // 上限を超えた（新しい 1,000 件だけ）・期間の始まりまで遡れなかったときは、件数が少なく出るので「以上」と書く
+    return { items: body.items, partial: !!body.overLimit || !!body.truncated || body.complete === false };
   } catch (e) {
     if (signal.aborted || (e instanceof DOMException && e.name === "AbortError")) throw e;
     if (e instanceof ApiError && e.status === 403) return { forbidden: true };
@@ -363,9 +364,13 @@ function ModalityDetail({
     ["種類", "DICOM"],
     ["AEタイトル", <span key="aet" className="font-mono">{aet}</span>],
     ...(showAddress ? [["ホスト名:ポート番号", <span key="host" className="font-mono">{address}</span>] as [string, ReactNode]] : []),
+    ["登録元", "Orthanc"],
   ];
   const received = logs && "items" in logs.received ? logs.received.items.filter((r) => r.remoteAet === aet) : null;
-  const sent = logs && "items" in logs.sent ? logs.sent.items.filter((s) => s.destination === id) : null;
+  // 同じ AE タイトルの接続先が複数あっても、送信先は AE タイトルで結ぶ（記録に AE タイトルが無いときだけ名称）
+  const sent = logs && "items" in logs.sent ? logs.sent.items.filter((s) => (s.destinationAet ? s.destinationAet === aet : s.destination === id)) : null;
+  const receivedPartial = !!(logs && "items" in logs.received && logs.received.partial);
+  const sentPartial = !!(logs && "items" in logs.sent && logs.sent.partial);
   // 役割に許されない区画は出さない（読めたあとに分かる）。区画が 3 つのときは、最後の区画を 2 列にまたがせる
   const showReceived = !(logs && "forbidden" in logs.received);
   const showSent = !(logs && "forbidden" in logs.sent);
@@ -393,13 +398,14 @@ function ModalityDetail({
         <Sec title="受け取ったもの" className={sections === 3 && !showSent ? span : undefined}>
           <RecentLog
             part={logs?.received}
-            rows={received?.slice(0, RECENT).map((r) => ({
-              key: `${r.study.studyInstanceUid ?? "row"}-${r.receivedAt ?? ""}`,
+            rows={received?.slice(0, RECENT).map((r, i) => ({
+              key: `${r.study.studyInstanceUid ?? "row"}-${r.receivedAt ?? ""}-${i}`,
               at: r.receivedAt,
               study: r.study,
               status: <ReceivedState state={r.receiveState} />,
             }))}
             count={received?.length ?? 0}
+            partial={receivedPartial}
             aside={receivedAside(received ?? [])}
             what="受け取ったもの"
             emptyText="今日の受信はありません。"
@@ -422,6 +428,7 @@ function ModalityDetail({
               status: s.status ? <StatusBadge kind={SENT_STATUS_KINDS[s.status]}>{SENT_STATUS_LABELS[s.status]}</StatusBadge> : null,
             }))}
             count={sent?.length ?? 0}
+            partial={sentPartial}
             aside={sentAside(sent ?? [])}
             what="送ったもの"
             emptyText="今日の送信はありません。"
@@ -469,6 +476,7 @@ function RecentLog({
   part,
   rows,
   count,
+  partial,
   aside,
   what,
   emptyText,
@@ -481,6 +489,8 @@ function RecentLog({
   part: Part<unknown> | undefined;
   rows: RecentRow[] | undefined;
   count: number;
+  /** 上限を超えた・期間の始まりまで遡れなかったため、件数は読めた範囲の分（「以上」と書く） */
+  partial: boolean;
   aside: string;
   what: string;
   emptyText: string;
@@ -496,7 +506,7 @@ function RecentLog({
     <div className="space-y-2" data-testid={testId}>
       <div className="flex min-h-7 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <span className="text-sm text-value">
-          今日 <b className="text-lg">{loading || failed ? "—" : count}</b> 件
+          今日 <b className="text-lg">{loading || failed ? "—" : count}</b> 件{partial && "以上"}
         </span>
         {aside && <span className="text-xs text-label">{aside}</span>}
       </div>

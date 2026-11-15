@@ -1,5 +1,6 @@
 import { SentList } from "@/components/pacs/sent-list";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
 import { pageAccess } from "@/lib/auth/page-session";
 import { getBackend } from "@/lib/backend";
@@ -35,10 +36,16 @@ export default async function SentPage({ searchParams }: { searchParams: Promise
   if (access.kind === "forbidden") {
     return <EmptyState kind="denied" adminOnly={false} />;
   }
-  const initialDestination = await destinationOf(first((await searchParams).aet));
+  const aet = first((await searchParams).aet);
+  const initialDestination = await destinationOf(aet);
   return (
     <section className="space-y-3" data-testid="sent-page">
       <PageHeader title="送信一覧" />
+      {aet && !initialDestination && (
+        <Notice kind="info" data-testid="sent-aet-unresolved">
+          AEタイトル {aet} の接続先は登録されていないため、送信先を絞らずに出しています。送信先の欄で選んでください。
+        </Notice>
+      )}
       <SentList timeZone={getConfig().timeZone} limit={SENT_LIMIT} initialDestination={initialDestination} />
     </section>
   );
