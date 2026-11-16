@@ -7,8 +7,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { FieldNote, Input } from "@/components/ui/input";
-import { ModalityMark } from "@/components/ui/modality-mark";
-import { CellMain, isRowControl, PINNED_CELL, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ModalityMark, ModalityMarkButton } from "@/components/ui/modality-mark";
+import { CellLink, CellMain, isRowControl, PINNED_CELL, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
 import { Notice } from "@/components/ui/notice";
 import { Select } from "@/components/ui/select";
@@ -27,9 +27,10 @@ import {
   subscribeSplit,
 } from "@/lib/client/split-position";
 import { SPLIT_MIN_BODY_REM, useNarrowerThan } from "@/lib/client/narrow";
+import { recentSearches, rememberSearch } from "@/lib/client/search-history";
 import type { StudyView } from "@/lib/fields";
 import { birthParts, formatBirthCell, formatDicomTime, formatSlashDate, localToday, sexLabel } from "@/lib/format/japanese-date";
-import { DETAIL_GROUPS, LIST_GROUPS, toggleGroup, type ModalityGroup } from "@/lib/modalities";
+import { DETAIL_GROUPS, LIST_GROUPS, modalityGroupOf, toggleGroup, type ModalityGroup } from "@/lib/modalities";
 import {
   advancedCount,
   birthFieldText,
@@ -40,8 +41,12 @@ import {
   filterToSearchParams,
   MAX_FIELD_LENGTH,
   MAX_QUERY_LENGTH,
+  narrowToDay,
+  narrowToModality,
+  narrowToPatient,
   PATIENT_SEX,
   readBirthField,
+  readPeriodField,
   type PatientSex,
   type StudyFacets,
   type StudyFilter,
@@ -173,6 +178,7 @@ function FilterBar({
   onChange,
   filtered,
   onClear,
+  openSignal,
 }: {
   filter: StudyFilter;
   facets: StudyFacets | undefined;
@@ -180,12 +186,20 @@ function FilterBar({
   /** 絞り込みが既定のままでない（戻す先がある） */
   filtered: boolean;
   onClear: () => void;
+  /** 増えるたびに詳細条件を開く（セルから詳細条件の中の条件で絞ったとき） */
+  openSignal: number;
 }) {
   const [text, setText] = useState(filter.q ?? "");
   // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名）は「詳細条件」の中。どれかで絞っているときは最初から開く
   // 一覧の上に出さないモダリティ（DOC・SR）も詳細条件の数に入れる（閉じていても、絞っていることが分かるように）
   const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0) + DETAIL_GROUPS.filter((g) => filter.modalities?.includes(g)).length;
   const [more, setMore] = useState(conditions > 0);
+  // 一覧のセルから詳細条件の中の条件（期間・文書・レポート）で絞ったときは、すでに同じ数の条件が付いていても開く（絞った条件が見えるように）
+  const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
+  if (openSignal !== seenOpenSignal) {
+    setSeenOpenSignal(openSignal);
+    setMore(true);
+  }
   /** モダリティの見出し 1 つ。押すと、その群を追加する・外す（複数選べる。どれかに合う検査を出す。全部外すと「すべて」） */
   const modalityChip = (m: ModalityGroup) => (
     <Chip
@@ -213,6 +227,20 @@ function FilterBar({
   const birthRead = readBirthField(birthText, today);
   const birthHintId = useId();
   const birthMsgId = useId();
+  // 検査日の短縮入力（docs/spec.md の 3.1「検査日の短縮入力」）。Enter か欄を出たときに開始日・終了日へ反映し、欄は空に戻す
+  const [periodText, setPeriodText] = useState("");
+  const periodRead = readPeriodField(periodText);
+  const periodId = useId();
+  const periodHintId = useId();
+  const periodMsgId = useId();
+  const applyPeriod = () => {
+    if (!periodRead.from && !periodRead.to) return;
+    onChange({ ...filter, date: "range", from: periodRead.from, to: periodRead.to });
+    setPeriodText("");
+  };
+  // 検索語の履歴（画面を開いている間だけ。src/lib/client/search-history.ts）。検索を実行した語を覚え、候補に出す
+  const [recent, setRecent] = useState<readonly string[]>(recentSearches);
+  const historyId = useId();
   // 打つたびに要求を送らない（横断の検索と詳細条件の文字の欄の、どれかを打ち止めてから 300 ミリ秒。待ちは1本にまとめる）
   const birth = birthRead.birth;
   useEffect(() => {
@@ -222,7 +250,13 @@ function FilterBar({
         birth,
         ...(Object.fromEntries(TEXT_FIELDS.map((k) => [k, fieldValue(fields[k])])) as Record<TextField, string | undefined>),
       };
-      if ((["q", "birth", ...TEXT_FIELDS] as const).some((k) => next[k] !== filter[k])) onChange({ ...filter, ...next });
+      if ((["q", "birth", ...TEXT_FIELDS] as const).some((k) => next[k] !== filter[k])) {
+        if (next.q && next.q !== filter.q) {
+          rememberSearch(next.q);
+          setRecent(recentSearches());
+        }
+        onChange({ ...filter, ...next });
+      }
     }, 300);
     return () => window.clearTimeout(t);
   }, [text, birth, fields, filter, onChange]);
@@ -257,9 +291,16 @@ function FilterBar({
             placeholder="患者ID・氏名・受付番号"
             title="患者ID・氏名（漢字・カナ・英字）・受付番号・検査名"
             aria-label="検査の検索"
+            list={historyId}
             className="h-7 pl-8"
             data-testid="study-search"
           />
+          {/* 直前に使った検索語（新しい順に 5 件まで）。ブラウザー標準の候補で出す（docs/design-system/components.md の「検索の帯」） */}
+          <datalist id={historyId} data-testid="study-search-history">
+            {recent.map((w) => (
+              <option key={w} value={w} />
+            ))}
+          </datalist>
         </div>
         <button
           type="button"
@@ -331,6 +372,34 @@ function FilterBar({
               />
             </span>
           )}
+          </span>
+          {/* 検査日の短縮入力（202604・2026・202604-・-202604・202601-202604）。Enter か欄を出たときに、上の開始日・終了日へ反映する */}
+          <span className="flex flex-col gap-0.5">
+            <span className="flex items-center gap-1.5">
+              <label htmlFor={periodId} className="shrink-0 text-xs text-label">
+                期間
+              </label>
+              <Input
+                id={periodId}
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                value={periodText}
+                onChange={(e) => setPeriodText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  applyPeriod();
+                }}
+                onBlur={applyPeriod}
+                placeholder="202604-"
+                aria-invalid={periodRead.message ? true : undefined}
+                aria-describedby={periodRead.message ? periodMsgId : periodRead.hint ? periodHintId : undefined}
+                className="h-7 w-40"
+                data-testid="filter-period"
+              />
+            </span>
+            <FieldNote hint={periodRead.hint} hintId={periodHintId} msg={periodRead.message} msgId={periodMsgId} testId="filter-period" />
           </span>
           {/* 生年月日・性別・受付番号・検査名は Orthanc の検索（QIDO-RS）の条件にする（docs/spec.md の 3.1）。どれも一覧の列に見える */}
           <span className="flex flex-col gap-0.5">
@@ -506,6 +575,8 @@ function birthTitle(birthDate: unknown, studyDate: unknown): string | undefined 
 /** 値が 1 行に収まらないときは `…` で切る（全文は title）。一覧の行だけ。詳細のパネルでは切らない */
 const CUT = "overflow-hidden text-ellipsis whitespace-nowrap";
 
+type NarrowKind = "patient" | "day" | "modality";
+
 /** 生年月日の列の値（`1975/05/14 (S50・51歳)`）。括弧から後ろを `.unit` で包む（読めない値・括弧の無い値はそのまま） */
 function BirthCell({ value }: { value: string }) {
   const parts = value.match(/^(\S+) (\(.+\))$/);
@@ -561,10 +632,13 @@ function StudyRows({
   compact = false,
   sort,
   onSort,
+  onNarrow,
 }: {
   /** いまの並びと、列見出しを押したときの切り替え */
   sort: StudySort;
   onSort: (key: SortKey) => void;
+  /** セルの値を押したとき、同じ値で一覧を絞る（患者 ID・検査日・モダリティ。docs/spec.md の 3.1「セルから同じ値で絞る」） */
+  onNarrow: (kind: NarrowKind, study: StudyView, modality?: string) => void;
   /** 詳細を開いている間（左右に分ける形の左）は、列を詰めた形にする（columnsFor） */
   compact?: boolean;
   /** いまの絞り込み（URL の形）。替わったら、見ていた行の位置を保たない */
@@ -711,11 +785,21 @@ function StudyRows({
                 >
                   {/* 日時は 2 行（日付／時刻）にして切らない。12px の 2 行で 28px の行に収める（行の高さを変えない） */}
                   <TableCell className="text-xs leading-3.5 whitespace-nowrap tabular-nums" title={dateTime} data-testid="study-datetime">
-                    <span className="block">{formatSlashDate(s.studyDate)}</span>
+                    {formatSlashDate(s.studyDate) ? (
+                      <CellLink title="この日の検査を出す" onClick={() => onNarrow("day", s)} className="block" data-testid="narrow-day">
+                        {formatSlashDate(s.studyDate)}
+                      </CellLink>
+                    ) : (
+                      <span className="block" />
+                    )}
                     <span className="block text-label">{formatDicomTime(s.studyTime)}</span>
                   </TableCell>
                   <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
-                    {s.patientId}
+                    {s.patientId && (
+                      <CellLink title="同じ患者の検査を出す" onClick={() => onNarrow("patient", s)} data-testid="narrow-patient">
+                        {s.patientId}
+                      </CellLink>
+                    )}
                   </td>
                   {has("accession") && (
                     <td className={cn(CELL, CUT, "font-mono")} title={s.accessionNumber} data-testid="accession-number">
@@ -757,7 +841,13 @@ function StudyRows({
                   )}
                   <td className={cn(CELL, CUT)} title={desc}>
                     <span className="mr-2 inline-flex gap-1 align-middle">
-                      {s.modalities?.map((m) => <ModalityMark key={m} modality={m} />)}
+                      {s.modalities?.map((m) =>
+                        modalityGroupOf(m) ? (
+                          <ModalityMarkButton key={m} modality={m} title="このモダリティの検査を出す" onClick={() => onNarrow("modality", s, m)} />
+                        ) : (
+                          <ModalityMark key={m} modality={m} />
+                        ),
+                      )}
                     </span>
                     {s.imported && (
                       <StatusBadge kind="note" className="mr-1.5" data-testid="study-imported">
@@ -1023,9 +1113,26 @@ function Browser({
   };
   /** 条件をクリア：絞り込みを既定に戻す。検索の欄の打ちかけの字も消すため、絞り込みの部品を作り直す */
   const [filterKey, setFilterKey] = useState(0);
+  const [openSignal, setOpenSignal] = useState(0);
   const clearFilter = () => {
     setFilterKey((k) => k + 1);
     changeFilter(DEFAULT_FILTER);
+  };
+  /**
+   * 行のセルの値で同じ値の検査に絞る。患者 ID は、ほかの条件を全部外して検索の欄に入れるので、検索の欄・詳細条件の打ちかけの字も
+   * 捨てて絞り込みの部品を作り直す。検査日・モダリティは、ほかの条件を残すので、部品は作り直さない（打ちかけの字・詳細条件の開閉を保つ）
+   */
+  const narrowTo = (kind: NarrowKind, study: StudyView, modality?: string) => {
+    const next =
+      kind === "patient" ? narrowToPatient(study.patientId) : kind === "day" ? narrowToDay(filter, study.studyDate) : narrowToModality(filter, modality ?? "");
+    if (!next) return;
+    if (kind === "patient") {
+      if (next.q) rememberSearch(next.q);
+      setFilterKey((k) => k + 1);
+    }
+    // 期間と、詳細条件の中のモダリティ（文書・レポート）は、詳細条件を開いて見せる
+    if (kind === "day" || next.modalities?.some((g) => DETAIL_GROUPS.includes(g))) setOpenSignal((n) => n + 1);
+    changeFilter(next);
   };
   const pick = (uid: string | null, how: "click" | "key") => {
     setNotice(null);
@@ -1071,7 +1178,7 @@ function Browser({
     <section ref={box} data-split-root className="@container relative flex min-h-0 flex-1 flex-col gap-2">
       {/* 絞り込みの帯と件数の行は、左右をまたいで上に置く（docs/design-system/screen-types.md の「型 B の変種」） */}
       <div inert={overlayOpen || undefined} className="shrink-0 space-y-3">
-        <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} filtered={params !== ""} onClear={clearFilter} />
+        <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} filtered={params !== ""} onClear={clearFilter} openSignal={openSignal} />
         {/* 件数の行（docs/design-system/components.md）：検索の欄が空かどうかで件数と自動更新の位置が動かない（#56） */}
         <CountRow
           aside={
@@ -1146,6 +1253,7 @@ function Browser({
         studies={rows}
         sort={sort}
         onSort={onSort}
+        onNarrow={narrowTo}
         // 前の絞り込みの行を出している間（placeholder）は、別の印にする（新しい絞り込みの行で、見ていた行の位置を戻さない）。
         // 並びを替えたときも別の印にする（並びが替わった行で、見ていた行の位置を戻さない）
         listKey={list.isPlaceholderData ? "placeholder" : `list:${params}:${sort.key}:${sort.dir}`}

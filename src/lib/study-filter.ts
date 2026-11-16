@@ -3,7 +3,7 @@ import type { StudyView } from "@/lib/fields";
 import type { SimpleDate } from "@/lib/format/japanese-date";
 import { birthInputHint, parseBirthInput, parseDicomDate } from "@/lib/format/japanese-date";
 import { parsePatientNameForSearch, type ParsedPatientName } from "@/lib/format/patient-name";
-import { orderGroups, parseGroups, studyInGroup, type ModalityGroup } from "@/lib/modalities";
+import { modalityGroupOf, orderGroups, parseGroups, studyInGroup, type ModalityGroup } from "@/lib/modalities";
 
 // 検査の一覧のすぐ絞れる見出し（docs/spec.md の 3.1）。
 // 検査日：今日・昨日・1週間・今月・全期間・期間の指定。モダリティ。横断の検索。
@@ -125,6 +125,86 @@ export function readBirthField(text: string, today: SimpleDate): { birth?: strin
   if (!read.ok) return { message: read.message };
   const { da } = read;
   return { birth: `${da.slice(0, 4)}-${da.slice(4, 6)}-${da.slice(6, 8)}`, hint: birthInputHint(read.date, today) };
+}
+
+export const PERIOD_FORMAT_ERROR = "検査日を読み取れません。202604・2026・202604- の形で入力してください。";
+export const PERIOD_ORDER_ERROR = "検査日の終わりが始まりより前です。";
+
+const PERIOD_SEPARATOR = /[-~〜−]/;
+const PERIOD_MIN_YEAR = 1900;
+
+const isoOf = (d: SimpleDate) => `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+const slashOf = (d: SimpleDate) => isoOf(d).replaceAll("-", "/");
+
+/** 短縮入力の片側（`2026`・`202604`・`20260415`・`2026/4/15`）を、その年・月・日の初めと終わりにする。読めなければ null */
+function readPeriodEdge(text: string): { from: SimpleDate; to: SimpleDate } | null {
+  // 区切りの `/` があるときだけ、月日を 1 桁で書ける（`2026/4/5`）。区切りが無いときは 4・6・8 桁だけ
+  const parts = text.includes("/")
+    ? text.split("/")
+    : [/^\d{4}(\d{2}(\d{2})?)?$/.test(text) ? text : ""].flatMap((t) => (t ? [t.slice(0, 4), t.slice(4, 6), t.slice(6, 8)].filter(Boolean) : []));
+  if (parts.length === 0 || parts.length > 3 || !/^\d{4}$/.test(parts[0]!) || parts.slice(1).some((p) => !/^\d{1,2}$/.test(p))) return null;
+  const [year, month, day] = parts.map(Number) as [number, number | undefined, number | undefined];
+  if (year < PERIOD_MIN_YEAR) return null;
+  if (month === undefined) return { from: { year, month: 1, day: 1 }, to: { year, month: 12, day: 31 } };
+  if (month < 1 || month > 12) return null;
+  if (day === undefined) return { from: { year, month, day: 1 }, to: { year, month, day: new Date(Date.UTC(year, month, 0)).getUTCDate() } };
+  const date = parseDicomDate(`${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`);
+  return date ? { from: date, to: date } : null;
+}
+
+/**
+ * 詳細条件の検査日の短縮入力を読む（docs/spec.md の 3.1「検査日の短縮入力」）。
+ * `YYYYMMDD`（その日）・`YYYYMM`（その月）・`YYYY`（その年）・`A-`（A の初めから）・`-B`（B の終わりまで）・`A-B`（範囲）。
+ * 区切りの `/` は付けても付けなくてもよい。全角の数字・ハイフンも読む。読めたら期間（`YYYY-MM-DD`。片側だけのこともある）と
+ * 欄の下の読み取り結果を返し、読めなければ誤りの文だけを返す（条件にしない）。空なら何も返さない
+ */
+export function readPeriodField(text: string): { from?: string; to?: string; hint?: string; message?: string } {
+  const value = text.normalize("NFKC").replace(/\s+/g, "");
+  if (value === "") return {};
+  const cut = value.split(PERIOD_SEPARATOR);
+  if (cut.length > 2) return { message: PERIOD_FORMAT_ERROR };
+  if (cut.length === 1) {
+    const edge = readPeriodEdge(value);
+    if (!edge) return { message: PERIOD_FORMAT_ERROR };
+    const [from, to] = [isoOf(edge.from), isoOf(edge.to)];
+    return { from, to, hint: from === to ? slashOf(edge.from) : `${slashOf(edge.from)} 〜 ${slashOf(edge.to)}` };
+  }
+  const [head, tail] = cut as [string, string];
+  if (head === "" && tail === "") return { message: PERIOD_FORMAT_ERROR };
+  const start = head === "" ? null : readPeriodEdge(head);
+  const end = tail === "" ? null : readPeriodEdge(tail);
+  if ((head !== "" && !start) || (tail !== "" && !end)) return { message: PERIOD_FORMAT_ERROR };
+  const from = start?.from;
+  const to = end?.to;
+  if (from && to && isoOf(from) > isoOf(to)) return { message: PERIOD_ORDER_ERROR };
+  return {
+    ...(from && { from: isoOf(from) }),
+    ...(to && { to: isoOf(to) }),
+    hint: `${from ? slashOf(from) : ""} 〜 ${to ? slashOf(to) : ""}`.trim(),
+  };
+}
+
+/**
+ * 一覧のセルから同じ値で絞る（docs/spec.md の 3.1「セルから同じ値で絞る」）。
+ * 患者 ID：その患者の検査を全期間で出す（検索の欄に患者 ID を入れ、検査日・モダリティ・詳細条件は外す）。患者 ID が無ければ null
+ */
+export function narrowToPatient(patientId: unknown): StudyFilter | null {
+  const id = typeof patientId === "string" ? patientId.trim().slice(0, MAX_QUERY_LENGTH) : "";
+  return id ? { date: "all", q: id } : null;
+}
+
+/** 検査日：その 1 日の期間指定にする（ほかの条件は残す）。日付が読めなければ null */
+export function narrowToDay(filter: StudyFilter, studyDate: unknown): StudyFilter | null {
+  const day = parseDicomDate(studyDate);
+  if (!day) return null;
+  const iso = isoOf(day);
+  return { ...filter, date: "range", from: iso, to: iso };
+}
+
+/** モダリティ：その群だけを選ぶ（ほかの条件は残す）。DICOM の Modality の値が群に入らなければ null */
+export function narrowToModality(filter: StudyFilter, modality: string): StudyFilter | null {
+  const group = modalityGroupOf(modality);
+  return group ? { ...filter, modalities: [group] } : null;
 }
 
 /** URL の値を読む。読めない値は使わない（既定にする） */

@@ -35,3 +35,21 @@ export function ModalityMark({ modality, className }: { modality: string; classN
     </span>
   );
 }
+
+/**
+ * 押せるモダリティの印（一覧の行の中。docs/design-system/components.md の「一覧の表」の「セルから同じ値で絞る」）。
+ * 印の形と色はそのままで、hover と focus で枠を出す。button なので、押しても行は選ばれない（ui/table の isRowControl）
+ */
+export function ModalityMarkButton({ modality, title, onClick }: { modality: string; title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className="rounded-sm hover:ring-1 hover:ring-border-input focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      data-testid="narrow-modality"
+    >
+      <ModalityMark modality={modality} />
+    </button>
+  );
+}
