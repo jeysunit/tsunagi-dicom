@@ -211,6 +211,7 @@
 ```
 
 - 区画：枠 1px `border`・角 6px。見出し 14px 太字・地 `surface`・内 8px 12px。中 12px 16px。名前は `.sec > h2`・`.sec > .in` に 1 つ（`.sec-body` は使わない）。
+- 表を主にする区画は `.in.flush` にし、表の枠を付けない（2026-11-16 承認者が決定。ui-kit 1.2.9）。区画の枠は 1 つのまま、表を区画の端から端まで広げる。対象は、中身が表だけの区画と、件数の行 `.listhead`＋表＋全部見るリンクの区画（接続先の詳細の「今日の受信」「今日の送信」）。最初と最後の列の内側の余白は 12px、`.listhead` と全部見るリンクを包む `.sec-foot` は内 8px 12px。表のほかに入力や知らせが同居する区画は今のまま（`.in` に 12px 16px、表は枠を持つ）。
 - `.kv`：項目名 12px `label`、値 14px 太字 `value`。値の無い項目は「—」。
 
 ## 患者バナー（`.fb`）
@@ -290,12 +291,12 @@
 <div class="grid2" role="region" aria-label="DTG_CT01 の詳細">
   <section class="sec"><h2>設定</h2><div class="in"><dl class="kv"><dt>名称</dt><dd><b>DTG_CT01</b></dd><dt>種類</dt><dd>DICOM</dd><dt>AEタイトル</dt><dd><span class="mono">DTG_CT01</span></dd><dt>ホスト名:ポート番号</dt><dd><span class="mono">192.0.2.50:11113</span></dd></dl></div></section>
   <section class="sec"><h2>接続確認</h2><div class="in"><dl class="kv"><dt>最後の接続確認</dt><dd><span class="st" data-k="ok">成功</span> <span class="when">10:32:05</span></dd></dl><div class="acts"><button type="button" class="btn">接続確認</button></div></div></section>
-  <section class="sec"><h2>今日の受信</h2><div class="in">
+  <section class="sec"><h2>今日の受信</h2><div class="in flush">
     <div class="listhead"><span class="cnt">今日 <b>3</b> 件</span><span class="xs label">受信完了 2・受信中 1</span></div>
     <div class="tbl-wrap" role="region" aria-label="DTG_CT01 の今日の受信" tabindex="0"><table class="tbl strong"><thead><tr><th>日時</th><th>患者ID</th><th>氏名</th><th>モダリティ・検査名</th><th>状態</th></tr></thead><tbody>…</tbody></table></div>
-    <a href="/received?aet=DTG_CT01">受信一覧で全部見る</a>
+    <div class="sec-foot"><a href="/received?aet=DTG_CT01">受信一覧で全部見る</a></div>
   </div></section>
-  <section class="sec"><h2>今日の送信</h2><div class="in">…<a href="/sent?aet=DTG_CT01">送信一覧で全部見る</a></div></section>
+  <section class="sec"><h2>今日の送信</h2><div class="in flush">…<div class="sec-foot"><a href="/sent?aet=DTG_CT01">送信一覧で全部見る</a></div></div></section>
 </div>
 ```
 
