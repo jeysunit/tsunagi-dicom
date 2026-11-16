@@ -49,6 +49,15 @@ describe("検査日の短縮入力（readPeriodField）", () => {
     expect(readPeriodField("20260420-20260415")).toEqual({ message: PERIOD_ORDER_ERROR });
   });
 
+  it("閏日：2000/02/29 は受け、1900/02/29（閏年でない）は読まない。1899 年は月日・範囲の端でも読まない", () => {
+    expect(readPeriodField("20000229")).toMatchObject({ from: "2000-02-29", to: "2000-02-29" });
+    expect(readPeriodField("19000229")).toEqual({ message: PERIOD_FORMAT_ERROR });
+    expect(readPeriodField("18990101")).toEqual({ message: PERIOD_FORMAT_ERROR });
+    expect(readPeriodField("189912-")).toEqual({ message: PERIOD_FORMAT_ERROR });
+    expect(readPeriodField("-189912")).toEqual({ message: PERIOD_FORMAT_ERROR });
+    expect(readPeriodField("1900-1899")).toEqual({ message: PERIOD_FORMAT_ERROR });
+  });
+
   it("同じ月の中の範囲（始まりが月の初め、終わりが月の終わり）は、順序が逆にならない", () => {
     expect(readPeriodField("202604-202604")).toMatchObject({ from: "2026-04-01", to: "2026-04-30" });
   });

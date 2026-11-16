@@ -7,8 +7,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Button, pressFeedback, pressInset } from "@/components/ui/button";
 import { CountRow } from "@/components/ui/count-row";
 import { FieldNote, Input } from "@/components/ui/input";
-import { ModalityMark } from "@/components/ui/modality-mark";
-import { CellMain, isRowControl, PINNED_CELL, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ModalityMark, ModalityMarkButton } from "@/components/ui/modality-mark";
+import { CellLink, CellMain, isRowControl, PINNED_CELL, SortableHead, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PendingText, ProgressBar, useDelayedPending } from "@/components/ui/pending";
 import { Notice } from "@/components/ui/notice";
 import { Select } from "@/components/ui/select";
@@ -191,6 +191,12 @@ function FilterBar({
   // 一覧の上に出さないモダリティ（DOC・SR）も詳細条件の数に入れる（閉じていても、絞っていることが分かるように）
   const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0) + DETAIL_GROUPS.filter((g) => filter.modalities?.includes(g)).length;
   const [more, setMore] = useState(conditions > 0);
+  // 検査日を押して期間指定になったときなど、詳細条件の外から条件が付いたときは開く（閉じたままだと、絞っている条件が見えない）
+  const [seenConditions, setSeenConditions] = useState(conditions);
+  if (conditions !== seenConditions) {
+    setSeenConditions(conditions);
+    if (conditions > 0) setMore(true);
+  }
   /** モダリティの見出し 1 つ。押すと、その群を追加する・外す（複数選べる。どれかに合う検査を出す。全部外すと「すべて」） */
   const modalityChip = (m: ModalityGroup) => (
     <Chip
@@ -568,36 +574,6 @@ const CUT = "overflow-hidden text-ellipsis whitespace-nowrap";
 
 type NarrowKind = "patient" | "day" | "modality";
 
-/**
- * 行の中の、同じ値で絞る値のボタン（docs/design-system/components.md の「一覧の表」）。link の文字で、押せる範囲は値の文字だけ。
- * button なので、押しても行は選ばれない（ui/table の isRowControl）
- */
-function CellLink({
-  title,
-  onClick,
-  className,
-  testId,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  className?: string;
-  testId: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={cn("rounded-sm text-left text-link underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", className)}
-      data-testid={testId}
-    >
-      {children}
-    </button>
-  );
-}
-
 /** 生年月日の列の値（`1975/05/14 (S50・51歳)`）。括弧から後ろを `.unit` で包む（読めない値・括弧の無い値はそのまま） */
 function BirthCell({ value }: { value: string }) {
   const parts = value.match(/^(\S+) (\(.+\))$/);
@@ -807,7 +783,7 @@ function StudyRows({
                   {/* 日時は 2 行（日付／時刻）にして切らない。12px の 2 行で 28px の行に収める（行の高さを変えない） */}
                   <TableCell className="text-xs leading-3.5 whitespace-nowrap tabular-nums" title={dateTime} data-testid="study-datetime">
                     {formatSlashDate(s.studyDate) ? (
-                      <CellLink title="この日の検査を出す" onClick={() => onNarrow("day", s)} className="block" testId="narrow-day">
+                      <CellLink title="この日の検査を出す" onClick={() => onNarrow("day", s)} className="block" data-testid="narrow-day">
                         {formatSlashDate(s.studyDate)}
                       </CellLink>
                     ) : (
@@ -817,7 +793,7 @@ function StudyRows({
                   </TableCell>
                   <td className={cn(CELL, "font-mono whitespace-nowrap")} data-testid="patient-id">
                     {s.patientId && (
-                      <CellLink title="同じ患者の検査を出す" onClick={() => onNarrow("patient", s)} testId="narrow-patient">
+                      <CellLink title="同じ患者の検査を出す" onClick={() => onNarrow("patient", s)} data-testid="narrow-patient">
                         {s.patientId}
                       </CellLink>
                     )}
@@ -864,16 +840,7 @@ function StudyRows({
                     <span className="mr-2 inline-flex gap-1 align-middle">
                       {s.modalities?.map((m) =>
                         modalityGroupOf(m) ? (
-                          <button
-                            key={m}
-                            type="button"
-                            title="このモダリティの検査を出す"
-                            onClick={() => onNarrow("modality", s, m)}
-                            className="rounded-sm hover:ring-1 hover:ring-border-input focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                            data-testid="narrow-modality"
-                          >
-                            <ModalityMark modality={m} />
-                          </button>
+                          <ModalityMarkButton key={m} modality={m} title="このモダリティの検査を出す" onClick={() => onNarrow("modality", s, m)} />
                         ) : (
                           <ModalityMark key={m} modality={m} />
                         ),
@@ -1147,13 +1114,18 @@ function Browser({
     setFilterKey((k) => k + 1);
     changeFilter(DEFAULT_FILTER);
   };
-  /** 行のセルの値で同じ値の検査に絞る。検索の欄・詳細条件の打ちかけの字も替えるため、絞り込みの部品を作り直す */
+  /**
+   * 行のセルの値で同じ値の検査に絞る。患者 ID は、ほかの条件を全部外して検索の欄に入れるので、検索の欄・詳細条件の打ちかけの字も
+   * 捨てて絞り込みの部品を作り直す。検査日・モダリティは、ほかの条件を残すので、部品は作り直さない（打ちかけの字・詳細条件の開閉を保つ）
+   */
   const narrowTo = (kind: NarrowKind, study: StudyView, modality?: string) => {
     const next =
       kind === "patient" ? narrowToPatient(study.patientId) : kind === "day" ? narrowToDay(filter, study.studyDate) : narrowToModality(filter, modality ?? "");
     if (!next) return;
-    if (next.q) rememberSearch(next.q);
-    setFilterKey((k) => k + 1);
+    if (kind === "patient") {
+      if (next.q) rememberSearch(next.q);
+      setFilterKey((k) => k + 1);
+    }
     changeFilter(next);
   };
   const pick = (uid: string | null, how: "click" | "key") => {

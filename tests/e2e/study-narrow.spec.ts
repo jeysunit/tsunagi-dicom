@@ -15,15 +15,24 @@ async function asGeneral(page: Page) {
 
 test("患者 ID を押すと、その患者の検査だけが全期間で出る：行は選ばれず、検索の欄に患者 ID が入り、条件をクリアで戻る", async ({ page }) => {
   await asGeneral(page);
-  // 先に、検査日とモダリティの絞り込みを入れておく（患者の検査を探す操作は、それを外す）
-  await page.getByTestId("date-week").click();
+  // 先に、モダリティ（CT）・期間指定・性別（男）の絞り込みを入れておく（患者の検査を探す操作は、それを全部外す）
   await page.getByTestId("modality-CT").click();
-  await page.getByTestId("modality-all").click();
-  await page.getByTestId("date-all").click();
+  await page.getByTestId("filter-more").click();
+  await page.getByTestId("filter-period").fill("2026");
+  await page.getByTestId("filter-period").press("Enter");
+  await page.getByTestId("filter-sex").selectOption("M");
+  await expect(page).toHaveURL(/date=range/);
+  await expect(page).toHaveURL(/sex=M/);
+  await expect(page).toHaveURL(/modality=CT/);
+  await expect(page.getByTestId("study-count")).toHaveText("4");
 
   const first = page.getByTestId("study-table").locator("tbody tr").first();
   const id = (await first.getByTestId("patient-id").innerText()).trim();
   await first.getByTestId("narrow-patient").click();
+  // ほかの条件は全部外れ、その患者の検査が全期間・全モダリティで出る
+  await expect(page.getByTestId("study-count")).toHaveText("2");
+  await expect(page).not.toHaveURL(/date=|sex=|modality=/);
+  await expect(page.getByTestId("modality-all")).toHaveAttribute("aria-pressed", "true");
 
   // 行は選ばれない（行を選ぶ操作と取り違えない）
   await expect(page.locator('tr[aria-selected="true"]')).toHaveCount(0);
@@ -43,15 +52,41 @@ test("患者 ID を押すと、その患者の検査だけが全期間で出る�
   await expect(page.getByTestId("study-search")).toHaveValue("");
 });
 
-test("患者 ID のボタンは、キーボードでも押せる（行から Tab で入り、Enter）。行の Enter（開く）とは別", async ({ page }) => {
+test("値のボタンはキーボードで押せる：行から Tab で入り、Enter・Space で絞る。行の Enter（ビューアで開く）にならず、行は選ばれない", async ({ page }) => {
   await asGeneral(page);
-  const first = page.getByTestId("study-table").locator("tbody tr").first();
+  let popups = 0;
+  page.on("popup", () => popups++);
+  const rowOf = (n: number) => page.getByTestId("study-table").locator("tbody tr").nth(n);
+  const first = rowOf(0);
   const id = (await first.getByTestId("patient-id").innerText()).trim();
-  const button = first.getByTestId("narrow-patient");
-  await button.focus();
+  // 行にフォーカス → Tab（検査日のボタン）→ Tab（患者 ID のボタン）
+  await first.focus();
+  await page.keyboard.press("Tab");
+  await expect(first.getByTestId("narrow-day")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(first.getByTestId("narrow-patient")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("study-search")).toHaveValue(id);
   await expect(page.locator('tr[aria-selected="true"]')).toHaveCount(0);
+  await page.getByTestId("filter-clear").click();
+  await expect(page.getByTestId("study-count")).toHaveText("8");
+
+  // Space でも押せる（行の Space は選ぶ操作だが、ボタンの Space は行に届かない）
+  await rowOf(1).getByTestId("narrow-patient").focus();
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("study-search")).not.toHaveValue("");
+  await expect(page.locator('tr[aria-selected="true"]')).toHaveCount(0);
+  expect(popups).toBe(0);
+});
+
+test("検査日・モダリティを押しても、詳細条件の開閉と、ほかの欄の入力は残る（絞り込みの部品を作り直さない）", async ({ page }) => {
+  await asGeneral(page);
+  await page.getByTestId("filter-more").click();
+  await page.getByTestId("filter-desc").fill("abc");
+  await page.getByTestId("study-table").locator("tbody tr").first().getByTestId("narrow-modality").first().click();
+  await expect(page.getByTestId("filter-more-panel")).toBeVisible();
+  await expect(page.getByTestId("filter-desc")).toHaveValue("abc");
+  await expect(page.locator('[data-testid^="modality-"][aria-pressed="true"]')).toHaveCount(1);
 });
 
 test("検査日を押すと、その 1 日の期間指定になる：詳細条件が開いて開始日と終了日に出る", async ({ page }) => {
@@ -108,6 +143,10 @@ test("検索語の履歴：検索した語が新しい順に候補に出る（5 
   ]);
   await expect(search).toHaveAttribute("list", (await page.getByTestId("study-search-history").getAttribute("id"))!);
   expect(await page.evaluate(() => `${localStorage.length}/${sessionStorage.length}`)).toBe("0/0");
+  // 頁を読み込み直す（ログアウトも、頁ごと読み込み直す）と、履歴は消える
+  await page.reload();
+  await expect(page.getByTestId("study-search")).toHaveValue("JP-TEST-0002");
+  await expect(page.getByTestId("study-search-history").locator("option")).toHaveCount(0);
 });
 
 test("検査日の短縮入力：202604 は 4 月の期間、読めない入力は誤りを出して条件にしない", async ({ page }) => {

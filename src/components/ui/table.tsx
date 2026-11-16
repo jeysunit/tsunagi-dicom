@@ -21,6 +21,30 @@ export const PINNED_CELL =
 /** 行を選ぶ操作にしない部品（行の中のリンク・ボタン・入力。印を付けた部品も） */
 export const ROW_CONTROL_SELECTOR = "a,button,input,select,textarea,label,summary,[role=menu],[data-row-control]";
 
+/**
+ * 行の中の、同じ値で絞る値のボタン（docs/design-system/components.md の「一覧の表」の「セルから同じ値で絞る」）。
+ * link の文字で、押せる範囲は値の文字だけ。button なので、押しても行は選ばれない（isRowControl）
+ */
+export function CellLink({
+  title,
+  onClick,
+  className,
+  children,
+  ...props
+}: Omit<React.ComponentProps<"button">, "type" | "onClick"> & { title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={cn("rounded-sm text-left text-link underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", className)}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
 /** 押した所が、行の中の操作の部品か（その部品の操作を、行を選ぶ操作にしない） */
 export function isRowControl(target: EventTarget | null, row: Element): boolean {
   if (!target || !(target instanceof Element)) return false;
