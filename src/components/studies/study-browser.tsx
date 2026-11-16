@@ -178,6 +178,7 @@ function FilterBar({
   onChange,
   filtered,
   onClear,
+  openSignal,
 }: {
   filter: StudyFilter;
   facets: StudyFacets | undefined;
@@ -185,17 +186,19 @@ function FilterBar({
   /** 絞り込みが既定のままでない（戻す先がある） */
   filtered: boolean;
   onClear: () => void;
+  /** 増えるたびに詳細条件を開く（セルから詳細条件の中の条件で絞ったとき） */
+  openSignal: number;
 }) {
   const [text, setText] = useState(filter.q ?? "");
   // 使うことの少ない条件（期間指定・生年月日・性別・受付番号・検査名）は「詳細条件」の中。どれかで絞っているときは最初から開く
   // 一覧の上に出さないモダリティ（DOC・SR）も詳細条件の数に入れる（閉じていても、絞っていることが分かるように）
   const conditions = advancedCount(filter) + (filter.date === "range" ? 1 : 0) + DETAIL_GROUPS.filter((g) => filter.modalities?.includes(g)).length;
   const [more, setMore] = useState(conditions > 0);
-  // 検査日を押して期間指定になったときなど、詳細条件の外から条件が付いたときは開く（閉じたままだと、絞っている条件が見えない）
-  const [seenConditions, setSeenConditions] = useState(conditions);
-  if (conditions !== seenConditions) {
-    setSeenConditions(conditions);
-    if (conditions > 0) setMore(true);
+  // 一覧のセルから詳細条件の中の条件（期間・文書・レポート）で絞ったときは、すでに同じ数の条件が付いていても開く（絞った条件が見えるように）
+  const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
+  if (openSignal !== seenOpenSignal) {
+    setSeenOpenSignal(openSignal);
+    setMore(true);
   }
   /** モダリティの見出し 1 つ。押すと、その群を追加する・外す（複数選べる。どれかに合う検査を出す。全部外すと「すべて」） */
   const modalityChip = (m: ModalityGroup) => (
@@ -1110,6 +1113,7 @@ function Browser({
   };
   /** 条件をクリア：絞り込みを既定に戻す。検索の欄の打ちかけの字も消すため、絞り込みの部品を作り直す */
   const [filterKey, setFilterKey] = useState(0);
+  const [openSignal, setOpenSignal] = useState(0);
   const clearFilter = () => {
     setFilterKey((k) => k + 1);
     changeFilter(DEFAULT_FILTER);
@@ -1126,6 +1130,8 @@ function Browser({
       if (next.q) rememberSearch(next.q);
       setFilterKey((k) => k + 1);
     }
+    // 期間と、詳細条件の中のモダリティ（文書・レポート）は、詳細条件を開いて見せる
+    if (kind === "day" || next.modalities?.some((g) => DETAIL_GROUPS.includes(g))) setOpenSignal((n) => n + 1);
     changeFilter(next);
   };
   const pick = (uid: string | null, how: "click" | "key") => {
@@ -1172,7 +1178,7 @@ function Browser({
     <section ref={box} data-split-root className="@container relative flex min-h-0 flex-1 flex-col gap-2">
       {/* 絞り込みの帯と件数の行は、左右をまたいで上に置く（docs/design-system/screen-types.md の「型 B の変種」） */}
       <div inert={overlayOpen || undefined} className="shrink-0 space-y-3">
-        <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} filtered={params !== ""} onClear={clearFilter} />
+        <FilterBar key={filterKey} filter={filter} facets={data?.facets} onChange={changeFilter} filtered={params !== ""} onClear={clearFilter} openSignal={openSignal} />
         {/* 件数の行（docs/design-system/components.md）：検索の欄が空かどうかで件数と自動更新の位置が動かない（#56） */}
         <CountRow
           aside={

@@ -89,6 +89,22 @@ test("検査日・モダリティを押しても、詳細条件の開閉と、�
   await expect(page.locator('[data-testid^="modality-"][aria-pressed="true"]')).toHaveCount(1);
 });
 
+test("期間指定が付いたまま詳細条件を閉じていても、検査日を押すと詳細条件が開き、絞った 1 日が出る", async ({ page }) => {
+  await asGeneral(page);
+  await page.getByTestId("filter-more").click();
+  await page.getByTestId("filter-period").fill("2026");
+  await page.getByTestId("filter-period").press("Enter");
+  await expect(page).toHaveURL(/date=range&from=2026-01-01&to=2026-12-31/);
+  await page.getByTestId("filter-more").click();
+  await expect(page.getByTestId("filter-more-panel")).toHaveCount(0);
+  const first = page.getByTestId("study-table").locator("tbody tr").first();
+  const iso = (await first.getByTestId("narrow-day").innerText()).trim().replaceAll("/", "-");
+  await first.getByTestId("narrow-day").click();
+  await expect(page.getByTestId("filter-more-panel")).toBeVisible();
+  await expect(page.getByLabel("開始日")).toHaveValue(iso);
+  await expect(page.getByLabel("終了日")).toHaveValue(iso);
+});
+
 test("検査日を押すと、その 1 日の期間指定になる：詳細条件が開いて開始日と終了日に出る", async ({ page }) => {
   await asGeneral(page);
   const first = page.getByTestId("study-table").locator("tbody tr").first();
