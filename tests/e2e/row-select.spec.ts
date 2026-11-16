@@ -303,7 +303,7 @@ test("タグの表：メニューを開いたまま外の欄を押したとき�
   const table = await openTagTable(page);
   await table.locator("tbody tr").nth(1).click({ button: "right" });
   await expect(page.getByTestId("tag-menu")).toBeVisible();
-  const search = page.getByRole("searchbox").first();
+  const search = page.getByTestId("study-search");
   await search.click();
   await expect(page.getByTestId("tag-menu")).toHaveCount(0);
   await expect(search).toBeFocused();

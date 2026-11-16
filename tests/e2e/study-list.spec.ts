@@ -213,7 +213,7 @@ test("詳細のシリーズ：サムネイルが横に 1 列に並び、横に�
 test("詳細のシリーズ：狭い幅（600px）でも、並びは 1 列のまま（縦に積まない）", async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 900 });
   await asRole(page, "一般");
-  await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().click({ position: { x: 100, y: 12 } });
+  await page.locator("tr[data-study-uid]").filter({ hasText: "2 / 6" }).first().getByTestId("patient-name").click();
   const row = page.getByTestId("series-row");
   await expect(row).toBeVisible();
   const boxes = await page.getByTestId("series-item").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
@@ -473,7 +473,7 @@ test("左右に分ける：狭い画面では一覧だけを出し、行を選�
   expect(await noPageScroll()).toBe(true);
 
   // 表は幅が広く、行の中央は画面の外なので、見えている左の端を押す
-  await row(page).click({ position: { x: 100, y: 20 } });
+  await row(page).getByTestId("patient-name").click();
   await expect(page.getByTestId("study-detail")).toBeVisible();
   await expectDetail(page, STUDY);
   expect(await noPageScroll()).toBe(true);
@@ -506,7 +506,7 @@ test("左右に分ける：狭い画面では一覧だけを出し、行を選�
   await expect(page.locator("[data-split-root] [inert]")).toHaveCount(0);
 
   // 閉じるボタンでも同じ
-  await row(page).click({ position: { x: 100, y: 20 } });
+  await row(page).getByTestId("patient-name").click();
   await expect(pane).toBeFocused();
   await page.getByRole("button", { name: "詳細を閉じる" }).click();
   await expect(pane).toBeHidden();
@@ -562,7 +562,7 @@ test("左右に分ける：境目をどちらへ寄せても、一覧は 440px�
 test("左右に分ける：本文が 852px より狭いとき（左のナビを開いた 900px の画面）は、左右に分けず、詳細を一覧の上に重ねる", async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 800 });
   await asRole(page, "一般");
-  await row(page).click({ position: { x: 100, y: 20 } });
+  await row(page).getByTestId("patient-name").click();
   const pane = page.getByTestId("detail-pane");
   await expect(pane).toBeVisible();
   // 重ね表示：境目は無く、詳細は一覧を覆い、背後の一覧は inert。フォーカスは詳細へ
@@ -584,7 +584,7 @@ test("左右に分ける：ブラウザの文字を大きくすると（rem が 
   await asRole(page, "一般");
   // 53.25rem ＝ 1278px になり、左のナビを開いた本文（1072px ほど）より広い。CSS と JS が同じ幅で切り替わることを確認する
   await page.addStyleTag({ content: "html { font-size: 24px; }" });
-  await row(page).click({ position: { x: 100, y: 20 } });
+  await row(page).getByTestId("patient-name").click();
   const pane = page.getByTestId("detail-pane");
   await expect(pane).toBeVisible();
   await expect(page.getByTestId("split-handle")).toBeHidden();
@@ -1230,7 +1230,7 @@ test("詳細の見出し：受付番号が無いときも「受付番号 —」�
     await route.fulfill({ response: res, json: body });
   });
   await page.getByTestId("modality-CT").click();
-  await rows(page).first().click();
+  await rows(page).first().getByTestId("patient-name").click();
   await expect(page.getByTestId("series-strip")).toHaveAttribute("data-loaded", "true");
   await expect(page.getByTestId("detail-banner").getByTestId("detail-accession")).toHaveText(/受付番号\s*—/);
   // 期待の変更（parts.md の `.fb`・`.finfo`）：値の無い項目も項目名を残して「—」にする（検査を替えても、同じ項目が同じ位置にある）。
@@ -1542,7 +1542,7 @@ test("画像の場所：別のサムネイルを押すと、そのシリーズ�
 test("画像の場所：狭い幅（600px）では、画像の一覧を上、タグの表を下に重ね、横にはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 900 });
   await asRole(page, "一般");
-  await row(page).click({ position: { x: 100, y: 12 } });
+  await row(page).getByTestId("patient-name").click();
   await page.getByTestId("series-open").click();
   const area = page.getByTestId("series-images");
   const list = (await area.getByTestId("instance-list").boundingBox())!;
@@ -1711,7 +1711,7 @@ test("自動更新：ポインタが一覧の上にある間とキーを押し�
   // 先頭の行を押して選ぶ。ポインタは一覧の上に置いたまま
   const first = rows(page).first();
   const uid = (await first.getAttribute("data-study-uid"))!;
-  await first.click({ position: { x: 100, y: 12 } });
+  await first.getByTestId("patient-name").click();
   await expect(first).toHaveAttribute("aria-selected", "true");
   const top = (await first.boundingBox())!.y;
 
