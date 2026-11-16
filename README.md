@@ -264,6 +264,7 @@ cosign verify ghcr.io/jeysunit/tsunagi-dicom@sha256:<digest> \
 | [`docs/security-and-maintenance.md`](docs/security-and-maintenance.md) | セキュリティと保守の方針（システム構成図・通信の一覧・秘密の保存先・記録・版と支える期間・使い終えるときの片付け） |
 | [`docs/round-trip-test.md`](docs/round-trip-test.md) | 開発用の compose（Orthanc・検査装置の試験用のソフト・storescp）での往復の試験の手順 |
 | [`docs/integration-test.md`](docs/integration-test.md) | 本物の Orthanc と DCMTK のコンテナでの結合の試験（CI で毎回実行する。手元での実行方法） |
+| [`docs/modern-web-guidance/`](docs/modern-web-guidance/README.md) | 画面を作るときの参考資料（Chrome チームのガイド 5 本を版を固定して取り込んだもの。Apache-2.0） |
 | [`SECURITY.md`](SECURITY.md) | 脆弱性の報告の窓口と支える版 |
 | [`docs/patient-name-test-cases.md`](docs/patient-name-test-cases.md) | 氏名の形の試験の一覧（機械的に読めるコピーは `tests/fixtures/patient-names.json`） |
 | [`tests/fixtures/orthanc/`](tests/fixtures/orthanc/) | モックに使う、架空の患者の応答の見本と、その置き換えの規則 |
