@@ -317,11 +317,12 @@ export function ModalityList({ modalities, csrfToken, timeZone }: { modalities: 
 }
 
 /** 接続先の詳細の区画（デザインシステムの `.sec`）。題は 14px・行の高さ 20px・地 surface */
-function Sec({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
+function Sec({ title, className, flush, children }: { title: string; className?: string; flush?: boolean; children: ReactNode }) {
   return (
     <section className={cn("min-w-0 rounded-md border border-border bg-background", className)}>
       <h2 className="rounded-t-md border-b border-border bg-surface px-3 py-2 text-sm leading-5 font-bold text-value">{title}</h2>
-      <div className="px-4 py-3">{children}</div>
+      {/* 表を主にする区画は、内側の余白を持たず表を端から端まで広げる（デザインシステムの `.in.flush`。ui-kit 1.2.9） */}
+      <div className={flush ? "overflow-hidden rounded-b-[5px]" : "px-4 py-3"}>{children}</div>
     </section>
   );
 }
@@ -395,7 +396,7 @@ function ModalityDetail({
         </div>
       </Sec>
       {showReceived && (
-        <Sec title="今日の受信" className={sections === 3 && !showSent ? span : undefined}>
+        <Sec title="今日の受信" className={sections === 3 && !showSent ? span : undefined} flush>
           <RecentLog
             part={logs?.received}
             rows={received?.slice(0, RECENT).map((r, i) => ({
@@ -418,7 +419,7 @@ function ModalityDetail({
         </Sec>
       )}
       {showSent && (
-        <Sec title="今日の送信" className={sections === 3 ? span : undefined}>
+        <Sec title="今日の送信" className={sections === 3 ? span : undefined} flush>
           <RecentLog
             part={logs?.sent}
             rows={sent?.slice(0, RECENT).map((s) => ({
@@ -503,22 +504,24 @@ function RecentLog({
   const failed = part && "failed" in part ? part.failed : null;
   const loading = part === undefined;
   return (
-    <div className="space-y-2" data-testid={testId}>
-      <div className="flex min-h-7 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+    <div data-testid={testId}>
+      <div className="flex min-h-7 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-3 py-2">
         <span className="text-sm text-value">
           今日 <b className="text-lg">{loading || failed ? "—" : count}</b> 件{partial && "以上"}
         </span>
         {aside && <span className="text-xs text-label">{aside}</span>}
       </div>
       {failed ? (
-        <NoticeBar kind="err">{failed || loadFailed(what)}</NoticeBar>
+        <div className="px-3 pb-2">
+          <NoticeBar kind="err">{failed || loadFailed(what)}</NoticeBar>
+        </div>
       ) : (
-        // 横にスクロールできる表の枠は、キーボードでも動かせるよう tabindex を付ける（表の部品 Table と同じ）
+        // 横にスクロールできる表は、キーボードでも動かせるよう tabindex を付ける（表の部品 Table と同じ）。枠は付けず、件数の行との間に線だけを引く
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-        <div className="overflow-auto rounded-md border border-border" role="region" aria-label={label} tabIndex={0}>
+        <div className="overflow-auto border-t border-border" role="region" aria-label={label} tabIndex={0}>
           <table className="w-full border-collapse text-sm">
             <thead className="bg-surface text-left text-xs text-label">
-              <tr className="border-b border-border">
+              <tr className="border-b border-border [&>*:first-child]:pl-3 [&>*:last-child]:pr-3">
                 <th className="h-7 px-2 py-0 font-normal">日時</th>
                 <th className="h-7 px-2 py-0 font-normal">患者ID</th>
                 <th className="h-7 px-2 py-0 font-normal">氏名</th>
@@ -536,7 +539,7 @@ function RecentLog({
                 </tr>
               )}
               {rows?.map((r) => (
-                <tr key={r.key} className="h-7 border-b border-border last:border-0" data-testid={`${testId}-row`}>
+                <tr key={r.key} className="h-7 border-b border-border [&>*:first-child]:pl-3 [&>*:last-child]:pr-3" data-testid={`${testId}-row`}>
                   <td className="px-2 py-0 whitespace-nowrap tabular-nums">{(formatDateTimeIn(r.at, timeZone).split(" ")[1] ?? "") || "—"}</td>
                   <td className="px-2 py-0 font-mono">{r.study.patientId || "—"}</td>
                   <td className="px-2 py-0 font-bold text-value">{r.study.patientName || "—"}</td>
@@ -553,9 +556,11 @@ function RecentLog({
           </table>
         </div>
       )}
-      <Link href={href} className="inline-block text-link underline-offset-2 hover:underline" data-testid={`${testId}-all`}>
-        {linkText}
-      </Link>
+      <div className="px-3 py-2">
+        <Link href={href} className="inline-block text-link underline-offset-2 hover:underline" data-testid={`${testId}-all`}>
+          {linkText}
+        </Link>
+      </div>
     </div>
   );
 }
