@@ -84,7 +84,10 @@
 }
 
 /* 縦のスクロールバーが出入りしても、画面が左右に寄らない（ui-kit 1.2.8 の components.css と同じ値。
-   tsunagi は components.css を読まないので、この 1 行をここに残す。docs/design-system/parts.md の「外枠」） */
+   tsunagi は components.css を読まないので、この 1 行をここに残す。docs/design-system/parts.md の「外枠」）。
+   Baseline Widely available の線の外（Baseline low、2024-12-11 から。Widely available になるのは 2027-06-11 の見込み）。
+   退避は不要：使えないブラウザーでは、スクロールバーが出入りするときに画面の幅が動くだけで、操作は変わらない。
+   出典：web-features の scrollbar-gutter（baseline_low_date 2024-12-11、2026-11-18 に確認） */
 html {
   scrollbar-gutter: stable;
 }
